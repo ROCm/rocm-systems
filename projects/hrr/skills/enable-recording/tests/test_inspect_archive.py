@@ -233,6 +233,30 @@ def test_a_manifest_that_is_not_an_object_is_unreadable_not_fatal(tmp_path, cont
     assert "state: unknown (manifest unreadable)" in inspect_archive.render(report)
 
 
+def test_manifest_fields_of_the_wrong_type_are_unknown_not_fatal(tmp_path):
+    """`"event_count": "100"` reached `event_count > 0` and raised, so verify
+    produced no report at all for a damaged archive.
+    """
+    pid_dir = make_process(tmp_path, 57)
+    (pid_dir / "manifest.json").write_text(json.dumps({
+        "pid": "57", "parent_pid": [1], "complete": "yes",
+        "event_count": "100", "blob_count": True,
+        "metadata": {"runtime": {"hip_runtime_version": 7}},
+    }))
+    make_root(tmp_path, [{"pid": [57], "event_count": 1}])
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+    rendered = inspect_archive.render(report)
+
+    proc = report.processes[0]
+    assert (proc.pid, proc.event_count, proc.blob_count, proc.complete) == (57, None, None, None)
+    assert report.recorded_processes, "the events are still there"
+    warning = next(w for w in report.warnings if "wrong type" in w)
+    assert "event_count: str" in warning and "blob_count: bool" in warning
+    assert not any("died before finalizing" in w for w in report.warnings)
+    assert "state: unknown (manifest damaged)" in rendered
+
+
 def test_size_on_disk_counts_the_root_manifest_but_not_the_parent(tmp_path):
     """The whole archive directory is what gets sent; a single pid-* directory
     passed on its own is sent alone.
@@ -603,6 +627,25 @@ def test_a_reader_that_never_started_is_a_failed_cross_check(tmp_path, monkeypat
     assert "librocprofiler-register" in error
 
 
+def test_a_reader_that_prints_nothing_is_a_failed_cross_check(tmp_path, monkeypatch):
+    """Exit 0 and no output returned neither text nor an error, so the report
+    failed its exit status with nothing to say why.
+    """
+    make_process(tmp_path, 66)
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = "  \n"
+
+    monkeypatch.setattr(inspect_archive.subprocess, "run", lambda *a, **k: Completed())
+
+    info, error = inspect_archive._run_playback_info("/reader/bin/hrr-playback", tmp_path, 10)
+
+    assert info is None
+    assert error == "hrr-playback --info exited 0 and printed nothing"
+
+
 def test_a_reader_that_refuses_the_archive_still_explains_itself(tmp_path, monkeypatch):
     """Non-zero, but the output is the reader's own verdict rather than a crash."""
 
@@ -665,6 +708,13 @@ def test_a_torn_first_event_header_is_not_a_recording(tmp_path):
 
     # A whole header claiming a record longer than the file holds.
     (pid_dir / "events.bin").write_bytes(header + struct.pack("<HQQQI2x", 1, 1, 0, 0, 1 << 20))
+    assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
+
+    # One longer than the reader takes, in a file that does hold it.
+    too_long = inspect_archive.MAX_RECORD_BYTES + 1
+    with (pid_dir / "events.bin").open("wb") as handle:
+        handle.write(header + struct.pack("<HQQQI2x", 1, 1, 0, 0, too_long))
+        handle.truncate(len(header) + too_long)
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
 
     # A plausible event behind a file header that is not HRR's.
@@ -896,7 +946,9 @@ def _strip_launchers(command: str) -> str:
     "command, expected",
     [
         ("python train.py", "python"),
-        ("env FOO=1 python train.py", "python"),
+        # env's assignments come first, one a line, so preflight can apply them.
+        ("env FOO=1 python train.py", "FOO=1\npython"),
+        ("env A=1 nice -n 5 env B=2 app", "A=1\nB=2\napp"),
         # The operand cases: skipping only dashed arguments used to leave the
         # duration or the niceness as the workload.
         ("timeout 60s python train.py", "python"),
@@ -911,6 +963,33 @@ def _strip_launchers(command: str) -> str:
 )
 def test_the_workload_is_found_behind_its_launcher(command, expected):
     assert _strip_launchers(command) == expected
+
+
+def test_preflight_resolves_with_the_launchers_environment():
+    """`env LD_LIBRARY_PATH=/capture/lib app` runs app with that path, and
+    preflight resolved its runtime with the parent's path instead. The
+    assignments apply to that check only, not to the rest of the script.
+    """
+    function = re.search(
+        r"^check_runtime_as_launched\(\).*?^\}", SCRIPT.read_text(encoding="utf-8"), re.M | re.S
+    )
+    assert function, "check_runtime_as_launched is gone from the script"
+    result = subprocess.run(
+        ["bash", "-c",
+         "check_runtime() { sh -c 'echo \"in=$LD_LIBRARY_PATH|$LD_PRELOAD\"'; }\n"
+         f"{function.group(0)}\n"
+         "LD_LIBRARY_PATH=/parent; export LD_LIBRARY_PATH\n"
+         "LAUNCHER_ENV=(LD_LIBRARY_PATH=/capture/lib LD_PRELOAD=/capture/libamdhip64.so.7 'not a name=x')\n"
+         "check_runtime_as_launched\n"
+         'echo "after=$LD_LIBRARY_PATH|${LD_PRELOAD-unset}"'],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.split() == [
+        "in=/capture/lib|/capture/libamdhip64.so.7",
+        "after=/parent|unset",
+    ]
 
 
 def _resolved_runtime(ldd_output: str, binary: Path) -> str:
@@ -1026,6 +1105,45 @@ def test_the_wrapper_waits_for_the_workload_it_signalled(tmp_path):
     assert done.exists(), "the wrapper returned before the workload had finished"
     assert "workload exited 0" in stderr
     assert wrapper.returncode == 0
+
+
+def test_a_signal_reaches_the_workers_a_launcher_started(tmp_path):
+    """The signal went to the wrapper's direct child only. A launcher that
+    exits on it left its workers capturing, and the wrapper verified the
+    archive they were still writing.
+    """
+    ready, done = tmp_path / "ready", tmp_path / "done"
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import signal, sys, time\n"
+        "def stop(*_):\n"
+        "    time.sleep(1)\n"
+        f"    open({str(done)!r}, 'w').close()\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"open({str(ready)!r}, 'w').close()\n"
+        "time.sleep(60)\n"
+    )
+    launcher = tmp_path / "launcher.py"
+    launcher.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, {str(worker)!r}])\n"
+        "time.sleep(60)\n"
+    )
+    wrapper = _run(tmp_path, str(launcher))
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists():
+            assert wrapper.poll() is None and time.monotonic() < deadline, "worker never started"
+            time.sleep(0.05)
+        wrapper.send_signal(signal.SIGTERM)
+        _, stderr = wrapper.communicate(timeout=30)
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+
+    assert done.exists(), "the worker was not stopped, or the wrapper did not wait for it"
+    assert "workload exited" in stderr
 
 
 @pytest.mark.skipif(_bash_version() < (4, 3), reason="needs bash >= 4.3 (Linux target)")

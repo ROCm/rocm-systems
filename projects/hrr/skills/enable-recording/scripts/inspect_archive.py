@@ -69,6 +69,9 @@ EOF_MAGIC_OFFSET = 40
 # `hrr_event_header`: uint16 event_type, uint64 sequence_id, uint64 timestamp_ns,
 # uint64 thread_id, uint32 payload_length, 2 bytes of padding. Packed, 32 bytes.
 EVENT_HEADER_BYTES = 32
+# The reader takes a record claiming more than this as torn (`kMaxRecordBytes`
+# in playback/hrr_reader.cpp), however large the file is.
+MAX_RECORD_BYTES = 64 * 1024 * 1024
 
 
 @dataclass
@@ -84,6 +87,8 @@ class ProcessArchive:
     code_object_files: int = 0
     total_bytes: int = 0
     manifest_error: str | None = None
+    # Manifest fields present with the wrong JSON type, read as unknown.
+    manifest_bad_fields: list[str] = field(default_factory=list)
     hip_runtime_version: str | None = None
     format_version: int | None = None
     holds_an_event: bool = False
@@ -204,8 +209,12 @@ def _holds_an_event(events: Path) -> bool:
     ):
         return False
     # payload_length counts the header too, and a record cannot claim more than
-    # the file holds.
-    if payload_length < EVENT_HEADER_BYTES or payload_length > size - HEADER_BYTES:
+    # the file holds, nor more than the reader will take.
+    if (
+        payload_length < EVENT_HEADER_BYTES
+        or payload_length > size - HEADER_BYTES
+        or payload_length > MAX_RECORD_BYTES
+    ):
         return False
     return True
 
@@ -241,17 +250,27 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     manifest, error = _read_manifest(pid_dir / "manifest.json")
     proc.manifest_error = error
     if manifest:
-        proc.pid = manifest.get("pid")
-        proc.parent_pid = manifest.get("parent_pid")
-        proc.complete = manifest.get("complete")
-        proc.event_count = manifest.get("event_count")
-        proc.blob_count = manifest.get("blob_count")
-        # A damaged manifest is reported, not raised on: either level can be
-        # any JSON value.
+        # A damaged manifest is reported, not raised on: any field can be any
+        # JSON value, and `"event_count": "100"` crashed the first comparison.
+        # bool is an int to Python, so it is excluded from the counts.
+        def typed(source: dict, key: str, kind: type):
+            value = source.get(key)
+            if value is None:
+                return None
+            if isinstance(value, kind) and (kind is bool or not isinstance(value, bool)):
+                return value
+            proc.manifest_bad_fields.append(f"{key}: {type(value).__name__}")
+            return None
+
+        proc.pid = typed(manifest, "pid", int)
+        proc.parent_pid = typed(manifest, "parent_pid", int)
+        proc.complete = typed(manifest, "complete", bool)
+        proc.event_count = typed(manifest, "event_count", int)
+        proc.blob_count = typed(manifest, "blob_count", int)
         metadata = manifest.get("metadata")
         runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
         if isinstance(runtime, dict):
-            proc.hip_runtime_version = runtime.get("hip_runtime_version")
+            proc.hip_runtime_version = typed(runtime, "hip_runtime_version", str)
 
     if proc.pid is None and pid_dir.name.startswith("pid-"):
         suffix = pid_dir.name[len("pid-") :]
@@ -403,6 +422,10 @@ def _run_playback_info(playback: str, target: Path, timeout: int) -> tuple[str |
             return output, None
         detail = output.splitlines()[0] if output else "no output"
         return None, f"hrr-playback --info exited {completed.returncode}: {detail}"
+    # Success with nothing said is not a cross-check either, and without an
+    # error here the report gave no reason for its failed exit status.
+    if not output:
+        return None, "hrr-playback --info exited 0 and printed nothing"
     return output, None
 
 
@@ -438,7 +461,8 @@ def inspect(
                 )
                 continue
             pid = entry.get("pid")
-            proc = by_pid.get(pid)
+            # A list or an object here is unhashable, and the lookup raised.
+            proc = by_pid.get(pid) if isinstance(pid, int) else None
             if proc is None:
                 report.warnings.append(
                     f"root manifest lists pid {pid} but no pid-{pid}/ directory exists"
@@ -456,13 +480,18 @@ def inspect(
                 )
 
     for proc in report.processes:
+        if proc.manifest_bad_fields:
+            report.warnings.append(
+                f"{proc.path.name}: manifest.json has fields of the wrong type "
+                f"({', '.join(proc.manifest_bad_fields)}), read as unknown"
+            )
         if proc.manifest_error:
             report.warnings.append(
                 f"{proc.path.name}: manifest.json is unreadable ({proc.manifest_error}), so "
                 "its counts and completion state are unknown; whether it recorded anything "
                 "was read off events.bin instead"
             )
-        elif proc.recorded and not proc.finalized:
+        elif proc.recorded and not proc.finalized and not proc.manifest_bad_fields:
             report.warnings.append(
                 f"{proc.path.name}: events.bin holds {proc.events_bytes} bytes but there is "
                 "no manifest, so the process died before finalizing; counts are unknown "
@@ -628,6 +657,8 @@ def render(report: ArchiveReport) -> str:
         blobs = f"{proc.blob_files:,}"
         if proc.manifest_error:
             state = "unknown (manifest unreadable)"
+        elif proc.complete is None and proc.manifest_bad_fields:
+            state = "unknown (manifest damaged)"
         elif proc.complete is None:
             state = "not finalized (no manifest)"
         elif proc.complete:

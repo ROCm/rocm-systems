@@ -117,13 +117,15 @@ workload_interpreter() {
 
 # Launchers that wrap the real workload. The binary that matters is the one
 # after them, otherwise preflight resolves `srun` or `env` and learns nothing.
+# Prints the VAR=value assignments `env` takes, one a line, then the workload
+# last: `env LD_LIBRARY_PATH=/capture/lib app` runs app with that path, so
+# preflight has to resolve its runtime with it too.
 strip_launchers() {
   while (( $# )); do
     case "${1##*/}" in
       env)
         shift
-        # Skip VAR=value assignments that env takes before the command.
-        while (( $# )) && [[ "$1" == *=* ]]; do shift; done ;;
+        while (( $# )) && [[ "$1" == *=* ]]; do printf '%s\n' "$1"; shift; done ;;
       nohup)
         shift ;;
       timeout)
@@ -504,15 +506,33 @@ done
 # The executable the command will run, when there is one. Preflight answers a
 # different and much weaker question without it.
 WORKLOAD_BIN=""
+LAUNCHER_ENV=()
 if [[ ${#CMD[@]} -gt 0 ]]; then
-  WORKLOAD_NAME="$(strip_launchers "${CMD[@]}")"
+  WORKLOAD_NAME=""
+  while IFS= read -r line; do
+    [[ -n "$WORKLOAD_NAME" ]] && LAUNCHER_ENV+=("$WORKLOAD_NAME")
+    WORKLOAD_NAME="$line"
+  done < <(strip_launchers "${CMD[@]}")
+  # A command that is nothing but assignments has no workload in it.
+  [[ "$WORKLOAD_NAME" == *=* ]] && { LAUNCHER_ENV+=("$WORKLOAD_NAME"); WORKLOAD_NAME=""; }
   WORKLOAD_BIN="$(command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true)"
 fi
+
+# check_runtime in the environment the workload will have. `local -x` exports
+# each assignment for the length of this call only, so the reader run after the
+# capture keeps this script's own loader path.
+check_runtime_as_launched() {
+  local assignment
+  for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
+    [[ "${assignment%%=*}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && local -x "$assignment"
+  done
+  check_runtime
+}
 
 case "$VERB" in
   preflight)
     rc=0
-    check_runtime || rc=1
+    check_runtime_as_launched || rc=1
     if [[ -n "$OUTPUT" ]]; then
       check_output_path "$OUTPUT" "$MIN_FREE_GB" || rc=1
     fi
@@ -540,7 +560,7 @@ case "$VERB" in
     [[ -n "$OUTPUT" ]] || fail "--output is required"
     [[ ${#CMD[@]} -gt 0 ]] || fail "no command given"
     if (( ! SKIP_PREFLIGHT )); then
-      if ! check_runtime; then
+      if ! check_runtime_as_launched; then
         (( FORCE )) || fail "preflight failed: no capture-capable runtime, so nothing would be recorded. Pass --force to run anyway."
       fi
       if ! check_output_path "$OUTPUT" "$MIN_FREE_GB"; then
@@ -571,22 +591,30 @@ case "$VERB" in
     # aimed at this script reaches the workload. Left in the foreground, a
     # SIGTERM from timeout, systemd, a pod stop or a cancelled CI job killed
     # the wrapper only: the workload carried on capturing and nothing verified
-    # the archive.
+    # the archive. The workload gets a process group of its own and the signal
+    # goes to the whole group: a launcher that exits on it would otherwise
+    # leave its GPU workers capturing behind it.
     workload_pid=0
     forward_signal() {
       local sig="$1"
-      (( workload_pid )) && kill -"$sig" "$workload_pid" 2>/dev/null || true
+      (( workload_pid )) && kill -"$sig" -- "-$workload_pid" 2>/dev/null || true
     }
     trap 'forward_signal TERM' TERM
     trap 'forward_signal INT' INT
     trap 'forward_signal HUP' HUP
 
     set +e
+    # Job control on for the launch only, which is what gives the job its own
+    # group. It also stops stdin defaulting to /dev/null for a background job,
+    # so that is now explicit: a workload reading the terminal from outside
+    # the foreground group would be stopped, and the wait below with it.
     # A background job starts with SIGINT and SIGQUIT ignored, and the workload
     # would inherit that, so neither a Ctrl-C nor the INT forwarded above would
     # ever reach it. Put them back to what this script was started with.
-    ( trap - INT QUIT; export HIP_HRR_CAPTURE_OUTPUT="$OUTPUT"; exec "${CMD[@]}" ) &
+    set -m
+    ( trap - INT QUIT; export HIP_HRR_CAPTURE_OUTPUT="$OUTPUT"; exec "${CMD[@]}" ) </dev/null &
     workload_pid=$!
+    set +m
     # A trapped signal cuts `wait` short while the workload may still be
     # shutting down. Keep waiting until it has gone, then take its own status.
     wait "$workload_pid"
@@ -595,6 +623,12 @@ case "$VERB" in
     done
     wait "$workload_pid"
     workload_rc=$?
+    # Then the rest of its group, which is still writing the archive.
+    if kill -0 -- "-$workload_pid" 2>/dev/null; then
+      log "the workload has exited and processes it started are still running; waiting"
+      log "for them, so the archive is checked once it is complete"
+      while kill -0 -- "-$workload_pid" 2>/dev/null; do sleep 1; done
+    fi
     set -e
     trap - TERM INT HUP
     log "workload exited $workload_rc"
