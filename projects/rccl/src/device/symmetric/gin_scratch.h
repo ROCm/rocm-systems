@@ -24,7 +24,7 @@ NCCL_EXTERN_C __host__ ncclResult_t ncclGinOutboxCreateRequirement(
 NCCL_EXTERN_C __host__ ncclResult_t ncclGinInboxA2ACreateRequirement(
   ncclTeam peers, int nBlocks, int size_log2, ncclGinInboxA2AHandle* outHandle, ncclDevResourceRequirements* outReq);
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop, unsigned ginBackendMask>
 struct ncclGinOutboxSession_internal;
 
@@ -44,16 +44,19 @@ struct ncclGinOutboxSession : ncclGinOutboxSession_internal<Coop, ginBackendMask
   // do the heavy work.
   template <typename SubCoop>
   NCCL_DEVICE_INLINE void apportion(Coop, SubCoop, bool subcoopIsNonTrivial, int nBufs_log2, bool deferSync = false);
+  NCCL_DEVICE_INLINE void apportionRequests(Coop, int nReqs_log2);
   template <typename SubCoop>
   NCCL_DEVICE_INLINE void waitBufs(SubCoop, int i0, int n);
+  template <typename SubCoop>
+  NCCL_DEVICE_INLINE void waitRecentRequests(SubCoop);
   NCCL_DEVICE_INLINE ncclSymPtr<char> getBuf(int i) const;
   NCCL_DEVICE_INLINE ncclGinScratch_GetBufPtr make_getBufPtr(int i0) const;
-  NCCL_DEVICE_INLINE ncclGinCounter_t getCounter(int i) const;
+  NCCL_DEVICE_INLINE void recordRequest(ncclTeam team, int peer, int i);
   NCCL_DEVICE_INLINE void advance(Coop, int n);
 };
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop, unsigned ginBackendMask>
 struct ncclGinInboxA2ASession_internal;
 
@@ -84,11 +87,12 @@ struct ncclGinInboxA2ASession : ncclGinInboxA2ASession_internal<Coop, ginBackend
   NCCL_DEVICE_INLINE ncclGinScratch_GetBufPtr make_getBufPtr(int step0) const;
 
   // Post sends for steps [step0, step0+nSteps). The lambdas take index in [0, nSteps).
-  template <typename SubCoop, typename GetPtr, typename GetEltCount, typename GetCompletion>
+  template <typename SubCoop, typename GetPtr, typename GetEltCount, typename GetCompletion, typename AfterPost>
   NCCL_DEVICE_INLINE void postSends(SubCoop, int step0, int nSteps,
                                     /*(int index, int peer)->ncclSymPtr<T>*/ GetPtr getPtr,
                                     /*(int index, int peer)->int*/ GetEltCount getEltCount,
-                                    /*(int index, int peer)->ncclGin_???*/ GetCompletion getCompletion);
+                                    /*(int index, int peer)->ncclGin_???*/ GetCompletion getCompletion,
+                                    /*(int index, int peer)->void*/ AfterPost afterPost);
   // Wait for recvs for steps [step0, step0+nSteps).
   template <typename SubCoop>
   NCCL_DEVICE_INLINE void waitRecvs(SubCoop, int step0, int nSteps);

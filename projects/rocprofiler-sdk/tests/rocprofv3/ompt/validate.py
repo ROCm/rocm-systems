@@ -239,16 +239,14 @@ def test_ompt_all_form_is_complete(rocpd_conn):
 
 def test_sys_trace_implicit_ompt_in_rocpd(request):
     """Regression guard for the --sys-trace implicit-OMPT path. Profiling with
-    --sys-trace (no explicit --ompt-trace) and a non-rocpd --output-format must
-    still implicitly enable OMPT and auto-add the rocpd output so OMPT data is not
-    dropped. A missing database here means that auto-add regressed, so this asserts
-    the database exists (rather than skipping like the shared rocpd_conn fixture)
-    and that it actually contains OMPT records."""
+    --sys-trace and no explicit --ompt-trace must still enable OMPT tracing, so the
+    rocpd output contains OMPT records. A missing database means the run itself
+    failed, so this asserts the database exists (rather than skipping like the shared
+    rocpd_conn fixture) and that it actually contains OMPT records."""
     filename = request.config.getoption("--rocpd-input")
     assert os.path.isfile(filename), (
-        f"rocpd database '{filename}' was not created; --sys-trace should implicitly "
-        "enable OMPT and auto-add the 'rocpd' output format even when another "
-        "--output-format was requested"
+        f"rocpd database '{filename}' was not created; expected the --sys-trace run to "
+        "write a rocpd database containing implicitly-enabled OMPT records"
     )
     conn = sqlite3.connect(filename)
     try:

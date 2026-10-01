@@ -23,7 +23,7 @@
 #
 # HSA multi-queue dependency test
 
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin-hsa-code-object LANGUAGES CXX)
 
@@ -72,7 +72,6 @@ add_custom_target(generate_hsaco_targets_code_object DEPENDS ${HSACO_TARGET_LIST
 
 add_executable(hsa_code_object_testapp)
 target_sources(hsa_code_object_testapp PRIVATE hsa_code_object_app.cpp)
-target_compile_options(hsa_code_object_testapp PRIVATE -W -Wall -Wextra -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
 target_link_libraries(hsa_code_object_testapp PRIVATE stdc++fs Threads::Threads)

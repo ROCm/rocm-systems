@@ -5,8 +5,11 @@
  */
 
 #include "hip_comgr_helper.hpp"
+#include <atomic>
 #if defined(_WIN32)
-#include <io.h>
+#include <process.h>
+#else
+#include <unistd.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
 
@@ -79,108 +82,6 @@ static char getFeatureValue(std::string& input, std::string feature) {
     input = input.substr(1);
   }
   return res;
-}
-
-static bool getTargetIDValue(std::string& input, std::string& processor, char& sramecc_value,
-                             char& xnack_value) {
-  processor = trimName(input, ':');
-  sramecc_value = getFeatureValue(input, std::string(":sramecc"));
-  if (sramecc_value != ' ' && sramecc_value != '+' && sramecc_value != '-') return false;
-  xnack_value = getFeatureValue(input, std::string(":xnack"));
-  if (xnack_value != ' ' && xnack_value != '+' && xnack_value != '-') return false;
-  return true;
-}
-
-bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
-                                      std::string agent_triple_target_id,
-                                      unsigned& genericVersion) {
-  // Primitive Check
-  if (co_triple_target_id == agent_triple_target_id) return true;
-
-  // Parse code object triple target id
-  if (!consume(co_triple_target_id,
-               std::string(OFFLOAD_KIND_HIP) + "-" + std::string(AMDGCN_TARGET_TRIPLE))) {
-    return false;
-  }
-
-  std::string co_processor;
-  char co_sram_ecc, co_xnack;
-  if (!getTargetIDValue(co_triple_target_id, co_processor, co_sram_ecc, co_xnack)) {
-    return false;
-  }
-
-  if (!co_triple_target_id.empty()) return false;
-
-  // Parse agent isa triple target id
-  if (!consume(agent_triple_target_id, std::string(AMDGCN_TARGET_TRIPLE) + '-')) {
-    return false;
-  }
-
-  std::string agent_isa_processor;
-  char isa_sram_ecc, isa_xnack;
-  if (!getTargetIDValue(agent_triple_target_id, agent_isa_processor, isa_sram_ecc, isa_xnack)) {
-    return false;
-  }
-
-  if (!agent_triple_target_id.empty()) return false;
-
-  // Check for compatibility
-  if (genericVersion >= EF_AMDGPU_GENERIC_VERSION_MIN) {
-    // co_processor is generic target
-    if (!IsCompatibleWithGenericTarget(co_processor, agent_isa_processor)) return false;
-  } else if (agent_isa_processor != co_processor) {
-    return false;
-  }
-
-  if (co_sram_ecc != ' ') {
-    if (co_sram_ecc != isa_sram_ecc) return false;
-  }
-  if (co_xnack != ' ') {
-    if (co_xnack != isa_xnack) return false;
-  }
-
-  return true;
-}
-
-static inline unsigned int getGenericVersion(const void* image) {
-  const Elf64_Ehdr* ehdr = reinterpret_cast<const Elf64_Ehdr*>(image);
-  return ehdr->e_ident[EI_ABIVERSION] == ELFABIVERSION_AMDGPU_HSA_V6
-             ? ((ehdr->e_flags & EF_AMDGPU_GENERIC_VERSION) >> EF_AMDGPU_GENERIC_VERSION_OFFSET)
-             : 0;
-}
-
-static inline bool isGenericTarget(const void* image) {
-  return getGenericVersion(image) >= EF_AMDGPU_GENERIC_VERSION_MIN;
-}
-
-bool UnbundleBitCode(std::string_view bundled_llvm_bitcode, const std::string& isa,
-                     size_t& co_offset, size_t& co_size) {
-  std::string_view magic = bundled_llvm_bitcode.substr(0, bundle_magic_string_size);
-  if (magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR)) {
-    // Handle case where the whole file is unbundled
-    return true;
-  }
-
-  const void* data = static_cast<const void*>(bundled_llvm_bitcode.data());
-  const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
-  const auto* desc = &obheader->desc[0];
-  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects;
-       ++idx, desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
-                  reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) + desc->bundleEntryIdSize)) {
-    const void* image =
-        reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
-    const size_t image_size = desc->size;
-    std::string bundleEntryId{desc->bundleEntryId, desc->bundleEntryIdSize};
-
-    // Check if the device id and code object id are compatible
-    unsigned genericVersion = getGenericVersion(image);
-    if (isCodeObjectCompatibleWithDevice(bundleEntryId, isa, genericVersion)) {
-      co_offset = (reinterpret_cast<uintptr_t>(image) - reinterpret_cast<uintptr_t>(data));
-      co_size = image_size;
-      break;
-    }
-  }
-  return true;
 }
 
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
@@ -548,20 +449,24 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 }
 
 void GenerateUniqueFileName(std::string& name) {
-#if !defined(_WIN32)
-  char* name_template = const_cast<char*>(name.c_str());
-  int temp_fd = mkstemp(name_template);
+  // Generate the unique Comgr label in memory (pid + atomic counter) instead of
+  // mkstemp, which created/unlinked a temp file in the CWD at scale (ROCM-29636).
+  static std::atomic<uint64_t> counter{0};
+#if defined(_WIN32)
+  const auto pid = _getpid();
 #else
-  char* name_template = new char[name.length() + 1];
-  strcpy_s(name_template, name.length() + 1, name.data());
-  int sizeinchars = strnlen(name_template, 20) + 1;
-  _mktemp_s(name_template, sizeinchars);
+  const auto pid = getpid();
 #endif
-  name = name_template;
-#if !defined(_WIN32)
-  unlink(name_template);
-  close(temp_fd);
-#endif
+  // Strip only an exact trailing mkstemp-style "XXXXXX" template, then append a
+  // process-unique suffix (e.g. "CompileSourceXXXXXX" -> "CompileSource1234_0").
+  static constexpr char kTemplate[] = "XXXXXX";
+  static constexpr size_t kTemplateLen = sizeof(kTemplate) - 1;
+  if (name.size() >= kTemplateLen &&
+      name.compare(name.size() - kTemplateLen, kTemplateLen, kTemplate) == 0) {
+    name.resize(name.size() - kTemplateLen);
+  }
+  name += std::to_string(static_cast<int64_t>(pid)) + "_" +
+          std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
 }
 
 bool demangleName(const std::string& mangledName, std::string& demangledName) {
@@ -990,8 +895,7 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
       data_kind = AMD_COMGR_DATA_KIND_BC;
       break;
     case hipJitInputLLVMBundledBitcode:
-      data_kind =
-          HIPRTC_USE_RUNTIME_UNBUNDLER ? AMD_COMGR_DATA_KIND_BC : AMD_COMGR_DATA_KIND_BC_BUNDLE;
+      data_kind = AMD_COMGR_DATA_KIND_BC_BUNDLE;
       break;
     case hipJitInputLLVMArchivesOfBundledBitcode:
       data_kind = AMD_COMGR_DATA_KIND_AR_BUNDLE;
@@ -1014,20 +918,7 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
   std::string_view llvm_code_object_view = link_data;
-  if (HIPRTC_USE_RUNTIME_UNBUNDLER && input_type == hipJitInputLLVMBundledBitcode) {
-    if (!findIsa()) {
-      return false;
-    }
-
-    size_t co_offset = 0;
-    size_t co_size = 0;
-    if (!helpers::UnbundleBitCode(link_data, isa_, co_offset, co_size)) {
-      LogError("Error in hip Linker: unable to unbundle the llvm bitcode");
-      return false;
-    }
-
-    llvm_code_object_view = link_data.substr(co_offset, co_size);
-  } else if (is_bundled_ && input_type == hipJitInputSpirv) {
+  if (is_bundled_ && input_type == hipJitInputSpirv) {
     const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);
     if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
@@ -1102,7 +993,7 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   if (!findIsa()) {
     return false;
   }
- 
+
   hip::comgr_helper::ComgrDataSetUniqueHandle link_output;
   if (link_output.Create() != AMD_COMGR_STATUS_SUCCESS) {
     return false;

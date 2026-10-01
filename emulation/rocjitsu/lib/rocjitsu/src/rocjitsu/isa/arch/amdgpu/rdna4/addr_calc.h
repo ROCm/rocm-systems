@@ -17,20 +17,23 @@
 /// vflat.cpp, vglobal.cpp, vscratch.cpp, vbuffer.cpp, and vds.cpp do not
 /// include it directly (codegen limitation to be fixed in Phase B.9).
 
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
+class ScalarMemState;
 } // namespace amdgpu
 
 namespace rdna4 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state = nullptr);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

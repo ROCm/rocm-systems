@@ -12,9 +12,9 @@
 
 #include "encoding_fields.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
 namespace rocjitsu {
 // Per-pair named namespace. Two pairs that share a source ISA
@@ -573,8 +573,27 @@ inline TranslationResult translate_encoding_cdna4_to_rdna4(uint32_t encoding_id,
     return encode_vop3_sdst_enc_rdna4(decode_vop3_sdst_enc_cdna4(w0, w1), dst_op);
   case kEnc_VOP3P:
     return encode_vop3p_rdna4(decode_vop3p_cdna4(w0, w1), dst_op);
-  case kEnc_DS:
-    return encode_ds_rdna4(decode_ds_cdna4(w0, w1), dst_op);
+  case kEnc_DS: {
+    DsFields fields = decode_ds_cdna4(w0, w1);
+    switch (fields.op) {
+    case 16:
+    case 17:
+    case 48:
+    case 49:
+    case 80:
+    case 81:
+    case 112:
+    case 113: {
+      const uint32_t comparison = fields.data0;
+      fields.data0 = fields.data1;
+      fields.data1 = comparison;
+      break;
+    }
+    default:
+      break;
+    }
+    return encode_ds_rdna4(fields, dst_op);
+  }
   case kEnc_FLAT: {
     const uint8_t seg = (w0 >> 14) & 0x3;
     switch (seg) {

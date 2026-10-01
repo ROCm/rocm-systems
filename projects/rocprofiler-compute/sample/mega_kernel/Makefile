@@ -4,7 +4,7 @@
 # AMD GPU Mega Kernel Unit Test - Makefile
 #
 # Supported offload-arch values (single source for per-arch binaries):
-ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1153 gfx1201 gfx1200
+ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1153 gfx1201 gfx1200 gfx1250
 ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #
 #   CDNA (Compute/Datacenter):
@@ -22,6 +22,12 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #   - RX 9070 XT/9070 (RDNA4): gfx1201
 #   - RX 9060 series (RDNA4): gfx1200
 #
+#   gfx1250:
+#   - gfx1250: FP8/BF8 OCP, WMMA, TDM, cluster ops, cooperative atomics
+#
+# gfx1250 metric-health profile args (do not pass -t 32; that is wave size, not block size)
+GFX1250_HEALTH_BATCH ?= 655360
+
 # Targets:
 #   make          - Build for gfx1151 (default; override with GPU_ARCH=...)
 #   make gfx950   - Build for MI350 (gfx950/CDNA4)
@@ -33,6 +39,7 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #   make gfx1153  - Build for Gorgon Point (gfx1153/RDNA3.5)
 #   make gfx1201  - Build for RX 9070 XT (gfx1201/RDNA4)
 #   make gfx1200  - Build for RX 9060 (gfx1200/RDNA4)
+#   make gfx1250  - Build for gfx1250
 #   make all-arch - Build binaries for all ARCHES
 #   make clean    - Remove build artifacts
 #   make run      - Build and run the test
@@ -59,7 +66,7 @@ HOST_SRC = main.cpp
 DEFAULT_TARGET = mega_kernel_test
 
 # Build rules
-.PHONY: all clean run $(ARCHES) all-arch help
+.PHONY: all clean run run-gfx1250-health $(ARCHES) all-arch help
 
 all: $(DEFAULT_TARGET)
 
@@ -75,9 +82,10 @@ $(ARCH_BINS): mega_kernel_test_%: $(KERNEL_SRC) $(HOST_SRC)
 	@echo "Build complete: $@"
 
 # Symlink convenience: gfx950 -> mega_kernel_test_gfx950, etc.
-gfx%: mega_kernel_test_gfx%
-	@ln -sf $< mega_kernel_test
-	@echo "Linked mega_kernel_test -> $<"
+$(ARCHES):
+	@$(MAKE) mega_kernel_test_$@
+	@ln -sf mega_kernel_test_$@ mega_kernel_test
+	@echo "Linked mega_kernel_test -> mega_kernel_test_$@"
 
 all-arch: $(ARCH_BINS)
 	@echo "Built: $(ARCHES)"
@@ -88,6 +96,11 @@ run: $(DEFAULT_TARGET)
 	@echo "Running GPU Mega Kernel Test..."
 	@echo ""
 	./$(DEFAULT_TARGET)
+
+# gfx1250 metric-health workload (see rocprof-compute profile -- ... -- <args>)
+run-gfx1250-health: mega_kernel_test_gfx1250
+	@echo "Running gfx1250 health args: -b $(GFX1250_HEALTH_BATCH) (block size default 256)"
+	./mega_kernel_test_gfx1250 -b $(GFX1250_HEALTH_BATCH)
 
 # Clean
 clean:
@@ -115,6 +128,9 @@ help:
 	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Wave32 WMMA path"
 	@echo "    gfx1200 - RX 9060 series:  FP8/BF8 OCP, Async LDS, Wave32 WMMA path"
 	@echo ""
+	@echo "  gfx1250:"
+	@echo "    gfx1250 - FP8/BF8 OCP, WMMA, TDM, cluster ops, cooperative atomics"
+	@echo ""
 	@echo "Usage:"
 	@echo "  make             - Build for gfx1151 (default; set GPU_ARCH to override)"
 	@echo "  make gfx950      - Build for MI350 (gfx950/CDNA4)"
@@ -126,8 +142,10 @@ help:
 	@echo "  make gfx1153     - Build for Gorgon Point (gfx1153)"
 	@echo "  make gfx1201     - Build for RX 9070 XT (gfx1201/RDNA4)"
 	@echo "  make gfx1200     - Build for RX 9060 (gfx1200/RDNA4)"
+	@echo "  make gfx1250     - Build for gfx1250"
 	@echo "  make all-arch    - Build one binary per ARCHES"
-	@echo "  make run         - Build and run the test"
+	@echo "  make run                 - Build and run the test"
+	@echo "  make run-gfx1250-health  - Run gfx1250 metric-health args (-b $(GFX1250_HEALTH_BATCH))"
 	@echo "  make clean       - Remove build artifacts"
 	@echo "  make help        - Show this help message"
 	@echo ""

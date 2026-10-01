@@ -244,13 +244,10 @@ From the ``rocdecdecode.cpp`` sample:
 
 Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to destroy the parser, and either ``rocDecDestroyDecoderHost()`` or ``rocDecDestroyDecoder()`` needs to be called to destroy the decoder.
 
-.. note:: 
+.. note::
 
-  To run the sample, you'll need to set the ``ROCM_PATH`` environment variable to point to the location of your ROCm installation:
+  Before running the sample, ensure that the ``ROCM_PATH`` environment variable is pointing to the location of your ROCm installation.
 
-  .. code:: shell
-
-    export ROCM_PATH=path_to_rocm_installation
 
 .. |rocdecdecode| replace:: ``rocdecdecode``
 .. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md

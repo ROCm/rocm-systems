@@ -11,6 +11,8 @@
 #include "nvtx.h"
 #include "utils.h"
 
+NCCL_PARAM(ShadowMempoolMaxSize, "SHADOW_MEMPOOL_MAX_SIZE", 1LL << 30);
+
 NCCL_API(ncclResult_t, ncclMemAlloc, void** ptr, size_t size);
 ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
@@ -25,6 +27,9 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   int cudaDev;
   int flag;
   int dcnt;
+  bool handleCreated = false;
+  bool addressReserved = false;
+  bool mapped = false;
 
   if (ptr == NULL || size == 0) goto fallback;
 
@@ -70,11 +75,14 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     ALIGN_SIZE(handleSize, memGran);
 
     /* Allocate the physical memory on the device */
-    CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
+    CUCHECKGOTO(cuMemCreate(&handle, handleSize, &memprop, 0), ret, vmm_fail);
+    handleCreated = true;
     /* Reserve a virtual address range */
-    CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
+    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0), ret, vmm_fail);
+    addressReserved = true;
     /* Map the virtual address range to the physical allocation */
-    CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
+    CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0), ret, vmm_fail);
+    mapped = true;
     /* Now allow RW access to the newly mapped memory */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
@@ -82,10 +90,17 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         accessDesc.location.id = i;
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-        CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+        CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1), ret, vmm_fail);
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
+    goto exit;
+
+vmm_fail:
+    if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, handleSize);
+    if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+    if (handleCreated) (void)cuMemRelease(handle);
+    *ptr = NULL;
     goto exit;
   }
 
@@ -119,8 +134,8 @@ ncclResult_t ncclMemFree_impl(void* ptr) {
   CUCHECKGOTO(cuPointerGetAttribute((void*)&ptrDev, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, (CUdeviceptr)ptr), ret, fail);
   CUDACHECKGOTO(cudaSetDevice((int)ptrDev), ret, fail);
   if (ncclCuMemEnable()) {
-    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret,
-                  fail); // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
+    // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
+    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail);
     goto exit;
   }
 
@@ -184,7 +199,8 @@ static void insertSegment(struct ncclSpace* a, int index, int64_t lo, int64_t hi
   while (r < a->count) {
     int64_t cur = a->cuts[r++];
     a->cuts[w++] = cur;
-    if (prev == cur) { // Repeated value is an empty segment which can be deleted.
+    if (prev == cur) {
+      // Repeated value is an empty segment which can be deleted.
       // Erase last two cuts or just one if we're at the start.
       w -= w == 1 ? 1 : 2;
       // Zeros can only occur at the beginning (due to being sorted). We want to
@@ -276,18 +292,16 @@ void ncclShadowPoolConstruct(struct ncclShadowPool* pool) {
   pool->pages = nullptr;
 }
 
-ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
+ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool, cudaStream_t stream) {
   if (pool->hbits != 0) {
-    cudaStream_t stream;
-    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
-
     if (pool->count != 0) {
       for (int i = 0; i < 1 << pool->hbits; i++) {
         struct ncclShadowObject* obj = pool->table[i];
         while (obj != nullptr) {
           struct ncclShadowPage* page = obj->page;
           if (page != nullptr) {
-            if (page->freeMask == 0) { // Put full pages back into page list.
+            if (page->freeMask == 0) {
+              // Put full pages back into page list.
               page->freeMask = 1;
               page->next = pool->pages;
               pool->pages = page;
@@ -311,7 +325,6 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
     }
 
     CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-    CUDACHECKIGNORE(cudaStreamDestroy(stream));
     CUDACHECKIGNORE(cudaMemPoolDestroy(pool->memPool));
   }
   return ncclSuccess;
@@ -338,6 +351,7 @@ ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool* pool, size_t size, void*
     props.handleTypes = cudaMemHandleTypeNone;
     props.location.type = cudaMemLocationTypeDevice;
     CUDACHECKIGNORE(cudaGetDevice(&props.location.id));
+    props.maxSize = (size_t)ncclParamShadowMempoolMaxSize();
     CUDACHECK(cudaMemPoolCreate(&pool->memPool, &props));
 
     pool->hbits = hbits = 4;

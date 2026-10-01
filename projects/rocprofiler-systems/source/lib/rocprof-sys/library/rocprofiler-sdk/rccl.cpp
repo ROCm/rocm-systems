@@ -19,9 +19,7 @@
 
 #include <dlfcn.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct rccl_recv
@@ -46,7 +44,10 @@ void
 rccl_metadata_initialize_categories()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
@@ -66,25 +67,38 @@ struct production_pmc_registrar
 {
     void register_gpu_pmc(std::uint32_t rccl_device_idx)
     {
-        constexpr size_t EVENT_CODE  = 0;
-        constexpr size_t INSTANCE_ID = 0;
-        constexpr auto*  LONG_DESCRIPTION =
+        constexpr size_t k_event_code  = 0;
+        constexpr size_t k_instance_id = 0;
+        constexpr auto*  k_long_description =
             "Per-GPU RCCL communication data with transfer_bytes in extdata JSON";
-        constexpr auto* COMPONENT   = "";
-        constexpr auto* BLOCK       = "";
-        constexpr auto* EXPRESSION  = "";
-        constexpr auto* MSG         = "bytes";
-        constexpr auto* TARGET_ARCH = "GPU";
+        constexpr auto* k_component   = "";
+        constexpr auto* k_block       = "";
+        constexpr auto* k_expression  = "";
+        constexpr auto* k_msg         = "bytes";
+        constexpr auto* k_target_arch = "GPU";
 
-        auto register_rccl_info = [&](const char* direction_label,
-                                      const char* description) {
-            std::string label =
+        auto const register_rccl_info = [&](const char* direction_label,
+                                            const char* description) {
+            const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  label.c_str(), description,
-                  trait::name<category::comm_data>::description, LONG_DESCRIPTION,
-                  COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+                { .type             = agent_type::gpu,
+                  .agent_type_index = rccl_device_idx,
+                  .target_arch      = k_target_arch,
+                  .event_code       = k_event_code,
+                  .instance_id      = k_instance_id,
+                  .name             = label,
+                  .symbol           = description,
+                  .description      = trait::name<category::comm_data>::description,
+                  .long_description = k_long_description,
+                  .component        = k_component,
+                  .units            = k_msg,
+                  .value_type       = trace_cache::ABSOLUTE,
+                  .block            = k_block,
+                  .expression       = k_expression,
+                  .is_constant      = 0,
+                  .is_derived       = 0,
+                  .extdata          = "{}" });
         };
 
         register_rccl_info(rccl_send::label,
@@ -194,7 +208,7 @@ write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
 
         if(!counter_track::exists(_idx))
         {
-            std::string _label =
+            const std::string _label =
                 (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
             counter_track::emplace(_idx, _label, "bytes");
         }
@@ -213,7 +227,7 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
     size_t transfer_bytes = bytes;
 
     tracking_state.register_gpu(rccl_device_idx);
-    std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
+    const std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
 
     const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
 
@@ -227,16 +241,16 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
-        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label,
         static_cast<double>(cumulative), std::nullopt });
 }
 
 rccl_gpu_tracking_state&
 rccl_get_gpu_tracking_state()
 {
-    static auto registrar = std::make_shared<production_pmc_registrar>();
+    static auto const registrar = std::make_shared<production_pmc_registrar>();
     static rccl_gpu_tracking_state state{ registrar };
     return state;
 }
@@ -244,7 +258,7 @@ rccl_get_gpu_tracking_state()
 [[nodiscard]] size_t
 rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
 {
-    auto size = rccl_type_size(datatype);
+    auto const size = rccl_type_size(datatype);
     if(size == 0)
     {
         LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
@@ -260,7 +274,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
-    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+    if(comm == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
 
@@ -279,7 +296,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
         }
     });
 
-    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
+    if(ncclCommCuDevice_ptr == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     int          device_id = DEFAULT_DEVICE_ID;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
@@ -320,15 +340,15 @@ rccl_comm_data_initialize()
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(std::uint32_t                                 operation,
-                           rocprofiler_callback_tracing_rccl_api_data_t* payload,
+tool_tracing_callback_rccl(std::uint32_t                                       operation,
+                           rocprofiler_callback_tracing_rccl_api_data_t const* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {
-    rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
+    const rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
 
     if(info.size > 0 && info.comm != nullptr)
     {
-        std::uint32_t device_id = rccl_get_device_id(info.comm);
+        const std::uint32_t device_id = rccl_get_device_id(info.comm);
 
         if(info.is_send)
         {
@@ -343,5 +363,4 @@ tool_tracing_callback_rccl(std::uint32_t                                 operati
     }
 }
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

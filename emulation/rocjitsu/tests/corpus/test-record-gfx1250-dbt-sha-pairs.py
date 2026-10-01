@@ -385,10 +385,94 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(status, TOOL.ERROR)
         self.assertIn("unsupported characters", diagnostics.getvalue())
 
+    def test_compare_reports_changed_outputs(self) -> None:
+        baseline = self.root / "baseline.json"
+        candidate = self.root / "candidate.json"
+        report = self.root / "report.md"
+        self.assertEqual(TOOL.main(self._finalize_args(baseline)), 0)
+
+        self._write_fragment(self.success_input, "4" * 64, output_bytes=128)
+        candidate_args = self._finalize_args(candidate)
+        source_index = candidate_args.index("--source-commit") + 1
+        candidate_args[source_index] = "c" * 40
+        self.assertEqual(TOOL.main(candidate_args), 0)
+
+        status = TOOL.main(
+            [
+                "compare",
+                "--baseline",
+                str(baseline),
+                "--candidate",
+                str(candidate),
+                "--markdown",
+                str(report),
+            ]
+        )
+
+        self.assertEqual(status, TOOL.COMPARE_CHANGED)
+        rendered = report.read_text(encoding="utf-8")
+        self.assertIn("changes 1 translated output", rendered)
+        self.assertIn("| Input SHA-256 | Input bytes |", rendered)
+        self.assertIn("| 64 |", rendered)
+        self.assertIn("| 96 |", rendered)
+        self.assertIn("| 128 |", rendered)
+
+    def test_compare_accepts_unchanged_outputs(self) -> None:
+        baseline = self.root / "baseline.json"
+        candidate = self.root / "candidate.json"
+        report = self.root / "report.md"
+        self.assertEqual(TOOL.main(self._finalize_args(baseline)), 0)
+        candidate_args = self._finalize_args(candidate)
+        source_index = candidate_args.index("--source-commit") + 1
+        candidate_args[source_index] = "c" * 40
+        self.assertEqual(TOOL.main(candidate_args), 0)
+
+        status = TOOL.main(
+            [
+                "compare",
+                "--baseline",
+                str(baseline),
+                "--candidate",
+                str(candidate),
+                "--markdown",
+                str(report),
+            ]
+        )
+
+        self.assertEqual(status, TOOL.COMPARE_UNCHANGED)
+        self.assertIn("No translated output", report.read_text(encoding="utf-8"))
+
+    def test_compare_rejects_incompatible_provenance(self) -> None:
+        baseline = self.root / "baseline.json"
+        candidate = self.root / "candidate.json"
+        report = self.root / "report.md"
+        self.assertEqual(TOOL.main(self._finalize_args(baseline)), 0)
+        candidate_args = self._finalize_args(candidate)
+        corpus_index = candidate_args.index("--corpus-commit") + 1
+        candidate_args[corpus_index] = "d" * 40
+        self.assertEqual(TOOL.main(candidate_args), 0)
+
+        status = TOOL.main(
+            [
+                "compare",
+                "--baseline",
+                str(baseline),
+                "--candidate",
+                str(candidate),
+                "--markdown",
+                str(report),
+            ]
+        )
+
+        self.assertEqual(status, TOOL.COMPARE_INCOMPATIBLE)
+        self.assertIn("not directly comparable", report.read_text(encoding="utf-8"))
+
     def _write_fragment(
         self,
         input_digest: str,
         output_digest: str,
+        *,
+        output_bytes: int = 96,
     ) -> None:
         path = self.fragments / f"{input_digest}.json"
         path.write_text(
@@ -396,7 +480,7 @@ class ManifestTest(unittest.TestCase):
                 {
                     "input_bytes": 64,
                     "input_sha256": input_digest,
-                    "output_bytes": 96,
+                    "output_bytes": output_bytes,
                     "output_sha256": output_digest,
                 }
             ),

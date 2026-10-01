@@ -75,6 +75,7 @@ breathe_default_project = "rocprofiler-sdk"
 doxyfile = "rocprofiler-sdk.dox"
 
 external_projects_current_project = "rocprofiler-sdk"
+external_projects_remote_repository = ""
 external_projects = []
 
 master_doc = "index"

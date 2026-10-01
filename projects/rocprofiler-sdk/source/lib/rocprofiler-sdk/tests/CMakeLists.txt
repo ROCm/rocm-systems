@@ -13,12 +13,15 @@ include(GoogleTest)
 
 set(rocprofiler_lib_sources
     agent.cpp
+    agent_mapping.cpp
+    parse_gfx_target_version_test.cpp
     buffer.cpp
     contexts.cpp
     enum_string.cpp
     hsa.cpp
     late_start.cpp
     naming.cpp
+    queue_controller.cpp
     queue_interposition.cpp
     timestamp.cpp
     version.cpp
@@ -31,6 +34,7 @@ target_link_libraries(
     rocprofiler-sdk-lib-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::counter-test-constants
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-drm
@@ -65,6 +69,7 @@ target_link_libraries(
     rocprofiler-sdk-lib-tests-shared
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-drm
             rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library

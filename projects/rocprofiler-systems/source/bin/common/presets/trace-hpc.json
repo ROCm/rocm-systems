@@ -73,7 +73,10 @@
         "use_case": "MPI/OpenMP/HPC applications with hardware counter collection"
     },
     "profiling": {
-        "enabled": true
+        "enabled": true,
+        "flat_profile": {
+            "enabled": true
+        }
     },
     "sampling": {
         "cpus": {

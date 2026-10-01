@@ -20,31 +20,31 @@ public:
 
     void set_expected_samples_1(const std::vector<test_sample_1>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_1 = samples;
     }
 
     void set_expected_samples_2(const std::vector<test_sample_2>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_2 = samples;
     }
 
     void set_expected_samples_3(const std::vector<test_sample_3>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_3 = samples;
     }
 
     void set_expected_samples_4(const std::vector<test_sample_4>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_4 = samples;
     }
 
     void set_expected_samples_5(const std::vector<test_sample_5>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_5 = samples;
     }
 
@@ -56,40 +56,40 @@ public:
             case test_type_identifier_t::sample_type_1:
             {
                 const auto& sample = static_cast<const test_sample_1&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
-                size_t                      idx = m_sample_1_count++;
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
+                const size_t                      idx = m_sample_1_count++;
                 check_sample_1(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_2:
             {
                 const auto& sample = static_cast<const test_sample_2&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
-                size_t                      idx = m_sample_2_count++;
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
+                const size_t                      idx = m_sample_2_count++;
                 check_sample_2(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_3:
             {
                 const auto& sample = static_cast<const test_sample_3&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
-                size_t                      idx = m_sample_3_count++;
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
+                const size_t                      idx = m_sample_3_count++;
                 check_sample_3(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_4:
             {
                 const auto& sample = static_cast<const test_sample_4&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
-                size_t                      idx = m_sample_4_count++;
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
+                const size_t                      idx = m_sample_4_count++;
                 check_sample_4(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_5:
             {
                 const auto& sample = static_cast<const test_sample_5&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
-                size_t                      idx = m_sample_5_count++;
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
+                const size_t                      idx = m_sample_5_count++;
                 check_sample_5(idx, sample);
                 break;
             }
@@ -225,7 +225,7 @@ TEST_F(storage_parser_test, load_empty_file)
     std::ofstream ofs(test_file_path, std::ios::binary);
     ofs.close();
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -242,12 +242,12 @@ TEST_F(storage_parser_test, load_empty_file)
 
 TEST_F(storage_parser_test, load_single_sample_type_1)
 {
-    std::vector<test_sample_1> samples_1 = { test_sample_1(42, "test_string"),
-                                             test_sample_1(100, "another_test") };
+    const std::vector<test_sample_1> samples_1 = { test_sample_1(42, "test_string"),
+                                                   test_sample_1(100, "another_test") };
 
     create_test_file_with_samples(samples_1, {}, {});
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -265,14 +265,14 @@ TEST_F(storage_parser_test, load_single_sample_type_1)
 
 TEST_F(storage_parser_test, load_multiple_sample_types)
 {
-    std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
-    std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
-                                             test_sample_2(2.71828, 777) };
-    std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
+    const std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
+    const std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
+                                                   test_sample_2(2.71828, 777) };
+    const std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
     processor->set_expected_samples_3(samples_3);
@@ -292,14 +292,14 @@ TEST_F(storage_parser_test, load_multiple_sample_types)
 
 TEST_F(storage_parser_test, load_unsupported_sample_type)
 {
-    std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
-    std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
-                                             test_sample_2(2.71828, 777) };
-    std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
+    const std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
+    const std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
+                                                   test_sample_2(2.71828, 777) };
+    const std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
 
@@ -318,7 +318,7 @@ TEST_F(storage_parser_test, load_unsupported_sample_type)
 
 TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
 {
-    test_sample_1 valid_sample(42, "valid");
+    const test_sample_1 valid_sample(42, "valid");
     {
         std::ofstream ofs(test_file_path, std::ios::binary);
 
@@ -342,7 +342,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1({ valid_sample });
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -357,7 +357,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
 
 TEST_F(storage_parser_test, load_nonexisting_file)
 {
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -371,11 +371,11 @@ TEST_F(storage_parser_test, load_large_sample_data)
     std::vector<std::uint8_t> large_payload(10000);
     std::iota(large_payload.begin(), large_payload.end(), 0);
 
-    std::vector<test_sample_3> samples_3 = { test_sample_3(large_payload) };
+    const std::vector<test_sample_3> samples_3 = { test_sample_3(large_payload) };
 
     create_test_file_with_samples({}, {}, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_3(samples_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -400,14 +400,14 @@ TEST_F(storage_parser_test, load_many_small_samples)
 
     for(int i = 0; i < num_of_elements; ++i)
     {
-        auto x = "sample_" + std::to_string(i);
+        auto const x = "sample_" + std::to_string(i);
         strings.push_back(x);
         many_samples.push_back({ 0, strings[i] });
     }
 
     create_test_file_with_samples(many_samples, {}, {});
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(many_samples);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -435,7 +435,7 @@ TEST_F(storage_parser_test, write_less_than_expected)
 
     ofs.close();
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -452,11 +452,11 @@ TEST_F(storage_parser_test, write_less_than_expected)
 
 TEST_F(storage_parser_test, read_fragmented_space)
 {
-    std::vector<test_sample_1> samples_1 = { test_sample_1(123,
-                                                           "fragmented-space test") };
-    std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
-                                             test_sample_2(2.71828, 777) };
-    std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
+    const std::vector<test_sample_1> samples_1 = { test_sample_1(
+        123, "fragmented-space test") };
+    const std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
+                                                   test_sample_2(2.71828, 777) };
+    const std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
     {
         std::ofstream ofs(test_file_path, std::ios::binary);
 
@@ -479,7 +479,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
     processor->set_expected_samples_3(samples_3);
@@ -499,7 +499,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
 
 TEST_F(storage_parser_test, load_sample_type_5_optional)
 {
-    std::vector<test_sample_5> samples_5 = {
+    const std::vector<test_sample_5> samples_5 = {
         test_sample_5(std::optional<std::uint32_t>{ 123 }), test_sample_5(std::nullopt)
     };
 
@@ -510,7 +510,7 @@ TEST_F(storage_parser_test, load_sample_type_5_optional)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_5(samples_5);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,

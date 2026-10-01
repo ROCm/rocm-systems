@@ -19,9 +19,13 @@ on:
     branches:
       - 'develop'
       - 'docs/**'
+      - 'rocprofiler-compute-develop'
     paths:
      - 'projects/**'
      - 'shared/**'
+
+permissions:
+  contents: read
 
 jobs:
   trigger-rtd:

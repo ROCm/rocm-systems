@@ -18,7 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from subprocess import Popen, PIPE
+from datetime import datetime
+from subprocess import Popen, PIPE, STDOUT
 import argparse
 import os
 import sys
@@ -26,13 +27,28 @@ import sys
 __license__ = "MIT"
 __version__ = "1.0"
 __status__ = "Shipping"
-            
+
+
+def run_and_log(cmd, logFilePath):
+    # Portable replacement for '| tee -a': stream the output line by line so
+    # progress stays visible during long runs, while appending it to the log.
+    # cmd is an argument list launched without a shell, so paths holding spaces
+    # or shell metacharacters reach the sample unmangled.
+    with open(logFilePath, 'a') as logf:
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
+        for line in p.stdout:
+            print(line, end='')
+            logf.write(line)
+        p.wait()
+    return p.returncode
+
+
 # Import arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--rocDecode_directory',   type=str, default='',
                     help='The rocDecode Directory - required')
 parser.add_argument('--videodecode_exe',   type=str, default='',
-                    help='Video decode sample app exe - optional')
+                    help='Video decode sample app exe - optional. If omitted, the sample is looked up under <rocDecode_directory>/samples/videoDecode/build (on Windows, the Release config). Pass this explicitly to run a Debug build or an exe from another location.')
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
@@ -61,7 +77,10 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 # rocDecode Application
 scriptPath = os.path.dirname(os.path.realpath(__file__))
 if videoDecodeEXE == '':
-    rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+    if platform.system() != 'Windows':
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+    else:
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
 else:
     rocDecode_exe = videoDecodeEXE
 if resultsDir == '':
@@ -74,7 +93,8 @@ os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
-    print("\nERROR: rocDecode Executable Not Found\n")
+    print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
+    print("Build the sample first, or pass --videodecode_exe to point at it.\n")
     exit()
 
 if os.path.exists(filesDir) and not os.path.isfile(filesDir):
@@ -111,19 +131,14 @@ if streamListSize != md5ListSize:
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
-    command = [run_rocDecode_app, '-i', streamFilePath]
+    cmd = [run_rocDecode_app, '-i', streamFilePath]
     if bsReaderOption:
-        command.append(bsReaderOption)
-    command.extend(['-md5_check', md5FilePath, '-d', str(gpuDeviceID)])
-
-    with open(outputLogPath, 'a') as outputLog:
-        with Popen(command, stdout=PIPE, text=True) as process:
-            for line in process.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                outputLog.write(line)
-        if process.returncode != 0:
-            sys.exit(process.returncode)
+        cmd.append(bsReaderOption)
+    cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
+    logFilePath = resultsPath + '/rocDecode_output.log'
+    returnCode = run_and_log(cmd, logFilePath)
+    if returnCode != 0:
+        sys.exit(returnCode)
     print("======================================================================================\n")
 
 fileString = 'Input file'

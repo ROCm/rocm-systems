@@ -37,6 +37,15 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -pi -e 's/(runRing<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeSplit<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
+
+  # AllGatherV: inject unroll/pipeline params, strip the ones setDataPtrsHelper can't deduce, add prims acc arg.
+  perl -pi -e 's/(runAllGatherV<T.*?)(>\()/\1, USE_ACC, COLL_UNROLL\2/g' "$HIP_FILE"
+  perl -pi -e 's/(runAllGatherV<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
+  perl -pi -e 's/(runAllGatherV<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
+  perl -0777 -pi -e 's/(typename Proto), int USE_ACC, int COLL_UNROLL, int Pipeline(>[\s\w]*?setDataPtrsHelper)/$1$2/' "$HIP_FILE"
+  perl -0777 -pi -e 's/(int COLL_UNROLL), int Pipeline(>[\s\w]*?setDataPtrsHelper)/$1$2/' "$HIP_FILE"
+  perl -pi -e 's/(prims\.setDataPtrs\(srcBuf, dstBuf, redOpArg, nullptr, 0, 0)\)/\1, nullptr)/g' "$HIP_FILE"
+
   sed -i "s/\\(struct RunWorkBatch<ncclFunc[^>]*\\)>*/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
   sed -i "s/\\(RunWorkColl<[^,]*,[^,]*,[^,]*,[^,]*,[^>]*\\)>/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
 

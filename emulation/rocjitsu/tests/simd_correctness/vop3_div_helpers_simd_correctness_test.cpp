@@ -11,22 +11,17 @@
 /// comparison — NaN-ness is deterministic from the inputs, so both runs skip the
 /// same lanes. In-process inactive lanes must keep the sentinel. The helpers
 /// covered:
-///   - v_div_fixup_f32 / v_div_fixup_f64: NaN/Inf/zero `else if` cascade
-///     ((p, b, c) -> selected float per AMD spec), routed through the
-///     existing fp ternary VOP3 glue with a `div_fixup_*_simd` functor that
-///     reproduces the cascade via lowest-priority-first `where` blends.
-///   - v_div_fmas_f32 / v_div_fmas_f64: `fma(s0, s1, s2)` then a VCC-bit-
-///     gated `ldexp(result, 32)` (f32) or `ldexp(result, 64)` (f64); no
-///     omod/clamp; routed through a dedicated glue that reads VCC as an
-///     input side-channel (similar to v_cndmask_b32 VCC select).
-/// NaN-input lanes are skipped per-lane in the comparison (the gcc-13 packed
-/// FMA quiets a different NaN operand vs scalar std::fma — accepted
-/// divergence shared with the rest of the ternary fp suite).
+///   - v_div_fixup_f32 / v_div_fixup_f64: shared bit-level quotient fixup.
+///   - v_div_fmas_f32 / v_div_fmas_f64: integer-significand FMA with fused
+///     VCC-controlled scaling and explicit guest rounding/denormal modes.
+/// Independent numerical expectations live in division_test.cpp and
+/// division_macro_test.cpp; this suite checks the execution-path integration.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -164,7 +159,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f32(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -176,7 +171,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f64(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -208,7 +203,7 @@ void check_div_fixup_f32(uint64_t exec) {
       uint32_t words[4] = {0u, 0u, 0u, 0u};
       vop3_tern_encode(opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257,
                        /*src2=*/258, words);
-      Instruction *inst = fx.decoder->decode(words);
+      Instruction *inst = decode_valid(*fx.decoder, words);
       EXPECT_NE(inst, nullptr) << name << " decode failed";
       auto out = fx.run32(inst, 0, r1, r2, exec, /*vcc=*/0);
       delete inst;
@@ -249,7 +244,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
   uint32_t words[4] = {0u, 0u, 0u, 0u};
   vop3_tern_encode(opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257, /*src2=*/258, words,
                    op_sel);
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   EXPECT_NE(inst, nullptr) << "v_div_fixup_f16-family decode failed";
 
   const uint32_t vb = fx.wf->vgpr_alloc().base;
@@ -261,7 +256,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -283,7 +278,7 @@ void check_div_fixup_f64(uint64_t exec) {
     // src2=v4:v5; vdst = kDstVgpr64:kDstVgpr64+1.
     vop3_tern_encode(/*op=*/479, /*vdst=*/kDstVgpr64, /*src0=*/256, /*src1=*/258,
                      /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_div_fixup_f64_vop3 decode failed";
     auto out = fx.run64(inst, 0, r1, r2, exec, /*vcc=*/0);
     delete inst;
@@ -320,7 +315,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
   vop3_tern_encode(opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257, /*src2=*/258, words);
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   EXPECT_NE(inst, nullptr) << "v_div_fixup_f32-family decode failed";
 
   constexpr uint32_t kP = 0x3F800000u;
@@ -335,7 +330,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -352,7 +347,7 @@ std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar
   uint32_t words[4] = {0u, 0u, 0u, 0u};
   vop3_tern_encode(/*op=*/479, /*vdst=*/kDstVgpr64, /*src0=*/256, /*src1=*/258,
                    /*src2=*/260, words);
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   EXPECT_NE(inst, nullptr) << "v_div_fixup_f64_vop3 decode failed";
 
   constexpr uint64_t kP = 0x3FF0000000000000ULL;
@@ -371,7 +366,7 @@ std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint64_t, WF_SIZE> out{};
@@ -394,7 +389,7 @@ void check_div_fmas_f32(uint64_t exec) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_tern_encode(/*op=*/482, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257,
                      /*src2=*/258, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_div_fmas_f32_vop3 decode failed";
     auto out = fx.run32(inst, 0, r1, 2 * r1, exec, vcc);
     delete inst;
@@ -438,7 +433,7 @@ void check_div_fmas_f64(uint64_t exec) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_tern_encode(/*op=*/483, /*vdst=*/kDstVgpr64, /*src0=*/256, /*src1=*/258,
                      /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_div_fmas_f64_vop3 decode failed";
     auto out = fx.run64(inst, 0, r1, 2 * r1, exec, vcc);
     delete inst;

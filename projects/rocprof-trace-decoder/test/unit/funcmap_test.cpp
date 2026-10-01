@@ -243,6 +243,43 @@ TEST(ParseFuncmap, ParsesExtraPayloadAndMarkerEncoding)
     EXPECT_EQ(m.marker_encoding.shader_clock_source_mask(), 0x0000FFF0u);
 }
 
+TEST(ParseFuncmap, ParsesLlvmSqttMarkerPluginOutput)
+{
+    // Captured verbatim from the .sqtt_funcmap section produced by
+    // llvm-project/amd/sqtt-marker's user-markers.hip test. Keep the trailing
+    // NUL because the plugin emits a null-terminated ELF section.
+    std::string blob = "K:marker_kernel\n"
+                       "U:1:outer\n"
+                       "U:2:inner\n"
+                       "P:3:point\n"
+                       "P:4:data\n"
+                       "R:4:extra_payload_count=1\n";
+    blob.push_back('\0');
+
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
+
+    ASSERT_EQ(m.entries.size(), 5u);
+    EXPECT_TRUE(m.diagnostics.empty());
+    EXPECT_EQ(m.entries.front()->kind, FuncmapEntryKind::Kernel);
+    EXPECT_EQ(m.entries.front()->name, "marker_kernel");
+
+    auto outer = m.find(1);
+    ASSERT_TRUE(outer);
+    EXPECT_EQ(outer->kind, FuncmapEntryKind::UserScope);
+    EXPECT_EQ(outer->name, "outer");
+
+    auto point = m.find(3);
+    ASSERT_TRUE(point);
+    EXPECT_EQ(point->kind, FuncmapEntryKind::Point);
+    EXPECT_EQ(point->name, "point");
+
+    auto data = m.find(4);
+    ASSERT_TRUE(data);
+    EXPECT_EQ(data->kind, FuncmapEntryKind::Point);
+    EXPECT_EQ(data->name, "data");
+    EXPECT_EQ(data->extra_payload_count, 1u);
+}
+
 TEST(ParseFuncmap, PackedMarkerEncodingRequiresClockShift)
 {
     Funcmap m = parse_funcmap_section("M:shader_clock_bits=12\n", /*silent=*/true);

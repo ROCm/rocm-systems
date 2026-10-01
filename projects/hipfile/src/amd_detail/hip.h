@@ -76,7 +76,9 @@ struct Hip {
     virtual hipDevice_t hipStreamGetDevice(hipStream_t stream) const;
     virtual void        hipInit() const;
     virtual int         hipGetDevice() const;
+    virtual void        hipSetDevice(int device_id) const;
     virtual int         hipGetDeviceCount() const;
+    virtual hipUUID     hipDeviceGetUuid(int device_id) const;
 
     struct RuntimeError : public std::runtime_error {
         hipError_t error;

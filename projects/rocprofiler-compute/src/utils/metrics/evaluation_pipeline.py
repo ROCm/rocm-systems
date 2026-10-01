@@ -38,23 +38,34 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
     else:
         peak_names = [
             "FP16Flops",
+            "BF16Flops",
             "FP32Flops",
             "FP64Flops",
+            "I8Ops",
+            "I32Ops",
+            "I64Ops",
+            "MFMAF4Flops",
+            "MFMAF6Flops",
             "MFMAF6F4Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
             "MFMAF16Flops",
             "MFMABF16Flops",
+            "MFMAMXF8Flops",
             "MFMAF8Flops",
             "MFMAI8Ops",
+            "WMMAF4Flops",
+            "WMMAF6Flops",
             "WMMAF6F4Flops",
             "WMMAF64Flops",
             "WMMAF32Flops",
             "WMMAF16Flops",
             "WMMABF16Flops",
+            "WMMAMXF8Flops",
             "WMMAF8Flops",
             "WMMAI8Ops",
             "HBMBw",
+            "MALLBw",
             "L2Bw",
             "L1Bw",
             "L0Bw",
@@ -189,12 +200,20 @@ def eval_metric(
     """Execute the expr string for each metric in the df."""
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
+    gui_active_counter = next(
+        (
+            counter
+            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
+            if counter in raw_pmc_df.columns
+        ),
+        None,
+    )
     if (
         (not roof_only_run)
-        and "GRBM_GUI_ACTIVE" in raw_pmc_df.columns
-        and (raw_pmc_df["GRBM_GUI_ACTIVE"] == 0).any()
+        and gui_active_counter is not None
+        and (raw_pmc_df[gui_active_counter] == 0).any()
     ):
-        console_warning("Detected GRBM_GUI_ACTIVE == 0")
+        console_warning(f"Detected {gui_active_counter} == 0")
         console_error("Halting execution for warning above.")
 
     sys_vars = create_sys_vars(sys_info)

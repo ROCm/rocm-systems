@@ -32,14 +32,14 @@ std::atomic<int> flush_worker_test::test_counter{ 0 };
 
 TEST_F(flush_worker_test, start_worker_in_correct_state)
 {
-    bool worker_called   = false;
-    auto worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
+    bool       worker_called   = false;
+    auto const worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
         worker_called = true;
     };
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
 
@@ -54,13 +54,13 @@ TEST_F(flush_worker_test, start_worker_in_correct_state)
 TEST_F(flush_worker_test, stop_worker_complete)
 {
     std::atomic<bool> worker_called{ false };
-    auto              worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
+    auto const        worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
         worker_called = true;
     };
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -76,14 +76,14 @@ TEST_F(flush_worker_test, worker_function_called_on_stop)
 {
     std::atomic<int>  call_count{ 0 };
     std::atomic<bool> force_flag{ false };
-    auto              worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool force) {
+    auto const        worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool force) {
         call_count++;
         force_flag = force;
     };
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -95,11 +95,11 @@ TEST_F(flush_worker_test, worker_function_called_on_stop)
 
 TEST_F(flush_worker_test, multiple_stop_calls_are_safe)
 {
-    auto worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
+    auto const worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -114,9 +114,9 @@ TEST_F(flush_worker_test, multiple_stop_calls_are_safe)
 
 TEST_F(flush_worker_test, worker_factory_creates_valid_object)
 {
-    auto worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
+    auto const worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
 
-    auto worker = rocprofsys::trace_cache::flush_worker_factory_t::get_worker(
+    auto const worker = rocprofsys::trace_cache::flush_worker_factory_t::get_worker(
         worker_function, worker_sync, test_file_path);
 
     EXPECT_NE(worker, nullptr);
@@ -125,12 +125,12 @@ TEST_F(flush_worker_test, worker_factory_creates_valid_object)
 
 TEST_F(flush_worker_test, worker_handles_invalid_path)
 {
-    auto        worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
-    std::string invalid_path    = "/invalid/path/file.bin";
+    auto const        worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
+    const std::string invalid_path    = "/invalid/path/file.bin";
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    invalid_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     EXPECT_THROW(worker.start(current_pid), std::runtime_error);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -143,13 +143,13 @@ TEST_F(flush_worker_test, worker_handles_invalid_path)
 TEST_F(flush_worker_test, different_pid_start_stop)
 {
     std::atomic<bool> worker_called{ false };
-    auto              worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
+    auto const        worker_function = [&](rocprofsys::trace_cache::ofs_t&, bool) {
         worker_called = true;
     };
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   parent_pid = getpid();
+    const pid_t                             parent_pid = getpid();
 
     worker.start(parent_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -157,31 +157,29 @@ TEST_F(flush_worker_test, different_pid_start_stop)
     EXPECT_TRUE(worker_sync->is_running);
     EXPECT_EQ(worker_sync->origin_pid, parent_pid);
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
-        pid_t current_child_pid = getpid();
+        const pid_t current_child_pid = getpid();
         worker.stop(current_child_pid);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        bool still_running = worker_sync->is_running;
-        bool exit_finished = worker_sync->exit_finished;
+        const bool still_running = worker_sync->is_running;
+        const bool exit_finished = worker_sync->exit_finished;
 
         _exit(still_running ? 1 : (exit_finished ? 2 : 0));
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0);
-        EXPECT_FALSE(worker_sync->exit_finished);
-        EXPECT_TRUE(worker_sync->is_running);
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
 
-        worker.stop(parent_pid);
-        EXPECT_TRUE(worker_sync->exit_finished);
-        EXPECT_FALSE(worker_sync->is_running);
-        EXPECT_TRUE(worker_called);
-    }
+    EXPECT_EQ(child_exit_code, 0);
+    EXPECT_FALSE(worker_sync->exit_finished);
+    EXPECT_TRUE(worker_sync->is_running);
+
+    worker.stop(parent_pid);
+    EXPECT_TRUE(worker_sync->exit_finished);
+    EXPECT_FALSE(worker_sync->is_running);
+    EXPECT_TRUE(worker_called);
 }

@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 from datetime import datetime
-from subprocess import Popen, PIPE, run
+from subprocess import Popen, PIPE, STDOUT, run
 import argparse
 import os
 import sys
@@ -40,14 +40,18 @@ def run_command(command):
     return result.stdout.rstrip('\n')
 
 
-def run_and_tee(command, log_path):
-    with open(log_path, 'a') as outputLog:
-        with Popen(command, stdout=PIPE, text=True) as process:
-            for line in process.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                outputLog.write(line)
-        return process.returncode
+def run_and_log(cmd, logFilePath):
+    # Portable replacement for '| tee -a': stream the output line by line so
+    # progress stays visible during long runs, while appending it to the log.
+    # cmd is an argument list launched without a shell, so paths holding spaces
+    # or shell metacharacters reach the sample unmangled.
+    with open(logFilePath, 'a') as logf:
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
+        for line in p.stdout:
+            print(line, end='')
+            logf.write(line)
+        p.wait()
+    return p.returncode
 
 
 def write_formatted(output, f):
@@ -89,7 +93,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--rocDecode_directory',   type=str, default='',
                     help='The rocDecode Directory - required')
 parser.add_argument('--videodecode_exe',   type=str, default='',
-                    help='Video decode sample app exe - optional')
+                    help='Video decode sample app exe - optional. If omitted, the sample is looked up under <rocDecode_directory>/samples/<sample>/build (on Windows, the Release config). Pass this explicitly to run a Debug build or an exe from another location.')
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
@@ -134,9 +138,15 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 scriptPath = os.path.dirname(os.path.realpath(__file__))
 if videoDecodeEXE == '':
     if sampleMode == 0:
-        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+        if platform.system() != 'Windows':
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+        else:
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
     elif sampleMode == 1:
-        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/videodecodeperf'
+        if platform.system() != 'Windows':
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/videodecodeperf'
+        else:
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/Release/videodecodeperf.exe'
 else:
     rocDecode_exe = videoDecodeEXE
 if resultsDir == '':
@@ -155,7 +165,8 @@ os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
-    print("\nERROR: rocDecode Executable Not Found\n")
+    print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
+    print("Build the sample first, or pass --videodecode_exe to point at it.\n")
     exit()
 
 if os.path.exists(filesDir) and not os.path.isfile(filesDir):
@@ -179,18 +190,11 @@ if sampleMode == 0:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        command = [
-            run_rocDecode_app,
-            '-i',
-            str(current_file),
-            '-d',
-            str(gpuDeviceID),
-            '-f',
-            str(maxNumFrames),
-        ]
+        cmd = [run_rocDecode_app, '-i', str(current_file), '-d', str(gpuDeviceID), '-f', str(maxNumFrames)]
         if bsReaderOption:
-            command.append(bsReaderOption)
-        returnCode = run_and_tee(command, outputLogPath)
+            cmd.append(bsReaderOption)
+        logFilePath = resultsPath+'/rocDecode_output.log'
+        returnCode = run_and_log(cmd, logFilePath)
         if returnCode != 0:
             sys.exit(returnCode)
         print("\n\n")
@@ -200,48 +204,37 @@ if sampleMode == 0:
         with open(resultsCsvPath, 'a') as resultsFile:
             print(echo_1, file=resultsFile)
 
-        awkProgram = r'''/Framerate: / {frameRate=$2; next}
-                            /Bitrate: / {bitRate=$2; next}
-                            /info: Input file: / {filename=$4; next}
-                            /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
-                            /info: decoding started, please wait!/{next}
-                            /Input Video Information/{next}
-                            /\tCodec        : / {codec=$3; next}
-                            /\tSequence     : /{next}
-                            /\tCoded size   : /{next}
-                            /\tDisplay area : /{next}
-                            /\tChroma       : /{next}
-                            /\tBit depth    : / {bitDepth=$4; next}
-                            /Video Decoding Params:/{next}
-                            /\tNum Surfaces : /{next}
-                            /\tCrop         : /{next}
-                            /\tResize       : /{videoSize=$3; next}
-                            /^$/{next}
-                            /info: Total pictures decoded: / {totalFrames=$5; next}
-                            /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }'''
-        with open(resultsCsvPath, 'a') as resultsFile:
-            awkResult = run(
-                ['awk', awkProgram, outputLogPath],
-                stdout=resultsFile,
-                check=False,
-            )
-        if awkResult.returncode != 0:
-            sys.exit(awkResult.returncode)
+        with open(resultsPath+'/rocDecode_output.log', 'r') as lf:
+            frameRate = bitRate = filename = codec = videoSize = bitDepth = totalFrames = timePerFrame = 'n/a'
+            csvf = open(resultsPath+'/rocDecode_test_results.csv', 'a')
+            for line in lf:
+                if 'Framerate: ' in line:
+                    frameRate = line.split()[1] if len(line.split()) > 1 else 'n/a'
+                elif 'Bitrate: ' in line:
+                    bitRate = line.split()[1] if len(line.split()) > 1 else 'n/a'
+                elif 'info: Input file: ' in line:
+                    filename = line.split()[3] if len(line.split()) > 3 else 'n/a'
+                elif '\tCodec        : ' in line:
+                    codec = line.split()[2] if len(line.split()) > 2 else 'n/a'
+                elif '\tBit depth    : ' in line:
+                    bitDepth = line.split()[3] if len(line.split()) > 3 else 'n/a'
+                elif '\tResize       : ' in line:
+                    videoSize = line.split()[2] if len(line.split()) > 2 else 'n/a'
+                elif 'info: Total pictures decoded: ' in line:
+                    totalFrames = line.split()[4] if len(line.split()) > 4 else 'n/a'
+                elif 'info: avg decoding time per picture: ' in line:
+                    timePerFrame = line.split()[6] if len(line.split()) > 6 else 'n/a'
+                elif 'info: avg decode FPS: ' in line:
+                    avgFPS = line.split()[4] if len(line.split()) > 4 else 'n/a'
+                    csvf.write('%s, %s, %s, %s, %s, %s, %s, %s, %s\n' % (filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, avgFPS))
+            csvf.close()
 elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        command = [
-            run_rocDecode_app,
-            '-i',
-            str(current_file),
-            '-t',
-            str(numThreads),
-            '-f',
-            str(maxNumFrames),
-        ]
-        returnCode = run_and_tee(command, outputLogPath)
+        cmd = [run_rocDecode_app, '-i', str(current_file), '-t', str(numThreads), '-f', str(maxNumFrames)]
+        logFilePath = resultsPath+'/rocDecode_output.log'
+        returnCode = run_and_log(cmd, logFilePath)
         if returnCode != 0:
             sys.exit(returnCode)
         print("\n\n")
@@ -251,52 +244,62 @@ elif sampleMode == 1:
         with open(resultsCsvPath, 'a') as resultsFile:
             print(echo_1, file=resultsFile)
 
-        awkProgram = r'''/Framerate: / {frameRate=$2; next}
-                            /Bitrate: / {bitRate=$2; next}
-                            /info: Input file: / {filename=$4; next}
-                            /info: Number of threads: / {numThreads=$5; next}
-                            /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
-                            /info: decoding started, please wait!/{next}
-                            /Input Video Information/{next}
-                            /\tCodec        : / {codec=$3; next}
-                            /\tSequence     : /{next}
-                            /\tCoded size   : /{next}
-                            /\tDisplay area : /{next}
-                            /\tChroma       : /{next}
-                            /\tBit depth    : / {bitDepth=$4; next}
-                            /Video Decoding Params:/{next}
-                            /\tNum Surfaces : /{next}
-                            /\tCrop         : /{next}
-                            /\tResize       : /{videoSize=$3; next}
-                            /^$/{next}
-                            /info: Total pictures decoded: / {totalFrames=$5; next}
-                            /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }'''
-        with open(resultsCsvPath, 'a') as resultsFile:
-            awkResult = run(
-                ['awk', awkProgram, outputLogPath],
-                stdout=resultsFile,
-                check=False,
-            )
-        if awkResult.returncode != 0:
-            sys.exit(awkResult.returncode)
+        with open(resultsPath+'/rocDecode_output.log', 'r') as lf:
+            frameRate = bitRate = filename = codec = videoSize = bitDepth = totalFrames = timePerFrame = numThr = 'n/a'
+            csvf = open(resultsPath+'/rocDecode_test_results.csv', 'a')
+            for line in lf:
+                if 'Framerate: ' in line:
+                    frameRate = line.split()[1] if len(line.split()) > 1 else 'n/a'
+                elif 'Bitrate: ' in line:
+                    bitRate = line.split()[1] if len(line.split()) > 1 else 'n/a'
+                elif 'info: Input file: ' in line:
+                    filename = line.split()[3] if len(line.split()) > 3 else 'n/a'
+                elif 'info: Number of threads: ' in line:
+                    numThr = line.split()[4] if len(line.split()) > 4 else 'n/a'
+                elif '\tCodec        : ' in line:
+                    codec = line.split()[2] if len(line.split()) > 2 else 'n/a'
+                elif '\tBit depth    : ' in line:
+                    bitDepth = line.split()[3] if len(line.split()) > 3 else 'n/a'
+                elif '\tResize       : ' in line:
+                    videoSize = line.split()[2] if len(line.split()) > 2 else 'n/a'
+                elif 'info: Total pictures decoded: ' in line:
+                    totalFrames = line.split()[4] if len(line.split()) > 4 else 'n/a'
+                elif 'info: avg decoding time per picture: ' in line:
+                    timePerFrame = line.split()[6] if len(line.split()) > 6 else 'n/a'
+                elif 'info: avg decode FPS: ' in line:
+                    avgFPS = line.split()[4] if len(line.split()) > 4 else 'n/a'
+                    csvf.write('%s, %s, %s, %s, %s, %s, %s, %s, %s, %s\n' % (filename, numThr, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, avgFPS))
+            csvf.close()
 
 # get data
 if checkDecStatus == 0:
     platform_name = platform.platform()
-    platform_name_fq = run_command(['hostname', '--all-fqdns'])
-    platform_ip = run_command(['hostname', '-I']).rstrip()
+    if platform.system() != 'Windows':
+        platform_name_fq = run_command(['hostname', '--all-fqdns'])
+        platform_ip = run_command(['hostname', '-I']).rstrip()
+    else:
+        platform_name_fq = run_command(['hostname'])
+        platform_ip = 'N/A'
 
     file_dtstr = datetime.now().strftime("%Y%m%d")
     reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
     report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
-    sys_info = run_command(['inxi', '-c0', '-S'])
-    cpu_info = run_command(['inxi', '-c0', '-C'])
-    gpu_info = run_command(['inxi', '-c0', '-G'])
-    memory_info = run_command(['inxi', '-c', '0', '-m'])
-    board_info = run_command(['inxi', '-c0', '-M'])
-
-    lib_tree = run_command(['ldd', run_rocDecode_app])
+    if platform.system() != 'Windows':
+        sys_info = run_command(['inxi', '-c0', '-S'])
+        cpu_info = run_command(['inxi', '-c0', '-C'])
+        gpu_info = run_command(['inxi', '-c0', '-G'])
+        memory_info = run_command(['inxi', '-c', '0', '-m'])
+        board_info = run_command(['inxi', '-c0', '-M'])
+        lib_tree = run_command(['ldd', run_rocDecode_app])
+    else:
+        # wmic is removed from Windows 11 24H2 onwards; use CIM cmdlets instead
+        powershell = ['powershell', '-NoProfile', '-Command']
+        sys_info = run_command(['systeminfo'])
+        cpu_info = run_command(powershell + ['Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name'])
+        gpu_info = run_command(powershell + ['Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name'])
+        memory_info = run_command(powershell + ['(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory'])
+        board_info = run_command(powershell + ['Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product | Format-List'])
+        lib_tree = 'N/A (use dumpbin /dependents on Windows)'
     lib_tree = strip_libtree_addresses(lib_tree)
 
     # Load the data

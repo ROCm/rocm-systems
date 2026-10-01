@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
 )
@@ -88,13 +91,19 @@ target_include_directories(
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-dl>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-user>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-causal-api>
 )
 
 # include threading because of rooflines
+#
+# the common-api target is defined later by add_subdirectory(source); linking it
+# by name here is resolved at generate time and carries its include directory,
+# so this file no longer hard-codes source/lib/rocprof-sys-common-api
 target_link_libraries(
     rocprofiler-systems-headers
-    INTERFACE rocprofiler-systems::rocprofiler-systems-threading
+    INTERFACE
+        rocprofiler-systems::rocprofiler-systems-threading
+        rocprofiler-systems::rocprofiler-systems-common-api-library
 )
 
 # ensure the env overrides the appending /opt/rocm later
@@ -157,33 +166,9 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(ROCmVersion)
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
-if(NOT ROCmVersion_FOUND)
-    find_package(
-        hip
-        ${rocprofiler_systems_FIND_QUIETLY}
-        REQUIRED
-        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-endif()
-
-if(NOT ROCmVersion_FOUND)
-    rocm_version_compute("${hip_VERSION}" _local)
-
-    foreach(_V ${ROCmVersion_VARIABLES})
-        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-        set(_LOCAL_VAR _local_${_V}_VERSION)
-        set(ROCmVersion_${_V}_VERSION
-            "${${_LOCAL_VAR}}"
-            CACHE STRING
-            "ROCm ${_V} version"
-        )
-        rocm_version_watch_for_change(${_CACHE_VAR})
-    endforeach()
-else()
+if(ROCmVersion_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
 endif()
 
@@ -617,6 +602,14 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Fmt
+#
+# ----------------------------------------------------------------------------------------#
+
+include(FmtLib)
+
+# ----------------------------------------------------------------------------------------#
+#
 # Spdlog
 #
 # ----------------------------------------------------------------------------------------#
@@ -639,24 +632,6 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -806,7 +781,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH rocprofiler-systems-cppstd20
+    REPO_BRANCH rocprofiler-systems
 )
 
 rocprofiler_systems_save_variables(
