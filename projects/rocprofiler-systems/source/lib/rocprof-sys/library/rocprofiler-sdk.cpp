@@ -272,36 +272,6 @@ struct external_dependencies
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
     using rocm_rccl_api_category = category::rocm_rccl_api;
     using pmc_event_with_sample  = trace_cache::pmc_event_with_sample;
-
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static constexpr std::string_view rocm_rccl_api_category_name =
-        trait::name<category::rocm_rccl_api>::value;
-
-    // Single source of truth for these strings is core/categories.hpp's
-    // trait::name<category::comm_data>; rccl.hpp itself never includes
-    // categories.hpp, so the values are surfaced here instead.
-    static constexpr std::string_view comm_data_name =
-        trait::name<category::comm_data>::value;
-    static constexpr std::string_view comm_data_description =
-        trait::name<category::comm_data>::description;
-    static constexpr std::size_t comm_data_enum_value =
-        static_cast<std::size_t>(category_enum_id<category::comm_data>::value);
-
-    static constexpr std::string_view rccl_send_label      = "RCCL Comm Send";
-    static constexpr std::string_view rccl_recv_label      = "RCCL Comm Recv";
-    static constexpr std::string_view rccl_send_track_name = rccl_send_label;
-    static constexpr std::string_view rccl_recv_track_name = rccl_recv_label;
-
-    static void* dlsym(const char* symbol_name)
-    {
-        return ::dlsym(RTLD_DEFAULT, symbol_name);
-    }
-
-    static const char* dlerror() { return ::dlerror(); }
-
-    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
-    using rocm_rccl_api_category = category::rocm_rccl_api;
-    using pmc_event_with_sample  = trace_cache::pmc_event_with_sample;
     using metadata_registry_t    = trace_cache::metadata_registry;
     using buffer_storage_t       = trace_cache::buffer_storage_t;
 
@@ -407,8 +377,6 @@ struct external_dependencies
 
     // ─── kernel_dispatch buffered-domain dependencies ────────────────────────────
     using kernel_dispatch_sample_t = trace_cache::kernel_dispatch_sample;
-    using metadata_registry_t      = trace_cache::metadata_registry;
-    using buffer_storage_t         = trace_cache::buffer_storage_t;
 
     static constexpr std::string_view k_kernel_dispatch_category_name =
         trait::name<category::rocm_kernel_dispatch>::value;
@@ -430,16 +398,6 @@ struct external_dependencies
 
     static constexpr std::string_view k_scratch_memory_category_name =
         trait::name<category::rocm_scratch_memory>::value;
-
-    static metadata_registry_t& get_metadata_registry()
-    {
-        return trace_cache::get_metadata_registry();
-    }
-
-    static buffer_storage_t& get_buffer_storage()
-    {
-        return trace_cache::get_buffer_storage();
-    }
 
     static std::string_view get_kernel_symbol_name(std::uint64_t kernel_id)
     {
@@ -805,6 +763,55 @@ cache_add_thread_info(std::uint64_t tid)
                                                            .start             = 0,
                                                            .end               = 0,
                                                            .extdata           = "{}" });
+}
+
+size_t
+get_mem_copy_dst_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
+{
+#if(ROCPROFILER_VERSION >= 700)
+    return record.dst_address.value;
+#else
+    return 0;
+#endif
+}
+
+size_t
+get_mem_copy_src_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
+{
+#if(ROCPROFILER_VERSION >= 700)
+    return record.src_address.value;
+#else
+    return 0;
+#endif
+}
+
+#if(ROCPROFILER_VERSION >= 600)
+size_t
+get_mem_alloc_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
+{
+#    if(ROCPROFILER_VERSION >= 700)
+    return record.address.value;
+#    else
+    return static_cast<size_t>(record.address.handle);
+#    endif
+}
+#endif
+
+std::uint64_t
+get_scratch_mem_alloc_size(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_scratch_memory_record_t& record)
+{
+// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
+// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
+// is 1.0.0, so we need to check the ROCm version.
+#if ROCPROFSYS_ROCM_VERSION >= 70100
+    return record.allocation_size;
+#else
+    return 0;
+#endif
 }
 
 void
