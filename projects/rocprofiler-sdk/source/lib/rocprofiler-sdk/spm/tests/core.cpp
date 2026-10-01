@@ -124,7 +124,8 @@ is_spm_supported_arch(const hsa::AgentCache& agent)
     auto rocp_agent = agent.get_rocp_agent();
     if(!rocp_agent) return false;
     auto v = rocp_agent->gfx_target_version;
-    return (v >= 90400 && v <= 90402) || v == 90500;
+    return (v >= 90400 && v <= 90402) || v == 90500 || v == 120000 || v == 120001 ||
+           v == 120500;
 }
 
 auto
