@@ -339,29 +339,32 @@ TEST_F(TopoTest, MloPartBusId_DoesNotClobberPciFunction) {
 TEST_F(TopoTest, IntelCpu_GnrSrfMapToErpAndUseErpUpiBandwidth) {
   struct Case {
     const char* name;
+    int familyId;
     int modelId;
     int expectedModel;
     float expectedSysBw;
   };
   const Case cases[] = {
-    {"GraniteRapids", 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
-    {"GraniteRapidsD", 0xAE, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
-    {"SierraForest", 0xAF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"GraniteRapids", 6, 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"GraniteRapidsD", 6, 0xAE, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SierraForest", 6, 0xAF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
     // Pins the hole between 0xAF and 0xCF. A rewrite to `modelId >= 0xAD` would
     // still pass GNR/SRF/ERP while promoting this id (and 0xB0..0xCE) to ERP.
-    {"RaptorLake", 0xB7, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
-    {"EmeraldRapids", 0xCF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
-    {"SapphireRapids", 0x8F, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
-    {"Skylake", 0x55, NCCL_TOPO_CPU_MODEL_INTEL_SKL, SKL_QPI_BW},
-    {"Broadwell", 0x3F, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
+    {"RaptorLake", 6, 0xB7, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
+    {"EmeraldRapids", 6, 0xCF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SapphireRapids", 6, 0x8F, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
+    {"Skylake", 6, 0x55, NCCL_TOPO_CPU_MODEL_INTEL_SKL, SKL_QPI_BW},
+    {"Broadwell", 6, 0x3F, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
+    // Pins family 6. Dropping that conjunct would classify this GNR model id as ERP.
+    {"NetburstGnrModel", 15, 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
   };
 
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
     ASSERT_NO_FATAL_FAILURE(resetXml());
     const uint64_t host = 0x2e31;
-    addSystemCpu(host, /*numaId=*/0, "GenuineIntel", /*familyId=*/6, c.modelId);
-    addSystemCpu(host, /*numaId=*/1, "GenuineIntel", /*familyId=*/6, c.modelId);
+    addSystemCpu(host, /*numaId=*/0, "GenuineIntel", c.familyId, c.modelId);
+    addSystemCpu(host, /*numaId=*/1, "GenuineIntel", c.familyId, c.modelId);
 
     struct ncclTopoSystem* built = nullptr;
     ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
