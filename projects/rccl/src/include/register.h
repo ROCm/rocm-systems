@@ -22,11 +22,7 @@ enum {
   NVLS_REG_POSSIBLE = 0x04,
   NVLS_REG_NO_SUPPORT = 0x08,
   COLLNET_REG_COMPLETE = 0x10,
-  IPC_REG_COMPLETE = 0x20,
-  // RCCL: every peer in this NET register call succeeded. NET_REG_COMPLETE is
-  // set on the first peer, so it cannot mean the cached segment count is valid.
-  // Re-check this bit whenever upstream adds a flag here; it must stay unused.
-  NET_REG_ALL_PEERS = 0x40
+  IPC_REG_COMPLETE = 0x20
 };
 
 struct ncclPeerRegIpcAddr {
@@ -48,7 +44,6 @@ struct ncclReg {
   uint32_t state;
   // net reg
   struct ncclRegNetHandles* netHandleHead;
-  int netNSegments; // 0 = unset; cached after a successful full-range NET register
   // nvls reg
   CUdeviceptr regAddr;
   size_t regUCSize, regMCSize;
@@ -65,6 +60,8 @@ struct ncclReg {
   struct ncclPeerRegIpcAddr regIpcAddrs;
   struct ncclIpcRegInfo** ipcInfos;  // Dynamically allocated, sized to ipcInfosSize
   int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
+  // RCCL: NET segment cache, written only by rcclNetRegCommit (rccl_wrap.cc).
+  struct { int nSegments; bool allPeers; } rcclNet;
 };
 
 struct ncclRegCache {

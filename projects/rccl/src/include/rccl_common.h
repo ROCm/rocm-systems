@@ -291,6 +291,8 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 // Physical segments behind the whole NET registration, not the collective's
 // slice. Returns the cached count once every peer has registered.
 ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Records an all-peers NET registration and caches its segment count.
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm);
