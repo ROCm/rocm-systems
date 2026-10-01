@@ -243,8 +243,12 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         proc.complete = manifest.get("complete")
         proc.event_count = manifest.get("event_count")
         proc.blob_count = manifest.get("blob_count")
-        runtime = (manifest.get("metadata") or {}).get("runtime") or {}
-        proc.hip_runtime_version = runtime.get("hip_runtime_version")
+        # A damaged manifest is reported, not raised on: either level can be
+        # any JSON value.
+        metadata = manifest.get("metadata")
+        runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
+        if isinstance(runtime, dict):
+            proc.hip_runtime_version = runtime.get("hip_runtime_version")
 
     if proc.pid is None and pid_dir.name.startswith("pid-"):
         suffix = pid_dir.name[len("pid-") :]
@@ -295,10 +299,15 @@ def _playback_env(playback: str) -> dict[str, str]:
     binary needs the HIP and HSA libraries from its own `lib/` and
     `runtime-lib/`. Without them it picks up whichever libamdhip64 the host has
     and dies on a missing symbol version, which reads like a broken archive.
+    A build-tree reader needs the matching libhsa-runtime64 the same way, and
+    `ROCR_LIB` names it, as it does for triage_archive.sh.
     """
     env = dict(os.environ)
     root = Path(playback).resolve().parent.parent
     dirs = [str(root / name) for name in ("lib", "runtime-lib") if (root / name).is_dir()]
+    rocr = env.get("ROCR_LIB")
+    if rocr and (Path(rocr) / "libhsa-runtime64.so.1").is_file() and rocr not in dirs:
+        dirs.append(rocr)
     if dirs:
         existing = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = ":".join(dirs + ([existing] if existing else []))

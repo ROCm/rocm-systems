@@ -229,6 +229,21 @@ def test_a_manifest_that_is_not_an_object_is_unreadable_not_fatal(tmp_path, cont
     assert report.recorded_processes, "the events are still there"
 
 
+@pytest.mark.parametrize(
+    "metadata", [[], None, "text", {"runtime": None}, {"runtime": []}, {"runtime": "7.16"}]
+)
+def test_metadata_of_the_wrong_type_is_not_fatal(tmp_path, metadata):
+    pid_dir = make_process(tmp_path, 57)
+    (pid_dir / "manifest.json").write_text(
+        json.dumps({"pid": 57, "complete": True, "metadata": metadata})
+    )
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    assert report.processes[0].hip_runtime_version is None
+    assert report.recorded_processes
+
+
 def test_version_mismatch_from_playback_is_explained(tmp_path, monkeypatch):
     """A reader that cannot read the archive is a tooling problem, not a bad capture.
 
@@ -308,6 +323,27 @@ def test_packaged_playback_gets_its_own_libraries_on_the_path(tmp_path):
     env = inspect_archive._playback_env(str(binary))
 
     assert env["LD_LIBRARY_PATH"].split(":")[:2] == [str(root / "lib"), str(root / "runtime-lib")]
+
+
+def test_build_tree_playback_gets_rocr_lib_on_the_path(tmp_path, monkeypatch):
+    """As triage_archive.sh does: an in-tree reader may need the matching
+    libhsa-runtime64, and ROCR_LIB is where it is."""
+    binary = tmp_path / "build" / "playback" / "hrr-playback"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n")
+    rocr = tmp_path / "rocr" / "lib"
+    rocr.mkdir(parents=True)
+    (rocr / "libhsa-runtime64.so.1").write_text("")
+    monkeypatch.setenv("ROCR_LIB", str(rocr))
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/mine")
+
+    env = inspect_archive._playback_env(str(binary))
+
+    assert env["LD_LIBRARY_PATH"] == f"{rocr}:/mine"
+
+    # A ROCR_LIB without the library in it is not put on the path.
+    (rocr / "libhsa-runtime64.so.1").unlink()
+    assert inspect_archive._playback_env(str(binary))["LD_LIBRARY_PATH"] == "/mine"
 
 
 def test_missing_playback_is_reported_not_fatal(tmp_path, monkeypatch):
@@ -417,6 +453,22 @@ def test_preflight_sees_the_reader_hrr_playback_names(tmp_path):
     )
 
     assert "hrr-playback is available" in result.stderr
+
+
+def test_preflight_refuses_a_directory_as_the_reader(tmp_path):
+    """`-x` is true of a directory, which verify then refuses as a reader."""
+    env = {**os.environ, "ROCM_PATH": str(tmp_path / "no-rocm")}
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "preflight", "--playback", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+
+    assert result.returncode != 0
+    assert "not an executable file" in result.stderr
 
 
 def test_json_is_still_json_when_there_is_no_archive(tmp_path, capsys):

@@ -517,13 +517,15 @@ case "$VERB" in
       check_output_path "$OUTPUT" "$MIN_FREE_GB" || rc=1
     fi
     if [[ -n "$PLAYBACK" ]]; then
-      if [[ -x "$PLAYBACK" ]]; then
+      # A regular file, as verify requires: -x alone passes a directory.
+      if [[ -f "$PLAYBACK" && -x "$PLAYBACK" ]]; then
         log "hrr-playback given: $PLAYBACK"
       else
-        log "the --playback path is not executable: $PLAYBACK"
+        log "the --playback path is not an executable file: $PLAYBACK"
         rc=1
       fi
-    elif [[ -n "${HRR_PLAYBACK:-}" && -x "$HRR_PLAYBACK" ]] || [[ -x "$ROCM_PATH/bin/hrr-playback" ]] ||
+    elif [[ -n "${HRR_PLAYBACK:-}" && -f "$HRR_PLAYBACK" && -x "$HRR_PLAYBACK" ]] ||
+         [[ -f "$ROCM_PATH/bin/hrr-playback" && -x "$ROCM_PATH/bin/hrr-playback" ]] ||
          command -v hrr-playback >/dev/null 2>&1; then
       log "hrr-playback is available, so the archive can be checked and replayed here"
     else
