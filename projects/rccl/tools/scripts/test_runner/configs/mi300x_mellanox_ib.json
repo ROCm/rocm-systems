@@ -929,6 +929,11 @@
           "test_filter": "CeAlltoAllvEligibilityTest.*"
         },
         {
+          "name": "CeHierAlltoAllvEligibilityTest",
+          "description": "Hierarchical CE AlltoAllv eligibility and gating tests",
+          "test_filter": "CeHierAlltoAllvEligibilityTest.*"
+        },
+        {
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"

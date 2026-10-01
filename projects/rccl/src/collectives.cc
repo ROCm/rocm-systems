@@ -700,11 +700,21 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     const size_t nGather = nLocal * (size_t)nRanks;
     // First call allocates. Doing it here, rather than at init, keeps the
     // 32 * nRanks^2 byte reservation off communicators that never AlltoAllv.
-    if (comm->localSizes == nullptr) {
-      NCCLCHECK(ncclMemAlloc(&comm->localSizes, nLocal * sizeof(size_t)));
-    }
-    if (comm->gatheredSizes == nullptr) {
-      NCCLCHECK(ncclMemAlloc(&comm->gatheredSizes, nGather * sizeof(size_t)));
+    // ncclMemAlloc uses cudaGetDevice(). Init used to run only after the
+    // runtime had selected comm->cudaDev, so select it here and put it back.
+    if (comm->localSizes == nullptr || comm->gatheredSizes == nullptr) {
+      int savedDev = -1;
+      CUDACHECK(cudaGetDevice(&savedDev));
+      CUDACHECK(cudaSetDevice(comm->cudaDev));
+      ncclResult_t allocResult = ncclSuccess;
+      if (comm->localSizes == nullptr) {
+        allocResult = ncclMemAlloc(&comm->localSizes, nLocal * sizeof(size_t));
+      }
+      if (allocResult == ncclSuccess && comm->gatheredSizes == nullptr) {
+        allocResult = ncclMemAlloc(&comm->gatheredSizes, nGather * sizeof(size_t));
+      }
+      CUDACHECK(cudaSetDevice(savedDev));
+      NCCLCHECK(allocResult);
     }
 
     CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));

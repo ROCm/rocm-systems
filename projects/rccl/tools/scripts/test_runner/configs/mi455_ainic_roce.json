@@ -1407,6 +1407,11 @@
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
           "test_filter": "CeAlltoAllvEligibilityTest.*"
+        },
+        {
+          "name": "CeHierAlltoAllvEligibilityTest",
+          "description": "Hierarchical CE AlltoAllv eligibility and gating tests",
+          "test_filter": "CeHierAlltoAllvEligibilityTest.*"
         }
       ]
     },
