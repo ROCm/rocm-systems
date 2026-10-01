@@ -1520,8 +1520,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
  *   - Forking while another thread records must not leave a child blocked on a
  *     writer mutex it inherited locked. The workload fails on a child that
  *     does not exit within its deadline.
- *   - Every child opens its own archive from the atfork handler, so the
- *     capture holds one archive per child besides the parent's.
+ *   - A child opens its own archive on its first record and not before, so
+ *     the capture holds one archive per child that recorded, besides the
+ *     parent's, and none for a child that exited straight away.
  */
 HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_recording"};
@@ -1536,6 +1537,6 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
   }
 
   CHECK(hrr_process_archives(cap.path).size() ==
-        static_cast<size_t>(kHrrForkWhileRecordingForks) + 1);
+        static_cast<size_t>(kHrrForkWhileRecordingArchives));
 }
 #endif  // !_WIN32

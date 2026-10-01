@@ -3463,15 +3463,16 @@ TEST_CASE("Unit_HRR_CaptureCrashSmallStack_Direct", "[.][hrr-direct]") {
 // Unit_HRR_ForkWhileRecording_Direct
 //
 // Forks kHrrForkWhileRecordingForks times while a second thread records copies
-// of fresh data, so some forks land while that thread holds a writer lock. The
-// atfork handler reopens an archive in every child, under both writer
-// mutexes; a child that inherited one locked would block there forever. Each
-// child exits as soon as it returns from fork, and the parent waits for it
-// under a deadline, so a hang fails the case rather than the job.
+// of fresh data, so some forks land while that thread holds a writer lock. A
+// child reopens its archive under the writer mutexes on its first record; one
+// that inherited a mutex locked would block there forever. Every other child
+// records hipGetLastError(), which needs no device work, and exits; the rest
+// exit as soon as fork returns. The parent waits for each under a deadline, so
+// a hang fails the case rather than the job.
 //
 // The lock windows are narrow, so a regression is caught by chance, not on
-// every run. A clean run also leaves one archive per child, which
-// Unit_HRR_ForkWhileRecording counts.
+// every run. A clean run leaves an archive for each child that recorded and
+// none for the others, which Unit_HRR_ForkWhileRecording counts.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -3498,7 +3499,10 @@ TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
   int forked = 0, hung = 0, failed = 0;
   for (; forked < kHrrForkWhileRecordingForks; ++forked) {
     pid_t pid = fork();
-    if (pid == 0) _exit(0);
+    if (pid == 0) {
+      if (forked % 2 == 0) (void)hipGetLastError();
+      _exit(0);
+    }
     if (pid < 0) break;
 
     int status = 0;

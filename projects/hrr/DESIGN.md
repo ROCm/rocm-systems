@@ -104,8 +104,11 @@ processes. Every HIP-owning process writes an independent sub-archive at
 two live writers into one `events.bin` without needing an advisory lock.
 
 `writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
-PID directory. A `fork()` child re-opens from the base dir in `atfork_child`, so
-the child naturally switches to its own `pid-<childpid>/` sub-archive. The root
+PID directory. A `fork()` child re-opens from the base dir on its first record,
+blob or code object after the fork, so it switches to its own `pid-<childpid>/`
+sub-archive. `atfork_child` only drops the parent's events fd and paths: the
+child of a multithreaded process may make only async-signal-safe calls until it
+execs, and a child that execs or exits without recording leaves no archive. The root
 `manifest.json` is a common aggregate index with the schema fields
 `version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
 it best-effort on clean shutdown by scanning existing `pid-*/manifest.json`
