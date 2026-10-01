@@ -118,17 +118,52 @@ if (-not (Test-Path $Archive -PathType Container)) {
     exit 1
 }
 
+# GetFullPath is lexical only, so a symbolic link or a junction anywhere in a
+# path is followed here, as realpath does for triage_archive.sh. Components that
+# do not exist yet are kept as they are. $null when the links go round in a
+# loop.
+function Resolve-LinkedPath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $hops = 0
+    while ($true) {
+        $root = [IO.Path]::GetPathRoot($full)
+        $parts = @($full.Substring($root.Length).Split([char[]]'\/', [StringSplitOptions]::RemoveEmptyEntries))
+        $cur = $root
+        $relinked = $false
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            $next = Join-Path $cur $parts[$i]
+            $item = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+            $target = if ($item -and $item.LinkType) { @($item.Target)[0] } else { $null }
+            if (-not $target) { $cur = $next; continue }
+            if (++$hops -gt 40) { return $null }
+            if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path $cur $target }
+            # The target can hold links of its own, so the walk starts again on it.
+            foreach ($p in ($parts | Select-Object -Skip ($i + 1))) { $target = Join-Path $target $p }
+            $full = [IO.Path]::GetFullPath($target)
+            $relinked = $true
+            break
+        }
+        if (-not $relinked) { return $cur }
+    }
+}
+
 $Name    = Split-Path $Archive -Leaf
 # The pid keeps two runs in the same second from sharing a log and a finding.
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
 $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
 # The archive is not to be written to, as in triage_archive.sh: the archive here
 # is the pid directory and, for a pid-<n> one, the capture directory holding it.
-# The path is resolved before anything is created.
+# Both paths are resolved, links included, before anything is created: a work
+# directory or a parent of it that is a link into the capture is inside it.
 $ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
-$ArchiveRoot = [IO.Path]::GetFullPath($ArchiveRoot).TrimEnd('\', '/')
-$WorkdirFull = [IO.Path]::GetFullPath(
-    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Workdir)).TrimEnd('\', '/')
+$ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
+$WorkdirFull = Resolve-LinkedPath $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Workdir)
+if (-not $ArchiveRoot -or -not $WorkdirFull) {
+    Write-Host "error: a symbolic link loop in the archive or work directory path: $Workdir" -ForegroundColor Red
+    exit 1
+}
+$ArchiveRoot = $ArchiveRoot.TrimEnd('\', '/')
+$WorkdirFull = $WorkdirFull.TrimEnd('\', '/')
 if ($WorkdirFull -ieq $ArchiveRoot -or
     $WorkdirFull.StartsWith($ArchiveRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     Write-Host "error: the triage work directory is inside the archive: $Workdir; set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red

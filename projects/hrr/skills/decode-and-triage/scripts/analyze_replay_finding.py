@@ -535,8 +535,9 @@ def render_markdown(f: Finding) -> str:
             "## Fault details",
             f"- **Fault address**: `{f.fault_address or 'n/a'}`",
             f"- **Fault reason**: {f.fault_reason or 'n/a'}",
-            f"- **Failing event seq**: {f.failing_event_seq or 'n/a'}",
-            f"- **Failing call index**: {f.failing_call_index or 'n/a'}",
+            # Both are zero-based, so 0 is the first event, not a missing one.
+            f"- **Failing event seq**: {'n/a' if f.failing_event_seq is None else f.failing_event_seq}",
+            f"- **Failing call index**: {'n/a' if f.failing_call_index is None else f.failing_call_index}",
             f"- **Failing API**: {f.failing_api or 'n/a'}",
             f"- **Kernarg address**: `{f.kernarg_address or 'n/a'}`",
             f"- **GPU node**: {f.gpu_node or 'n/a'}",

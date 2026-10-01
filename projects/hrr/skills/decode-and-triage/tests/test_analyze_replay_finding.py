@@ -211,6 +211,23 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(payload["kernels_launched"], 13233)
         self.assertEqual(payload["d2h_attempted"], 32)
 
+    def test_a_fault_at_the_first_event_names_it(self) -> None:
+        """Event and call indices are zero-based, so 0 is a real index."""
+        finding = arf.Finding(
+            outcome="MAF",
+            fault_class="illegal_memory_access",
+            failing_event_seq=0,
+            failing_call_index=0,
+        )
+        report = arf.render_markdown(finding)
+        self.assertIn("- **Failing event seq**: 0", report)
+        self.assertIn("- **Failing call index**: 0", report)
+        report = arf.render_markdown(
+            arf.Finding(outcome="MAF", fault_class="illegal_memory_access")
+        )
+        self.assertIn("- **Failing event seq**: n/a", report)
+        self.assertIn("- **Failing call index**: n/a", report)
+
     def test_truncated_kernel_names_are_ignored(self) -> None:
         """Every name in this capture's table is cut off by the column width."""
         finding = self._analyze("info_pass.txt")
