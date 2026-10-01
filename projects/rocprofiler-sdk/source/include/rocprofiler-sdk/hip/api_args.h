@@ -3648,6 +3648,21 @@ typedef union rocprofiler_hip_api_args_t
         hipModule_t    mod;
     } hipModuleEnumerateFunctions;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    struct
+    {
+        hipModule_t* pMod;
+        hipLibrary_t library;
+    } hipLibraryGetModule;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
+    struct
+    {
+        void**        fptr;
+        hipLibrary_t  library;
+        const char*   symbol;
+    } hipLibraryGetUnifiedFunction;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
