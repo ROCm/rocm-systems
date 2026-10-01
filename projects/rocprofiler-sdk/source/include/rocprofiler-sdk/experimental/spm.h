@@ -36,6 +36,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_type_t
 {
     ROCPROFILER_SPM_PARAMETER_TYPE_NONE = 0,
     ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+    ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
     ROCPROFILER_SPM_PARAMETER_TYPE_LAST,
 } rocprofiler_spm_parameter_type_t;
 
@@ -142,6 +143,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND if agent not found
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if an input counter is not found in metrics
  file
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if a REFCLK interval is requested on an
+ * unsupported agent
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t

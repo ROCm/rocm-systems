@@ -30,9 +30,27 @@
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <vector>
+
+namespace
+{
+// gfx1200, gfx1201, and gfx1250 (MI450).
+bool
+is_refclk_supported(const rocprofiler_agent_t& agent)
+{
+    switch(agent.gfx_target_version)
+    {
+        case 120000:  // gfx1200
+        case 120001:  // gfx1201
+        case 120500:  // gfx1250
+            return true;
+        default: return false;
+    }
+}
+}  // namespace
 
 extern "C" {
 
@@ -91,10 +109,17 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
 
     for(size_t i = 0; i < parameters_count; i++)
     {
+        const auto* parameter = CHECK_NOTNULL(parameters[i]);
+        // Fail before the profile is built. rocprofv3 then stops instead of
+        // programming SAMPLE_MODE_REFCLK on an agent that does not support it.
+        if(parameter->type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES &&
+           !is_refclk_supported(*agent))
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
         config->spm_parameters.emplace_back(
             rocprofiler_spm_parameters_t{.size  = sizeof(rocprofiler_spm_parameters_t),
-                                         .type  = CHECK_NOTNULL(parameters[i])->type,
-                                         .value = CHECK_NOTNULL(parameters[i])->value});
+                                         .type  = parameter->type,
+                                         .value = parameter->value});
     }
 
     if(config_id->handle != 0)
@@ -241,12 +266,19 @@ rocprofiler_spm_configure_buffer_dispatch_service(
 using spm_config_vec_t = std::vector<std::unique_ptr<rocprofiler_spm_available_configuration_t>>;
 
 rocprofiler_spm_parameter_type_t
-get_type(aqlprofile_spm_parameter_type_t src)
+get_type(const aqlprofile_spm_available_configuration_t& src)
 {
-    switch(src)
+    switch(src.type)
     {
         case AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL:
-            return ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES;
+            switch(src.interval.mode)
+            {
+                case AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK:
+                    return ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES;
+                case AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK:
+                    return ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES;
+            }
+            break;
         default: break;
     }
     return ROCPROFILER_SPM_PARAMETER_TYPE_NONE;
@@ -262,10 +294,11 @@ query_cb(const aqlprofile_spm_available_configuration_t* config,
     {
         auto cfg = rocprofiler_spm_available_configuration_t{};
         cfg.size = sizeof(rocprofiler_spm_available_configuration_t);
-        cfg.type = get_type(config[itr].type);
+        cfg.type = get_type(config[itr]);
         switch(cfg.type)
         {
             case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES:
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
                 cfg.interval.min_interval = config[itr].interval.min_interval;
                 cfg.interval.max_interval = config[itr].interval.max_interval;
                 break;
@@ -288,9 +321,24 @@ rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t               
 
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent_id);
     if(!aql_agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
     spm_config_vec_t configs_supported{};
     auto status = sym->spm_query_agent_configurations(*aql_agent, query_cb, &configs_supported);
+    // aqlprofile reports a reference-clock interval for some agents that cannot
+    // program SAMPLE_MODE_REFCLK. Drop that entry unless the agent is gfx1200,
+    // gfx1201, or gfx1250, so rocprofv3-avail does not advertise refclk_cycles
+    // there. The shader-clock interval stays.
+    if(!is_refclk_supported(*agent))
+        configs_supported.erase(
+            std::remove_if(configs_supported.begin(),
+                           configs_supported.end(),
+                           [](const auto& config) {
+                               return config->type ==
+                                      ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES;
+                           }),
+            configs_supported.end());
 
     if(status == HSA_STATUS_SUCCESS)
     {
