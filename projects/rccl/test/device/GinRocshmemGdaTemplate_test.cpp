@@ -451,6 +451,52 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_WithSignal) {
   EXPECT_EQ(sigs[2], 4ULL);
 }
 
+// G9b: PutValue fences only when required=system and given < required, and the scalar lands either way.
+__global__ void kernelPutValueScoped(GdaHarness* h, uint64_t val, cuda::thread_scope required,
+                                     cuda::thread_scope given) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig,
+      ncclGinSignalInc, 0, false, nullptr, required, given);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_FencesOnlyForWeakerGivenAtSystemScope) {
+  struct ScopeCase {
+    cuda::thread_scope required;
+    cuda::thread_scope given;
+    size_t fences;
+  };
+  const ScopeCase kCases[] = {
+      {cuda::thread_scope_system, cuda::thread_scope_thread, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_block, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_device, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_system, 0},
+      {cuda::thread_scope_device, cuda::thread_scope_block, 0},  // weaker given, but required is not system
+  };
+  for (size_t i = 0; i < sizeof(kCases) / sizeof(kCases[0]); ++i) {
+    const ScopeCase& c = kCases[i];
+    SCOPED_TRACE(::testing::Message() << "required=" << c.required << " given=" << c.given);
+    GdaEnv env(sizeof(uint64_t));
+    env.dst.zero();
+    env.build();
+    resetThreadfenceCount();
+    resetPutValCount();
+    const uint64_t kVal = 0xC0FFEE0000000000ULL + i;
+    kernelPutValueScoped<<<1, 1>>>(env.dHarness.ptr, kVal, c.required, c.given);
+    syncAndCheck();
+    EXPECT_EQ(readThreadfenceCount(), c.fences);
+    EXPECT_EQ(readPutValCount(), 1ULL);
+    auto got = env.dst.copyTo();
+    uint64_t observed = 0;
+    std::memcpy(&observed, got.data(), sizeof(observed));
+    EXPECT_EQ(observed, kVal);
+  }
+}
+
 // G10: Flush quiets every peer QP (one quiet per rank for a single-thread coop).
 __global__ void kernelFlush(GdaHarness* h) {
   ncclGinCtx ginCtx{};
