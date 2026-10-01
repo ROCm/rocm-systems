@@ -502,12 +502,14 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].portAttr = portAttr;
             IbCastDevs[IbCastNDevs].portNum = port_num;
             IbCastDevs[IbCastNDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex) {
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              IbCastDevs[IbCastNDevs].speed =
-                IbCastSpeed(portAttr.active_speed_ex) * IbCastWidth(portAttr.active_width);
+            // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+            uint64_t querySpeed = 0;
+            if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess) {
+              // ibv_query_port_speed returns speed in granularity of 100 Mbps
+              IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
             } else {
-              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
+              int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
             }
             IbCastDevs[IbCastNDevs].context = context;
             IbCastDevs[IbCastNDevs].pdRefs = 0;
