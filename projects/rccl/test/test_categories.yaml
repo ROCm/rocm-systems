@@ -110,6 +110,7 @@ test_categories:
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
+      - "ProfilerApiEventRank.*"
     exclude_windows:
       - "*"
     labels:

@@ -75,6 +75,7 @@
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
         {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
         {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
+        {"name": "ProfilerApiEventRank.ApiEventsCarryCommRank", "description": "Verify profiler API and kernel-launch events report the rank of the communicator that issued them", "test_filter": "ProfilerApiEventRank.ApiEventsCarryCommRank"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
         {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
         {"name": "DoneEventOrdering.PostReinitStreamAlternation", "description": "DoneEventOrdering post-reinit stream alternation", "test_filter": "DoneEventOrdering.PostReinitStreamAlternation", "timeout": 240},
