@@ -238,6 +238,52 @@ def test_csv_for_schema_3_0_4_changes_absent(output_root, old_schema):
     ), f"out_hip_event_trace.csv should not be created for schema {old_schema}"
 
 
+def _csv_column_values(csv_path: Path, column: str) -> list:
+    """Return values from one CSV column. ``column`` is matched case-insensitively."""
+    with open(csv_path, newline="") as fh:
+        rows = list(csv_mod.DictReader(fh))
+    if not rows:
+        return []
+    key = next(name for name in rows[0] if name.strip().lower() == column.lower())
+    return [row[key] for row in rows]
+
+
+def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Shader array and WGP must be absent from the SPM counter name before 3.0.5."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
+    if tuple(map(int, old_schema.split("."))) < (3, 0, 3):
+        return
+
+    spm_counters_csv = (
+        output_root / old_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert spm_counters_csv.exists(), (
+        f"out_spm_counter_collection_trace.csv not found for schema {old_schema}"
+    )
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {old_schema}"
+    for name in names:
+        assert "SA:" not in name and "WGP:" not in name, (
+            f"schema {old_schema} counter name includes shader array or WGP: {name}"
+        )
+
+
+def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Shader array and WGP must appear in the SPM counter name for schema 3.0.5."""
+    spm_counters_csv = (
+        output_root / latest_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert spm_counters_csv.exists(), (
+        f"out_spm_counter_collection_trace.csv not found for schema {latest_schema}"
+    )
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {latest_schema}"
+    assert any("SA:" in name and "WGP:" in name for name in names), (
+        f"schema {latest_schema} counter names omit shader array or WGP: {names}"
+    )
+
+
 def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
     """Schema 3.0.4 additions must be present for the latest schema.
 

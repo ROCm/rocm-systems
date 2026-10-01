@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.5
+-- RocPD schema version 3.0.4
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -232,8 +232,6 @@ CREATE TABLE IF NOT EXISTS
         "value" REAL DEFAULT 0.0,
         "xcc" INTEGER,              -- SPM only: XCC index
         "shader_engine" INTEGER,    -- SPM only: shader engine index
-        "shader_array" INTEGER,     -- SPM only: shader array index
-        "wgp" INTEGER,              -- SPM only: workgroup processor index
         "instance" INTEGER,         -- SPM only: counter instance index
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
