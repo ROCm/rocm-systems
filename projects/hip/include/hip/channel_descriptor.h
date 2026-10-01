@@ -11,7 +11,6 @@
 // paths to provide a consistent include env and avoid "missing symbol" errors that only appears
 // on NVCC path:
 
-
 #if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
 #include <hip/amd_detail/amd_channel_descriptor.h>
 #elif !defined(__HIP_PLATFORM_AMD__) && defined(__HIP_PLATFORM_NVIDIA__)
