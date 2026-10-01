@@ -27,7 +27,9 @@
 
 #include "hrr_reader.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -92,6 +94,20 @@ std::vector<uint8_t> expected_host(uint8_t fill, size_t depth, size_t dst_z) {
         host[(dst_z + z) * kHostSlice + (kDstY + y) * kHostPitch + kDstX + x] =
             dev_byte((kSrcZ + z) * kDevSlice + (kSrcY + y) * kDevPitch + kSrcX + x) ^ fill;
   return host;
+}
+
+// Empty when the two buffers match, otherwise the first offset where they
+// differ. Comparing the vectors directly makes Catch2 print every byte as a
+// char, which is unreadable and not valid UTF-8.
+std::string byte_diff(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want) {
+  if (got.size() != want.size())
+    return "size " + std::to_string(got.size()) + ", want " + std::to_string(want.size());
+  const auto at = std::mismatch(got.begin(), got.end(), want.begin()).first;
+  if (at == got.end()) return {};
+  const size_t i = static_cast<size_t>(at - got.begin());
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "offset %zu: 0x%02x, want 0x%02x", i, got[i], want[i]);
+  return buf;
 }
 
 std::vector<uint8_t> read_file(const fs::path& path) {
@@ -253,14 +269,14 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   std::vector<uint8_t> h0(kHostBytes, kFill[0]);
   drv3d.dstHost = h0.data();
   HRR_HIP_CHECK(hipDrvMemcpy3D(&drv3d));
-  REQUIRE(h0 == expected_host(kFill[0], kDepth, kDstZ));
+  REQUIRE(byte_diff(h0, expected_host(kFill[0], kDepth, kDstZ)) == "");
 
   load(1);
   std::vector<uint8_t> h1(kHostBytes, kFill[1]);
   drv3d.dstHost = h1.data();
   HRR_HIP_CHECK(hipDrvMemcpy3DAsync(&drv3d, s));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
-  REQUIRE(h1 == expected_host(kFill[1], kDepth, kDstZ));
+  REQUIRE(byte_diff(h1, expected_host(kFill[1], kDepth, kDstZ)) == "");
 
   hip_Memcpy2D drv2d{};
   drv2d.srcMemoryType = hipMemoryTypeDevice;
@@ -279,7 +295,7 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   std::vector<uint8_t> h2(kHostBytes, kFill[2]);
   drv2d.dstHost = h2.data();
   HRR_HIP_CHECK(hipDrvMemcpy2DUnaligned(&drv2d));
-  REQUIRE(h2 == expected_host(kFill[2], 1, 0));
+  REQUIRE(byte_diff(h2, expected_host(kFill[2], 1, 0)) == "");
 
   hipMemcpy3DParms p3d{};
   p3d.srcPtr = make_hipPitchedPtr(dev, kDevPitch, kDevPitch, kDevRows);
@@ -292,14 +308,14 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   std::vector<uint8_t> h3(kHostBytes, kFill[3]);
   p3d.dstPtr = make_hipPitchedPtr(h3.data(), kHostPitch, kHostPitch, kHostRows);
   HRR_HIP_CHECK(hipMemcpy3D(&p3d));
-  REQUIRE(h3 == expected_host(kFill[3], kDepth, kDstZ));
+  REQUIRE(byte_diff(h3, expected_host(kFill[3], kDepth, kDstZ)) == "");
 
   load(4);
   std::vector<uint8_t> h4(kHostBytes, kFill[4]);
   p3d.dstPtr = make_hipPitchedPtr(h4.data(), kHostPitch, kHostPitch, kHostRows);
   HRR_HIP_CHECK(hipMemcpy3DAsync(&p3d, s));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
-  REQUIRE(h4 == expected_host(kFill[4], kDepth, kDstZ));
+  REQUIRE(byte_diff(h4, expected_host(kFill[4], kDepth, kDstZ)) == "");
 
   // hipMemcpy2D takes no offsets: the window is wherever the pointers point.
   const void* src2d =
@@ -310,14 +326,14 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   std::vector<uint8_t> h5(kHostBytes, kFill[5]);
   HRR_HIP_CHECK(hipMemcpy2D(h5.data() + dst2d, kHostPitch, src2d, kDevPitch, kWidth, kHeight,
                             hipMemcpyDeviceToHost));
-  REQUIRE(h5 == expected_host(kFill[5], 1, 0));
+  REQUIRE(byte_diff(h5, expected_host(kFill[5], 1, 0)) == "");
 
   load(6);
   std::vector<uint8_t> h6(kHostBytes, kFill[6]);
   HRR_HIP_CHECK(hipMemcpy2DAsync(h6.data() + dst2d, kHostPitch, src2d, kDevPitch, kWidth,
                                  kHeight, hipMemcpyDeviceToHost, s));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
-  REQUIRE(h6 == expected_host(kFill[6], 1, 0));
+  REQUIRE(byte_diff(h6, expected_host(kFill[6], 1, 0)) == "");
 
   HRR_HIP_CHECK(hipStreamDestroy(s));
   HRR_HIP_CHECK(hipFree(dev));
@@ -523,6 +539,10 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < 2; ++i) {
     HRR_HIP_CHECK(hipMalloc(&dev[i], kDevBytes));
     HRR_HIP_CHECK(hipMemset(dev[i], kDevFill[i], kDevBytes));
+    // hipMemset can return before the fill lands, and the non-blocking stream
+    // does not wait for the null stream: without this the fill can overwrite
+    // the async copy, at capture and again at replay.
+    HRR_HIP_CHECK(hipDeviceSynchronize());
     p.dstPtr = make_hipPitchedPtr(dev[i], kDevPitch, kDevPitch, kDevRows);
     if (i == 0) {
       HRR_HIP_CHECK(hipMemcpy3D(&p));
@@ -532,7 +552,7 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
     }
     std::vector<uint8_t> out(kDevBytes);
     HRR_HIP_CHECK(hipMemcpy(out.data(), dev[i], kDevBytes, hipMemcpyDeviceToHost));
-    REQUIRE(out == expected_dev(kDevFill[i]));
+    REQUIRE(byte_diff(out, expected_dev(kDevFill[i])) == "");
   }
 
   HRR_HIP_CHECK(hipFree(dev[0]));
