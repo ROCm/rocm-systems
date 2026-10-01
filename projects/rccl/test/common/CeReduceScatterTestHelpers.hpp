@@ -51,6 +51,10 @@ struct CeReduceScatterMockComm
         comm.rank             = 0;
         comm.symmetricSupport = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // Exercise the initialized-LSA branch used by a real communicator.
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = comm.nRanks;
+        comm.devrState.lsaSelf = comm.rank;
     }
 
     ncclComm* get() { return &comm; }

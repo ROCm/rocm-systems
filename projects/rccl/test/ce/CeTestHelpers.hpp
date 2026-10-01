@@ -86,6 +86,18 @@ inline bool isCeAllReduceDispatchConfigured()
            MPIHelpers::getEnvParam("RCCL_CE_ALLREDUCE", kCeAllReduceDefault) == kCeAllReduceEnabled;
 }
 
+// Returns true when forced CE ReduceScatter dispatch is expected. The MPI
+// coverage uses the forced path with ordinary device buffers so symmetric-SM
+// selection cannot hide the CE path being tested.
+inline bool isCeReduceScatterDispatchConfigured()
+{
+    constexpr int kDisabled = 0;
+    constexpr int kEnabled  = 1;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_CE_REDUCESCATTER", kDisabled) == kEnabled &&
+           MPIHelpers::getEnvParam("RCCL_FORCE_CE_REDUCESCATTER", kDisabled) == kEnabled;
+}
+
 // Batch path prediction helpers
 
 // Mirrors the thresholds from ce_coll.cc (CE_COLL_INTRA_BATCH_SYNC_FREQ /
@@ -122,6 +134,11 @@ inline bool ceLogShowsAllReducePath(const std::string& log)
     return log.find("CE AllReduce: rank") != std::string::npos ||
            log.find("CE AllReduce: Phase") != std::string::npos ||
            log.find("CE 2-shot AllReduce") != std::string::npos;
+}
+
+inline bool ceLogShowsReduceScatterPath(const std::string& log)
+{
+    return log.find("CE ReduceScatter: rank") != std::string::npos;
 }
 
 // Largest chunksPerShard reported by the "CE AllReduce: rank ..." INFO line that

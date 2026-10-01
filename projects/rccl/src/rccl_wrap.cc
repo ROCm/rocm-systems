@@ -1206,8 +1206,7 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   return true;
 }
 
-bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op,
-                            const void* recvbuff) {
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op) {
   // Re-read every call. A function-local static latches the first value and
   // ignores the host-test param seam.
   const int enabled = rcclParamCeReduceScatter();
@@ -1234,17 +1233,14 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
     return false;
   }
 
-  // Same 2-shot window as CE AllReduce. 0 means 2-shot is tuned off.
+  // Same tuned 2-shot window as CE AllReduce.  Force mode deliberately
+  // bypasses this policy cap: ReduceScatter's staging implementation chunks
+  // and pipelines messages larger than ceArStagingBytes, so the cap is not an
+  // allocation or correctness limit.
   const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-  if (twoShotMax == 0) return false;
   size_t msgBytes = recvcount * ncclTypeSize(datatype) * (size_t)comm->nRanks;
-  if (msgBytes > twoShotMax) {
-    if (force) {
-      WARN("Skipping CE ReduceScatter despite RCCL_FORCE_CE_REDUCESCATTER=1: msgBytes (%zu) > twoShotMax (%zu)",
-           msgBytes, twoShotMax);
-    } else {
-      WARN("Skipping CE ReduceScatter: msgBytes (%zu) > twoShotMax (%zu)", msgBytes, twoShotMax);
-    }
+  if (!force && (twoShotMax == 0 || msgBytes > twoShotMax)) {
+    WARN("Skipping CE ReduceScatter: msgBytes (%zu) exceeds tuned twoShotMax (%zu)", msgBytes, twoShotMax);
     return false;
   }
 
@@ -1252,19 +1248,14 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
     WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
     return false;
   }
-  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+  const bool opSupported = op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax ||
+                           (op == ncclAvg && datatype == ncclBfloat16);
+  if (!opSupported) {
     WARN("Skipping CE ReduceScatter: unsupported reduction operation");
     return false;
   }
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
     WARN("Skipping CE ReduceScatter: unsupported datatype: Float8");
-    return false;
-  }
-  // In-place ReduceScatter is recvbuff == sendbuff + rank * recvcount, which is
-  // not 16-byte aligned for every legal count. The reduce kernel stores a
-  // 16-byte vector, so reject here and let the caller fall back.
-  if (recvbuff != nullptr && ((uintptr_t)recvbuff & 15) != 0) {
-    WARN("Skipping CE ReduceScatter: recvbuff %p is not 16-byte aligned", recvbuff);
     return false;
   }
   return true;
@@ -1841,9 +1832,15 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     const bool force = rcclParamForceCeReduceScatter() != 0;
     const bool symReg =
       ncclCeAvailable(comm, ncclFuncReduceScatter, (int)op, datatype, rsWinRegType, rsSendWin, rsRecvWin);
-    const bool ceReduceScatterAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                        rcclUseCeReduceScatter(comm, recvcount, datatype, op, recvbuff) && (force || symReg);
-    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    const bool ceReduceScatterAllowed = ceArGraphAllowed &&
+                                        rcclUseCeReduceScatter(comm, recvcount, datatype, op) && (force || symReg);
+    // Explicit force mode must preempt symk and use the pipelined staging path,
+    // including for messages above the tuned 2-shot cap. Without this, Primus'
+    // registered gradient buffers silently select symk even though the user
+    // requested CE. Non-force mode preserves the tuned symk precedence here;
+    // registered CE still has its independent branch below.
+    if ((force || !symEligible) && ceReduceScatterAllowed && ncclGroupDepth == 0 &&
+        comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
@@ -1852,7 +1849,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // by the CE launch, which the 2-shot early-return never reaches. Hand this
     // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
     // Otherwise DDA is suppressed below and the call stays on the ring kernel.
-    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf == NULL) {
+    // Grouped collectives cannot execute the eager 2-shot return above: they
+    // must remain queued until ncclGroupEnd. RCCL_CE_REGISTERED is the queued
+    // CE dispatch token even when force mode uses internal staging rather than
+    // registered user buffers. It also initializes staging on the first call.
+    if ((force || !symEligible) && ceReduceScatterAllowed &&
+        (ncclGroupDepth != 0 || comm->ceColl.ceARTmpBuf == NULL)) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
@@ -1922,8 +1924,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // (5) CE via registered symmetric windows / force (enqueue finishes the launch).
     bool ceAvailable = ceArGraphAllowed && !hasSysmemSegment && symReg;
     const bool ceReduceScatterOpSupported =
-      (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-    if (!ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) ceAvailable = false;
+      (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax ||
+       (op == ncclAvg && datatype == ncclBfloat16));
+    const bool ceReduceScatterTypeSupported =
+      datatype != ncclFloat8e4m3 && datatype != ncclFloat8e5m2;
+    if (!ceReduceScatterOpSupported || !ceReduceScatterTypeSupported || !rcclParamCeReduceScatter())
+      ceAvailable = false;
     if (ceAvailable && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
