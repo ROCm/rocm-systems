@@ -424,7 +424,9 @@ if(
 
     # Match both provider families to their private ABI, execution helpers,
     # compiler and effective host flags.
+    include(rj_x86_v4_provider)
     set(_rj_x86_v4_digest_files
+        "${PROJECT_SOURCE_DIR}/cmake/rj_x86_v4_provider.cmake"
         "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_provider.h"
         "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_provider.cpp"
         "${_rj_x86_v4_src_root}/arch/amdgpu/shared/x86_v4_dispatch.cpp"
@@ -457,31 +459,18 @@ if(
         "${PROJECT_SOURCE_DIR}/lib/util/include/util/amdgpu_exp.h"
         "${PROJECT_SOURCE_DIR}/lib/util/include/util/amdgpu_log.h"
     )
-    set_property(
-        DIRECTORY
-        APPEND
-        PROPERTY CMAKE_CONFIGURE_DEPENDS ${_rj_x86_v4_digest_files}
-    )
     set(_rj_x86_v4_digest_input
         "${CMAKE_CXX_COMPILER}|${CMAKE_CXX_COMPILER_ID}|"
         "${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_CXX_COMPILER_TARGET}|"
-        "${CMAKE_BUILD_TYPE}|${CMAKE_CXX_FLAGS}|"
-        "${CMAKE_CXX_FLAGS_DEBUG}|${CMAKE_CXX_FLAGS_RELEASE}|"
-        "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}|${CMAKE_CXX_FLAGS_MINSIZEREL}|"
         "${ROCJITSU_HOST_CPU_BASELINE}|-O3|-march=x86-64-v4|-fno-lto|"
         "ROCJITSU_DEFER_FORCE_SCALAR_INIT=1|"
         "${LTO}|${RJ_SANITIZER_COMPILE_OPTIONS}"
     )
-    foreach(_rj_x86_v4_digest_file IN LISTS _rj_x86_v4_digest_files)
-        file(SHA256 "${_rj_x86_v4_digest_file}" _rj_x86_v4_file_hash)
-        string(
-            APPEND _rj_x86_v4_digest_input
-            "|${_rj_x86_v4_digest_file}:${_rj_x86_v4_file_hash}"
-        )
-    endforeach()
-    string(SHA256 RJ_X86_V4_BUILD_DIGEST "${_rj_x86_v4_digest_input}")
-    unset(_rj_x86_v4_file_hash)
-    unset(_rj_x86_v4_digest_file)
+    rj_x86_v4_build_digest(
+        RJ_X86_V4_BUILD_DIGEST
+        INPUT "${_rj_x86_v4_digest_input}"
+        FILES ${_rj_x86_v4_digest_files}
+    )
     unset(_rj_x86_v4_digest_files)
     unset(_rj_x86_v4_digest_input)
     unset(_rj_x86_v4_src_root)
@@ -588,8 +577,6 @@ if(TARGET rocjitsu_x86_v4_provider_object)
     # Flatten the entire provider's COMDAT groups before localizing definitions
     # so baseline helpers cannot coalesce with their v4 variants.
     # EXP/LOG and focused WMMA share the same getter and isolated object.
-    set(_rj_x86_v4_reloc_object "${PROJECT_BINARY_DIR}/rocjitsu_x86_v4.reloc.o")
-    set(_rj_x86_v4_local_object "${PROJECT_BINARY_DIR}/rocjitsu_x86_v4.local.o")
     set(_rj_x86_v4_keep_global_options
         --keep-global-symbol=rj_x86_v4_provider_v1
     )
@@ -601,36 +588,13 @@ if(TARGET rocjitsu_x86_v4_provider_object)
             --keep-global-symbol=___asan_globals_registered
         )
     endif()
-    add_custom_command(
-        OUTPUT "${_rj_x86_v4_local_object}"
-        BYPRODUCTS "${_rj_x86_v4_reloc_object}"
-        COMMAND
-            ${CMAKE_LINKER} -r --force-group-allocation -o
-            "${_rj_x86_v4_reloc_object}"
-            $<TARGET_OBJECTS:rocjitsu_x86_v4_provider_object>
-            $<TARGET_OBJECTS:rocjitsu_fp_math_v4>
-            $<TARGET_OBJECTS:rocjitsu_cdna5_wmma_v4_object>
-        COMMAND
-            ${CMAKE_OBJCOPY} ${_rj_x86_v4_keep_global_options}
-            "${_rj_x86_v4_reloc_object}" "${_rj_x86_v4_local_object}"
-        DEPENDS
+    rj_add_x86_v4_local_object(
+        rocjitsu_x86_v4_local_object rocjitsu_x86_v4 _rj_x86_v4_local_object
+        OBJECT_TARGETS
             rocjitsu_x86_v4_provider_object
             rocjitsu_fp_math_v4
             rocjitsu_cdna5_wmma_v4_object
-            $<TARGET_OBJECTS:rocjitsu_x86_v4_provider_object>
-            $<TARGET_OBJECTS:rocjitsu_fp_math_v4>
-            $<TARGET_OBJECTS:rocjitsu_cdna5_wmma_v4_object>
-        COMMENT "Isolating shared x86-v4 provider COMDAT definitions"
-        COMMAND_EXPAND_LISTS
-        VERBATIM
-    )
-    set_source_files_properties(
-        "${_rj_x86_v4_local_object}"
-        PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE
-    )
-    add_custom_target(
-        rocjitsu_x86_v4_local_object
-        DEPENDS "${_rj_x86_v4_local_object}"
+        OBJCOPY_OPTIONS ${_rj_x86_v4_keep_global_options}
     )
 
     add_library(rocjitsu_x86_v4 SHARED "${_rj_x86_v4_local_object}")
@@ -672,7 +636,6 @@ if(TARGET rocjitsu_x86_v4_provider_object)
         target_link_options(rocjitsu_x86_v4 PRIVATE "LINKER:-z,defs")
     endif()
     unset(_rj_x86_v4_export_map)
-    unset(_rj_x86_v4_reloc_object)
     unset(_rj_x86_v4_local_object)
     unset(_rj_x86_v4_keep_global_options)
 endif()

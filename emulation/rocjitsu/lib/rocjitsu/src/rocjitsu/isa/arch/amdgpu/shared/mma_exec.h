@@ -3543,7 +3543,6 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
                                              const_acc, wf);
-    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -3614,14 +3613,19 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = writes.linear_word(reg * wf + lane);
+          uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        writes.set_linear_word(reg * wf + lane, word);
+        words[idx] = word;
       }
+    // Only partial packed outputs read D. Finish preservation reads before
+    // publishing any writes; full 16x16 outputs need no destination reads.
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+    for (uint32_t idx = 0; idx < DST_REGS * WMMA_WAVE32; ++idx)
+      writes.set_linear_word(idx, words[idx]);
   }
 }
 
@@ -3688,7 +3692,6 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
                                              const_acc, wf);
-    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -3759,14 +3762,17 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = writes.linear_word(reg * wf + lane);
+          uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        writes.set_linear_word(reg * wf + lane, word);
+        words[idx] = word;
       }
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+    for (uint32_t idx = 0; idx < DST_REGS * WMMA_WAVE32; ++idx)
+      writes.set_linear_word(idx, words[idx]);
   }
 }
 

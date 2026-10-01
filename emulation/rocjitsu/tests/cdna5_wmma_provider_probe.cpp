@@ -13,6 +13,8 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <array>
 #include <chrono>
@@ -136,11 +138,42 @@ const cdna5::Operand *decoded_src2(Instruction *inst, uint32_t form) {
   }
 }
 
-} // namespace
+class VgprObservationPlugin final : public ExecutionPlugin {
+public:
+  VgprObservationPlugin(const amdgpu::Wavefront &wf, rj_test_cdna5_wmma_result &result)
+      : ExecutionPlugin("cdna5_wmma_provider_observer"), wf_(&wf), result_(result) {}
 
-extern "C" RJ_API_EXPORT int rj_test_cdna5_wmma_probe(uint32_t form, uint32_t scenario,
-                                                      uint32_t iterations,
-                                                      rj_test_cdna5_wmma_result *out) noexcept {
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t reg, uint64_t lanes,
+                             uint8_t bytes) override {
+    record(wf, reg, lanes, bytes, result_.read_lanes, result_.read_bytes);
+  }
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t reg, uint64_t lanes,
+                              uint8_t bytes) override {
+    record(wf, reg, lanes, bytes, result_.write_lanes, result_.write_bytes);
+  }
+
+  bool valid() const { return valid_; }
+
+private:
+  void record(const amdgpu::Wavefront *wf, uint32_t reg, uint64_t lanes, uint8_t bytes,
+              uint64_t *recorded_lanes, uint8_t *recorded_bytes) {
+    const uint32_t base = wf_->vgpr_alloc().base;
+    if (wf != wf_ || reg < base || reg - base >= RJ_TEST_WMMA_MAX_VGPRS) {
+      valid_ = false;
+      return;
+    }
+    recorded_lanes[reg - base] |= lanes;
+    recorded_bytes[reg - base] |= bytes;
+  }
+
+  const amdgpu::Wavefront *wf_;
+  rj_test_cdna5_wmma_result &result_;
+  bool valid_ = true;
+};
+
+int run_probe(uint32_t form, uint32_t scenario, uint32_t iterations, bool observe,
+              rj_test_cdna5_wmma_result *out) noexcept {
   if (!out)
     return -1;
   std::memset(out, 0, sizeof(*out));
@@ -197,8 +230,32 @@ extern "C" RJ_API_EXPORT int rj_test_cdna5_wmma_probe(uint32_t form, uint32_t sc
     }
     out->callback_addr = reinterpret_cast<uintptr_t>(inst->execute);
 
+    std::shared_ptr<ExecutionPluginGroup> observation_group;
+    VgprObservationPlugin *observer = nullptr;
+    if (observe) {
+      if (scenario == 0)
+        for (uint32_t reg = 0; reg < kAccRegs; ++reg)
+          for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+            cu->write_vgpr(wf->vgpr_alloc().base + dst + reg, lane,
+                           0xDEAD0000u | (reg << 8) | lane);
+      observation_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      auto plugin = std::make_unique<VgprObservationPlugin>(*wf, *out);
+      observer = plugin.get();
+      if (!observation_group->add(std::move(plugin)))
+        return error(out, "failed to add WMMA observation plugin");
+      cu->set_plugin_group(observation_group);
+      observation_group->onInit();
+    }
     if (!cu->execute_instruction(inst.get(), *wf).succeeded())
       return error(out, "first WMMA execution failed");
+    if (observer) {
+      if (!observer->valid())
+        return error(out, "observed VGPR access is outside the probe wavefront");
+      // Output inspection uses the VM's raw read API and must not become an
+      // instruction observation. Timing also keeps the original observer-free path.
+      cu->set_plugin_group(nullptr);
+      observation_group->onShutdown();
+    }
     const uint32_t output_regs = form == 0 || form == 2 ? 8 : 4;
     out->output_count = output_regs * kWaveSize;
     for (uint32_t reg = 0; reg < output_regs; ++reg)
@@ -226,4 +283,17 @@ extern "C" RJ_API_EXPORT int rj_test_cdna5_wmma_probe(uint32_t form, uint32_t sc
   } catch (...) {
     return error(out, "unknown WMMA probe exception");
   }
+}
+
+} // namespace
+
+extern "C" RJ_API_EXPORT int rj_test_cdna5_wmma_probe(uint32_t form, uint32_t scenario,
+                                                      uint32_t iterations,
+                                                      rj_test_cdna5_wmma_result *out) noexcept {
+  return run_probe(form, scenario, iterations, false, out);
+}
+
+extern "C" RJ_API_EXPORT int rj_test_cdna5_wmma_observe(uint32_t form, uint32_t scenario,
+                                                        rj_test_cdna5_wmma_result *out) noexcept {
+  return run_probe(form, scenario, 0, true, out);
 }

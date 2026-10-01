@@ -61,6 +61,18 @@ uint64_t output_hash(const rj_test_cdna5_wmma_result &result) {
   return hash;
 }
 
+void dump_accesses(const char *name, const uint64_t *lanes, const uint8_t *bytes) {
+  std::printf("%s=", name);
+  const char *separator = "";
+  for (uint32_t reg = 0; reg < RJ_TEST_WMMA_MAX_VGPRS; ++reg) {
+    if (!lanes[reg])
+      continue;
+    std::printf("%s%u:%" PRIx64 ":%x", separator, reg, lanes[reg], unsigned{bytes[reg]});
+    separator = ",";
+  }
+  std::printf("\n");
+}
+
 int cold_load() {
   Dl_info info{};
   if (!dladdr(reinterpret_cast<void *>(&rj_test_cdna5_wmma_probe), &info) || !info.dli_fname) {
@@ -85,10 +97,12 @@ int cold_load() {
   return 0;
 }
 
-int run(uint32_t form, uint32_t scenario, uint32_t iterations, std::string_view expected,
-        bool dump) {
+int run(uint32_t form, uint32_t scenario, uint32_t iterations, std::string_view expected, bool dump,
+        bool observe = false) {
   rj_test_cdna5_wmma_result result{};
-  if (rj_test_cdna5_wmma_probe(form, scenario, iterations, &result) != 0) {
+  const int status = observe ? rj_test_cdna5_wmma_observe(form, scenario, &result)
+                             : rj_test_cdna5_wmma_probe(form, scenario, iterations, &result);
+  if (status != 0) {
     std::fprintf(stderr, "form=%.*s scenario=%u error=%s\n", static_cast<int>(kForms[form].size()),
                  kForms[form].data(), scenario, result.error);
     return expected == "provider" && unsupported_v4(result.error) ? kSkip : 1;
@@ -120,6 +134,10 @@ int run(uint32_t form, uint32_t scenario, uint32_t iterations, std::string_view 
     for (uint32_t i = 0; i < result.output_count; ++i)
       std::printf("%08x", result.output_words[i]);
     std::printf("\n");
+  }
+  if (observe) {
+    dump_accesses("reads", result.read_lanes, result.read_bytes);
+    dump_accesses("writes", result.write_lanes, result.write_bytes);
   }
   return 0;
 }
@@ -171,7 +189,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr,
                  "usage: %s --cold-load | --chdir-and-probe <dir> <all|form> <main|provider> "
                  "| <all|form 0..4> <iterations> [scenario 0..14] "
-                 "[expected main|provider|any] [--dump]\n",
+                 "[expected main|provider|any] [--dump|--observe]\n",
                  argv[0]);
     return 2;
   }
@@ -194,14 +212,19 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "expected module must be main, provider, or any\n");
     return 2;
   }
-  const bool dump = argc == 6 && std::string_view(argv[5]) == "--dump";
+  const bool observe = argc == 6 && std::string_view(argv[5]) == "--observe";
+  const bool dump = observe || (argc == 6 && std::string_view(argv[5]) == "--dump");
   if (argc == 6 && !dump) {
     std::fprintf(stderr, "unknown option: %s\n", argv[5]);
     return 2;
   }
+  if (observe && iterations != 0) {
+    std::fprintf(stderr, "observed probes cannot be timed\n");
+    return 2;
+  }
   if (std::string_view(argv[1]) == "all") {
     for (uint32_t form = 0; form < 5; ++form)
-      if (const int status = run(form, scenario, iterations, expected, dump); status != 0)
+      if (const int status = run(form, scenario, iterations, expected, dump, observe); status != 0)
         return status;
     return 0;
   }
@@ -210,5 +233,5 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "form must be all or in 0..4\n");
     return 2;
   }
-  return run(form, scenario, iterations, expected, dump);
+  return run(form, scenario, iterations, expected, dump, observe);
 }

@@ -547,6 +547,23 @@ add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(TARGET rocjitsu_x86_v4)
+    find_program(RJ_PROVIDER_TEST_NINJA NAMES ninja ninja-build)
+    if(RJ_PROVIDER_TEST_NINJA)
+        add_test(
+            NAME X86V4ProviderBuildConfigurations
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_x86_v4_provider_build.py
+                --cmake ${CMAKE_COMMAND} --ninja ${RJ_PROVIDER_TEST_NINJA}
+                --compiler ${CMAKE_CXX_COMPILER}
+        )
+        set_tests_properties(
+            X86V4ProviderBuildConfigurations
+            PROPERTIES TIMEOUT 120
+        )
+    endif()
+endif()
 if(TARGET cdna5_wmma_provider_probe)
     add_test(
         NAME Cdna5WmmaProviderScalarOracle
