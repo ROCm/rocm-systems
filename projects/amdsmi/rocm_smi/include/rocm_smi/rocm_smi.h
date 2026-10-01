@@ -3218,9 +3218,9 @@ rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
  *  @param[in] dv_ind a device index
  *  @param[out] version optional buffer of size RSMI_AMPP_MAX_STRING_LENGTH
  *  to receive the AMPP ABI version string, or nullptr to skip
- *  @param[inout] profiles buffer to receive the profile list, or nullptr
  *  @param[inout] num_profiles capacity of @p profiles on input, count on
  *  output
+ *  @param[inout] profiles buffer to receive the profile list, or nullptr
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_INVALID_ARGS num_profiles is nullptr
@@ -3228,7 +3228,7 @@ rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
  *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p profiles capacity too small
  */
 rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP_MAX_STRING_LENGTH],
-                                         rsmi_ampp_profile_t* profiles, uint32_t* num_profiles);
+                                         uint32_t* num_profiles, rsmi_ampp_profile_t* profiles);
 
 /**
  *  @brief Get the fields (name/value/unit/limits) of a single AMPP profile.
@@ -3248,6 +3248,10 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
  *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p fields capacity too small
  *  @retval ::RSMI_STATUS_NO_DATA the profile is writable but not yet
  *  configured (has no fields yet)
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA a field file's content did not
+ *  parse as expected; on this return, *num_fields still reflects the
+ *  required count but @p fields itself is only partially filled -- treat
+ *  its contents as undefined and discard
  */
 rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name,
                                        uint32_t* num_fields, rsmi_ampp_field_t* fields);

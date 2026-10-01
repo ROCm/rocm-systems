@@ -4940,7 +4940,7 @@ amdsmi_ampp_profile_t = struct_amdsmi_ampp_profile_t
 try:
     amdsmi_get_ampp_profiles = _libraries['libamd_smi.so'].amdsmi_get_ampp_profiles
     amdsmi_get_ampp_profiles.restype = amdsmi_status_t
-    amdsmi_get_ampp_profiles.argtypes = [amdsmi_processor_handle, ctypes.c_char * 256, ctypes.POINTER(struct_amdsmi_ampp_profile_t), ctypes.POINTER(ctypes.c_uint32)]
+    amdsmi_get_ampp_profiles.argtypes = [amdsmi_processor_handle, ctypes.c_char * 256, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_ampp_profile_t)]
 except AttributeError:
     pass
 try:
@@ -5393,7 +5393,7 @@ __all__ = \
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
-    'amdsmi_compute_partition_type_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_compute_tray_type_t',
     'amdsmi_configure_ampp_profile', 'amdsmi_container_types_t',
     'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
     'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',

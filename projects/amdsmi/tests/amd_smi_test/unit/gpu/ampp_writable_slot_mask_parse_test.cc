@@ -97,4 +97,29 @@ TEST(GpuUnit, AmppWritableSlotMaskParsePrefixOnlyIsRejected) {
   EXPECT_EQ(parse_ampp_writable_slot_mask("0x", &slots), RSMI_STATUS_UNEXPECTED_DATA);
 }
 
+TEST(GpuUnit, AmppWritableSlotMaskParseTrailingGarbageAfterValidDigitsIsRejected) {
+  std::vector<uint32_t> slots;
+  EXPECT_EQ(parse_ampp_writable_slot_mask("0xe00", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, AmppWritableSlotMaskParseNonHexPrefixCharacterIsRejected) {
+  std::vector<uint32_t> slots;
+  EXPECT_EQ(parse_ampp_writable_slot_mask("1x0", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, AmppWritableSlotMaskParseNegativeSignIsRejected) {
+  std::vector<uint32_t> slots;
+  EXPECT_EQ(parse_ampp_writable_slot_mask("0x-1", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, AmppWritableSlotMaskParseEmbeddedWhitespaceIsRejected) {
+  std::vector<uint32_t> slots;
+  EXPECT_EQ(parse_ampp_writable_slot_mask("0x 1", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, AmppWritableSlotMaskParsePositiveSignIsRejected) {
+  std::vector<uint32_t> slots;
+  EXPECT_EQ(parse_ampp_writable_slot_mask("0x+1", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+}
+
 }  // namespace

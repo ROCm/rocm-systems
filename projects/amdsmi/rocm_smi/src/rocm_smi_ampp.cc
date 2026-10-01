@@ -48,18 +48,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-std::string ltrim(const std::string& s) {
-  size_t start = s.find_first_not_of(" \t\r\n");
-  return (start == std::string::npos) ? std::string() : s.substr(start);
-}
-
-std::string rtrim(const std::string& s) {
-  size_t end = s.find_last_not_of(" \t\r\n");
-  return (end == std::string::npos) ? std::string() : s.substr(0, end + 1);
-}
-
-std::string trim(const std::string& s) { return rtrim(ltrim(s)); }
-
 // Maps an errno value observed while reading/writing an app_modes/ sysfs
 // file to the closest rsmi_status_t. ENOENT means the file/dir does not
 // exist -- for AMPP that is the "unconfigured slot" or "unpublished
@@ -75,6 +63,20 @@ rsmi_status_t convert_ampp_errno(int errno_val) {
       return RSMI_STATUS_PERMISSION;
     case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case ENOENT:
+      return RSMI_STATUS_NOT_FOUND;
+    case ENOTDIR:
+      return RSMI_STATUS_DIRECTORY_NOT_FOUND;
+    case ERANGE:
+    case EDOM:
+      return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    case EBUSY:
+      return RSMI_STATUS_BUSY;
+    case EINTR:
+      return RSMI_STATUS_INTERRUPT;
+    case ENOMEM:
+    case ENOSPC:
+      return RSMI_STATUS_OUT_OF_RESOURCES;
     default:
       return RSMI_STATUS_FILE_ERROR;
   }
@@ -144,7 +146,7 @@ rsmi_status_t read_profile_abi(const std::string& root, std::string* version) {
   if (status != RSMI_STATUS_SUCCESS) {
     return status;
   }
-  *version = trim(line);
+  *version = amd::smi::trim(line);
   return RSMI_STATUS_SUCCESS;
 }
 
@@ -166,7 +168,7 @@ bool parse_field_content(const std::string& content, int64_t* value, std::string
   *value = parsed_value;
   std::string rest;
   std::getline(iss, rest);
-  *unit = trim(rest);
+  *unit = amd::smi::trim(rest);
   return true;
 }
 
@@ -185,7 +187,7 @@ rsmi_status_t read_writable_slots(const std::string& root, std::vector<uint32_t>
     return RSMI_STATUS_SUCCESS;
   }
   if (status != RSMI_STATUS_SUCCESS) return status;
-  return amd::smi::parse_ampp_writable_slot_mask(trim(line), out_slots);
+  return amd::smi::parse_ampp_writable_slot_mask(amd::smi::trim(line), out_slots);
 }
 
 bool is_writable_slot(const std::vector<uint32_t>& writable_slots, uint32_t index) {
@@ -242,10 +244,14 @@ bool parse_profile_index(const std::string& profile_name, uint32_t* index) {
 }
 
 bool parse_active_profile(const std::string& content, uint32_t* index) {
+  std::string trimmed = amd::smi::trim(content);
+  if (trimmed.empty() || !std::isdigit(static_cast<unsigned char>(trimmed[0]))) {
+    return false;
+  }
   char* end = nullptr;
   errno = 0;
-  unsigned long parsed_index = std::strtoul(content.c_str(), &end, 10);
-  if (errno == ERANGE || end == content.c_str() || *end != '\0' ||
+  unsigned long parsed_index = std::strtoul(trimmed.c_str(), &end, 10);
+  if (errno == ERANGE || end == trimmed.c_str() || *end != '\0' ||
       parsed_index > std::numeric_limits<uint32_t>::max()) {
     return false;
   }
@@ -306,7 +312,8 @@ std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root,
 
 // Enumerates the field files that currently exist directly under
 // app_modes/<profile_name>/. Field names are opaque strings -- whatever
-// the driver happens to expose is what gets returned.
+// the driver happens to expose is what gets returned, sorted for stable,
+// predictable results (directory-listing order is not guaranteed).
 std::vector<std::string> enumerate_field_names(const std::string& profile_dir,
                                                rsmi_status_t* status) {
   std::vector<std::string> names;
@@ -329,7 +336,44 @@ std::vector<std::string> enumerate_field_names(const std::string& profile_dir,
     *status = convert_ampp_errno(ec.value());
     return {};
   }
+  std::sort(names.begin(), names.end());
   return names;
+}
+
+// Shared prefix of rsmi_dev_ampp_fields_get/_profile_activate/_configure:
+// validates profile_name, resolves the app_modes root, and confirms the slot
+// exists on disk. Returns the parsed slot index via *out_index; any
+// non-success return means the caller should propagate the status without
+// touching sysfs.
+rsmi_status_t resolve_ampp_profile_dir(const std::shared_ptr<amd::smi::Device>& dev,
+                                       const char* profile_name, std::string* out_root,
+                                       uint32_t* out_index) {
+  if (profile_name == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  *out_root = dev->get_ampp_root_path();
+  if (!app_modes_supported(*out_root)) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  // Reject anything that doesn't parse as "profile_<N>" before doing any
+  // path construction / filesystem lookups -- otherwise a caller-supplied
+  // profile_name like "../../etc" would be concatenated onto root and
+  // probed on disk, and control directories (e.g. "config", "limits")
+  // would be treated as pseudo-profiles.
+  if (!parse_profile_index(profile_name, out_index)) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string profile_dir = *out_root + profile_name;
+  std::error_code ec;
+  if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
+    if (ec) return convert_ampp_errno(ec.value());
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  return RSMI_STATUS_SUCCESS;
 }
 
 }  // namespace
@@ -369,7 +413,7 @@ rsmi_status_t parse_ampp_writable_slot_mask(const std::string& trimmed_line,
 }  // namespace amd::smi
 
 rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP_MAX_STRING_LENGTH],
-                                         rsmi_ampp_profile_t* profiles, uint32_t* num_profiles) {
+                                         uint32_t* num_profiles, rsmi_ampp_profile_t* profiles) {
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
   LOG_TRACE(ss);
@@ -457,27 +501,14 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
 
   DEVICE_MUTEX
 
-  std::string root = dev->get_ampp_root_path();
-  if (!app_modes_supported(root)) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  // Reject anything that doesn't parse as "profile_<N>" before doing any
-  // path construction / filesystem lookups -- otherwise a caller-supplied
-  // profile_name like "../../etc" would be concatenated onto root and
-  // probed on disk, and control directories (e.g. "config", "limits")
-  // would be treated as pseudo-profiles.
+  std::string root;
   uint32_t index = 0;
-  if (!parse_profile_index(profile_name, &index)) {
-    return RSMI_STATUS_INVALID_ARGS;
+  rsmi_status_t resolve_ret = resolve_ampp_profile_dir(dev, profile_name, &root, &index);
+  if (resolve_ret != RSMI_STATUS_SUCCESS) {
+    return resolve_ret;
   }
 
   std::string profile_dir = root + profile_name;
-  std::error_code ec;
-  if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
-    if (ec) return convert_ampp_errno(ec.value());
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   rsmi_status_t enumerate_status = RSMI_STATUS_SUCCESS;
   std::vector<std::string> field_names = enumerate_field_names(profile_dir, &enumerate_status);
@@ -513,9 +544,13 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
     return RSMI_STATUS_OUT_OF_RESOURCES;
   }
 
+  // Zero the whole output range up front so a failure partway through the
+  // fill loop below never leaves caller-visible entries holding stale data
+  // from a previous call.
+  memset(fields, 0, sizeof(*fields) * required);
+
   for (uint32_t i = 0; i < required; ++i) {
     rsmi_ampp_field_t& f = fields[i];
-    memset(&f, 0, sizeof(f));
     snprintf(f.name, sizeof(f.name), "%s", field_names[i].c_str());
 
     std::string content;
@@ -556,45 +591,6 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
-
-namespace {
-
-// Shared prefix of both rsmi_dev_ampp_profile_activate/_configure: validates
-// profile_name, resolves the app_modes root, and confirms the slot exists on
-// disk. Returns the parsed slot index via *out_index; any non-success return
-// means the caller should propagate the status without touching sysfs.
-rsmi_status_t resolve_ampp_profile_dir(const std::shared_ptr<amd::smi::Device>& dev,
-                                       const char* profile_name, std::string* out_root,
-                                       uint32_t* out_index) {
-  if (profile_name == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  *out_root = dev->get_ampp_root_path();
-  if (!app_modes_supported(*out_root)) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  // Reject anything that doesn't parse as "profile_<N>" before doing any
-  // path construction / filesystem lookups -- otherwise a caller-supplied
-  // profile_name like "../../etc" would be concatenated onto root and
-  // probed on disk, and control directories (e.g. "config", "limits")
-  // would be treated as pseudo-profiles.
-  if (!parse_profile_index(profile_name, out_index)) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  std::string profile_dir = *out_root + profile_name;
-  std::error_code ec;
-  if (!fs::exists(profile_dir, ec) || !fs::is_directory(profile_dir, ec)) {
-    if (ec) return convert_ampp_errno(ec.value());
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  return RSMI_STATUS_SUCCESS;
-}
-
-}  // namespace
 
 rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profile_name) {
   TRY std::ostringstream ss;

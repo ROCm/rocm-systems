@@ -30,11 +30,23 @@ import tempfile
 import types
 import unittest
 
+# ``common.common`` bootstraps the real amdsmi package at import time (sys.path
+# insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
+# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself and
+# only needs ``amdsmi_path`` to locate the *installed* CLI fallback, so degrade
+# gracefully: if the shared harness cannot load, drop to ``None`` and rely on
+# the in-tree source checkout (resolved first below).
+try:
+    from common.common import amdsmi_path, resolve_cli_dir
+except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
+    amdsmi_path = None
+    resolve_cli_dir = None
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py")
-SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py")
-HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py")
+_CLI_DIR = resolve_cli_dir(_THIS_DIR, amdsmi_path) if resolve_cli_dir else None
+PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else ""
+SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
+HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py") if _CLI_DIR else ""
 
 # AMDSMI_STATUS_* sentinels used by the stubbed library-error paths.
 _STATUS_INVAL = 1
@@ -72,6 +84,10 @@ def _import_real_amdsmi_helpers():
     per-test fake ``amdsmi_helpers`` module installed by
     ``_install_fake_modules()``.
     """
+    if not HELPERS_PATH:
+        # Neither CLI layout was found; the test classes below will skip via
+        # their own setUpClass checks, so avoid crashing at import time here.
+        return None
     saved = {
         name: sys.modules.pop(name, None)
         for name in ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception", "amdsmi_init")

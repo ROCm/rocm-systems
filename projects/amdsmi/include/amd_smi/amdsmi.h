@@ -9804,14 +9804,17 @@ typedef struct {
  *  AMDSMI_MAX_STRING_LENGTH. Left as an empty string if profile_abi does not
  *  exist. This is a single tree-wide ABI version, not a per-profile value.
  *
- *  @param[out] profiles If NULL, only @p num_profiles is filled with the
- *  required size. Otherwise, must point to an array with at least
- *  @p num_profiles entries on input; filled with up to that many published
- *  profiles. Exactly one returned entry has is_active set.
- *
  *  @param[in,out] num_profiles On input, the capacity of @p profiles (ignored
  *  if @p profiles is NULL). On output, the number of profiles currently
  *  published by the driver.
+ *
+ *  @param[out] profiles If NULL, only @p num_profiles is filled with the
+ *  required size. Otherwise, must point to an array with at least
+ *  @p num_profiles entries on input; filled with up to that many published
+ *  profiles. At most one returned entry has is_active set -- none will if
+ *  active_profile currently points to a slot that is not (or no longer)
+ *  published. On any return other than ::AMDSMI_STATUS_SUCCESS, treat
+ *  @p num_profiles and the contents of @p profiles as undefined.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/
@@ -9825,7 +9828,7 @@ typedef struct {
  */
 amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
                                          char version[AMDSMI_MAX_STRING_LENGTH],
-                                         amdsmi_ampp_profile_t* profiles, uint32_t* num_profiles);
+                                         uint32_t* num_profiles, amdsmi_ampp_profile_t* profiles);
 
 /**
  *  @brief Get the fields of a single AMPP power profile
@@ -9852,7 +9855,9 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
  *
  *  @param[out] fields If NULL, only @p num_fields is filled with the required
  *  size. Otherwise, must point to an array with at least @p num_fields
- *  entries on input; filled with up to that many published fields.
+ *  entries on input; filled with up to that many published fields. On any
+ *  return other than ::AMDSMI_STATUS_SUCCESS, treat @p num_fields and the
+ *  contents of @p fields as undefined.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
@@ -9887,7 +9892,8 @@ amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
- *          ::AMDSMI_STATUS_NO_PERM if the caller lacks root/CAP_SYS_ADMIN,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
+ *          app_modes/active_profile (typically requires root/CAP_SYS_ADMIN),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          published profile_N
  */

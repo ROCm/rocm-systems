@@ -5370,8 +5370,8 @@ extern "C" {
     pub fn amdsmi_get_ampp_profiles(
         processor_handle: AmdsmiProcessorHandle,
         version: *mut ::std::os::raw::c_char,
-        profiles: *mut AmdsmiAmppProfileT,
         num_profiles: *mut u32,
+        profiles: *mut AmdsmiAmppProfileT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

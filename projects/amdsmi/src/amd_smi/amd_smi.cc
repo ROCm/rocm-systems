@@ -1712,7 +1712,7 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
 
 amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
                                          char version[AMDSMI_MAX_STRING_LENGTH],
-                                         amdsmi_ampp_profile_t* profiles, uint32_t* num_profiles) {
+                                         uint32_t* num_profiles, amdsmi_ampp_profile_t* profiles) {
   AMDSMI_CHECK_INIT();
 
   if (num_profiles == nullptr) {
@@ -1747,8 +1747,8 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
       "AMDSMI and RSMI AMPP profile reserved offsets must match");
 
   amdsmi_status_t amdsmi_status =
-      rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version,
-                   reinterpret_cast<rsmi_ampp_profile_t*>(profiles), num_profiles);
+      rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version, num_profiles,
+                   reinterpret_cast<rsmi_ampp_profile_t*>(profiles));
   if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
     return amdsmi_status;
   }

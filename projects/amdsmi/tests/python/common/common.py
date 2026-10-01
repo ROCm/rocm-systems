@@ -52,6 +52,30 @@ def _print_path_remediation(script, file):
     )
 
 
+def resolve_cli_dir(this_dir, amdsmi_path=None):
+    """Resolve the amdsmi_cli directory for tests that import CLI modules directly.
+
+    amdsmi_parser.py/set_value.py/amdsmi_helpers.py live in the amd-smi CLI,
+    which exists in two layouts:
+      * source checkout: <repo>/projects/amdsmi/amdsmi_cli (four levels up
+        from a tests/python/unit/<group>/test_*.py file's directory)
+      * installed:       <rocm>/libexec/amdsmi_cli (amdsmi_path is the
+        sibling <rocm>/share/amd_smi)
+    Prefers the in-tree source so tests exercise the code under review,
+    falling back to the installed CLI otherwise.
+    """
+    source_cli_dir = os.path.normpath(os.path.join(this_dir, "..", "..", "..", "..", "amdsmi_cli"))
+    installed_cli_dir = (
+        os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
+        if amdsmi_path
+        else ""
+    )
+    for cli_dir in (source_cli_dir, installed_cli_dir):
+        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "set_value.py")):
+            return cli_dir
+    return None
+
+
 def print_amdsmi_path_help(file=sys.stdout):
     """Print env-var documentation, path remediation guidance, and usage examples for -h output."""
     _script = os.path.basename(sys.argv[0]) or "<script>"

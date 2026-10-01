@@ -51,9 +51,12 @@ void TestAmppReadWrite::Run(void) {
   TestBase::Run();
   PRINT_VERBOSITY();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    return;
+    GTEST_SKIP() << "SetUp failed for this test.";
   }
+
+  bool ampp_supported = false;
+  bool configured_profile_exercised = false;
+  bool unconfigured_writable_profile_exercised = false;
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
@@ -74,7 +77,7 @@ void TestAmppReadWrite::Run(void) {
     uint32_t num_profiles = 0;
     DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles", "gpu=" + std::to_string(dv_ind) + " (size)",
                        VERB(STANDARD));
-    ret = amdsmi_get_ampp_profiles(handle, version, nullptr, &num_profiles);
+    ret = amdsmi_get_ampp_profiles(handle, version, &num_profiles, nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -83,6 +86,7 @@ void TestAmppReadWrite::Run(void) {
       continue;
     }
     CHK_ERR_ASRT(ret)
+    ampp_supported = true;
     IF_VERB(STANDARD) { std::cout << "\t  profile_abi version=" << version << std::endl; }
 
     // An under-sized caller buffer must be rejected with OUT_OF_RESOURCES
@@ -93,7 +97,7 @@ void TestAmppReadWrite::Run(void) {
       uint32_t requested = num_profiles - 1;
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles",
                          "gpu=" + std::to_string(dv_ind) + " (undersized buffer)", VERB(STANDARD));
-      ret = amdsmi_get_ampp_profiles(handle, version, undersized, &requested);
+      ret = amdsmi_get_ampp_profiles(handle, version, &requested, undersized);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
@@ -106,7 +110,7 @@ void TestAmppReadWrite::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles",
                          "gpu=" + std::to_string(dv_ind) + " (zero-capacity buffer)",
                          VERB(STANDARD));
-      ret = amdsmi_get_ampp_profiles(handle, version, undersized, &zero_capacity);
+      ret = amdsmi_get_ampp_profiles(handle, version, &zero_capacity, undersized);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
@@ -116,7 +120,7 @@ void TestAmppReadWrite::Run(void) {
     std::vector<amdsmi_ampp_profile_t> profiles(num_profiles);
     DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles", "gpu=" + std::to_string(dv_ind) + " (fill)",
                        VERB(STANDARD));
-    ret = amdsmi_get_ampp_profiles(handle, version, profiles.data(), &num_profiles);
+    ret = amdsmi_get_ampp_profiles(handle, version, &num_profiles, profiles.data());
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
@@ -139,8 +143,11 @@ void TestAmppReadWrite::Run(void) {
         unconfigured_writable_profile_name = p.name;
       }
     }
-    // Exactly one profile should be marked active.
-    ASSERT_EQ(active_count, 1);
+    // Exactly one profile should be marked active, unless the driver
+    // published zero profiles.
+    if (num_profiles > 0) {
+      ASSERT_EQ(active_count, 1);
+    }
 
     // num_fields == nullptr must be rejected.
     DISPLAY_AMDSMI_API("amdsmi_get_ampp_fields", "gpu=" + std::to_string(dv_ind) + ", NULL",
@@ -163,6 +170,7 @@ void TestAmppReadWrite::Run(void) {
     }
 
     if (!configured_profile_name.empty()) {
+      configured_profile_exercised = true;
       uint32_t num_fields = 0;
       DISPLAY_AMDSMI_API(
           "amdsmi_get_ampp_fields",
@@ -218,6 +226,7 @@ void TestAmppReadWrite::Run(void) {
     }
 
     if (!unconfigured_writable_profile_name.empty()) {
+      unconfigured_writable_profile_exercised = true;
       uint32_t num_fields = 5;
       amdsmi_ampp_field_t fields[5];
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_fields",
@@ -264,5 +273,17 @@ void TestAmppReadWrite::Run(void) {
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     }
+  }
+
+  if (!ampp_supported) {
+    GTEST_SKIP() << "AMPP not supported on any monitored device.";
+  }
+  if (!configured_profile_exercised) {
+    GTEST_SKIP() << "No configured AMPP profile found on any monitored device -- "
+                    "configured-profile assertions were not exercised.";
+  }
+  if (!unconfigured_writable_profile_exercised) {
+    GTEST_SKIP() << "No unconfigured writable AMPP profile found on any monitored device -- "
+                    "unconfigured-writable-profile assertions were not exercised.";
   }
 }

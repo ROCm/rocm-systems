@@ -7322,14 +7322,14 @@ def amdsmi_get_ampp_profiles(
     nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_profile_t)()
     _check_res(
         amdsmi_wrapper.amdsmi_get_ampp_profiles(
-            processor_handle, version_buf, nullptr, ctypes.byref(num_profiles)
+            processor_handle, version_buf, ctypes.byref(num_profiles), nullptr
         )
     )
 
     profiles = (amdsmi_wrapper.amdsmi_ampp_profile_t * num_profiles.value)()
     _check_res(
         amdsmi_wrapper.amdsmi_get_ampp_profiles(
-            processor_handle, version_buf, profiles, ctypes.byref(num_profiles)
+            processor_handle, version_buf, ctypes.byref(num_profiles), profiles
         )
     )
 
@@ -7431,7 +7431,9 @@ def amdsmi_configure_ampp_profile(
             ever staged)
 
     Raises:
-        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiParameterException: If processor_handle is invalid, a field
+            name isn't a str or doesn't fit in AMDSMI_MAX_STRING_LENGTH
+            bytes, or a field value isn't representable as an int64
         AmdSmiException: If the function fails (e.g. NO_PERM if the caller
             lacks root/CAP_SYS_ADMIN, NOT_SUPPORTED if the profile is not
             writable, INVAL for an unpublished profile_name, unrecognized
@@ -7452,8 +7454,16 @@ def amdsmi_configure_ampp_profile(
         field_name = field["name"]
         if not isinstance(field_name, str):
             raise AmdSmiParameterException(field_name, str)
-        field_array[i].name = field_name.encode("utf-8")
-        field_array[i].value = int(field["value"])
+        encoded_name = field_name.encode("utf-8")
+        if len(encoded_name) >= AMDSMI_MAX_STRING_LENGTH:
+            raise AmdSmiParameterException(field_name, str)
+        field_array[i].name = encoded_name
+        field_value = field["value"]
+        if not isinstance(field_value, int) or isinstance(field_value, bool):
+            raise AmdSmiParameterException(field_value, int)
+        if not -(2**63) <= field_value < 2**63:
+            raise AmdSmiParameterException(field_value, int)
+        field_array[i].value = field_value
 
     _check_res(
         amdsmi_wrapper.amdsmi_configure_ampp_profile(
