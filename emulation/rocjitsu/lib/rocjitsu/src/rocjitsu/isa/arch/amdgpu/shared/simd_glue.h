@@ -1038,6 +1038,13 @@ RJ_NOINLINE inline uint32_t convert_mxfp_unpack_scalar(uint32_t code, uint8_t sc
   else
     return util::f32_to_bf16_rne_mode(decode_mxfp_scalar<Format>(code) * scale, fp16_ovfl);
 }
+
+/// Passing the decoded operand first as an FP argument keeps GCC's multiply
+/// operand order consistent with the generated F32 scalar consumer. Decoding
+/// inside this frame instead lets GCC select the other quiet-NaN operand.
+RJ_NOINLINE inline uint32_t multiply_mxfp_unpack_f32_scalar(float input, float scale) {
+  return std::bit_cast<uint32_t>(input * scale);
+}
 #endif
 
 /// Keep each rare exceptional pack pipeline in one scalar call frame. Besides
@@ -1221,8 +1228,14 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
           if constexpr (WideFormat == MxfpWideFormat::F32) {
             const float scalar_scale = util::e8m0_to_f32(scalar_scale_byte);
             for (uint32_t index = 0; index < Count; ++index) {
+#if defined(__GNUC__) && !defined(__clang__)
+              const uint32_t bits = multiply_mxfp_unpack_f32_scalar(
+                  decode_mxfp_scalar<Format>(read_scaled_code(index)), scalar_scale);
+              destination.set_lane(index, lane, bits);
+#else
               float value = decode_mxfp_scalar<Format>(read_scaled_code(index)) * scalar_scale;
               destination.set_lane(index, lane, std::bit_cast<uint32_t>(value));
+#endif
             }
           } else {
 #if !defined(__GNUC__) || defined(__clang__)
