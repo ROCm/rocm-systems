@@ -52,7 +52,8 @@ struct DbiEntryStorage {
 /// @param desc The kernel's descriptor, read for its user-SGPR ABI.
 /// @param arch ISA used to decode @p desc's USER_SGPR_COUNT layout.
 /// @param kernel_sgpr_count The kernel's SGPR allocation. The run must fit
-///        inside it; the allocation is not grown.
+///        inside it, and on CDNA below its top @ref kCdnaSpecialSgprTailReserve
+///        SGPRs, which can hold special registers; the allocation is not grown.
 /// @param reserved Registers the caller has already spoken for, such as the
 ///        probe-call return-link pair. Skipped rather than treated as a floor,
 ///        so a kernel can place storage below them.
