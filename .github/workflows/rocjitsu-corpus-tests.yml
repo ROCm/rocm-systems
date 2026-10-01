@@ -447,6 +447,9 @@ jobs:
             -R '^LaunchPreloadTest\.' \
             --output-on-failure
 
+      - name: Test corpus harness options
+        run: python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-run-corpus-tests.py"
+
       - name: Install corpus test dependencies
         id: install_corpus_dependencies
         if: matrix.run_simulator_corpus
