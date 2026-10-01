@@ -61,16 +61,20 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
+  // Engine id the successful create used. For a generic HSA_QUEUE_SDMA retry this is 0 (KFD
+  // picks); the budget map keys on this value rather than the id that was requested.
+  uint32_t engineId() const { return engineId_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
-  int remoteDeviceId_;
-  uint64_t* cachedWptr_;
-  uint64_t* committedWptr_;
-  void* queueBuffer_;
-  HsaQueueResource queue_;
-  SdmaQueueDeviceHandle* deviceHandle_;
+  int remoteDeviceId_{-1};
+  uint32_t engineId_{0};
+  uint64_t* cachedWptr_{nullptr};
+  uint64_t* committedWptr_{nullptr};
+  void* queueBuffer_{nullptr};
+  HsaQueueResource queue_{};
+  SdmaQueueDeviceHandle* deviceHandle_{nullptr};
   SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle_{nullptr};
 };
 
@@ -127,7 +131,8 @@ class AnvilLib {
   // queue budget. Track usage per engine to refuse a mesh that cannot fit before KFD returns
   // NO_MEMORY part way through building it.
   uint32_t numSdmaQueuesPerEngine_{0};
-  std::unordered_map<uint32_t, uint32_t> queuesPerEngine_;
+  // Queues already taken by this process, keyed by the engine the create actually used.
+  std::unordered_map<uint32_t, uint32_t> queuesUsedPerEngine_;
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
   // Last preferred-engine query, so a getOamId failure can print status and mask.
   hsa_status_t lastPreferredStatus_{HSA_STATUS_ERROR};

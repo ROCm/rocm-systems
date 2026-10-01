@@ -64,12 +64,20 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all local PEs including self
+  // Create SDMA connections to all local PEs including self. A false return leaves a partially
+  // wired mesh whose null handles would silently skip puts above the SDMA threshold, so tear
+  // everything down and fall back to IPC memcpy instead.
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
     }
-    sdma_anvil::anvil.connect(deviceId, i, numChannels);
+    if (!sdma_anvil::anvil.connect(deviceId, i, numChannels)) {
+      LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s); disabling SDMA",
+                deviceId, i, numChannels);
+      sdma_anvil::anvil.disconnect();
+      sdmaEnabled = false;
+      return;
+    }
   }
 
   // Total number of handles: shm_size * numChannels

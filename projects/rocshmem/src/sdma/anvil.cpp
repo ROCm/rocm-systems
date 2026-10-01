@@ -168,7 +168,7 @@ static const std::string getBusId(int deviceId) {
 SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
                      uint32_t engineId, hsa_status_t preferredStatus, uint32_t preferredMask,
                      bool usedPreferred, uint32_t numSdmaEngines, uint32_t numSdmaXgmiEngines)
-    : remoteDeviceId_(remoteDeviceId) {
+    : remoteDeviceId_(remoteDeviceId), engineId_(engineId) {
   int originalDeviceId;
 
   ANVIL_CHECK_HIP_ERROR(hipGetDevice(&originalDeviceId));  // Save the current device
@@ -177,6 +177,8 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
   hsa_status_t status = hsa_agent_get_info(localAgent, HSA_AGENT_INFO_NODE, &localNodeId);
   if (status != HSA_STATUS_SUCCESS) {
     LOG_ERROR("anvil: HSA_AGENT_INFO_NODE failed device=%d status=%#x", localDeviceId, status);
+    createStatus_ = HSAKMT_STATUS_ERROR;
+    return;
   }
 
   // Allocate SDMA queue buffer on device side, requires ExecuteAccess
@@ -198,9 +200,10 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  HSAKMT_STATUS queueStatus = hsaKmtCreateQueueExt(
+  HSAKMT_STATUS pinnedStatus = hsaKmtCreateQueueExt(
       localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
       queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+  HSAKMT_STATUS queueStatus = pinnedStatus;
 
   if (queueStatus != HSAKMT_STATUS_SUCCESS) {
     // An engine-pinned queue needs an engine id the KFD node actually owns. A CPX/DPX partition owns
@@ -214,9 +217,16 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     queueStatus =
         hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA, DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY,
                              0, queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+    if (queueStatus == HSAKMT_STATUS_SUCCESS) {
+      // KFD picks; charge the budget against engine 0, which is the id the generic create takes.
+      engineId_ = 0;
+    }
   }
 
-  createStatus_ = queueStatus;
+  // Keep the pinned failure when the retry also fails so connect() can still recognise NO_MEMORY.
+  createStatus_ = (queueStatus != HSAKMT_STATUS_SUCCESS && pinnedStatus != HSAKMT_STATUS_SUCCESS)
+                      ? pinnedStatus
+                      : queueStatus;
 
   if (queueStatus != HSAKMT_STATUS_SUCCESS) {
     const std::string srcBus = getBusId(localDeviceId);
@@ -225,7 +235,7 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
         "anvil: hsaKmtCreateQueueExt failed hsakmt=%d (%s) node=%u engineId=%u srcDev=%d (%s) "
         "dstDev=%d (%s) usedPreferred=%d preferredStatus=%#x preferredMask=0x%x hostEng=%u "
         "xgmiEng=%u total=%u",
-        static_cast<int>(queueStatus), hsakmtStatusName(queueStatus), localNodeId, engineId,
+        static_cast<int>(createStatus_), hsakmtStatusName(createStatus_), localNodeId, engineId,
         localDeviceId, srcBus.c_str(), remoteDeviceId, dstBus.c_str(), usedPreferred ? 1 : 0,
         static_cast<unsigned>(preferredStatus), preferredMask, numSdmaEngines, numSdmaXgmiEngines,
         numSdmaEngines + numSdmaXgmiEngines);
@@ -534,8 +544,13 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   hsa_status_t preferredStatus = HSA_STATUS_ERROR;
   uint32_t preferredMask = 0;
   bool usedPreferred = false;
-  uint32_t engineId = static_cast<uint32_t>(
-      getSdmaEngineId(srcDeviceId, dstDeviceId, &preferredStatus, &preferredMask, &usedPreferred));
+  const int engineIdSigned =
+      getSdmaEngineId(srcDeviceId, dstDeviceId, &preferredStatus, &preferredMask, &usedPreferred);
+  if (engineIdSigned < 0) {
+    LOG_ERROR("anvil: no SDMA engine mapping for %d -> %d", srcDeviceId, dstDeviceId);
+    return false;
+  }
+  const uint32_t engineId = static_cast<uint32_t>(engineIdSigned);
   LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
             srcDeviceId, dstDeviceId, numChannels, engineId);
 
@@ -543,30 +558,48 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   // owns one XCD's engines, so the mesh a whole MI300X supports does not fit. KFD also does not
   // report how many queues ROCr already holds, so an exhausted budget can only be predicted for
   // gross over-subscription and must additionally be recognised when queue creation fails.
-  auto reportBudget = [&](uint32_t used) {
+  auto reportBudget = [&](uint32_t usedEng, uint32_t used) {
     LOG_ERROR(
         "anvil: SDMA queue budget exhausted on engine %u: %u queue(s) taken by this process + %d "
         "requested, limit %u per engine (%u engines: host=%u xgmi=%u). This partition has %u SDMA "
         "queues in total and ROCm holds some of them, so it cannot cover this peer count at %d "
         "channel(s) per peer. Use fewer ranks per node, fewer channels, or a coarser partition mode "
         "(DPX/SPX).",
-        engineId, used, numChannels, numSdmaQueuesPerEngine_, numSdmaEnginesTotal_, numSdmaEngines_,
+        usedEng, used, numChannels, numSdmaQueuesPerEngine_, numSdmaEnginesTotal_, numSdmaEngines_,
         numSdmaXgmiEngines_, numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_, numChannels);
   };
 
-  uint32_t& used = queuesPerEngine_[engineId];
-  if (numSdmaQueuesPerEngine_ > 0 && used + static_cast<uint32_t>(numChannels) > numSdmaQueuesPerEngine_) {
-    reportBudget(used);
+  const uint32_t used = queuesUsedPerEngine_[engineId];
+  if (numSdmaQueuesPerEngine_ > 0 &&
+      used + static_cast<uint32_t>(numChannels) > numSdmaQueuesPerEngine_) {
+    reportBudget(engineId, used);
     return false;
   }
 
+  auto& vec = sdma_channels_[dstDeviceId];
+  const size_t already = vec.size();
+  auto rollback = [&]() {
+    while (vec.size() > already) {
+      SdmaQueue* q = vec.back().get();
+      if (q != nullptr && q->valid()) {
+        auto it = queuesUsedPerEngine_.find(q->engineId());
+        if (it != queuesUsedPerEngine_.end() && it->second > 0) it->second -= 1;
+      }
+      vec.pop_back();
+    }
+  };
+
   for (int c = 0; c < numChannels; ++c) {
-    if (createSdmaQueue(srcDeviceId, dstDeviceId, engineId, preferredStatus, preferredMask,
-                        usedPreferred) == nullptr) {
-      if (numSdmaQueuesPerEngine_ > 0 && lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) reportBudget(used);
+    SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, preferredStatus,
+                                      preferredMask, usedPreferred);
+    if (queue == nullptr) {
+      if (numSdmaQueuesPerEngine_ > 0 && lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
+        reportBudget(engineId, queuesUsedPerEngine_[engineId]);
+      }
+      rollback();
       return false;
     }
-    used += 1;
+    queuesUsedPerEngine_[queue->engineId()] += 1;
   }
   return true;
 }
@@ -574,6 +607,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
 void AnvilLib::disconnect() {
   // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
   sdma_channels_.clear();
+  queuesUsedPerEngine_.clear();
   LOG_TRACE("SDMA: Disconnected all queues");
 }
 
@@ -613,7 +647,9 @@ int AnvilLib::getOamId(int deviceId) {
   }
 
   const int preferredEngine = lastPreferredMask_ == 0 ? -1 : __builtin_ctz(lastPreferredMask_);
-  LOG_WARN(
+  // LOG_ERROR so a default ROCSHMEM_DEBUG_LEVEL=ERROR banff repro still shows the preferred-engine
+  // values that explain why the OAM map was needed.
+  LOG_ERROR(
       "anvil: no xGMI physical id for %s or %s device=%d pair=%d->%d preferredQueried=%d "
       "preferredStatus=%#x preferredMask=0x%x preferredEngine=%d hostEng=%u xgmiEng=%u total=%u",
       busId.c_str(), physBusId.c_str(), deviceId, lastSrcDeviceId_, lastDstDeviceId_,
@@ -622,16 +658,26 @@ int AnvilLib::getOamId(int deviceId) {
   return -1;
 }
 
+// PCI function digit of a BDF like "0000:0c:00.2". Matches how RCCL keeps the partition index
+// alongside the masked physical BDF (init.cc fillInfo).
+static int pciFunctionFromBusId(const std::string& busId) {
+  if (busId.empty()) return 0;
+  const char c = busId.back();
+  if (c >= '0' && c <= '7') return c - '0';
+  return 0;
+}
+
 int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
-  auto normalizeOamId = [](int oamId) {
-    if (oamId < 0) return 0;
-    return oamId % static_cast<int>(AnvilLib::kMi300xOamMapDim);
-  };
+  const int srcOamId = getOamId(srcDeviceId);
+  const int dstOamId = getOamId(dstDeviceId);
+  // Do not clamp an unreadable id to 0: that would make every failed pair select mi300xOamMap[0][0]
+  // and pin them all on engine 0. Propagate to connect() instead.
+  if (srcOamId < 0 || dstOamId < 0) return -1;
 
-  const int srcOamId = normalizeOamId(getOamId(srcDeviceId));
-  const int dstOamId = normalizeOamId(getOamId(dstDeviceId));
+  const int srcIdx = srcOamId % static_cast<int>(AnvilLib::kMi300xOamMapDim);
+  const int dstIdx = dstOamId % static_cast<int>(AnvilLib::kMi300xOamMapDim);
 
-  const int oamEngine = mi300xOamMap[static_cast<size_t>(srcOamId)][static_cast<size_t>(dstOamId)];
+  const int oamEngine = mi300xOamMap[static_cast<size_t>(srcIdx)][static_cast<size_t>(dstIdx)];
   // Use even engines only (MI300X xGMI SDMA layout).
   int engineId = oamEngine * 2;
 
@@ -640,10 +686,15 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
     // Both the map and the doubling assume the 14 xGMI SDMA engines of an unpartitioned MI300X. A
     // partition owns fewer engines (CPX: 2 host engines, 0 xGMI), so fold the undoubled map value
     // into the range this node reports. Folding the doubled value would be wrong: it is always
-    // even, so it would collapse every peer onto engine 0 and exhaust that engine's queue budget.
-    const int folded = oamEngine % static_cast<int>(numSdmaEnginesTotal_);
-    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u, using engine %d", engineId,
-             numSdmaEnginesTotal_, folded);
+    // even, so it would collapse every peer onto engine 0. The physical-function BDF fallback also
+    // gives every CPX partition of one GPU the same OAM id, so same-device peers hit the map
+    // diagonal (0); fold the PCI function in so they land on distinct engines.
+    const int srcFn = pciFunctionFromBusId(getBusId(srcDeviceId));
+    const int dstFn = pciFunctionFromBusId(getBusId(dstDeviceId));
+    const int folded =
+        (oamEngine + srcFn + dstFn) % static_cast<int>(numSdmaEnginesTotal_);
+    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u, using engine %d (oam=%d srcFn=%d dstFn=%d)",
+             engineId, numSdmaEnginesTotal_, folded, oamEngine, srcFn, dstFn);
     engineId = folded;
   }
   return engineId;

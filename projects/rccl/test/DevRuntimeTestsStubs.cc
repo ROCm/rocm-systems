@@ -149,7 +149,7 @@ ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuc
 // ---------------------------------------------------------------------------
 // cuMem allocation tracking / peer import. windowRegisterNonSym takes the cuMem
 // branch for VMM buffers, which reaches ncclP2pImportShareableBuffer and (via
-// ncclCuMemFreeAddr in alloc.h) the mem-manager untrack helpers. Report cuMem as
+// ncclCudaFree in alloc.h) the mem-manager untrack helpers. Report cuMem as
 // disabled so the micro-tests keep exercising the legacy IPC branch.
 // ---------------------------------------------------------------------------
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};

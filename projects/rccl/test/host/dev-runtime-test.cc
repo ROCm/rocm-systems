@@ -145,6 +145,7 @@ static void ReclaimDevrWindows(ncclComm* comm) {
     if (w == nullptr) continue;
     free(w->ipcPeerPtrs);
     free(w->ipcPeerPtrsAllocBase);
+    free(w->ipcPeerIsCuMem);
     free(w);
   }
   free(devr->winSorted);
@@ -3125,6 +3126,28 @@ TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
 
   windowCloseIpcPeers(comm, &win);
   EXPECT_EQ(close.calls, 2);
+}
+
+// Branch: ipcPeerIsCuMem selects ncclCudaFree per peer; legacy peers still use
+// cudaIpcCloseMemHandle. Peer 0 is cuMem, peer 2 is legacy (self at index 1 is
+// skipped). Shutdown short-circuits ncclCudaFree so the fake pointer is not
+// handed to HIP.
+TEST_F(WindowCloseIpcPeersTest, MixedCuMemAndLegacy_TakesMatchingRelease) {
+  uint8_t isCuMem[3] = {1, 0, 0};
+  win.ipcPeerIsCuMem = isCuMem;
+
+  std::vector<void*> ipcClosed;
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
+    ipcClosed.push_back(p);
+    return hipSuccess;
+  });
+
+  rcclShutdownFlag().store(true, std::memory_order_release);
+  windowCloseIpcPeers(comm, &win);
+  rcclShutdownFlag().store(false, std::memory_order_release);
+
+  ASSERT_EQ(ipcClosed.size(), 1u);
+  EXPECT_EQ(ipcClosed[0], allocBase[2]);
 }
 
 
