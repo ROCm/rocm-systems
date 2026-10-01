@@ -4682,6 +4682,58 @@ TEST(WaitcheckTest, SaluVccReadClearsValuVccHazard) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+// Typed operand classification must retain both selector-encoded halves and
+// the fieldless VCC operands of VALU instructions, without confusing SGPRs.
+TEST(WaitcheckTest, VccSelectorHalvesPreserveSaluReadAndWriteHazards) {
+  for (uint32_t selector : {0u, 106u, 107u}) {
+    SCOPED_TRACE(selector);
+    std::vector<uint32_t> program;
+    append_inst(program, v_cndmask_b32_e32(0, 128, 1));
+    append_inst(program, s_cselect_b32(selector));
+    append_inst(program, v_cndmask_b32_e32(2, 128, 2));
+    auto written = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(written.supported);
+    if (selector == 0) {
+      EXPECT_TRUE(written.diagnostics.empty()) << diagnostic_summary(written);
+    } else {
+      ASSERT_EQ(written.diagnostics.size(), 1u) << diagnostic_summary(written);
+      EXPECT_EQ(written.diagnostics[0].reg.cls, RegClass::VCC);
+    }
+
+    program.clear();
+    append_inst(program, v_cndmask_b32_e32(0, 128, 1));
+    append_inst(program, v_cmp_gt_u32_e32(5, 12));
+    append_inst(program, s_mov_b32(4, selector));
+    append_inst(program, v_cndmask_b32_e32(2, 128, 2));
+    auto read = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(read.supported);
+    if (selector == 0) {
+      ASSERT_EQ(read.diagnostics.size(), 1u) << diagnostic_summary(read);
+      EXPECT_EQ(read.diagnostics[0].reg.cls, RegClass::VCC);
+    } else {
+      EXPECT_TRUE(read.diagnostics.empty()) << diagnostic_summary(read);
+    }
+  }
+}
+
+TEST(WaitcheckTest, ExecSelectorHalvesPreserveExportOverwriteHazards) {
+  for (uint32_t selector : {4u, 126u, 127u}) {
+    SCOPED_TRACE(selector);
+    std::vector<uint32_t> program;
+    append_inst(program, export_mrt0_v0());
+    append_inst(program, s_mov_b32(selector, 128));
+    auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(report.supported);
+    if (selector == 4) {
+      EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+      EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Exp);
+      EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::EXEC);
+    }
+  }
+}
+
 TEST(WaitcheckTest, ReportsMissingDscntBeforeDsLoadUse) {
   std::vector<uint32_t> program;
   append_inst(program, ds_load_b32(0, 4));

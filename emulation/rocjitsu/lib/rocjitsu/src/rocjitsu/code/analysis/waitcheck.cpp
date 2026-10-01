@@ -66,19 +66,6 @@ static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size cha
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
-[[nodiscard]] bool equals_ignore_ascii_case(std::string_view lhs, std::string_view rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    const auto to_lower = [](char c) {
-      return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;
-    };
-    if (to_lower(lhs[i]) != to_lower(rhs[i]))
-      return false;
-  }
-  return true;
-}
-
 enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 
 [[nodiscard]] WaitcntModel waitcnt_model(rj_code_arch_t arch) {
@@ -5262,9 +5249,9 @@ private:
       const Operand *op = inst.dst_operand(i);
       if (!op)
         continue;
-      const std::string name = op->name();
-      if (equals_ignore_ascii_case(name, "exec") || equals_ignore_ascii_case(name, "exec_lo") ||
-          equals_ignore_ascii_case(name, "exec_hi"))
+      const auto ref = op->to_register_ref();
+      if ((ref && ref->cls == RegClass::EXEC) ||
+          (!ref && op->to_special_reg_class() == RegClass::EXEC))
         return true;
     }
 
@@ -5288,8 +5275,8 @@ private:
   [[nodiscard]] static bool operand_is_vcc(const Operand *op) {
     if (op == nullptr)
       return false;
-    const std::string name = op->name();
-    return name == "vcc" || name == "vcc_lo" || name == "vcc_hi";
+    const auto ref = op->to_register_ref();
+    return ref ? ref->cls == RegClass::VCC : op->to_special_reg_class() == RegClass::VCC;
   }
 
   [[nodiscard]] static bool instruction_uses_vcc_explicit(const Instruction &inst) {
