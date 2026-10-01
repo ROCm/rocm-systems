@@ -274,6 +274,50 @@ class WorkdirDefaultTests(unittest.TestCase):
             self.assertEqual(workdir.stat().st_mode & 0o777, 0o700)
             self.assertEqual(findings[0].stat().st_mode & 0o777, 0o600)
 
+    def _run_in_archive(self, env_extra: dict, args=(), stdout=subprocess.PIPE) -> tuple:
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = Path(tmp) / "capture.hrr"
+            archive = capture / "pid-1"
+            archive.mkdir(parents=True)
+            (archive / "events.bin").write_bytes(b"\0" * 64)
+            env = {k: v for k, v in os.environ.items() if k != "HRR_TRIAGE_WORKDIR"}
+            env.update(env_extra)
+            proc = subprocess.run(
+                ["bash", str(SCRIPT), "--archive", str(archive), "--no-replay", *args],
+                cwd=archive,
+                stdout=stdout,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                check=False,
+            )
+            inside = sorted(str(p.relative_to(capture)) for p in capture.rglob("*"))
+            return proc, inside
+
+    def test_a_relative_tmpdir_inside_the_archive_is_not_used(self):
+        proc, inside = self._run_in_archive({"TMPDIR": "."})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(inside, ["pid-1", "pid-1/events.bin"])
+        self.assertIn("[triage] finding=/tmp/", proc.stderr)
+        finding = proc.stderr.split("[triage] finding=", 1)[1].split("\n", 1)[0]
+        Path(finding).unlink()
+
+    def test_an_explicit_workdir_inside_the_archive_is_refused(self):
+        proc, inside = self._run_in_archive({"HRR_TRIAGE_WORKDIR": "out"})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("inside the archive", proc.stderr)
+        self.assertEqual(inside, ["pid-1", "pid-1/events.bin"])
+
+    def test_stdout_redirected_to_a_file_keeps_its_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "finding.md"
+            out.touch()
+            out.chmod(0o644)
+            with out.open("w") as fh:
+                proc, _ = self._run_in_archive({"TMPDIR": tmp}, ["-o", "/dev/stdout"], fh)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+
 
 class LibraryPathSafetyTests(unittest.TestCase):
     """An empty component in LD_LIBRARY_PATH means the current directory, and

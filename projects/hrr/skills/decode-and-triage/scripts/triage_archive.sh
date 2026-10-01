@@ -31,7 +31,8 @@ Options:
 Environment (common):
   HRR_TRIAGE_WORKDIR   Output directory for findings and replay logs
                        (default: $TMPDIR/hrr-triage-<uid>, mode 0700, never the
-                       archive; a mktemp directory if that one is not ours)
+                       archive; /tmp if TMPDIR is inside the archive, and a
+                       mktemp directory if that one is not ours)
   HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
   HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
   GPU                  Replay GPU ordinal (default: auto-pick)
@@ -71,20 +72,40 @@ ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 # and the finding and the replay log land in it, against this skill's own rule
 # that the archive is not to be written to. Per user, because a shared /tmp
 # directory belongs to whoever ran first and the next user cannot write in it.
+# The archive here is the pid directory and, for a pid-<n> one, the capture
+# directory holding it. Paths are resolved before anything is created, so
+# TMPDIR=. from inside the archive is caught before it writes there.
+ARCHIVE_ROOT="$ARCHIVE"
+[[ "$name" == pid-* ]] && ARCHIVE_ROOT="$(dirname "$ARCHIVE")"
+in_archive() {
+  local p
+  p="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")"
+  [[ "$p" == "$ARCHIVE_ROOT" || "$p" == "$ARCHIVE_ROOT"/* ]]
+}
 if [[ -n "${HRR_TRIAGE_WORKDIR:-}" ]]; then
   WORKDIR="$HRR_TRIAGE_WORKDIR"
+  if in_archive "$WORKDIR"; then
+    echo "error: HRR_TRIAGE_WORKDIR is inside the archive: $WORKDIR" >&2
+    exit 1
+  fi
   # Created private when we are the one creating it. An existing directory is
   # the caller's business, but the finding inside it is not: see the chmod
   # where it is written.
   mkdir -p -m 700 "$WORKDIR"
 else
-  WORKDIR="${TMPDIR:-/tmp}/hrr-triage-$(id -u)"
+  tmp_base="${TMPDIR:-/tmp}"
+  in_archive "$tmp_base" && tmp_base=/tmp
+  if in_archive "$tmp_base"; then
+    echo "error: the archive holds /tmp; set HRR_TRIAGE_WORKDIR outside it" >&2
+    exit 1
+  fi
+  WORKDIR="$tmp_base/hrr-triage-$(id -u)"
   # 0700 and ours, or somewhere else entirely. The name is predictable, so on a
   # shared host another user can get there first, and a finding names a
   # customer's kernels and addresses.
   mkdir -p -m 700 "$WORKDIR" 2>/dev/null || true
   if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]]; then
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hrr-triage-XXXXXX")"
+    WORKDIR="$(mktemp -d "$tmp_base/hrr-triage-XXXXXX")"
   else
     chmod 700 "$WORKDIR" 2>/dev/null || true
   fi
@@ -333,8 +354,10 @@ CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
 [[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
 "${CMD[@]}"
 
-# A regular file only: -o can name a device such as /dev/stdout or /dev/null.
-[[ -f "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
+# A regular file only: -o can name a device such as /dev/stdout or /dev/null,
+# and -f follows a link, so /dev/stdout redirected to a file would pass it.
+[[ -f "$FINDING" && ! -L "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
 [[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
 echo "[triage] finding=$FINDING" >&2
-cat "$FINDING"
+# Already on stdout when -o named it.
+[[ "$FINDING" -ef /dev/stdout ]] || cat "$FINDING"

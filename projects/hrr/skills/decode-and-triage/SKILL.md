@@ -91,7 +91,7 @@ Environment variables on Windows:
 | `HIP_PATH` or `ROCM_PATH` | HIP SDK root (default: `C:\Program Files\AMD\ROCm\6.2`) |
 | `HRR_BUILD` | Dedicated HRR build dir for `--build` (default: `projects/hrr\build-playback`) |
 | `GPU` | GPU ordinal for replay (default: `0`) |
-| `HRR_TRIAGE_WORKDIR` | Output dir for findings + logs. Never the archive. Default on Linux `$TMPDIR/hrr-triage-<uid>` created mode 0700, or a `mktemp` directory when that one is not ours; on Windows the user's temp directory plus `hrr-triage` |
+| `HRR_TRIAGE_WORKDIR` | Output dir for findings + logs. Never the archive: a value inside it is refused. Default on Linux `$TMPDIR/hrr-triage-<uid>` created mode 0700 (`/tmp` when `TMPDIR` is inside the archive), or a `mktemp` directory when that one is not ours; on Windows the user's temp directory plus `hrr-triage` |
 | `HRR_CONTINUE=1` | Proceed past HIP/comgr version mismatch |
 | `HRR_SKIP_COMPAT=1` | Skip manifest preflight entirely |
 
