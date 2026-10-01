@@ -43,7 +43,7 @@ The following are required to install and use the AMD SMI library through its la
 * Python 3.6.8+ (64-bit)
 
 ### Note: No module named more_itertools warning on Azure Linux 3
-When installing an `amd-smi-lib` package older than ROCm 7.14 on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. Those packages ran `pip` with `setuptools` and `wheel` during installation, which requires `more_itertools`. ROCm 7.14 and later packages no longer run `pip` during installation and are not affected. For older packages, use the following command before installation:
+When installing an `amd-smi-lib` package from ROCm 7.2.x or earlier, or one built from source before ROCm 10.1, on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. Those packages run `pip` with `setuptools` and `wheel` during installation, which requires `more_itertools`. The ROCm Core SDK `amdrocm-amdsmi` packages do not run `pip` and are not affected. For `amd-smi-lib`, use the following command before installation:
 ```
 sudo python3 -m pip install more_itertools
 ```
