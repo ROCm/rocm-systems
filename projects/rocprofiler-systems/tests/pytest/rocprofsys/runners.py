@@ -16,11 +16,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+import getpass
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
+from .cache import resolve_username
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -218,9 +221,17 @@ class BaseRunner(ABC):
             self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
             self.environment.set_test_environment(env)
-        # ROCPROFSYS_OUTPUT_PATH is framework-controlled
+        # ROCPROFSYS_OUTPUT_PATH and ROCPROFSYS_TMPDIR are framework-controlled.
+        # Use a user-scoped tmpdir to prevent cross-user permission collisions on
+        # shared machines where multiple users run the same test as different OS
+        # users: the second user cannot write into a /tmp/<test-name>/ directory
+        # that was created (and is owned) by the first user.
+        tmpdir = Path(tempfile.gettempdir()) / resolve_username()
         self.environment.set_test_environment(
-            {"ROCPROFSYS_OUTPUT_PATH": str(self.output_dir)}
+            {
+                "ROCPROFSYS_OUTPUT_PATH": str(self.output_dir),
+                "ROCPROFSYS_TMPDIR": str(tmpdir),
+            }
         )
         self.environment.set_user_environment()
 

@@ -4168,7 +4168,8 @@ void SimulatedKfd::complete_runtime_queue_exception(uint32_t process_id, uint32_
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
-                                                  uint32_t process_id, uint64_t exception_mask) {
+                                                  uint32_t process_id, uint64_t exception_mask,
+                                                  bool wait_for_ack) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || exception_mask == 0)
     return false;
@@ -4203,7 +4204,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   bool published = false;
   {
     std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
-    published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
+    published =
+        publisher->publish_queue_exception(queue_id, process_id, exception_mask, wait_for_ack);
   }
   if (queue_exception_cleanup_hook_for_testing_)
     queue_exception_cleanup_hook_for_testing_(false);
@@ -6068,18 +6070,24 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       auto *gpu = find_gpu(event.gpu_id);
       if (!gpu || !gpu->soc)
         return -ENODEV;
-      // Drop debug_sessions_mutex_ first: signal_queue_exception() takes the CU
-      // wave-state lock and waits up to a second for the target to observe the
-      // exception word, while the engine thread runs its issue loop under that
-      // same wave-state lock and calls back into the trap/watchpoint handlers,
-      // which take debug_sessions_mutex_. Holding it across the call inverts
-      // that order -- the inversion DISABLE and SUSPEND_QUEUES both avoid -- and
-      // would additionally stall every trap callback for the duration of the
-      // wait. Nothing below this point reads debug_sessions_ or session_it.
+      // Drop debug_sessions_mutex_ before entering the CU wave-state locks:
+      // trap callbacks acquire these in the opposite order. Nothing below
+      // this point reads debug_sessions_ or session_it.
       lk.unlock();
-      const bool delivered = signal_runtime_queue_exception(
-          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask);
-      return delivered ? 0 : -ENOENT;
+      // KFD's SEND_RUNTIME_EVENT publishes the status and event without
+      // waiting for ROCr to acknowledge them. ROCr removes its async exception
+      // handler after a fatal error, so later waves forwarding their aborts
+      // cannot satisfy such a wait. A debugger can also have the host stopped.
+      const bool published = signal_runtime_queue_exception(
+          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask,
+          /*wait_for_ack=*/false);
+      if (published)
+        return 0;
+      // The runtime may already have destroyed this queue after the first
+      // forwarded abort. KFD accepts that stale request too. Keep reporting
+      // actual publication failures for queues that still exist.
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      return target_proc->queue_snapshot_map_.contains(event.queue_id) ? -ENOENT : 0;
     }
     std::lock_guard<std::mutex> runtime_lock(runtime_handshake_mutex_);
     runtime_acked_.insert(target_pid);
