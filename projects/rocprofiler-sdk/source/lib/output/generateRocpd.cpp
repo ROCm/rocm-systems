@@ -1754,6 +1754,14 @@ write_rocpd(
                                              counters::rec_to_dim_pos(
                                                  count.instance_id,
                                                  counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
+                                insert_value("shader_array",
+                                             counters::rec_to_dim_pos(
+                                                 count.instance_id,
+                                                 counters::ROCPROFILER_DIMENSION_SHADER_ARRAY)),
+                                insert_value(
+                                    "wgp",
+                                    counters::rec_to_dim_pos(count.instance_id,
+                                                             counters::ROCPROFILER_DIMENSION_WGP)),
                                 insert_value("instance",
                                              counters::rec_to_dim_pos(
                                                  count.instance_id,
