@@ -772,7 +772,8 @@ written by a producer outside `libamdhip64`. Nothing is exported for this, no
 capture-side code runs, and a producer needs neither `dlopen` nor a symbol.
 `HIP_HRR_CAPTURE_OUTPUT` is a plain environment variable and the writer's layout
 is `$HIP_HRR_CAPTURE_OUTPUT/pid-<getpid()>/`, so a producer computes the path
-itself; "is capture active" reduces to whether that directory exists.
+itself; "is capture active" reduces to whether that directory's `events.bin`
+exists, since a directory refused by the writer is left in place.
 
 A sidecar is an ordinary HRR record stream — `hrr_file_header` + repeated
 `hrr_event_header` + payload — carrying its own magic (`HRR_REGION_MAGIC`,

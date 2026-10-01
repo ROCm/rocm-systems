@@ -70,15 +70,19 @@ def _archive_dir():
     """The capture directory for this process, or None if capture is not active.
 
     This is the whole "is HRR recording?" check: the capture writer creates
-    pid-<pid>/ when it opens, so the directory existing is the signal. Re-checked
-    on every poll because capture starts at HIP init, which is normally after
-    this module loads.
+    pid-<pid>/ and its events.bin when it opens, so those existing are the
+    signal. The file matters as well as the directory: a pid-<pid> that was
+    already there is kept when the writer refuses it, say for a planted
+    events.bin link, and capture is off. Re-checked on every poll because
+    capture starts at HIP init, which is normally after this module loads.
     """
     root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
     if not root:
         return None
     d = os.path.join(root, "pid-%d" % os.getpid())
-    return d if _private_dir(d) else None
+    if not _private_dir(d) or not _private_events(os.path.join(d, "events.bin")):
+        return None
+    return d
 
 
 def _private_dir(path):
@@ -94,6 +98,19 @@ def _private_dir(path):
     except OSError:
         return False
     return stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
+
+
+def _private_events(path):
+    """True if path is a regular single-linked file owned by us, as the writer
+    requires of the events.bin it opens."""
+    if os.name == "nt":
+        return os.path.isfile(path)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return (stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid()
+            and st.st_nlink == 1)
 
 
 def _open_private_dir(path):
