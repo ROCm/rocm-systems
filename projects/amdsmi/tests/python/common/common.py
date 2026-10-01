@@ -827,6 +827,8 @@ class Common:
             # Set bad gpu: None is rejected by the isinstance check in amdsmi_interface.py,
             # raising AmdSmiParameterException(INVAL). Platform-agnostic and unambiguous.
             self.bad_gpu = None
+            # Same sentinel for CPU/CPU-core APIs; named separately so CPU tests read clearly.
+            self.bad_cpu = None
 
             self.virt_mode = []
             self.asic_info = []
@@ -1369,6 +1371,18 @@ class Common:
             raise unittest.SkipTest(msg)
         return handles
 
+    def skip_without_cpu_core(self):
+        """CPU core handles, skipping the calling test when there are none.
+
+        Core-handle counterpart to skip_without_cpu() for inline-iterating tests.
+        """
+        handles = self._cpu_core_handles()
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        return handles
+
     def _Test_API_Per_Handles(self, handles, label, **kwargs):
         params = kwargs
         iterator = iter(params.items())
@@ -1386,7 +1400,7 @@ class Common:
             if i < len(handles):
                 handle = handles[i]
             else:
-                handle = self.bad_gpu
+                handle = self.bad_cpu
                 i = "invalid"
                 cond = self.FAIL
 
