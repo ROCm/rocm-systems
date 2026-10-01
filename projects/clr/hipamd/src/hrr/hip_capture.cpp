@@ -2470,7 +2470,12 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // A refused open leaves capture off, so take the shims out of the dispatch
+    // table too rather than leave every call going through them for nothing.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) {
+      hip_capture_uninstall();
+      return;
+    }
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

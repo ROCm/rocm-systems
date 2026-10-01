@@ -20,7 +20,8 @@ namespace writer {
 // off, when the file system holding the archive has less than the reserve free.
 bool open(const char* output_dir);
 
-// Returns true if open() has been called successfully.
+// True while events.bin is open: from a successful open() until close(), or
+// until capture stops because the file system fell to the reserve.
 bool is_open();
 
 // Cache process-level metadata JSON for manifest writers. The emergency
