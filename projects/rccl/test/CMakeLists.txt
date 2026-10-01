@@ -373,6 +373,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
+      ProfilerOverheadTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
@@ -413,6 +414,10 @@ if(BUILD_TESTS)
   endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
     # Unit tests pass generic hipMalloc pointers into load16global/store16global.
     # The gfx942 b128 global-aperture builtins fault on those pointers; use the
