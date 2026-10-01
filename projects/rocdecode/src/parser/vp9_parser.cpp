@@ -476,14 +476,39 @@ void Vp9VideoParser::CheckAndUpdateDecStatus() {
 }
 
 ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t size) {
-    // The uncompressed header carries state forward between frames, and SetupPastIndependence()
-    // resets part of it mid parse. A frame that fails after that point would otherwise leave the
-    // carried state half updated for the next frame in the chunk, which ParsePictureData() goes
-    // on to parse. Roll the state back so only a frame that parsed cleanly can change it.
+    // The parse carries state forward between frames and mutates it before its later failure
+    // exits: SetupPastIndependence() resets part of the header, and the size change block assigns
+    // pic_width_ and pic_height_ before the check that rejects an unsupported size up on a non key
+    // frame. A failed frame therefore left the parser believing the new size had been taken, so a
+    // following frame of that size skipped the size change check and could be submitted against
+    // the older, smaller surfaces. Snapshot everything the body can touch and roll it back, so
+    // only a frame that parsed cleanly changes any of it.
+    // frame_data_size_in_bits_ and bitstream_overrun_ are excluded because the body sets both
+    // before its first read, and y_dequant_, uv_dequant_ and lvl_lookup_ because they are derived
+    // and recomputed by every successful frame before anything reads them.
     Vp9UncompressedHeader saved_header = uncompressed_header_;
+    uint32_t saved_uncomp_header_size = uncomp_header_size_;
+    uint32_t saved_pic_width = pic_width_;
+    uint32_t saved_pic_height = pic_height_;
+    uint32_t saved_curr_surface_width = curr_surface_width_;
+    uint32_t saved_curr_surface_height = curr_surface_height_;
+    uint32_t saved_reconfig_option = reconfig_option_;
+    bool saved_new_seq_activated = new_seq_activated_;
+    uint8_t saved_last_frame_type = last_frame_type_;
+    uint8_t saved_frame_is_intra = frame_is_intra_;
+
     ParserResult ret = ParseUncompressedHeaderBody(p_stream, size);
     if (ret != PARSER_OK) {
         uncompressed_header_ = saved_header;
+        uncomp_header_size_ = saved_uncomp_header_size;
+        pic_width_ = saved_pic_width;
+        pic_height_ = saved_pic_height;
+        curr_surface_width_ = saved_curr_surface_width;
+        curr_surface_height_ = saved_curr_surface_height;
+        reconfig_option_ = saved_reconfig_option;
+        new_seq_activated_ = saved_new_seq_activated;
+        last_frame_type_ = saved_last_frame_type;
+        frame_is_intra_ = saved_frame_is_intra;
     }
     return ret;
 }
