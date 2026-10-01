@@ -102,6 +102,7 @@ jobs:
             # Each simulator process can use many host threads. Bound Release
             # fanout so long FPSAN cases do not starve under runner load.
             corpus_worker_limit: 4
+            rocjitsu_cpu_threads_budget: 8
             corpus_soft_timeout: 360
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
@@ -123,6 +124,7 @@ jobs:
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
             corpus_worker_limit: 4
+            rocjitsu_cpu_threads_budget: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -143,6 +145,7 @@ jobs:
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
             corpus_worker_limit: 16
+            rocjitsu_cpu_threads_budget: 4
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -165,6 +168,7 @@ jobs:
             cxx_compiler: g++
             run_simulator_corpus: true
             corpus_worker_limit: 4
+            rocjitsu_cpu_threads_budget: 8
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -492,8 +496,15 @@ jobs:
           if (( WORKERS > WORKER_LIMIT )); then
             WORKERS="${WORKER_LIMIT}"
           fi
+          ROCJITSU_CPU_BUDGET_LIMIT=${{ matrix.rocjitsu_cpu_threads_budget }}
+          ROCJITSU_CPU_BUDGET="$(nproc)"
+          if (( ROCJITSU_CPU_BUDGET > ROCJITSU_CPU_BUDGET_LIMIT )); then
+            ROCJITSU_CPU_BUDGET="${ROCJITSU_CPU_BUDGET_LIMIT}"
+          fi
+          echo "Corpus CPU plan: pytest-workers: ${WORKERS}, rocjitsu-cpu-budget: ${ROCJITSU_CPU_BUDGET}"
           corpus_test_flags=(
             --workers "${WORKERS}"
+            --cpu-budget "${ROCJITSU_CPU_BUDGET}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}
