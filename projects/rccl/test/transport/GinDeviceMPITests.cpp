@@ -5959,14 +5959,37 @@ constexpr int kResetConsumerRank = 1;
 // a read or wait that ignores the offset cannot land on the expected value.
 constexpr uint64_t kResetBaseline = 1000;
 
-// Head start for a consumer wait launched before its producer, so the wait is
-// already polling a cell that still holds the pre-reset value.
-constexpr int kConsumerHeadStartMs = 200;
-
 constexpr int kResetDrainTimeoutSec = 60;
 constexpr uint64_t kResultSentinel  = ~uint64_t(0);
 
 bool ginTypeIsProxy() { return requestedGinType() == NCCL_NET_DEVICE_GIN_PROXY; }
+
+// A kernel still running past the deadline cannot be cancelled, and returning
+// from the test would let the scope guards free memory and the devComm it is
+// still using, so a timeout aborts the whole job instead.
+[[noreturn]] void abortResetTest(const char* what) {
+  fprintf(stderr, "GIN reset test: %s did not finish within %d s, aborting\n", what,
+          kResetDrainTimeoutSec);
+  fflush(stderr);
+  MPI_Abort(MPI_COMM_WORLD, 1);
+  std::abort();
+}
+
+hipError_t drainResetStream(hipStream_t stream) {
+  const hipError_t status = syncStreamWithinTimeout(stream, kResetDrainTimeoutSec);
+  if (status == hipErrorNotReady) abortResetTest("stream drain");
+  return status;
+}
+
+// Blocks until the consumer kernel has raised *armed, i.e. is about to poll.
+void waitConsumerArmed(const volatile int* armed) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kResetDrainTimeoutSec);
+  while (*armed == 0) {
+    if (std::chrono::steady_clock::now() >= deadline) abortResetTest("consumer wait arm");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
 
 // Copies nSlots result slots back on checkRank; other ranks report hipSuccess.
 hipError_t copyResultsOnRank(int rank, int checkRank, const uint64_t* dOut, uint64_t* hOut, size_t nSlots) {
@@ -5977,18 +6000,30 @@ hipError_t copyResultsOnRank(int rank, int checkRank, const uint64_t* dOut, uint
 }  // namespace
 
 // Same backend hook that readSignal/waitSignal use to find the cell and offset.
-__device__ ncclGinOffsetPtr resetTestSignalCell(const ncclGin& gin, ncclGinSignal_t sigIdx) {
+__device__ ncclGinOffsetPtr signalPtrAndOffset(const ncclGin& gin, ncclGinSignal_t sigIdx) {
   return ncclGinCall<ncclGinApi_GetSignalPtr>(gin._makeCtx(), sigIdx);
 }
 
+// Raises the host-mapped *armed flag right before the block starts polling, so
+// the host can hold the producer back until the wait is live.
+__device__ void markConsumerArmed(int* armed) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    __threadfence_system();
+    *(volatile int*)armed = 1;
+  }
+}
+
 // out: [0] raw cell, [1] offset, [2] readSignal, [3] shadow -- all after reset.
+// The shadow is raised first so the reset has a non-zero shadow to clear.
 __global__ void signalWaitResetSnapshotKernel(
-    ncclGinSignal_t sigIdx, uint64_t least, uint64_t* out, struct ncclDevComm devComm) {
+    ncclGinSignal_t sigIdx, uint64_t least, uint64_t shadowBump, uint64_t* out,
+    struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
   gin.waitSignal(ncclCoopCta(), sigIdx, least);
   if (threadIdx.x == 0 && blockIdx.x == 0) {
+    gin.increaseSignalShadow(sigIdx, shadowBump);
     gin.resetSignal(sigIdx);
-    ncclGinOffsetPtr cell = resetTestSignalCell(gin, sigIdx);
+    ncclGinOffsetPtr cell = signalPtrAndOffset(gin, sigIdx);
     out[0] = *(volatile uint64_t*)cell.ptr;
     out[1] = cell.offset;
     out[2] = gin.readSignal(sigIdx);
@@ -6011,9 +6046,21 @@ __global__ void signalFollowShadowKernel(
   }
 }
 
-__global__ void signalMeetShadowReadKernel(
-    ncclGinSignal_t sigIdx, uint64_t* outRead, struct ncclDevComm devComm) {
+__global__ void signalArmedWaitReadKernel(
+    ncclGinSignal_t sigIdx, uint64_t least, int* armed, uint64_t* outRead,
+    struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
+  markConsumerArmed(armed);
+  gin.waitSignal(ncclCoopCta(), sigIdx, least);
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *outRead = gin.readSignal(sigIdx);
+  }
+}
+
+__global__ void signalMeetShadowReadKernel(
+    ncclGinSignal_t sigIdx, int* armed, uint64_t* outRead, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  markConsumerArmed(armed);
   gin.waitSignalMeetShadow(ncclCoopCta(), sigIdx);
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     *outRead = gin.readSignal(sigIdx);
@@ -6062,7 +6109,7 @@ __global__ void signalReadPerContextKernel(
   ncclGin gin{devComm, ctx};
   if (threadIdx.x == 0) {
     out[2 * ctx]     = gin.readSignal(sigIdx);
-    out[2 * ctx + 1] = resetTestSignalCell(gin, sigIdx).offset;
+    out[2 * ctx + 1] = signalPtrAndOffset(gin, sigIdx).offset;
   }
 }
 
@@ -6093,8 +6140,8 @@ __global__ void counterResetProducerKernel(
   }
 }
 
-// Two resets in a row: after each one readSignal and the shadow are 0 and the
-// raw cell equals the offset. On proxy the cell keeps the cumulative value
+// Two resets in a row: after each one readSignal and the shadow (raised just
+// before the reset) are 0 and the raw cell equals the offset. On proxy the cell keeps the cumulative value
 // (1000, then 1023); a reset that zeroes the cell fails here. The second wait
 // asks for 23 on top of an offset of 1000, so it also checks that waitSignal
 // adds the offset.
@@ -6137,6 +6184,7 @@ TEST_F(GinMPIDeviceTests, SignalReset_SnapshotsOffsetInsteadOfZeroing) {
     uint64_t cumulative;
   };
   constexpr uint64_t kSecondAddend = 23;
+  constexpr uint64_t kShadowBump   = 7;
   const Phase phases[] = {{kResetBaseline, kResetBaseline},
                           {kSecondAddend, kResetBaseline + kSecondAddend}};
 
@@ -6148,8 +6196,8 @@ TEST_F(GinMPIDeviceTests, SignalReset_SnapshotsOffsetInsteadOfZeroing) {
           kSigIdx, phase.addend, kResetConsumerRank, devComm);
     else
       signalWaitResetSnapshotKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-          kSigIdx, phase.addend, dOut, devComm);
-    ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+          kSigIdx, phase.addend, kShadowBump, dOut, devComm);
+    ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
     uint64_t h[kSlots] = {kResultSentinel, kResultSentinel, kResultSentinel, kResultSentinel};
     ASSERT_MPI_HIP_OK_ON_RANK(rank, kResetConsumerRank,
@@ -6201,6 +6249,12 @@ TEST_F(GinMPIDeviceTests, SignalReset_WaitAndReadAreRelative) {
     if (dOut) (void)hipFree(dOut);
   });
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0xFF, kSlots * sizeof(uint64_t)));
+  int* armed = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipHostMalloc(&armed, sizeof(int), hipHostMallocMapped));
+  auto armedCleanup = makeScopeGuard([&]() {
+    if (armed) (void)hipHostFree(armed);
+  });
+  *armed = 0;
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == kResetProducerRank)
@@ -6209,18 +6263,18 @@ TEST_F(GinMPIDeviceTests, SignalReset_WaitAndReadAreRelative) {
   else
     indexedSignalReadResetConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kResetBaseline, &dOut[0], &dOut[1], devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
-  if (rank == kResetConsumerRank)
-    indexedSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-        kSigIdx, kIncCount, &dOut[2], devComm);
+  if (rank == kResetConsumerRank) {
+    signalArmedWaitReadKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kIncCount, armed, &dOut[2], devComm);
+    waitConsumerArmed(armed);
+  }
   MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == kResetProducerRank) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(kConsumerHeadStartMs));
+  if (rank == kResetProducerRank)
     signalIncRepeatProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kIncCount, kResetConsumerRank, devComm);
-  }
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   uint64_t h[kSlots] = {kResultSentinel, kResultSentinel, kResultSentinel};
   ASSERT_MPI_HIP_OK_ON_RANK(rank, kResetConsumerRank,
@@ -6271,6 +6325,12 @@ TEST_F(GinMPIDeviceTests, SignalReset_ShadowApisAreRelative) {
     if (dOut) (void)hipFree(dOut);
   });
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0xFF, kSlots * sizeof(uint64_t)));
+  int* armed = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipHostMalloc(&armed, sizeof(int), hipHostMallocMapped));
+  auto armedCleanup = makeScopeGuard([&]() {
+    if (armed) (void)hipHostFree(armed);
+  });
+  *armed = 0;
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == kResetProducerRank)
@@ -6279,7 +6339,7 @@ TEST_F(GinMPIDeviceTests, SignalReset_ShadowApisAreRelative) {
   else
     indexedSignalReadResetConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kResetBaseline, &dOut[0], &dOut[1], devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   // leastDelta is the full addend, so the result does not depend on how the
   // producer and consumer interleave.
@@ -6289,18 +6349,18 @@ TEST_F(GinMPIDeviceTests, SignalReset_ShadowApisAreRelative) {
   else
     signalFollowShadowKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kFollowAddend, kShadowBump, &dOut[2], devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
-  if (rank == kResetConsumerRank)
+  if (rank == kResetConsumerRank) {
     signalMeetShadowReadKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-        kSigIdx, &dOut[5], devComm);
+        kSigIdx, armed, &dOut[5], devComm);
+    waitConsumerArmed(armed);
+  }
   MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == kResetProducerRank) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(kConsumerHeadStartMs));
+  if (rank == kResetProducerRank)
     signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kShadowBump, kResetConsumerRank, devComm);
-  }
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   uint64_t h[kSlots];
   std::fill(h, h + kSlots, kResultSentinel);
@@ -6361,7 +6421,7 @@ TEST_F(GinMPIDeviceTests, SignalReset_Low32BitWrap) {
   else
     indexedSignalReadResetConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kNearWrap, &dOut[0], &dOut[1], devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   if (rank == kResetProducerRank)
     signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
@@ -6369,7 +6429,7 @@ TEST_F(GinMPIDeviceTests, SignalReset_Low32BitWrap) {
   else
     signalWaitReadMaskedAndFullKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kDelta, kBits, &dOut[2], devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   uint64_t h[kSlots];
   std::fill(h, h + kSlots, kResultSentinel);
@@ -6382,12 +6442,15 @@ TEST_F(GinMPIDeviceTests, SignalReset_Low32BitWrap) {
 }
 
 // Resetting a signal on context 0 must not change the same signal id on other
-// contexts: their reads keep their values and, on proxy, their offsets stay 0.
+// contexts: their reads keep their values and their offsets stay 0.
 TEST_F(GinMPIDeviceTests, SignalReset_IsPerContext_MultiContext) {
   int nContexts = ginEnvContextCount();
   if (nContexts == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
+  // rocSHMEM GDA and Anvil SDMA ignore ctx.contextId and share one signal array
+  // across the contexts of a connection.
+  if (!ginTypeIsProxy()) GTEST_SKIP() << "Per-context signals are only provided by the proxy backend";
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
@@ -6433,7 +6496,7 @@ TEST_F(GinMPIDeviceTests, SignalReset_IsPerContext_MultiContext) {
   else
     signalWaitPerContextKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kResetBaseline, devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   if (rank == kResetConsumerRank) {
     signalResetOnContextKernel<<<kGinSingleThreadBlocks, kGinSingleThreadThreads, 0, stream>>>(
@@ -6441,16 +6504,15 @@ TEST_F(GinMPIDeviceTests, SignalReset_IsPerContext_MultiContext) {
     signalReadPerContextKernel<<<nContexts, kGinSingleThreadThreads, 0, stream>>>(
         kSigIdx, dOut, devComm);
   }
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   std::vector<uint64_t> h(nSlots, kResultSentinel);
   ASSERT_MPI_HIP_OK_ON_RANK(rank, kResetConsumerRank,
                             copyResultsOnRank(rank, kResetConsumerRank, dOut, h.data(), nSlots));
-  const bool proxy = ginTypeIsProxy();
   for (int ctx = 0; ctx < nContexts; ctx++) {
     const uint64_t added = kResetBaseline + ctx;
     const uint64_t expectedRead   = ctx == kResetCtx ? 0 : added;
-    const uint64_t expectedOffset = proxy && ctx == kResetCtx ? added : 0;
+    const uint64_t expectedOffset = ctx == kResetCtx ? added : 0;
     ASSERT_MPI_EQ_ON_RANK(rank, kResetConsumerRank, expectedRead, h[2 * ctx]);
     ASSERT_MPI_EQ_ON_RANK(rank, kResetConsumerRank, expectedOffset, h[2 * ctx + 1]);
   }
@@ -6519,7 +6581,7 @@ TEST_F(GinMPIDeviceTests, CounterReset_ReadAndWaitAreRelative) {
   if (rank == kResetProducerRank)
     counterResetProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, dstWin, kBufBytes, kCntIdx, kPutsBefore, kPutsAfter, kResetConsumerRank, dOut, devComm);
-  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, kResetDrainTimeoutSec));
+  ASSERT_MPI_EQ(hipSuccess, drainResetStream(stream));
 
   uint64_t h[kSlots] = {kResultSentinel, kResultSentinel, kResultSentinel};
   ASSERT_MPI_HIP_OK_ON_RANK(rank, kResetProducerRank,
