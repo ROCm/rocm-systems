@@ -191,7 +191,7 @@ protected:
     uint32_t next_start_code_offset_;
     uint32_t nal_unit_size_;
 
-    int                 rbsp_size_;
+    size_t              rbsp_size_; // size_t to match the parse functions it is passed to
     uint8_t             rbsp_buf_[RBSP_BUF_SIZE]; // to store parameter set or slice header RBSP
 
     int                 num_slices_;
@@ -229,7 +229,7 @@ protected:
      * \param [in] end_bytepos End position in the EBSP buffer to convert, generally it's size.
      * \return Returns the size of the converted buffer in <tt>size_t</tt>
      */
-    size_t EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos);
+    ParserResult EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size);
 
     /*! \brief Function to parse Sei Message Info. Stops at the first message that runs past the
      *         end of the NAL unit, keeping the messages read before it. SEI does not affect the

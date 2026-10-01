@@ -176,10 +176,12 @@ ParserResult RocVideoParser::GetNalUnit() {
     }
 }
 
-size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos) {
+ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size) {
     int count = 0;
+    *p_rbsp_size = 0;
     if (end_bytepos < begin_bytepos) {
-        return end_bytepos;
+        *p_rbsp_size = end_bytepos;
+        return PARSER_OK;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
     uint8_t *streamBuffer_end = streamBuffer + end_bytepos;
@@ -192,7 +194,8 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
             if (tmp == 0x03) {
                 //check the 4th uint8_t after 0x000003, except when cabac_zero_word is used, in which case the last three bytes of this NAL unit must be 0x000003
                 if ((streamBuffer_i + 1 != streamBuffer_end) && (streamBuffer_i[1] > 0x03)) {
-                    return static_cast<size_t>(-1);
+                    ErrorLog(g_rocdec_logger, "Malformed emulation prevention sequence in the NAL unit.");
+                    return PARSER_INVALID_ARG;
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000
                 if (streamBuffer_i + 1 == streamBuffer_end) {
@@ -213,7 +216,8 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
         }
         streamBuffer_i++;
     }
-    return end_bytepos - begin_bytepos + reduce_count;
+    *p_rbsp_size = end_bytepos - begin_bytepos + reduce_count;
+    return PARSER_OK;
 }
 
 ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
