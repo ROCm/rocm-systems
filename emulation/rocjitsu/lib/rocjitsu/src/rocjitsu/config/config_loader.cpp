@@ -26,6 +26,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/topology.h"
 #include "simulation_config_generated.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <cassert>
@@ -633,6 +634,11 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
           return dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
         });
     if ((num_cus || dynamic_cast<amdgpu::ShaderEngine *>(group)) && num_cus != expected_cus) {
+      if (cus_per_shader_array)
+        util::Logger::warn("Shader-array geometry mismatch: ", group->full_path(), " has ", num_cus,
+                           " compute units; expected ", expected_cus,
+                           " from num_shader_arrays_per_engine * num_cu_per_sh. "
+                           "Shader-array width remains unknown.");
       cus_per_shader_array = 0;
       break;
     }

@@ -490,7 +490,7 @@ public:
   /// @param cu_index Zero-based CU index within the shader engine.
   /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
-                                  uint32_t cus_per_shader_array) {
+                                  uint32_t cus_per_shader_array = 0) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;

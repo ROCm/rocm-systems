@@ -364,10 +364,15 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
   auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
                                     rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(loaded.device.num_cu_per_sh, 8u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
   auto check_build = [](const config::TopologyBuildResult &build) {
+    ASSERT_FALSE(build.xcds.empty());
     for (auto *xcd : build.xcds) {
+      ASSERT_GT(xcd->num_shader_engines(), 0u);
       for (uint32_t se_id = 0; se_id < xcd->num_shader_engines(); ++se_id) {
         auto *se = xcd->shader_engine(se_id);
+        ASSERT_EQ(se->num_compute_units(), 16u);
         for (uint32_t cu_id : {0u, 5u, 7u, 8u, 13u, 15u}) {
           auto *cu = se->compute_unit(cu_id);
           auto *wf = cu->dispatch_wf(0, 0, 32, 8);
@@ -423,6 +428,89 @@ TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
       check_build(loaded.build_result);
       for (const auto &build : loaded.extra_gpu_builds)
         check_build(build);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths) {
+  for (uint32_t second_engine_cus : {2u, 0u}) {
+    SCOPED_TRACE(second_engine_cus);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna5", "gpu": {"device": {
+        "gfx_target_version": 120500, "num_sdma_engines": 0,
+        "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu[0:4]", "type": "compute_unit"}
+          ]},
+          {"name": "se1", "type": "shader_engine", "children": []}
+        ]}
+      ]}, "links": []}
+    })";
+    if (second_engine_cus)
+      ASSERT_TRUE(
+          replace_exactly_once(json, R"("children": [])",
+                               R"("children": [{"name": "cu[0:2]", "type": "compute_unit"}])"));
+
+    testing::internal::CaptureStderr();
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    EXPECT_THAT(warning,
+                testing::HasSubstr("soc.xcd0.se1 has " + std::to_string(second_engine_cus) +
+                                   " compute units; expected 4"));
+    EXPECT_EQ(std::count(warning.begin(), warning.end(), '\n'), 1);
+    ASSERT_EQ(loaded.build_result.xcds.size(), 1u);
+    auto *xcd = loaded.build_result.xcds[0];
+    ASSERT_EQ(xcd->num_shader_engines(), 2u);
+    ASSERT_EQ(xcd->shader_engine(0)->num_compute_units(), 4u);
+    ASSERT_EQ(xcd->shader_engine(1)->num_compute_units(), second_engine_cus);
+    for (auto *se : xcd->shader_engines())
+      for (auto *cu : se->compute_units())
+        EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  }
+}
+
+TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
+  for (uint32_t num_cus : {4u, 3u}) {
+    SCOPED_TRACE(num_cus);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna5", "gpu": {"device": {
+        "gfx_target_version": 120500, "num_sdma_engines": 0,
+        "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "cu[0:CU_COUNT]", "type": "compute_unit"}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "CU_COUNT", std::to_string(num_cus)));
+    testing::internal::CaptureStderr();
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    if (num_cus == 4)
+      EXPECT_TRUE(warning.empty());
+    else
+      EXPECT_THAT(warning, testing::HasSubstr("soc.xcd0 has 3 compute units; expected 4"));
+    ASSERT_EQ(loaded.build_result.xcds.size(), 1u);
+    auto *cp = loaded.build_result.xcds[0]->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), num_cus);
+    for (uint32_t cu_index = 0; cu_index < num_cus; ++cu_index) {
+      EXPECT_EQ(cus[cu_index]->cus_per_shader_array(), num_cus == 4 ? 2u : 0u);
+      if (num_cus == 4)
+        EXPECT_EQ(cus[cu_index]->shader_array_cu_id(), cu_index % 2);
     }
   }
 }
@@ -1825,8 +1913,11 @@ TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
   ASSERT_EQ(source.device.num_cu_per_sh, 8u);
   constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
   constexpr std::array<uint32_t, 6> kCuIndices{0, 5, 7, 8, 13, 15};
+  ASSERT_GT(source.soc()->num_xcds(), 0u);
   auto *source_xcd = source.soc()->xcd(0);
+  ASSERT_GT(source_xcd->num_shader_engines(), 0u);
   for (auto *se : source_xcd->shader_engines()) {
+    ASSERT_EQ(se->num_compute_units(), 16u);
     for (uint32_t cu_index : kCuIndices) {
       auto *cu = se->compute_unit(cu_index);
       auto *wf = cu->dispatch_wf(0, 0, 32, 8);
@@ -1841,9 +1932,11 @@ TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
   config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
   auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_EQ(restored.soc()->num_xcds(), source.soc()->num_xcds());
   auto *restored_xcd = restored.soc()->xcd(0);
   ASSERT_EQ(restored_xcd->num_shader_engines(), source_xcd->num_shader_engines());
   for (auto *se : restored_xcd->shader_engines()) {
+    ASSERT_EQ(se->num_compute_units(), 16u);
     for (uint32_t cu_index : kCuIndices) {
       SCOPED_TRACE(se->full_path() + ".cu" + std::to_string(cu_index));
       auto *cu = se->compute_unit(cu_index);

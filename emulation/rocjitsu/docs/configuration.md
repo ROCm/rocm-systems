@@ -283,10 +283,18 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
-gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width of 1–16 and
-per-engine CU counts matching `num_shader_arrays_per_engine * num_cu_per_sh`
-from `vm.gpu.device`. If the geometry disagrees with the component hierarchy,
-the loader leaves the shader-array width unknown and reads return `Unsupported`.
+gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width
+(`vm.gpu.device.num_cu_per_sh`) of 1–16. Every shader engine, including groups
+with direct CU children, must have `num_shader_arrays_per_engine * num_cu_per_sh`
+compute units. If this geometry disagrees with the component hierarchy, the
+loader warns once per GPU and leaves the shader-array width unknown. Reads
+with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
+write zero.
+
+The topology has no shader-array level. Within each shader engine, the first
+`num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
+The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
+KFD CU masks use the same order. Direct-CU groups follow their CU child order.
 
 ### Memory wait diagnostics
 
@@ -318,9 +326,9 @@ The JSON config is validated against FlatBuffers schemas in `schemas/`:
 
 Checkpoints preserve the shader-array width used by gfx1250 `WAVE_HW_ID1.WGP_ID`
 reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
-them return `Unsupported`; the simulator cannot infer a shader-array-local ID
-from the shader-engine CU count alone. Saving such a restored checkpoint again
-preserves that unknown geometry.
+them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer a
+shader-array-local ID from the shader-engine CU count alone. Saving such a restored
+checkpoint again preserves that unknown geometry.
 
 ## Multi-GPU
 

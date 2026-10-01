@@ -7905,6 +7905,14 @@ TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
     EXPECT_EQ(value, 15u);
   }
 
+  cu->set_shader_engine_location(1, 13);
+  EXPECT_EQ(cu->shader_engine_id(), 1u);
+  EXPECT_EQ(cu->scratch_scoreboard_base(), 13u * cu->scratch_slots_per_cu());
+  EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+
   for (uint32_t width : {0u, 17u, 32u, std::numeric_limits<uint32_t>::max()}) {
     SCOPED_TRACE(width);
     for (uint32_t cu_index : {0u, 16u}) {
