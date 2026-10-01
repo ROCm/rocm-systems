@@ -65,7 +65,8 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 [[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $ARCHIVE" >&2; exit 1; }
 
 name="$(basename "$ARCHIVE")"
-ts="$(date -u +%Y%m%dT%H%M%SZ)"
+# The pid keeps two runs in the same second from sharing a log and a finding.
+ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 # Never the current directory by default: run from inside a customer's archive
 # and the finding and the replay log land in it, against this skill's own rule
 # that the archive is not to be written to. Per user, because a shared /tmp

@@ -119,7 +119,8 @@ if (-not (Test-Path $Archive -PathType Container)) {
 }
 
 $Name    = Split-Path $Archive -Leaf
-$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
+# The pid keeps two runs in the same second from sharing a log and a finding.
+$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
 $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
 $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
