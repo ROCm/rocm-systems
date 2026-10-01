@@ -54,6 +54,10 @@ inline constexpr std::uint32_t kIValueTensorTag     = 1;
 inline constexpr std::size_t   kIValueKnownTagCount = 28;
 inline constexpr std::size_t   kTensorSize          = 8;
 
+// c10::detail::ListImpl's std::vector<IValue> begin/end pointers (libstdc++).
+inline constexpr std::size_t kListImplElementsBeginOff = 16;
+inline constexpr std::size_t kListImplElementsEndOff   = 24;
+
 inline constexpr std::size_t kOperatorNameSize              = 64;
 inline constexpr std::size_t kOperatorNameAlignment         = 8;
 inline constexpr std::size_t kOperatorNameNameOff           = 0;

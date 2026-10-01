@@ -88,6 +88,10 @@ copy tensor contents or retain their ownership. Common dtype names come from
 AOTI dtype identifiers; version-dependent fallback dtype names use the AOTI
 version independently of the loader's supported-minor check.
 
+TensorLists borrow their existing element array during synchronous capture.
+Traversal stops after eight entries or when the text buffer truncates, without
+copying the list or retaining element ownership.
+
 Capture renders at most 32 top-level arguments and limits the unencoded text
 to 512 bytes of payload. Truncated text may add the four-character closing
 suffix, and percent encoding can expand the wire field further. Python
@@ -166,7 +170,8 @@ rocprofiler-compute library directory under lib or lib64, without a Torch
 minor or Python-SOABI suffix.
 
 The local shim covers RecordFunction and callback layouts, input views,
-IValue payloads, operator names and handles, Dispatcher registration listeners
+IValue payloads, ListImpl vector begin/end positions and the libstdc++ pointer
+representation, operator names and handles, Dispatcher registration listeners
 and their registration handle, and ThreadLocalDebugInfo. These
 are private PyTorch interfaces. The accepted compatibility boundary is the
 validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
