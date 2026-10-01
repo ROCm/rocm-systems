@@ -192,6 +192,9 @@ def _holds_an_event(events: Path) -> bool:
         return False
     if len(head) < HEADER_BYTES + EVENT_HEADER_BYTES:
         return False
+    # The reader rejects a file without the HRR header, whatever follows it.
+    if struct.unpack_from("<I", head)[0] != HEADER_MAGIC:
+        return False
     event_type, payload_length = struct.unpack_from("<H24xI", head, HEADER_BYTES)
     if (
         event_type == EOF_MARKER

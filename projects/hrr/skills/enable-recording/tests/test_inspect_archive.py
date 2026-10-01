@@ -648,6 +648,11 @@ def test_a_torn_first_event_header_is_not_a_recording(tmp_path):
     (pid_dir / "events.bin").write_bytes(header + struct.pack("<HQQQI2x", 1, 1, 0, 0, 1 << 20))
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
 
+    # A plausible event behind a file header that is not HRR's.
+    bad_header = struct.pack("<IHH", 0, 5, 0)
+    (pid_dir / "events.bin").write_bytes(bad_header + struct.pack("<HQQQI2x", 1, 1, 0, 0, 32))
+    assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
+
 
 def test_framing_without_events_is_not_a_recording_either(tmp_path):
     """Header plus clean trailer is 52 bytes and no events at all, so a byte
