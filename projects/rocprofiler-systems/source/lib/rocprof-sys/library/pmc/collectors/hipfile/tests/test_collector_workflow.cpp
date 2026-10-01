@@ -67,8 +67,6 @@ struct stub_cache
         metadata_gpus.push_back(gpu_id);
     }
 
-    // needs a refactor of every collector's store_sample
-    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_cfg,
                              const enabled_metrics& supported, const metrics& values,

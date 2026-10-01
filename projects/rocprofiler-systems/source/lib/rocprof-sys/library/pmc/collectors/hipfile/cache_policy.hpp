@@ -81,8 +81,6 @@ struct cache_policy
      * @param metric_values Collected values.
      * @param timestamp Sample timestamp in nanoseconds.
      */
-    // needs a refactor of every collector's store_sample
-    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t                         device_id,
                              [[maybe_unused]] const std::string& device_name,
                              const enabled_metrics&              enabled_metrics_cfg,
