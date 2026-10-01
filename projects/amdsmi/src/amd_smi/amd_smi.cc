@@ -94,6 +94,58 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
                           {AMDSMI_MEMORY_PARTITION_NPS4, RSMI_MEMORY_PARTITION_NPS4},
                           {AMDSMI_MEMORY_PARTITION_NPS8, RSMI_MEMORY_PARTITION_NPS8}};
 
+// Switch (not a table) so a missing case warns at compile time when a new block is added.
+#define AMDSMI_BLOCK_CASE(name) \
+  case AMDSMI_GPU_BLOCK_##name: \
+    return #name
+static std::string get_gpu_block_name(amdsmi_gpu_block_t block) {
+  switch (block) {
+    AMDSMI_BLOCK_CASE(INVALID);
+    AMDSMI_BLOCK_CASE(UMC);
+    AMDSMI_BLOCK_CASE(SDMA);
+    AMDSMI_BLOCK_CASE(GFX);
+    AMDSMI_BLOCK_CASE(MMHUB);
+    AMDSMI_BLOCK_CASE(ATHUB);
+    AMDSMI_BLOCK_CASE(PCIE_BIF);
+    AMDSMI_BLOCK_CASE(HDP);
+    AMDSMI_BLOCK_CASE(XGMI_WAFL);
+    AMDSMI_BLOCK_CASE(DF);
+    AMDSMI_BLOCK_CASE(SMN);
+    AMDSMI_BLOCK_CASE(SEM);
+    AMDSMI_BLOCK_CASE(MP0);
+    AMDSMI_BLOCK_CASE(MP1);
+    AMDSMI_BLOCK_CASE(FUSE);
+    AMDSMI_BLOCK_CASE(MCA);
+    AMDSMI_BLOCK_CASE(VCN);
+    AMDSMI_BLOCK_CASE(JPEG);
+    AMDSMI_BLOCK_CASE(IH);
+    AMDSMI_BLOCK_CASE(MPIO);
+    AMDSMI_BLOCK_CASE(MMSCH);
+    AMDSMI_BLOCK_CASE(MP5);
+    AMDSMI_BLOCK_CASE(ATU);
+    AMDSMI_BLOCK_CASE(DACC_BE);
+    AMDSMI_BLOCK_CASE(ECLR);
+    AMDSMI_BLOCK_CASE(KPX_SERDES);
+    AMDSMI_BLOCK_CASE(LSDMA);
+    AMDSMI_BLOCK_CASE(MPART);
+    AMDSMI_BLOCK_CASE(MPIFOE);
+    AMDSMI_BLOCK_CASE(MPRAS);
+    AMDSMI_BLOCK_CASE(NBIF);
+    AMDSMI_BLOCK_CASE(NBIO);
+    AMDSMI_BLOCK_CASE(OXRP);
+    AMDSMI_BLOCK_CASE(PCIE_PL);
+    AMDSMI_BLOCK_CASE(PCS_XGMI);
+    AMDSMI_BLOCK_CASE(PIE);
+    AMDSMI_BLOCK_CASE(CS);
+    AMDSMI_BLOCK_CASE(SHUB);
+    AMDSMI_BLOCK_CASE(SSBDCI);
+    AMDSMI_BLOCK_CASE(UCIE_PCS);  // == AMDSMI_GPU_BLOCK_LAST
+    AMDSMI_BLOCK_CASE(RESERVED);
+  }
+  return "UNKNOWN";
+}
+#undef AMDSMI_BLOCK_CASE
+
 template <typename F, typename... Args>
 amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
                              uint32_t increment_gpu_id, Args&&... args) {
@@ -5478,6 +5530,19 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
       ec->correctable_count += block_ec.correctable_count;
       ec->uncorrectable_count += block_ec.uncorrectable_count;
       ec->deferred_count += block_ec.deferred_count;
+    } else {
+      // Not propagated to the overall return status: AMDSMI_STATUS_NOT_SUPPORTED
+      // here is ambiguous (covers both "block genuinely unsupported" and "GPU
+      // mid-reset," both benign) and any other status would mean *ec below is a
+      // real undercount with no caller-visible signal -- tracked as a follow-up
+      // to properly distinguish and propagate the latter case.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | block 0x" << std::hex << block << std::dec << " ("
+         << get_gpu_block_name(block) << ")"
+         << " enabled per mask but amdsmi_get_gpu_ecc_count() returned "
+         << smi_amdgpu_get_status_string(status, false)
+         << "; total ecc count below may be incomplete";
+      LOG_ERROR(ss);
     }
   }
 

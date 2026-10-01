@@ -6,8 +6,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
@@ -104,6 +107,53 @@ class ScopedProcessorRegistration {
 
  private:
   amd::smi::AMDSmiProcessor* processor_;
+};
+
+// RAII wrapper around an inotify(7) watch on a single, already-existing file
+// path. Tallies file operations (open, write-close) performed by ANY
+// process on that path -- including a forked-and-privilege-dropped child --
+// with zero changes to the production code under test. `path` must already
+// exist when constructed. Construct BEFORE locking a file down (e.g. via
+// FakeSysfsTree::SetPermissions()), not after, to keep IsAvailable() true
+// regardless of which privilege level the test binary runs under. See
+// docs/design/faking-external-interfaces.md's "Monitoring file operations
+// in tests" section for the full design, constraints, and alternatives
+// considered.
+class ScopedFileWatch {
+ public:
+  // event_mask is a bitwise-OR of IN_* flags (<sys/inotify.h>), e.g.
+  // IN_OPEN | IN_CLOSE_WRITE, naming which operations this watch observes.
+  ScopedFileWatch(const std::string& path, uint32_t event_mask);
+  ~ScopedFileWatch();
+
+  ScopedFileWatch(const ScopedFileWatch&) = delete;
+  ScopedFileWatch& operator=(const ScopedFileWatch&) = delete;
+
+  // False if the watch couldn't be established -- inotify unavailable,
+  // `path` didn't exist at construction time, or the constructing process
+  // lacked read permission on `path` at that time (inotify_add_watch(2)).
+  // Tests should GTEST_SKIP() (or skip just the affected assertion), not assert/fail, when this is
+  // false: it means the mechanism itself is unusable here, not that zero events happened.
+  bool IsAvailable() const { return watch_fd_ >= 0; }
+
+  // Cumulative count of events matching any bit in `mask` seen since
+  // construction. Drains pending inotify events on every call.
+  uint32_t Count(uint32_t mask);
+
+  // Convenience wrappers for the two cases this codebase needs today.
+  uint32_t OpenCount();
+  uint32_t WriteCount();
+
+ private:
+  // uint32_t is guaranteed exactly 32 bits by <cstdint>; this names that fact
+  // instead of repeating the literal 32 at each use.
+  static constexpr std::size_t kBitsPerMask = std::numeric_limits<uint32_t>::digits;
+
+  void Drain();
+
+  int inotify_fd_ = -1;
+  int watch_fd_ = -1;
+  std::array<uint32_t, kBitsPerMask> event_tally_{};  // indexed by bit position of each IN_* flag
 };
 
 }  // namespace amd::smi::testing

@@ -221,6 +221,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
   - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
   - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`.
+  - A GPU with RAS present but genuinely disabled (a cleanly-read, all-zero RAS state) still correctly reports `0`, not `N/A` -- only an actual read/parse failure reports `N/A`.
   - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
   - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
     ```
