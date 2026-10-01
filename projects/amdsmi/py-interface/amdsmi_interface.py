@@ -1370,20 +1370,9 @@ def amdsmi_get_cpu_apb_status(processor_handle: processor_handle_t) -> dict:
         )
     )
 
-    apb_status_val = apb_status.value
-    if apb_status_val == 0:
-        status = "Enabled"
-    elif apb_status_val == 1:
-        status = "Disabled"
-    else:
-        status = f"Unknown ({apb_status_val})"
-
-    if apb_status_val == 0:  # APB is enabled; pstate not applicable
-        pstate_val = -1
-    else:  # APB is disabled; pstate reflects the fixed DF pstate
-        pstate_val = pstate.value
-
-    return {"status": status, "pstate": pstate_val}
+    # apb_status: 0 = APB enabled (auto P-state), 1 = APB disabled (fixed P-state)
+    # pstate is only meaningful when APB is disabled.
+    return {"apb_disabled": apb_status.value, "pstate": pstate.value}
 
 
 def amdsmi_get_cpu_fclk_mclk(processor_handle: processor_handle_t):

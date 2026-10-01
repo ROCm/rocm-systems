@@ -105,12 +105,51 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_apb_status(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_apb_status as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
+        # Declared, not tolerated: a handle with no HSMP-capable CPU socket behind
+        # it (eg. a GPU handle, or a host with no amd_hsmp/hsmp_acpi driver) must
+        # come back NOT_SUPPORTED or NO_HSMP_MSG_SUP -- anything else, including a
+        # crash or a bogus SUCCESS, is a real failure.
+        wrong_processor = [amdsmi.AmdSmiStatus.NOT_SUPPORTED, amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP]
+        correct_processor = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_apb_status=amdsmi.amdsmi_get_cpu_apb_status)
+        # Two independent sweeps: a bug in one handle type's loop must not
+        # prevent the other handle type from being exercised.
+        failures = []
+
+        try:
+            with self.common.status_sweep():
+                for i, gpu in enumerate(self.common.processors):
+                    self.common.print_device_header(i)
+                    msg = f"\t### amdsmi_get_cpu_apb_status(gpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, wrong_processor):
+                        val = amdsmi.amdsmi_get_cpu_apb_status(gpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except amdsmi.AmdSmiLibraryException:
+            cpu_handles = []
+        self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, correct_processor):
+                        val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
         return
 
     def test_get_cpu_cclk_limit(self):
@@ -196,14 +235,45 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_df_pstate_range(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_df_pstate_range as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
+        wrong_processor = [amdsmi.AmdSmiStatus.NOT_SUPPORTED, amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP]
+        correct_processor = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_df_pstate_range=amdsmi.amdsmi_get_cpu_df_pstate_range
-        )
+        failures = []
+
+        try:
+            with self.common.status_sweep():
+                for i, gpu in enumerate(self.common.processors):
+                    self.common.print_device_header(i)
+                    msg = f"\t### amdsmi_get_cpu_df_pstate_range(gpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, wrong_processor):
+                        val = amdsmi.amdsmi_get_cpu_df_pstate_range(gpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except amdsmi.AmdSmiLibraryException:
+            cpu_handles = []
+        self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, correct_processor):
+                        val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
         return
 
     def test_set_cpu_gmi3_link_width_range(self):
@@ -286,10 +356,54 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_xgmi_width(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_xgmi_width as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
+        # amdsmi_get_cpu_xgmi_width delegates to ESMI's esmi_xgmi_width_get, which
+        # is defined only for *multi-socket* systems (XGMI is the socket-to-socket
+        # link). On a single-socket host there is no XGMI link, so ESMI rejects the
+        # query and it surfaces as AMDSMI_STATUS_INVAL -- a legitimate result here,
+        # not a failure. SUCCESS is still excluded from wrong_processor so a non-CPU
+        # handle that bogusly succeeds is still caught.
+        wrong_processor = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.INVAL,
+        ]
+        correct_processor = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.INVAL,
+        ]
 
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_xgmi_width=amdsmi.amdsmi_get_cpu_xgmi_width)
+        failures = []
+
+        try:
+            with self.common.status_sweep():
+                for i, gpu in enumerate(self.common.processors):
+                    self.common.print_device_header(i)
+                    msg = f"\t### amdsmi_get_cpu_xgmi_width(gpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, wrong_processor):
+                        val = amdsmi.amdsmi_get_cpu_xgmi_width(gpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except amdsmi.AmdSmiLibraryException:
+            cpu_handles = []
+        self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    msg = f"\t### amdsmi_get_cpu_xgmi_width(cpu={i}):"
+                    val = "N/A"
+                    with self.common.expect_status(msg, correct_processor):
+                        val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
+                    self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
         return

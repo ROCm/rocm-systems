@@ -2670,8 +2670,12 @@ class MetricCommands:
             static_dict["apb_status"] = {}
             try:
                 apb_info = amdsmi_interface.amdsmi_get_cpu_apb_status(args.cpu)
-                static_dict["apb_status"]["status"] = apb_info["status"]
-                static_dict["apb_status"]["pstate"] = apb_info["pstate"]
+                if apb_info["apb_disabled"]:
+                    static_dict["apb_status"]["status"] = "DISABLED"
+                    static_dict["apb_status"]["pstate"] = apb_info["pstate"]
+                else:
+                    static_dict["apb_status"]["status"] = "ENABLED"
+                    static_dict["apb_status"]["pstate"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["apb_status"]["status"] = "N/A"
                 static_dict["apb_status"]["pstate"] = "N/A"

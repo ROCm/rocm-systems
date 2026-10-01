@@ -8997,14 +8997,13 @@ amdsmi_status_t amdsmi_set_cpu_dimm_sb_reg(amdsmi_processor_handle processor_han
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-
 amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_handle, uint8_t min,
                                           uint8_t max);
 
 /**
  * @brief Get XGMI link width range.
  *
- * @ingroup tagXGMIBandwidthCont
+ * @ingroup tagEsmiXGMIBandwidthCont
  *
  * @platform{cpu_bm}
  *
@@ -9083,13 +9082,14 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
 /**
  * @brief Get APB disable state.
  *
- * @ingroup tagPstateSelect
+ * @ingroup tagEsmiPstateSelect
  *
  * @platform{cpu_bm}
  *
  * @param[in] processor_handle Cpu socket which to query
  *
- * @param[in,out] apb_status - Input buffer to receive APB status
+ * @param[in,out] apb_status - Input buffer to receive APB status (0 = APB enabled/automatic
+ * P-state, 1 = APB disabled/fixed P-state)
  *
  * @param[in,out] pstate - Input buffer to receive DF pstate value, during APB disabled condition
  *
@@ -9178,15 +9178,15 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
  * This API retrieves the current Data Fabric (DF) P-State range for the specified processor
  * socket.
  *
- * @ingroup tagPstateSelect
+ * @ingroup tagEsmiPstateSelect
  *
  * @platform{cpu_bm}
  *
  * @param[in] processor_handle Cpu socket which to query
  *
- * @param[out] min_pstate - Input buffer to receive minimum DF pstate value
+ * @param[out] min_pstate - Output buffer to receive minimum DF pstate value
  *
- * @param[out] max_pstate - Input buffer to receive maximum DF pstate value
+ * @param[out] max_pstate - Output buffer to receive maximum DF pstate value
  *
  * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
