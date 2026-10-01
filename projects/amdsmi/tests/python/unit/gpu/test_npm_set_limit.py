@@ -126,7 +126,3 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_limit(node_handle, 250)
         self.assertEqual(ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
-
-
-if __name__ == "__main__":
-    unittest.main()

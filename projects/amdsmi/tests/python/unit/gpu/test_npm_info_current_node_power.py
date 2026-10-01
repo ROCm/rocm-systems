@@ -102,7 +102,3 @@ class TestNpmInfoCurrentNodePowerKey(unittest.TestCase):
         # with the sentinel/absent case.
         result = self._get_npm_info_with_mocked_c_call(current_node_power_raw=0)
         self.assertEqual(result["current_node_power"], 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

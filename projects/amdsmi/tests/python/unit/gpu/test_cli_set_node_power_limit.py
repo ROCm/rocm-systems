@@ -80,33 +80,16 @@ import types
 import unittest
 from unittest import mock
 
-try:
-    from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
-
-
-def _resolve_cli_dir():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "set_value.py")):
-            return cli_dir
-    return None
-
-
-_CLI_DIR = _resolve_cli_dir()
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
 
 _STATUS_NOT_SUPPORTED = 2
 _STATUS_NO_PERM = 10
 _STATUS_INVAL = 5
+_STATUS_UNEXPECTED_SIZE = 42
+_STATUS_UNEXPECTED_DATA = 43
 _NPM_STATUS_DISABLED = 0
 _NPM_STATUS_ENABLED = 1
 
@@ -125,36 +108,41 @@ class _FakeLibraryException(Exception):
 
 
 def _install_fake_amdsmi():
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
-    wrapper = types.ModuleType("amdsmi.amdsmi_wrapper")
+    wrapper = fake_module(
+        "amdsmi.amdsmi_wrapper",
+        AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_PERM=_STATUS_NO_PERM,
+        AMDSMI_STATUS_INVAL=_STATUS_INVAL,
+        # Unused by this file's own tests, but amdsmi_helpers.AMDSMIHelpers's
+        # CPER_DECODE_MESSAGES class body reads these off amdsmi_wrapper at
+        # import time, so `import amdsmi_helpers` under this stub needs them
+        # present or it dies with an AttributeError before any test runs.
+        AMDSMI_STATUS_UNEXPECTED_SIZE=_STATUS_UNEXPECTED_SIZE,
+        AMDSMI_STATUS_UNEXPECTED_DATA=_STATUS_UNEXPECTED_DATA,
+        AMDSMI_NPM_STATUS_DISABLED=_NPM_STATUS_DISABLED,
+        AMDSMI_NPM_STATUS_ENABLED=_NPM_STATUS_ENABLED,
+    )
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        AMDSMI_MAX_PPT_LIMIT=0,
+        AMDSMI_MAX_UTIL=100,
+        amdsmi_wrapper=wrapper,
+        # Overwritten per-test.
+        amdsmi_set_npm_limit=lambda _handle, _limit: None,
+        amdsmi_get_npm_info=lambda _handle: {
+            "max_node_power_limit": "N/A",
+            "status": _NPM_STATUS_ENABLED,
+        },
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
-    interface.AMDSMI_MAX_PPT_LIMIT = 0
-    interface.AMDSMI_MAX_UTIL = 100
-    wrapper.AMDSMI_STATUS_NOT_SUPPORTED = _STATUS_NOT_SUPPORTED
-    wrapper.AMDSMI_STATUS_NO_PERM = _STATUS_NO_PERM
-    wrapper.AMDSMI_STATUS_INVAL = _STATUS_INVAL
-    wrapper.AMDSMI_NPM_STATUS_DISABLED = _NPM_STATUS_DISABLED
-    wrapper.AMDSMI_NPM_STATUS_ENABLED = _NPM_STATUS_ENABLED
-    interface.amdsmi_wrapper = wrapper
-    # Overwritten per-test.
-    interface.amdsmi_set_npm_limit = lambda _handle, _limit: None
-    interface.amdsmi_get_npm_info = lambda _handle: {
-        "max_node_power_limit": "N/A",
-        "status": _NPM_STATUS_ENABLED,
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
     }
-
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
-    return interface
 
 
 def _load_set_value_module():
@@ -224,29 +212,15 @@ class _StubHelpers:
 
 
 class TestCliSetNodePowerLimit(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-        "amdsmi_cli_exceptions",
-    )
-
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        modules = _install_fake_amdsmi()
+        modules["amdsmi_cli_exceptions"] = None
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _make_command(self, node_handle):
         cmd = self.module.SetValueCommands()
@@ -352,39 +326,32 @@ def _install_fake_amdsmi_for_helpers():
     / ``AmdSmiParameterException`` directly on the ``amdsmi_interface`` module
     (as opposed to the ``amdsmi_exception`` submodule).
     """
-    interface = _install_fake_amdsmi()
+    modules = _install_fake_amdsmi()
+    interface = modules["amdsmi.amdsmi_interface"]
     interface.AmdSmiInitFlags = _FakeInitFlags
     interface.amdsmi_init = lambda _flag: None
     interface.amdsmi_shut_down = lambda: None
     interface.AmdSmiLibraryException = _FakeLibraryException
     interface.AmdSmiParameterException = _FakeParameterException
-    return interface
+    return modules
 
 
 class TestValidateAndSetNodePowerLimit(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-        "amdsmi_init",
-        "amdsmi_helpers",
-        "amdsmi_cli_exceptions",
-        "BDF",
-    )
+    _EXTRA_STUBBED_NAMES = ("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")
 
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
             raise unittest.SkipTest("amd-smi CLI source not found")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        for name in cls._SAVED_MODULE_NAMES:
-            sys.modules.pop(name, None)
+        modules = _install_fake_amdsmi_for_helpers()
+        modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+
         cls._path_added = _CLI_DIR not in sys.path
         if cls._path_added:
             sys.path.insert(0, _CLI_DIR)
 
-        cls.interface = _install_fake_amdsmi_for_helpers()
         import amdsmi_helpers as amdsmi_helpers_module
 
         # staticmethod() wrapping prevents `self.validate` from auto-binding
@@ -401,11 +368,6 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
     def tearDownClass(cls):
         if getattr(cls, "_path_added", False) and _CLI_DIR in sys.path:
             sys.path.remove(_CLI_DIR)
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def setUp(self):
         self.calls = []
@@ -487,20 +449,21 @@ class TestGetMaxNodePowerLimit(unittest.TestCase):
     device fails or reports "N/A" itself.
     """
 
-    _SAVED_MODULE_NAMES = TestValidateAndSetNodePowerLimit._SAVED_MODULE_NAMES
+    _EXTRA_STUBBED_NAMES = TestValidateAndSetNodePowerLimit._EXTRA_STUBBED_NAMES
 
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
             raise unittest.SkipTest("amd-smi CLI source not found")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        for name in cls._SAVED_MODULE_NAMES:
-            sys.modules.pop(name, None)
+        modules = _install_fake_amdsmi_for_helpers()
+        modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+
         cls._path_added = _CLI_DIR not in sys.path
         if cls._path_added:
             sys.path.insert(0, _CLI_DIR)
 
-        cls.interface = _install_fake_amdsmi_for_helpers()
         import amdsmi_helpers as amdsmi_helpers_module
 
         # staticmethod() wrapping avoids auto-binding this TestCase instance
@@ -511,11 +474,6 @@ class TestGetMaxNodePowerLimit(unittest.TestCase):
     def tearDownClass(cls):
         if getattr(cls, "_path_added", False) and _CLI_DIR in sys.path:
             sys.path.remove(_CLI_DIR)
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _fake_self(self, gpu_handles):
         # get_max_node_power_limit() only calls self.get_gpu_handles(); a
@@ -574,25 +532,23 @@ class TestGetMaxNodePowerLimit(unittest.TestCase):
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else ""
 
 
-def _install_fake_amdsmi_for_parser():
+def _build_fake_modules_for_parser():
     """Minimal stub surface for importing amdsmi_parser.py.
 
     Mirrors test_output_file_stdin.py's _install_stubs(): the parser module
     only needs these names to bind at import time, not to be functional.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    amdsmi_pkg.amdsmi_interface = interface
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
+    interface = fake_module("amdsmi.amdsmi_interface")
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface)
+    version_mod = fake_module("_version", __version__="0.0.0-test")
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
 
-    version_mod = types.ModuleType("_version")
-    version_mod.__version__ = "0.0.0-test"
-    sys.modules["_version"] = version_mod
-
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = helpers_mod
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "_version": version_mod,
+        "amdsmi_helpers": helpers_mod,
+    }
 
 
 def _load_parser_module():
@@ -656,29 +612,14 @@ class _FakeHelpersGuest:
 
 
 class TestNodePowerLimitGuestRegistration(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "_version",
-        "amdsmi_helpers",
-        "amdsmi_cli_exceptions",
-    )
-
     @classmethod
     def setUpClass(cls):
         if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
             raise unittest.SkipTest("amd-smi CLI amdsmi_parser.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        _install_fake_amdsmi_for_parser()
+        modules = _build_fake_modules_for_parser()
+        modules["amdsmi_cli_exceptions"] = None
+        stub_modules(cls, modules)
         cls.parser_mod = _load_parser_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _build_set_parser(self):
         # A minimal fake ``self`` -- exercises the real, unbound
@@ -765,7 +706,3 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
         self.assertNotIn(
             "--node-power-limit/-n: not allowed with argument --gpu/-g", stderr.getvalue()
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

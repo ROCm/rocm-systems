@@ -36,32 +36,11 @@ defaults, current_node_power included).
 import argparse
 import importlib.util
 import os
-import sys
-import types
 import unittest
 
-try:
-    from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
-
-
-def _resolve_cli_dir():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "node.py")):
-            return cli_dir
-    return None
-
-
-_CLI_DIR = _resolve_cli_dir()
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 NODE_PATH = os.path.join(_CLI_DIR, "subcommands", "node.py") if _CLI_DIR else ""
 
 
@@ -83,27 +62,24 @@ _DEFAULT_NPM_INFO = {
 }
 
 
-def _install_fake_amdsmi():
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
-    wrapper = types.ModuleType("amdsmi.amdsmi_wrapper")
+def _build_fake_modules():
+    wrapper = fake_module("amdsmi.amdsmi_wrapper", AMDSMI_NPM_STATUS_DISABLED=1)
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        amdsmi_wrapper=wrapper,
+        amdsmi_get_npm_info=lambda _h: dict(_DEFAULT_NPM_INFO),
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module(
+        "amdsmi", amdsmi_interface=interface, amdsmi_exception=exception, amdsmi_wrapper=wrapper
+    )
 
-    wrapper.AMDSMI_NPM_STATUS_DISABLED = 1
-    interface.amdsmi_wrapper = wrapper
-    interface.amdsmi_get_npm_info = lambda _h: dict(_DEFAULT_NPM_INFO)
-
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-    amdsmi_pkg.amdsmi_wrapper = wrapper
-
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
+    }
 
 
 def _load_node_module():
@@ -176,27 +152,13 @@ def _run_node(node_module, output_format="human", destination="stdout"):
 
 
 class TestNodePowerManagementCurrentNodePower(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-    )
-
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(NODE_PATH):
             raise unittest.SkipTest(f"amd-smi CLI node.py not found at {NODE_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
 
     def setUp(self):
         # Reload fresh each test so per-test monkeypatches on the shared
@@ -271,7 +233,3 @@ class TestNodePowerManagementCurrentNodePower(unittest.TestCase):
         power_management = commands.logger.output["node"]["power_management"]
         self.assertEqual(power_management["current_node_power"], "N/A")
         self.assertEqual(power_management["limit"], "N/A")
-
-
-if __name__ == "__main__":
-    unittest.main()
