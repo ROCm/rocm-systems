@@ -2466,6 +2466,7 @@ static void record_registered_var(const void* host_var, const char* name,
 // when capture and a profiler tool run together, which HRR does not support.
 // ---------------------------------------------------------------------------
 void hip_capture_install_early(HipDispatchTable* table) {
+#if defined(HIP_HRR_CAPTURE_ENABLED)
   // Flag::init() has not run, so HIP_HRR_CAPTURE_OUTPUT is not populated yet and
   // hip_capture_enabled() cannot be trusted here. getenv is safe this early and
   // reads the same variable the flag is later initialised from.
@@ -2474,6 +2475,11 @@ void hip_capture_install_early(HipDispatchTable* table) {
 
   hip_capture_build_table(table);
   hip_capture_install(table);
+#else
+  // Capture is compiled out: leave the dispatch table untouched even when
+  // HIP_HRR_CAPTURE_OUTPUT is set, so no shim is ever installed (R-06).
+  (void)table;
+#endif
 }
 
 // ---------------------------------------------------------------------------
