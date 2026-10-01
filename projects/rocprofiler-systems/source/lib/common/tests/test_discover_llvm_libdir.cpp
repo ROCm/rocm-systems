@@ -29,8 +29,8 @@ protected:
 
     std::string create_temp_dir()
     {
-        char  tmpl[] = "/tmp/rocprofsys_llvm_test_XXXXXX";
-        char* dir    = mkdtemp(tmpl);
+        char        tmpl[] = "/tmp/rocprofsys_llvm_test_XXXXXX";
+        char const* dir    = mkdtemp(tmpl);
         if(!dir)
         {
             throw std::runtime_error("Failed to create temp directory");

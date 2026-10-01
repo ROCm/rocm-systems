@@ -568,10 +568,9 @@ TEST(InstructionCacheCuTest, ReentrantFaultCancellationKeepsAccessUntilIssueRetu
         (void)owner;
         ++faults;
         fixture.cu()->abort_dispatch(1);
-        // The registry and the in-flight snapshot must both still own the
-        // callback. Clearing the CU snapshot inside abort would destroy an
-        // object whose read/fault callback is still on the stack.
-        EXPECT_GE(lifetime.use_count(), 2);
+        // The registry and in-flight access share the generation's callback.
+        // Cancellation must leave its owner alive while the callback executes.
+        EXPECT_FALSE(lifetime.expired());
       });
   ASSERT_TRUE(handle);
   owner.reset();
@@ -589,7 +588,7 @@ TEST(InstructionCacheCuTest, ReentrantFaultCancellationKeepsAccessUntilIssueRetu
   EXPECT_TRUE(lifetime.expired()) << "fault handling left the binding retained after issue";
 }
 
-TEST(InstructionCacheCuTest, ExceptionalQuantumRetainsTheProcessUntilCancellation) {
+TEST(InstructionCacheCuTest, ExceptionalQuantumReleasesTheProcessBeforeCancellation) {
   GpuVm gpu_vm;
   CuFixture fixture("vm_exception_lifetime_cu");
   auto backing = std::make_shared<ExecutableAddressSpace>(0);
@@ -611,12 +610,12 @@ TEST(InstructionCacheCuTest, ExceptionalQuantumRetainsTheProcessUntilCancellatio
   EXPECT_THROW(fixture.cu()->run_quantum(), std::runtime_error);
   ASSERT_TRUE(fixture.cu()->has_active_wfs());
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
-  EXPECT_FALSE(lifetime.expired()) << "the active wave must keep its snapshot until cancellation";
+  EXPECT_TRUE(lifetime.expired()) << "exception unwinding must release the quantum snapshot";
   fixture.cu()->abort_dispatch(1);
   EXPECT_TRUE(lifetime.expired());
 }
 
-TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps) {
+TEST(InstructionCacheCuTest, ActiveWaveSharesReporterAcrossQuantaAndDirectSteps) {
   GpuVm gpu_vm;
   CuFixture fixture("vm_quantum_lifetime_cu");
   auto backing = std::make_shared<ExecutableAddressSpace>(0);
@@ -638,13 +637,13 @@ TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps)
   copies = 0;
   fixture.cu()->run_quantum();
   ASSERT_EQ(wf->pc, kCodeBase + 4);
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   fixture.cu()->run_quantum();
   ASSERT_EQ(wf->pc, kCodeBase + 8);
-  EXPECT_EQ(copies, 1u) << "a quantum boundary must not discard an active wave's snapshot";
+  EXPECT_EQ(copies, 0u) << "new quantum snapshots must share the fault reporter";
   fixture.cu()->step();
   EXPECT_TRUE(wf->is_halted());
-  EXPECT_EQ(copies, 1u) << "direct stepping must reuse the active snapshot";
+  EXPECT_EQ(copies, 0u) << "direct stepping must share the fault reporter";
 
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_TRUE(lifetime.expired()) << "the final wave retained its process after retiring";
@@ -677,15 +676,15 @@ TEST(InstructionCacheCuTest, EndingOneWaveKeepsTheOtherWavesVmAccess) {
   ASSERT_TRUE(first->is_halted());
   ASSERT_FALSE(second->is_halted());
   ASSERT_EQ(second->pc, kCodeBase + 4);
-  EXPECT_EQ(copies, 1u) << "retiring the first wave must not discard the live wave's snapshot";
-  EXPECT_GE(lifetime.use_count(), 2);
+  EXPECT_EQ(copies, 0u) << "both waves must share the fault reporter";
+  EXPECT_FALSE(lifetime.expired());
   fixture.cu()->step();
   ASSERT_EQ(second->pc, kCodeBase + 8);
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   fixture.cu()->step();
   EXPECT_TRUE(second->is_halted());
   EXPECT_FALSE(fixture.cu()->has_active_wfs());
-  EXPECT_EQ(copies, 1u);
+  EXPECT_EQ(copies, 0u);
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_TRUE(lifetime.expired());
 }

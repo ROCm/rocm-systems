@@ -194,7 +194,7 @@ public:
         if constexpr(Backend::sdma_supported)
         {
             std::uint64_t cumulative = 0;
-            auto          procs      = m_session->get_gpu_process_list(m_handle);
+            auto const    procs      = m_session->get_gpu_process_list(m_handle);
             for(const auto& proc : procs)
             {
                 cumulative += proc.sdma_usage;

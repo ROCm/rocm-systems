@@ -30,7 +30,3 @@ checkout.
 
 `abce` is not a mirror: `include/abce` is its primary location, and it is
 edited here.
-
-These headers are not yet exposed through a CMake target. As runtime components
-begin consuming them from this repository, build integration will be added to
-export the target and install the headers.
