@@ -80,6 +80,7 @@ test_categories:
       - "eatHash.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "GinDeviceTest.*"
     exclude_windows:
       - "*"
     labels:
