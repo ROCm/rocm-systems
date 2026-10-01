@@ -240,6 +240,45 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "does not refer to a regular file"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
+# Every library in a colon-delimited tool library list is validated
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-last-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "$<TARGET_FILE:rocattach-tool-path-validation-test>:/tmp/rocattach-missing-tool-library-does-not-exist.so"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "'/tmp/rocattach-missing-tool-library-does-not-exist.so' is absolute but is not visible"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-first-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "/tmp/rocattach-missing-tool-library-does-not-exist.so:$<TARGET_FILE:rocattach-tool-path-validation-test>"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "'/tmp/rocattach-missing-tool-library-does-not-exist.so' is absolute but is not visible"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-delimiter-only-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "::"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path must not be empty"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
 rocprofiler_add_integration_execute_test(
     rocattach-empty-tool-path-test-execute
     TARGET rocattach-tool-path-validation-test
