@@ -1814,15 +1814,17 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_b16_vop3_simd(In
 /// inactive-lane VCC bits are preserved (mirroring the scalar body, which
 /// flips only active-lane bits). VOPC writes VCC only — there is no vdst
 /// operand and CDNA4 has no v_cmpx (EXEC-writing) form, so this single shape
-/// covers every compare. `T` is the 32-bit lane read type (float32_t for the
-/// f32 relations, int32_t/uint32_t for the integer ones); the f16 and 16-bit
-/// integer relations also read as 32-bit lanes and narrow/convert inside the
-/// functor. The VCC merge is identical to the carry path's.
+/// covers every compare. `T` is the 32-bit lane read type (uint32_t raw
+/// encodings for the f16/f32 relations, int32_t/uint32_t for the integer ones);
+/// the f16 and 16-bit integer relations read as 32-bit lanes and narrow/convert
+/// inside the functor. The VCC merge is identical to the carry path's.
 ///
-/// Float comparison operators (and stdx::isnan, used by the ordered/unordered
-/// relations) produce the same per-lane boolean as the scalar `<`/`==`/isnan,
-/// for all inputs including NaN/Inf/±0 — so the compares are bit-exact with no
-/// accepted-divergence carve-out (unlike fma / min-max).
+/// Float relations never see host floats: their functors call
+/// comparison::evaluate on the raw encodings with the captured MODE
+/// input-denormal policy, the same evaluation the scalar body uses, so host
+/// DAZ cannot alter a lane and the compares are bit-exact for every input
+/// including NaN/Inf/±0/subnormals (no accepted-divergence carve-out, unlike
+/// fma / min-max).
 template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
@@ -1862,9 +1864,11 @@ template <typename T, typename Inst, typename CmpOp>
 }
 
 /// 64-bit-lane VOPC compare SIMD fast path (f64/i64/u64 relations). Identical to
-/// try_execute_vopc_simd but reads each operand as `native<T>` (T = double /
-/// int64_t / uint64_t) through 64-bit RegisterAccess operand views, so
-/// it processes `native_width64` lanes per chunk. Same VCC merge.
+/// try_execute_vopc_simd but reads each operand as `native<T>` (T = uint64_t
+/// raw encodings for f64, int64_t / uint64_t for the integer relations) through
+/// 64-bit RegisterAccess operand views, so it processes `native_width64` lanes
+/// per chunk. f64 functors evaluate through comparison::evaluate as above.
+/// Same VCC merge.
 template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc64_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
@@ -4930,9 +4934,11 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp_simd<Tin, Tout>(inst, wf, __VA_ARGS__))        \
   return
 
-/// VOP3 integer/bitwise VOPC compare counterpart (32-bit lane, no modifiers,
-/// SGPR-pair dst). `T` is the 32-bit integer lane read type; variadic in the
-/// functor so its commas pass through as one token sequence.
+/// VOP3 raw-lane VOPC compare counterpart (32-bit lane, SGPR-pair dst). Despite
+/// the _INT name, f16/f32 relations use it too: the glue applies no modifiers,
+/// and a float functor applies the captured ABS/NEG fields and MODE input
+/// flush itself via comparison::evaluate. `T` is the 32-bit raw lane read type;
+/// variadic in the functor so its commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(T, ...)                                                    \
   if (::rocjitsu::amdgpu::try_execute_vopc_vop3_int_simd<T>(                                       \
           inst, wf, __VA_ARGS__, [&](uint64_t result) {                                            \
@@ -4956,9 +4962,10 @@ template <bool Vop3, typename Inst>
                                                                   WRITE_RESULT))                   \
   return
 
-/// 64-bit-lane VOP3 integer/bitwise VOPC compare counterpart (i64/u64, no
-/// modifiers, SGPR-pair dst). `T` is the 64-bit integer lane read type;
-/// variadic in the functor.
+/// 64-bit-lane VOP3 raw-lane VOPC compare counterpart (i64/u64/f64, SGPR-pair
+/// dst). As with the 32-bit macro, f64 callers use it too, with the functor
+/// applying ABS/NEG and MODE input flush via comparison::evaluate. `T` is the
+/// 64-bit raw lane read type; variadic in the functor.
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...) static_cast<void>(inst)
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(WRITE_RESULT, T, ...) static_cast<void>(inst)
