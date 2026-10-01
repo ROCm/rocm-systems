@@ -23,6 +23,7 @@
 #include "functional/gpu/metrics/gpu_partition_metrics_read.h"
 #include "functional/gpu/metrics/metrics_counter_read.h"
 #include "functional/gpu/metrics/process_info_read.h"
+#include "functional/gpu/metrics/process_list_concurrent_read.h"
 #include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
@@ -233,6 +234,11 @@ TEST(GpuFunctionalReadOnly, TestProcInfoRead) {
 
 TEST(GpuFunctionalReadOnly, TestProcessListRead) {
   TestProcessListRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestProcessListConcurrentRead) {
+  TestProcessListConcurrentRead tst;
   RunGenericTest(&tst);
 }
 

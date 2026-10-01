@@ -171,9 +171,10 @@ struct ComputeProcessCache {
       std::chrono::steady_clock::time_point{}};
   std::mutex mtx;
   uint32_t num_running_processes = 0;
+  // Per GPU, keyed by pid: the cached memory and engine usage differ per GPU.
+  std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info;
 };
 
-std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
 // Never destroyed: a thread can still be inside get_compute_process_list_impl()
 // while the library's static destructors run at exit.
 auto& compute_process_cache_map =
@@ -194,6 +195,9 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
     cache_ptr = compute_process_cache_map[gpu_id_].get();
   }
+  // Held from the expiry check through the read-out, so no call reads this GPU's
+  // cache while another call refreshes it.
+  std::lock_guard<std::mutex> lock(cache_ptr->mtx);
 
   /**
    *  The first call to rsmi_compute_process_info_get() to find the number of
@@ -205,18 +209,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       now - cache_ptr->last_compute_process_list_update_time.load());
   // only get new data if cache duration has expired
   if (last_read_delta > kComputeProcessCacheDuration) {
-    // double-check locking pattern here
-    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
-    if (std::chrono::steady_clock::now() -
-            cache_ptr->last_compute_process_list_update_time.load() <=
-        kComputeProcessCacheDuration) {
-      // another thread already updated the data while we were waiting for the lock
-      // so just return the existing data
-      return rsmi_status_t::RSMI_STATUS_SUCCESS;
-    }
-
     // Clear the process info cache when refreshing
-    process_info_cache_map.clear();
+    cache_ptr->process_info.clear();
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -412,8 +406,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       if (list_device_ptr[device_idx] == get_gpu_id()) {
         amdsmi_proc_info_t tmp_amdsmi_proc_info{};
 
-        auto cached_amdsmi_proc = process_info_cache_map.find(rsmi_proc_info.process_id);
-        if (cached_amdsmi_proc != process_info_cache_map.end()) {
+        auto cached_amdsmi_proc = cache_ptr->process_info.find(rsmi_proc_info.process_id);
+        if (cached_amdsmi_proc != cache_ptr->process_info.end()) {
           // Use cached info
           tmp_amdsmi_proc_info = cached_amdsmi_proc->second;
         } else {
@@ -422,7 +416,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
           gpu_set.insert(get_kfd_gpu_id());
           GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
           get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
-          process_info_cache_map[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
+          cache_ptr->process_info[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
         }
         compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
       }
@@ -435,7 +429,6 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    *  Transfer/Save the ones linked to this device.
    */
   compute_process_list.clear();
-  std::lock_guard<std::mutex> lock(cache_ptr->mtx);
   for (auto process_idx = uint32_t(0); process_idx < cache_ptr->num_running_processes;
        ++process_idx) {
     if (list_type == ComputeProcessListType_t::kAllProcesses ||
@@ -447,14 +440,16 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   return static_cast<int32_t>(status_code);
 }
 
-const GPUComputeProcessList_t& AMDSmiGPUDevice::amdgpu_get_compute_process_list(
+GPUComputeProcessList_t AMDSmiGPUDevice::amdgpu_get_compute_process_list(
     ComputeProcessListType_t list_type) {
-  auto error_code = get_compute_process_list_impl(compute_process_list_, list_type);
+  // Local per call: other threads may query this GPU at the same time.
+  GPUComputeProcessList_t compute_process_list;
+  auto error_code = get_compute_process_list_impl(compute_process_list, list_type);
   if (error_code) {
-    compute_process_list_.clear();
+    compute_process_list.clear();
   }
 
-  return compute_process_list_;
+  return compute_process_list;
 }
 
 // Convert `amdsmi_bdf_t` to a PCI BDF string
