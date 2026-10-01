@@ -360,7 +360,7 @@ padded_zero_exec_flat_lds_store_preserves_scalar_pair_for_instrumentation(uint32
   out[4] = lds[0];
 }
 
-__global__ void
+__global__ __launch_bounds__(64) void
 padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   uint32_t scalar_before_lo = 0;
