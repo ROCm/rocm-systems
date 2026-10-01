@@ -1862,20 +1862,24 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
     const hsa_amd_memory_copy_rect_ptr_t* srcs, const hsa_amd_memory_copy_rect_ptr_t* dsts,
     const hsa_dim3_t* ranges, uint16_t num_rects, std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal) {
-  // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
-  const bool isGFX12Plus =
-                        (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
-
-  // Common and GFX12 packet must match in size to use same code for vector/append.
-  static_assert(sizeof(SDMA_PKT_COPY_LINEAR_RECT) == sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12), "");
-
-  const uint max_pitch = 1 << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
-
-  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
+  std::vector<char> cmds;
   auto append = [&](size_t size) {
-    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
-    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
-    return &pkts.back();
+    cmds.resize(cmds.size() + size);
+    return cmds.data() + cmds.size() - size;
+  };
+  const size_t max_copy_size = MaxSingleLinearCopySize();
+
+  // Contiguous rects that continue each other in both source and destination collect into one
+  // linear run. Any other rect flushes the run first, so the packets keep the rect order.
+  char* run_dst = nullptr;
+  const char* run_src = nullptr;
+  size_t run_size = 0;
+  auto flush_run = [&]() {
+    if (run_size == 0) return;
+    const uint32_t num_copy_command = (run_size + max_copy_size - 1) / max_copy_size;
+    BuildCopyCommand(append(num_copy_command * linear_copy_command_size_), num_copy_command,
+                     run_dst, run_src, run_size);
+    run_size = 0;
   };
 
   // Every box is checked and built before the single submission, so a failing
@@ -1907,39 +1911,36 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
     if (range->z > 1 && (src->slice == 0 || dst->slice == 0))
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice needed.");
 
-    // Do wide pitch 2D copies along X-Z
-    if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
-      hsa_pitched_ptr_t Src = *src;
-      hsa_pitched_ptr_t Dst = *dst;
-      hsa_dim3_t Soff = *src_offset;
-      hsa_dim3_t Doff = *dst_offset;
-      hsa_dim3_t Range = *range;
+    // Rows are packed when each row starts where the previous row ends (a single row, or rows as
+    // wide as the pitch); layers are packed when each layer starts where the previous layer ends
+    // (a single layer, or layers as large as the slice).
+    const size_t plane = static_cast<size_t>(range->x) * range->y;
+    const bool rows_packed = range->y == 1 || (src->pitch == range->x && dst->pitch == range->x);
+    const bool layers_packed = range->z == 1 || (src->slice == plane && dst->slice == plane);
 
-      Src.base = static_cast<char*>(Src.base) + Soff.z * Src.slice + Soff.y * Src.pitch;
-      Dst.base = static_cast<char*>(Dst.base) + Doff.z * Dst.slice + Doff.y * Dst.pitch;
-      Soff.y = Soff.z = 0;
-      Doff.y = Doff.z = 0;
-
-      Src.slice = Src.pitch;
-      Src.pitch = 0;
-      Dst.slice = Dst.pitch;
-      Dst.pitch = 0;
-
-      Range.z = Range.y;
-      Range.y = 1;
-
-      BuildCopyRectCommand(append, &Dst, &Doff, &Src, &Soff, &Range);
+    if (rows_packed && layers_packed) {
+      // Whole rect is contiguous: linear packets, merged with adjacent rects.
+      char* block_dst = static_cast<char*>(dst->base) + dst_offset->z * dst->slice +
+          dst_offset->y * dst->pitch + dst_offset->x;
+      const char* block_src = static_cast<const char*>(src->base) + src_offset->z * src->slice +
+          src_offset->y * src->pitch + src_offset->x;
+      if (run_dst + run_size != block_dst || run_src + run_size != block_src) {
+        flush_run();
+        run_dst = block_dst;
+        run_src = block_src;
+      }
+      run_size += plane * range->z;
     } else {
+      flush_run();
       BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
     }
-
     size += static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
   }
+  flush_run();
 
   std::vector<core::Signal*> gang_signals(0);
 
-  return SubmitCommand(&pkts[0], pkts.size() * sizeof(SDMA_PKT_COPY_LINEAR_RECT), size, dep_signals,
-                       out_signal, gang_signals);
+  return SubmitCommand(cmds.data(), cmds.size(), size, dep_signals, out_signal, gang_signals);
 }
 
 template <bool useGCR, bool scopeFields>
@@ -2458,7 +2459,8 @@ void BlitSdma<useGCR, scopeFields>::BuildSwapCopyCommand(char* cmd_addr, uint32_
 Copies are done in terms of elements (1, 2, 4, 8, or 16 bytes) and have alignment restrictions.
 Elements are coded by the log2 of the element size in bytes (ie. element 0=1 byte, 4=16 byte).
 This routine breaks a large rect into tiles that can be handled by hardware.  Pitches and offsets
-must be representable in terms of elements in all tiles of the copy.
+must be representable in terms of elements in all tiles of the copy.  A 2D rect whose pitch
+exceeds the packet limit is copied along X-Z instead, one row per layer.
 */
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<void*(size_t)>& append,
@@ -2484,6 +2486,31 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
   const uint32_t max_x     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_xy_bits : SDMA_PKT_COPY_LINEAR_RECT::rect_xy_bits);
   const uint32_t max_y     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_xy_bits : SDMA_PKT_COPY_LINEAR_RECT::rect_xy_bits);
   const uint32_t max_z     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_z_bits  : SDMA_PKT_COPY_LINEAR_RECT::rect_z_bits);
+
+  // Both packet formats are appended with the pre-GFX12 packet size.
+  static_assert(sizeof(SDMA_PKT_COPY_LINEAR_RECT) == sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12), "");
+
+  hsa_pitched_ptr_t xz_src;
+  hsa_pitched_ptr_t xz_dst;
+  hsa_dim3_t xz_src_offset;
+  hsa_dim3_t xz_dst_offset;
+  hsa_dim3_t xz_range;
+
+  // Do wide pitch 2D copies along X-Z
+  if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
+    xz_src = {static_cast<char*>(src->base) + src_offset->z * src->slice +
+                  src_offset->y * src->pitch, 0, src->pitch};
+    xz_dst = {static_cast<char*>(dst->base) + dst_offset->z * dst->slice +
+                  dst_offset->y * dst->pitch, 0, dst->pitch};
+    xz_src_offset = {src_offset->x, 0, 0};
+    xz_dst_offset = {dst_offset->x, 0, 0};
+    xz_range = {range->x, 1, range->y};
+    src = &xz_src;
+    dst = &xz_dst;
+    src_offset = &xz_src_offset;
+    dst_offset = &xz_dst_offset;
+    range = &xz_range;
+  }
 
   // Find maximum element that describes the pitch and slice.
   // Pitch and slice must both be represented in units of elements.  No element larger than this
