@@ -59,7 +59,10 @@ def wrap_mpi_program(program, gtest_json_path=None):
         )
     else:
         inner = preamble + f"exec {program}"
-    return f"bash -c {shlex.quote(inner)}"
+    # Ranks under an ssh-launched orted make `bash -c` source ~/.bashrc, whose
+    # /etc/profile.d scripts can prepend /opt/rocm/lib and shadow the
+    # LD_LIBRARY_PATH forwarded with -x (loading the system librccl).
+    return f"bash --norc -c {shlex.quote(inner)}"
 
 
 def glob_filter_matches(name: str, pattern_str: str) -> bool:
@@ -2198,7 +2201,7 @@ class TestExecutor:
             # raise it before exec. `set -f` keeps gtest filter globs literal.
             # The env_prefix stays in front so bash inherits the test env vars.
             inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
-            cmd = f"{env_prefix}bash -c {shlex.quote(inner)}"
+            cmd = f"{env_prefix}bash --norc -c {shlex.quote(inner)}"
 
         else:
             # MPI test

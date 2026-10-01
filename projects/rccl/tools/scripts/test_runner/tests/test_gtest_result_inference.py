@@ -439,6 +439,10 @@ class TestWrapMpiProgram(unittest.TestCase):
         self.assertNotIn("GTEST_OUTPUT", wrapped)
         self.assertIn("exec /bin/rccl-UnitTestsMPI", wrapped)
 
+    def test_skips_bashrc(self):
+        wrapped = wrap_mpi_program("/bin/rccl-UnitTestsMPI")
+        self.assertTrue(wrapped.startswith("bash --norc -c "))
+
 
 def _leaf(full_name, status, identity, suite=None, case=None):
     if suite is None or case is None:
