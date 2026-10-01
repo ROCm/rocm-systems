@@ -80,6 +80,20 @@
 ///                                           s_add_u32 s4, s4, -20   ; 32: helper
 ///                                           s_addc_u32 s5, s5, -1   ; 40
 ///                                           s_setpc_b64 s[4:5]      ; 44
+///
+/// Indirect-jump restore builds the entry's address from s_getpc_b64 and jumps
+/// to it, with no call involved:
+///   s_add_u32 s6, s6, 1     ; 0:  ENTRY
+///   v_mov_b32 v1, v0        ; 4:  ANCHOR
+///   s_cmp_lg_u32 s6, 2      ; 8
+///   s_cbranch_scc0 36       ; 12
+///   s_getpc_b64 s[4:5]      ; 16: s[4:5] = address of offset 20
+///   s_add_u32 s4, s4, -20   ; 20
+///   s_addc_u32 s5, s5, -1   ; 28
+///   s_setpc_b64 s[4:5]      ; 32
+///   v_mov_b32 v2, s0        ; 36
+///   v_mov_b32 v3, s1        ; 40
+///   s_endpgm                ; 44
 /// The delivery variants end at s_endpgm where the restore variants read s[0:1].
 /// The descriptor enters at the prologue's stub, so the second pass through the
 /// original entry runs guest code only; a second prologue run would reload both
@@ -234,7 +248,7 @@ protected:
                                   /*anchor_offset=*/0, probe_obj, entry_point_restore_));
 
     // Re-entry kernels. s6 counts passes through the entry; the second pass
-    // leaves the loop or skips the call.
+    // leaves the loop or skips the call or jump.
     const uint32_t count_pass = build_s_add_u32(6, 6, kInline1, a_.arch);
     const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch);
     const uint32_t read_s0 = build_v_mov_b32_src(2, 0, a_.arch);
@@ -269,6 +283,24 @@ protected:
              endpgm};
     words.insert(words.end(), rewrite_return.begin(), rewrite_return.end());
     ASSERT_NO_FATAL_FAILURE(patch(words, /*anchor_offset=*/4, probe_obj, return_restore_));
+
+    // A plain indirect jump to the entry: the address comes from s_getpc_b64,
+    // not from a call's saved return address.
+    const std::vector<uint32_t> jump_to_entry{build_s_cmp_lg_u32(6, kInline2, a_.arch),
+                                              build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
+                                              build_s_getpc_b64(4, a_.arch),
+                                              build_s_add_u32(4, 4, kLiteral, a_.arch),
+                                              static_cast<uint32_t>(-20),
+                                              build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
+                                              ret};
+    words = {count_pass, guest_anchor};
+    words.insert(words.end(), jump_to_entry.begin(), jump_to_entry.end());
+    words.push_back(endpgm);
+    ASSERT_NO_FATAL_FAILURE(patch(words, /*anchor_offset=*/4, probe_obj, jump_delivery_));
+    words = {count_pass, guest_anchor};
+    words.insert(words.end(), jump_to_entry.begin(), jump_to_entry.end());
+    words.insert(words.end(), {read_s0, read_s1, endpgm});
+    ASSERT_NO_FATAL_FAILURE(patch(words, /*anchor_offset=*/4, probe_obj, jump_restore_));
   }
 
   // What dispatching one patched kernel needs: its words, its scratch, and the
@@ -504,6 +536,8 @@ protected:
   PatchedKernel loop_restore_;
   PatchedKernel return_delivery_;
   PatchedKernel return_restore_;
+  PatchedKernel jump_delivery_;
+  PatchedKernel jump_restore_;
 };
 
 class DbiCdna3EntryPrologueSim : public DbiEntryPrologueSimBase {
@@ -548,6 +582,15 @@ TEST_F(DbiCdna3EntryPrologueSim, TheLoopPassesThroughTheEntryTwice) {
 }
 TEST_F(DbiCdna3EntryPrologueSim, TheRewrittenReturnPassesThroughTheEntryTwice) {
   expect_two_passes_through_the_entry(return_restore_);
+}
+TEST_F(DbiCdna3EntryPrologueSim, TheIndirectJumpPassesThroughTheEntryTwice) {
+  expect_two_passes_through_the_entry(jump_restore_);
+}
+TEST_F(DbiCdna3EntryPrologueSim, ProbeReceivesThePayloadPointerAfterAnIndirectJumpToTheEntry) {
+  expect_probe_receives_the_payload_pointer(jump_delivery_);
+}
+TEST_F(DbiCdna3EntryPrologueSim, GuestKernargPointerIsRestoredAfterAnIndirectJumpToTheEntry) {
+  expect_guest_kernarg_pointer_is_restored(jump_restore_);
 }
 TEST_F(DbiCdna3EntryPrologueSim, ProbeReceivesThePayloadPointerAfterALoopToTheEntry) {
   expect_probe_receives_the_payload_pointer(loop_delivery_);
@@ -598,6 +641,15 @@ TEST_F(DbiCdna4EntryPrologueSim, TheLoopPassesThroughTheEntryTwice) {
 TEST_F(DbiCdna4EntryPrologueSim, TheRewrittenReturnPassesThroughTheEntryTwice) {
   expect_two_passes_through_the_entry(return_restore_);
 }
+TEST_F(DbiCdna4EntryPrologueSim, TheIndirectJumpPassesThroughTheEntryTwice) {
+  expect_two_passes_through_the_entry(jump_restore_);
+}
+TEST_F(DbiCdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAfterAnIndirectJumpToTheEntry) {
+  expect_probe_receives_the_payload_pointer(jump_delivery_);
+}
+TEST_F(DbiCdna4EntryPrologueSim, GuestKernargPointerIsRestoredAfterAnIndirectJumpToTheEntry) {
+  expect_guest_kernarg_pointer_is_restored(jump_restore_);
+}
 TEST_F(DbiCdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAfterALoopToTheEntry) {
   expect_probe_receives_the_payload_pointer(loop_delivery_);
 }
@@ -646,6 +698,15 @@ TEST_F(DbiRdna4EntryPrologueSim, TheLoopPassesThroughTheEntryTwice) {
 }
 TEST_F(DbiRdna4EntryPrologueSim, TheRewrittenReturnPassesThroughTheEntryTwice) {
   expect_two_passes_through_the_entry(return_restore_);
+}
+TEST_F(DbiRdna4EntryPrologueSim, TheIndirectJumpPassesThroughTheEntryTwice) {
+  expect_two_passes_through_the_entry(jump_restore_);
+}
+TEST_F(DbiRdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAfterAnIndirectJumpToTheEntry) {
+  expect_probe_receives_the_payload_pointer(jump_delivery_);
+}
+TEST_F(DbiRdna4EntryPrologueSim, GuestKernargPointerIsRestoredAfterAnIndirectJumpToTheEntry) {
+  expect_guest_kernarg_pointer_is_restored(jump_restore_);
 }
 TEST_F(DbiRdna4EntryPrologueSim, ProbeReceivesThePayloadPointerAfterALoopToTheEntry) {
   expect_probe_receives_the_payload_pointer(loop_delivery_);
