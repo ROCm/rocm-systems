@@ -491,6 +491,17 @@ check_cxx_source_compiles("
   }
 " HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
 
+### Check for host VMM location types (hipMemLocationTypeHost). Stock ROCm 7.0.2
+### shares the 7.0.2.x backport's HIP_VERSION but does not declare them.
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support

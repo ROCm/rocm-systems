@@ -1301,6 +1301,10 @@ if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
 endif()
+if(HIP_MEM_LOCATION_TYPE_HOST)
+  target_compile_definitions(rccl PRIVATE RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+  message(STATUS "RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED compile definition enabled")
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)

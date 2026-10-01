@@ -350,7 +350,7 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
     prop->location.type = hipMemLocationTypeDevice;
     const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
     if (loc != nullptr && std::strcmp(loc, "host") == 0) {
-#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
       prop->location.type = hipMemLocationTypeHost;
 #else
       prop->location.type = static_cast<hipMemLocationType>(2);

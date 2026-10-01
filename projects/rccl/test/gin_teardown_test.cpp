@@ -379,7 +379,7 @@ TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
                               .setVariable("RCCL_TEST_VMM_LOCATION", "device")
                               .setVariable("RCCL_TEST_VMM_SEGMENT_SIZE", "4096");
 
-#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if NCCL_CUMEM_HOST_GATE
   RUN_ISOLATED_TESTS(
       ProcessIsolatedTestRunner::TestConfig(
           "HostSegment_ElasticOff_InvalidArgument",

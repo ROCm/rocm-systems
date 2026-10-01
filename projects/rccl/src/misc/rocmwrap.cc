@@ -214,7 +214,7 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !NCCL_CUMEM_HOST_GATE
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
