@@ -106,6 +106,46 @@ TEST(ConSanProgramInventory, CodeObjectIdentityIsStableCompatibleAndCollisionAwa
   EXPECT_TRUE(make_code_object_id(std::span<const uint8_t>{}).valid());
 }
 
+TEST(ConSanProgramInventory, CodeObjectIdentityPreservesBothDirectionalDigests) {
+  struct Expected {
+    size_t size;
+    const char *fingerprint;
+    uint64_t verifier;
+  };
+  // Golden values cover empty input, odd/even lengths and word/page boundaries.
+  // Start three bytes into the backing array to exercise unaligned input too.
+  const Expected expected[] = {
+      {0, "fnv1a64:cbf29ce484222325", 0x6c62272e07bb0142ull},
+      {1, "fnv1a64:af63f74c86021a6d", 0xe5c9cb3722c31228ull},
+      {2, "fnv1a64:08f82907b593c936", 0x3b27aab013550be7ull},
+      {3, "fnv1a64:d177aa198a202636", 0xe484b72f2bd64017ull},
+      {7, "fnv1a64:5c08aa959d548b92", 0xa2132d2e54253893ull},
+      {8, "fnv1a64:b745cb3a56a9c71d", 0x661c0f996d073a7aull},
+      {9, "fnv1a64:15601321427e698d", 0x28633f6a6eb3a830ull},
+      {63, "fnv1a64:6d894c79e07797d2", 0xdd0462016b2c6c23ull},
+      {64, "fnv1a64:97e43a186b360da5", 0xcf92e850a939fb02ull},
+      {65, "fnv1a64:4edbd67e2cd84bad", 0x691320103ecbb368ull},
+      {255, "fnv1a64:0332f88dc208b992", 0x3cfcff7f01924ce3ull},
+      {256, "fnv1a64:78561fe0b4d3ad25", 0x7cb3fbd35f49b842ull},
+      {257, "fnv1a64:4e0589d343af986d", 0x625fa50f0fd59828ull},
+      {4095, "fnv1a64:de682768979e4b92", 0xa8ddfe41021584e3ull},
+      {4096, "fnv1a64:8946bdb9a1fac325", 0x7e1400699fc67142ull},
+      {4097, "fnv1a64:3df7c16e3d19fa6d", 0xd8bf796eff2b7228ull},
+  };
+  std::vector<uint8_t> storage(4100);
+  for (size_t i = 0; i < storage.size(); ++i)
+    storage[i] = static_cast<uint8_t>(i * 37 + 11);
+  for (const auto &entry : expected) {
+    SCOPED_TRACE(entry.size);
+    const auto id = make_code_object_id(std::span(storage).subspan(3, entry.size));
+    EXPECT_TRUE(id.valid());
+    EXPECT_EQ(id.byte_size, entry.size);
+    EXPECT_EQ(id.fingerprint, entry.fingerprint);
+    EXPECT_EQ(id.collision_verifier, entry.verifier);
+  }
+  EXPECT_EQ(make_code_object_id({}), make_code_object_id(std::span(storage).subspan(3, 0)));
+}
+
 TEST(ConSanProgramInventory, PhysicalAndSemanticIdentitiesHaveExplicitValidityAndOrdinals) {
   PhysicalSiteId physical;
   EXPECT_FALSE(physical.valid());

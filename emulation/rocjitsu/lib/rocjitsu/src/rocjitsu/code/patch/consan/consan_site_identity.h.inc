@@ -33,14 +33,6 @@ struct CodeObjectId {
 /// The function is deterministic across hosts and retains the pre-production
 /// `fnv1a64:<hex>` diagnostic representation.
 [[nodiscard]] inline CodeObjectId make_code_object_id(std::span<const uint8_t> bytes) {
-  const auto fnv1a = [](auto begin, auto end, uint64_t seed) {
-    uint64_t hash = seed;
-    for (auto cursor = begin; cursor != end; ++cursor) {
-      hash ^= static_cast<uint8_t>(*cursor);
-      hash *= 1099511628211ull;
-    }
-    return hash;
-  };
   const auto hex = [](uint64_t value) {
     constexpr char kHex[] = "0123456789abcdef";
     std::string result(16, '0');
@@ -50,8 +42,17 @@ struct CodeObjectId {
     }
     return result;
   };
-  const uint64_t primary = fnv1a(bytes.begin(), bytes.end(), 14695981039346656037ull);
-  const uint64_t verifier = fnv1a(bytes.rbegin(), bytes.rend(), 7809847782465536322ull);
+  // Interleave the independent recurrences so one multiply can progress while
+  // the other waits for its previous result. Keep each digest's byte order and
+  // seed unchanged: both are part of the stable code-object identity.
+  uint64_t primary = 14695981039346656037ull;
+  uint64_t verifier = 7809847782465536322ull;
+  for (size_t i = 0; i < bytes.size(); ++i) {
+    primary ^= bytes[i];
+    primary *= 1099511628211ull;
+    verifier ^= bytes[bytes.size() - 1 - i];
+    verifier *= 1099511628211ull;
+  }
   return {
       .fingerprint = "fnv1a64:" + hex(primary),
       .byte_size = bytes.size(),
