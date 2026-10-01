@@ -27,7 +27,7 @@ inline void
 on_kernel_dispatch_configure()
 {
     Externals::get_metadata_registry().add_string(
-        Externals::kernel_dispatch_category_name);
+        Externals::k_kernel_dispatch_category_name);
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -68,13 +68,21 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
 
     {
         auto& metadata_registry = Externals::get_metadata_registry();
-        metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
-                                            record->thread_id, k_zero_start_timestamp,
-                                            k_zero_end_timestamp, k_empty_json });
+        metadata_registry.add_thread_info({
+            .parent_process_id = Externals::get_ppid(),
+            .process_id        = Externals::get_pid(),
+            .thread_id         = record->thread_id,
+            .start             = k_zero_start_timestamp,
+            .end               = k_zero_end_timestamp,
+            .extdata           = k_empty_json,
+        });
 
-        metadata_registry.add_track({ fmt::format("GPU Kernel Dispatch [{}] Queue {}",
-                                                  agent->device_id, queue_id.handle),
-                                      record->thread_id, k_empty_json });
+        metadata_registry.add_track({
+            .track_name = fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                      agent->device_id, queue_id.handle),
+            .thread_id  = record->thread_id,
+            .extdata    = k_empty_json,
+        });
 
         metadata_registry.add_queue(queue_id.handle);
         metadata_registry.add_stream(stream_id);

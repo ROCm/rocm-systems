@@ -330,25 +330,25 @@ struct external_dependencies
     using metadata_registry_t      = trace_cache::metadata_registry;
     using buffer_storage_t         = trace_cache::buffer_storage_t;
 
-    static constexpr std::string_view kernel_dispatch_category_name =
+    static constexpr std::string_view k_kernel_dispatch_category_name =
         trait::name<category::rocm_kernel_dispatch>::value;
 
     // ─── memory_copy buffered-domain dependencies ────────────────────────────────
     using memory_copy_sample_t = trace_cache::memory_copy_sample;
 
-    static constexpr std::string_view memory_copy_category_name =
+    static constexpr std::string_view k_memory_copy_category_name =
         trait::name<category::rocm_memory_copy>::value;
 
     // ─── memory_allocation buffered-domain dependencies ──────────────────────────
     using memory_allocation_sample_t = trace_cache::memory_allocate_sample;
 
-    static constexpr std::string_view memory_allocation_category_name =
+    static constexpr std::string_view k_memory_allocation_category_name =
         trait::name<category::rocm_memory_allocate>::value;
 
     // ─── scratch_memory buffered-domain dependencies ─────────────────────────────
     using scratch_memory_sample_t = trace_cache::scratch_memory_sample;
 
-    static constexpr std::string_view scratch_memory_category_name =
+    static constexpr std::string_view k_scratch_memory_category_name =
         trait::name<category::rocm_scratch_memory>::value;
 
     static metadata_registry_t& get_metadata_registry()

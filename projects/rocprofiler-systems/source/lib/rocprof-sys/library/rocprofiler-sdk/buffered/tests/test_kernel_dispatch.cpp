@@ -63,7 +63,7 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_configure_adds_category_string)
     g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
     EXPECT_CALL(*g_metadata_registry_mock,
-                add_string(Eq(externals::kernel_dispatch_category_name)))
+                add_string(Eq(externals::k_kernel_dispatch_category_name)))
         .Times(1);
 
     on_kernel_dispatch_configure<externals>();

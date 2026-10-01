@@ -20,7 +20,7 @@ inline void
 on_memory_allocation_configure()
 {
     Externals::get_metadata_registry().add_string(
-        Externals::memory_allocation_category_name);
+        Externals::k_memory_allocation_category_name);
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -42,9 +42,14 @@ on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record,
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
-                                        record->thread_id, k_zero_start_timestamp,
-                                        k_zero_end_timestamp, k_empty_json });
+    metadata_registry.add_thread_info({
+        .parent_process_id = Externals::get_ppid(),
+        .process_id        = Externals::get_pid(),
+        .thread_id         = record->thread_id,
+        .start             = k_zero_start_timestamp,
+        .end               = k_zero_end_timestamp,
+        .extdata           = k_empty_json,
+    });
 
     metadata_registry.add_stream(stream_id);
 

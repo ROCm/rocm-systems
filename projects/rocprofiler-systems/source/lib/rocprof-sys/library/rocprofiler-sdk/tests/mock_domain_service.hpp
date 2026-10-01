@@ -1100,24 +1100,24 @@ struct externals
     // ── kernel_dispatch buffered-domain support ──────────────────────────────
     using kernel_dispatch_sample_t = test_support::kernel_dispatch_sample_data_t;
 
-    static constexpr std::string_view kernel_dispatch_category_name =
+    static constexpr std::string_view k_kernel_dispatch_category_name =
         "rocm_kernel_dispatch";
 
     // ── memory_copy buffered-domain support ──────────────────────────────────
     using memory_copy_sample_t = test_support::memory_copy_sample_data_t;
 
-    static constexpr std::string_view memory_copy_category_name = "rocm_memory_copy";
+    static constexpr std::string_view k_memory_copy_category_name = "rocm_memory_copy";
 
     // ── memory_allocation buffered-domain support ────────────────────────────
     using memory_allocation_sample_t = test_support::memory_allocation_sample_data_t;
 
-    static constexpr std::string_view memory_allocation_category_name =
+    static constexpr std::string_view k_memory_allocation_category_name =
         "rocm_memory_allocate";
 
     // ── scratch_memory buffered-domain support ───────────────────────────────
     using scratch_memory_sample_t = test_support::scratch_memory_sample_data_t;
 
-    static constexpr std::string_view scratch_memory_category_name =
+    static constexpr std::string_view k_scratch_memory_category_name =
         "rocm_scratch_memory";
 
     // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace

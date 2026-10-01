@@ -63,7 +63,7 @@ TEST(scratch_memory_test, on_scratch_memory_configure_adds_category_string)
     g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
     EXPECT_CALL(*g_metadata_registry_mock,
-                add_string(Eq(externals::scratch_memory_category_name)))
+                add_string(Eq(externals::k_scratch_memory_category_name)))
         .Times(1);
 
     on_scratch_memory_configure<externals>();

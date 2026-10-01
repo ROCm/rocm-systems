@@ -24,7 +24,7 @@ template <policies::domain_service::externals Externals>
 inline void
 on_memory_copy_configure()
 {
-    Externals::get_metadata_registry().add_string(Externals::memory_copy_category_name);
+    Externals::get_metadata_registry().add_string(Externals::k_memory_copy_category_name);
 }
 
 template <policies::domain_service::backend   SdkBackend,
@@ -73,14 +73,21 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info({ Externals::get_ppid(), Externals::get_pid(),
-                                        record->thread_id, k_zero_start_timestamp,
-                                        k_zero_end_timestamp, k_empty_json });
+    metadata_registry.add_thread_info({
+        .parent_process_id = Externals::get_ppid(),
+        .process_id        = Externals::get_pid(),
+        .thread_id         = record->thread_id,
+        .start             = k_zero_start_timestamp,
+        .end               = k_zero_end_timestamp,
+        .extdata           = k_empty_json,
+    });
 
-    metadata_registry.add_track(
-        { fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                      dst_agent->logical_node_id, record->thread_id),
-          record->thread_id, k_empty_json });
+    metadata_registry.add_track({
+        .track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                  dst_agent->logical_node_id, record->thread_id),
+        .thread_id  = record->thread_id,
+        .extdata    = k_empty_json,
+    });
 
     metadata_registry.add_stream(stream_id);
 

@@ -58,7 +58,7 @@ TEST(memory_allocation_test, on_memory_allocation_configure_adds_category_string
     g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
     EXPECT_CALL(*g_metadata_registry_mock,
-                add_string(Eq(externals::memory_allocation_category_name)))
+                add_string(Eq(externals::k_memory_allocation_category_name)))
         .Times(1);
 
     on_memory_allocation_configure<externals>();
