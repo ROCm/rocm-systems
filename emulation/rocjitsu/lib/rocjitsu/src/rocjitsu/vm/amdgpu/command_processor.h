@@ -252,8 +252,10 @@ public:
   /// @details The caller must first stop every queue replica with
   /// signal_queue_exception(..., false). This operation is safe to serialize
   /// under a driver status-publication mutex because it cannot flush CU
-  /// notifications back into the driver.
-  bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  /// notifications back into the driver. With wait_for_ack=false, success
+  /// means the status and interrupt were published, not consumed by ROCr.
+  bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                               bool wait_for_ack = true);
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -282,6 +284,7 @@ public:
     cu->set_gpu_vm(gpu_vm_);
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
+    on_cu_pool_ready(cu);
   }
 
   void startup() override;
@@ -524,6 +527,7 @@ public:
 
 private:
   friend class CommandProcessorCloseTestAccess;
+  friend class CommandProcessorPlacementTestAccess;
 
   class QueueRegistrationTransaction {
   public:
@@ -755,10 +759,9 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
-  bool has_runnable_cus() const;
   FunctionalQuantumResult run_active_cus_once(simdojo::Tick now);
-  void refresh_pooled_due_ticks(simdojo::Tick now);
-  simdojo::Tick next_pooled_due_tick(simdojo::Tick now);
+  void prune_pooled_due_ticks();
+  simdojo::Tick next_pooled_due_tick();
   void arm_dispatch_continuation(simdojo::Tick tick);
   void cancel_dispatch_continuation();
 

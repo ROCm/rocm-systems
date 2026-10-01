@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -951,6 +952,7 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
 
   const std::optional<GpuVmAccess> old_access = gpu_vm.snapshot(address_space);
   ASSERT_TRUE(old_access);
+  EXPECT_TRUE(old_access->is_current());
   const VmCacheNamespace old_namespace = old_access->cache_namespace();
   EXPECT_EQ(old_namespace.address_space, address_space);
 
@@ -958,6 +960,8 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
   const std::optional<GpuVmAccess> new_access = gpu_vm.snapshot(address_space);
   ASSERT_TRUE(new_access);
+  EXPECT_FALSE(old_access->is_current());
+  EXPECT_TRUE(new_access->is_current());
   EXPECT_NE(new_access->cache_namespace(), old_namespace);
   EXPECT_EQ(new_access->cache_namespace().address_space, address_space);
 
@@ -969,10 +973,240 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
 
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
   EXPECT_FALSE(gpu_vm.snapshot(address_space));
+  EXPECT_FALSE(new_access->is_current());
   value[0] = std::byte{0x5a};
   EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
+}
+
+TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
+  GpuVm gpu_vm;
+  const auto handle = register_byte_address_space(gpu_vm, 7, 0x11);
+  ASSERT_TRUE(handle);
+  const auto old_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(old_access);
+  ASSERT_TRUE(old_access->is_current());
+
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  EXPECT_FALSE(old_access->is_current());
+  const auto refreshed = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(refreshed);
+  EXPECT_TRUE(refreshed->is_current());
+  EXPECT_NE(old_access->cache_namespace(), refreshed->cache_namespace());
+  std::array<std::byte, 1> value{std::byte{0x5a}};
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(value[0], std::byte{0x5a});
+  EXPECT_EQ(refreshed->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
+}
+
+TEST(GpuVmService, PolicyCacheDoesNotRetainSnapshotBacking) {
+  GpuVm vm;
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  std::weak_ptr<ByteAddressSpace> weak_backing = backing;
+  const auto handle = vm.register_translated(77, backing, backing);
+  ASSERT_TRUE(handle);
+  auto snapshot = vm.snapshot(handle);
+  ASSERT_TRUE(snapshot);
+  VmMtypeCache cache;
+  EXPECT_EQ(snapshot->query_mtype(0, cache), Mtype::RW);
+  ASSERT_TRUE(vm.unregister_address_space(handle));
+  EXPECT_FALSE(snapshot->is_current());
+  EXPECT_FALSE(snapshot->query_mtype(0, cache));
+  backing.reset();
+  EXPECT_FALSE(weak_backing.expired());
+  snapshot.reset();
+  EXPECT_TRUE(weak_backing.expired());
+}
+
+TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
+  class Reporter {
+  public:
+    Reporter(uint32_t &copies, uint32_t &calls) : copies_(copies), calls_(calls) {}
+    Reporter(const Reporter &other) : copies_(other.copies_), calls_(other.calls_) { ++copies_; }
+    void operator()(uint64_t, VmAccessKind) const { ++calls_; }
+
+  private:
+    uint32_t &copies_;
+    uint32_t &calls_;
+  };
+
+  uint32_t copies = 0, calls = 0;
+  GpuVm vm;
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  const AddressSpaceHandle handle =
+      vm.register_address_space(7, backing, backing, Reporter(copies, calls));
+  ASSERT_TRUE(handle);
+  copies = 0;
+  auto fault = [](const std::optional<GpuVmAccess> &access) {
+    ASSERT_TRUE(access);
+    EXPECT_EQ(access->probe(4096, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
+  };
+  fault(vm.snapshot(handle));
+  auto pinned = vm.snapshot_pinned(handle);
+  fault(pinned);
+  EXPECT_TRUE(vm.invalidate(handle));
+  fault(vm.snapshot(handle));
+  EXPECT_TRUE(vm.replace_translated(handle, backing, backing));
+  fault(vm.snapshot(handle));
+  EXPECT_EQ(calls, 4u);
+  // A callback can be active in another snapshot while a new generation is
+  // created. Copying its possibly mutable target would race that invocation.
+  EXPECT_EQ(copies, 0u);
+}
+
+TEST(GpuVmService, FaultReporterSerializesDistinctSnapshotsAndGenerations) {
+  class Reporter {
+  public:
+    Reporter(std::atomic<bool> &overlapped, std::atomic<unsigned> &calls)
+        : overlapped_(overlapped), calls_(calls) {}
+    Reporter(const Reporter &other) : overlapped_(other.overlapped_), calls_(other.calls_) {}
+
+    void operator()(uint64_t, VmAccessKind) {
+      if (active_.fetch_add(1) != 0)
+        overlapped_ = true;
+      std::this_thread::yield();
+      ++calls_;
+      --active_;
+    }
+
+  private:
+    // This state belongs to the callable itself, unlike the shared observations.
+    // Copying a callable gives each snapshot its own state; sharing it requires
+    // serialization before invoking a potentially mutable target.
+    std::atomic<unsigned> active_{0};
+    std::atomic<bool> &overlapped_;
+    std::atomic<unsigned> &calls_;
+  };
+
+  for (bool routed : {false, true}) {
+    SCOPED_TRACE(routed);
+    GpuVm vm;
+    auto backing = std::make_shared<ByteAddressSpace>(0x11);
+    std::atomic<bool> overlapped{false};
+    std::atomic<unsigned> calls{0};
+    const auto handle =
+        routed
+            ? vm.register_address_space(7, backing, backing, Reporter(overlapped, calls))
+            : vm.register_unrouted_address_space(7, backing, backing, Reporter(overlapped, calls));
+    ASSERT_TRUE(handle);
+    auto first = vm.snapshot_pinned(handle);
+    auto second = vm.snapshot_pinned(handle);
+    ASSERT_TRUE(vm.replace_translated(handle, backing, backing));
+    auto third = vm.snapshot(handle);
+    auto fourth = vm.snapshot(handle);
+    ASSERT_TRUE(first && second && third && fourth);
+    std::array snapshots{*first, *second, *third, *fourth};
+    constexpr unsigned kIterations = 128;
+    std::barrier start(snapshots.size());
+    std::vector<std::jthread> threads;
+    for (unsigned index = 0; index < snapshots.size(); ++index) {
+      threads.emplace_back([&, index] {
+        std::array<std::byte, 1> bytes{};
+        for (unsigned iteration = 0; iteration < kIterations; ++iteration) {
+          start.arrive_and_wait();
+          const auto &snapshot = snapshots[index];
+          if (index == 0)
+            EXPECT_EQ(snapshot.probe(4096, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
+          else if (index == 1)
+            EXPECT_EQ(snapshot.read(4096, bytes), VmAccessOutcome::Faulted);
+          else if (index == 2)
+            EXPECT_EQ(snapshot.write(4096, bytes), VmAccessOutcome::Faulted);
+          else
+            EXPECT_EQ(snapshot.atomic_load(0, 3).outcome, VmAccessOutcome::Malformed);
+        }
+      });
+    }
+    threads.clear();
+    EXPECT_FALSE(overlapped);
+    EXPECT_EQ(calls, snapshots.size() * kIterations);
+  }
+}
+
+TEST(GpuVmService, FaultReporterAllowsNestedFaultsAndReleasesAfterException) {
+  GpuVm vm;
+  auto backing = std::make_shared<ByteAddressSpace>(0x11);
+  AddressSpaceHandle handle;
+  unsigned calls = 0;
+  handle = vm.register_address_space(7, backing, backing, [&](uint64_t address, VmAccessKind) {
+    ++calls;
+    if (address == 4096) {
+      auto nested = vm.snapshot_pinned(handle);
+      ASSERT_TRUE(nested);
+      EXPECT_EQ(nested->probe(4097, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
+    }
+    if (address == 4098)
+      throw std::runtime_error("fault reporter");
+  });
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(access->probe(4096, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
+  EXPECT_EQ(calls, 2u);
+  EXPECT_THROW((void)access->probe(4098, 1, VmAccessKind::Read), std::runtime_error);
+  EXPECT_EQ(calls, 3u);
+  // A different thread must be able to enter after the throwing callback.
+  std::jthread reader(
+      [&] { EXPECT_EQ(access->probe(4097, 1, VmAccessKind::Read), VmAccessOutcome::Faulted); });
+  reader.join();
+  EXPECT_EQ(calls, 4u);
+}
+
+TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
+  GpuVm gpu_vm;
+  const auto handle = register_byte_address_space(gpu_vm, 7, 1);
+  ASSERT_TRUE(handle);
+  constexpr unsigned kReaders = 8;
+  std::barrier phase(kReaders + 1);
+  std::array<std::optional<GpuVmAccess>, kReaders> pinned;
+  std::vector<std::jthread> readers;
+  for (unsigned i = 0; i < kReaders; ++i) {
+    readers.emplace_back([&, i] {
+      for (unsigned epoch = 2; epoch <= 65; ++epoch) {
+        phase.arrive_and_wait();
+        // These reads race with root replacement. Each returned snapshot must
+        // pair its captured epoch with the corresponding immutable backing.
+        auto access = i % 2 ? gpu_vm.snapshot(handle) : gpu_vm.snapshot_vmid(7);
+        EXPECT_TRUE(access);
+        if (access) {
+          EXPECT_EQ(access->cache_namespace().address_space, handle);
+          std::array<std::byte, 1> value{};
+          const auto outcome = access->read(0, value);
+          if (outcome == VmAccessOutcome::Complete)
+            EXPECT_EQ(value[0], std::byte(access->info().translation_epoch & 255));
+          else
+            EXPECT_EQ(outcome, VmAccessOutcome::Unavailable);
+        }
+        EXPECT_EQ(gpu_vm.find_vmid(7), handle);
+        EXPECT_TRUE(gpu_vm.lookup(handle)->ready);
+        EXPECT_EQ(gpu_vm.active_address_spaces(), 1u);
+        // Pinned transactions survive root replacement, until explicit retirement.
+        pinned[i] = gpu_vm.snapshot_pinned(handle);
+        EXPECT_TRUE(pinned[i]);
+        if (pinned[i]) {
+          std::array<std::byte, 1> value{};
+          EXPECT_EQ(pinned[i]->read(0, value), VmAccessOutcome::Complete);
+          EXPECT_EQ(value[0], std::byte(pinned[i]->info().translation_epoch & 255));
+        }
+        phase.arrive_and_wait();
+      }
+    });
+  }
+  for (unsigned epoch = 2; epoch <= 65; ++epoch) {
+    auto replacement = std::make_shared<ByteAddressSpace>(epoch);
+    phase.arrive_and_wait();
+    EXPECT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+    phase.arrive_and_wait();
+  }
+  readers.clear();
+  EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_FALSE(gpu_vm.snapshot_vmid(7));
+  for (const auto &access : pinned) {
+    ASSERT_TRUE(access);
+    std::array<std::byte, 1> value{std::byte{0xff}};
+    EXPECT_EQ(access->read(0, value), VmAccessOutcome::Unavailable);
+    EXPECT_EQ(value[0], std::byte{0xff});
+  }
 }
 
 TEST(GpuVmService, ClearingGartPreservesItsIdentityAndUnrelatedAddressSpaces) {
