@@ -13,9 +13,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-build-flags)
 install(
     TARGETS rocprofiler-sdk-registration-attach-fixture
-    LIBRARY
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/lib
-        COMPONENT tests)
+    LIBRARY DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/lib
+            COMPONENT tests)
 
 # -------------------------------------------------------------------------------------- #
 #
