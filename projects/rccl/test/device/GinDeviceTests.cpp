@@ -1532,7 +1532,7 @@ __global__ void kernelProxyPut(ncclGinProxyGpuCtx_t* ctx, ProxyPutArgs args) {
     signal.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(args.signalWindow);
     signal.vaSignal.signalOffset = args.signalOffset;
   }
-  ncclGinProxyGfd_t gfd;
+  ncclGinProxyGfd_t gfd{};
   // Matching system scopes skip the release fence; the fake windows are never dereferenced.
   nccl::gin::proxy::put<ncclCoopCta, uint64_t>(ncclCoopCta{}, &gfd, ctx, static_cast<int>(args.peer),
                                                reinterpret_cast<ncclGinWindow_t>(args.dstWnd), args.dstOff,
@@ -1689,6 +1689,27 @@ TEST_F(GinProxyPutTest, ExactChunkMultipleWithVASignal) {
   expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 1), 1);
   // The VA signal GFD has no put bit, no size and no destination; qwords 1-2 carry the signal VA.
   expectGfd(queues[kQueueSize + 2], {kVaOp, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0, kSigVal, 1}, 2);
+}
+
+// A standalone VA signal (no source window, no bytes, no counter) posts only the VA GFD, with no empty put first.
+TEST_F(GinProxyPutTest, StandaloneVASignalPostsOnlySignalGfd) {
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_VA;
+  args.signalWindow = 0x00003C3C00003000ULL;
+  args.signalOffset = 0x48;
+  args.signalOp = ncclGinSignalInc;
+  args.signalVal = 1;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  expectOnlyPeer1Posted(pis, queues, 1);
+  expectGfd(queues[kQueueSize],
+            {ncclGinProxyOpWithSignalInc | ncclGinProxyOpVASignal, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0,
+             args.signalVal, 0},
+            0);
 }
 
 // ---------------------------------------------------------------------------

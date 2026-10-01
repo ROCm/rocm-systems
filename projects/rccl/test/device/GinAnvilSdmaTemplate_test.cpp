@@ -1051,6 +1051,7 @@ static void checkMultiSegmentSplit(bool fused) {
       StubRecordOnlyScope recordOnly;
       ASSERT_TRUE(readStubLog().recordOnly) << "else the stub would copy up to 2 * kGinPutSegBytes into 8-byte buffers";
       kernelPutSignalQuiesce<<<1, 1>>>(env.h.ptr, /*hasWins=*/true, c.bytes);
+      ASSERT_EQ(hipGetLastError(), hipSuccess);
       ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
       log = readStubLog();
     }
