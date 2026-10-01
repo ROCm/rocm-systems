@@ -200,7 +200,8 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
                                                   const SkippedKernelLayoutPlan &plan,
                                                   rj_code_arch_t arch) {
   const uint64_t source_entry = plan.source_entry;
-  const uint64_t padding = padding_for_residue(text.size(), source_entry % 256, 256);
+  const uint64_t padding =
+      padding_for_residue(text.size(), source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
   append_nop_padding(text, padding, arch);
   const uint64_t target_entry = text.size();
 
@@ -256,8 +257,8 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // Kernarg-preload kernels have two hardware-visible entries separated by
     // exactly 256 bytes. Reserve that launch window before appending the body;
     // the stubs are written after the body offsets have been rebased.
-    const uint64_t launch_padding =
-        padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
+    const uint64_t launch_padding = padding_for_residue(
+        translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
     append_nop_padding(translated_text, launch_padding, arch);
     layout.target_entry = translated_text.size();
     const uint64_t launch_end =
@@ -271,19 +272,21 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // the descriptor entry and relocated guest entry on the original entry
     // residue: the former is the hardware launch address, while the latter
     // preserves the body placement invariant used by kernels without prologues.
-    const uint64_t launch_padding =
-        padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
+    const uint64_t launch_padding = padding_for_residue(
+        translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
     append_nop_padding(translated_text, launch_padding, arch);
     layout.target_entry = translated_text.size();
     const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
     append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
-    const uint64_t body_padding = padding_for_residue(
-        translated_text.size() + layout.target_body_entry, layout.source_entry % 256, 256);
+    const uint64_t body_padding =
+        padding_for_residue(translated_text.size() + layout.target_body_entry,
+                            layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
     append_nop_padding(translated_text, body_padding, arch);
     target_delta = translated_text.size();
   } else {
-    const uint64_t body_padding = padding_for_residue(
-        translated_text.size() + layout.target_body_entry, layout.source_entry % 256, 256);
+    const uint64_t body_padding =
+        padding_for_residue(translated_text.size() + layout.target_body_entry,
+                            layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
     append_nop_padding(translated_text, body_padding, arch);
     target_delta = translated_text.size();
   }

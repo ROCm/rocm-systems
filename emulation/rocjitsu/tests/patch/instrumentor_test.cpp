@@ -2276,8 +2276,9 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 //==============================================================================
 // The DBI entry prologue
 //
-// A probe asking for the framework's entry storage makes the instrumentor
-// synthesize a site at the kernel entry that defines it. These cover the gates
+// A probe asking for the framework's entry storage makes the instrumentor place
+// an entry-prologue stub that defines it in the cave and redirect the kernel
+// descriptor to it. These cover the gates
 // that refuse a kernel the prologue could not cover, plus the `.rocjitsu.kernarg`
 // record the successful path declares.
 //==============================================================================
@@ -2354,11 +2355,10 @@ TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
       << result.errors.front();
 }
 
-// The prologue and a user point would each splice a branch over the same bytes.
-// Checked before storage selection, so it reports the collision rather than
-// whatever the storage planner would have said next.
-TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryFailsClosed) {
-  auto target = make_gfx950_kernel_elf_with_two_nops(); // entry at .text offset 0.
+// The prologue runs from a stub dispatch enters at, so the entry is an ordinary
+// anchor: a point on it composes, running after the prologue.
+TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryComposesWithThePrologue) {
+  auto target = make_gfx950_kernarg_kernel_elf(); // entry at .text offset 0.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2367,16 +2367,118 @@ TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryFailsClosed) {
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
   auto result = instr.patch_with_debug_summaries();
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("overlaps the kernel entry"), std::string::npos)
-      << result.errors.front();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches[0].anchor_offset, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_NE(*stub, 0u) << "dispatch still enters at the original entry, skipping the prologue";
+
+  // The entry is spliced to the site's trampoline, and the stub branches to it.
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  ASSERT_LT(result.patches[0].trampoline_offset / sizeof(uint32_t), text.size());
+  EXPECT_NE(text[0], 0xBF800000u) << "the point on the entry was not spliced";
+  const uint64_t branch_pc = result.patches[0].trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, /*target=*/0);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(text[branch_pc / sizeof(uint32_t)], build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the entry";
 }
 
-// The entry is an anchor like any other, so an entry the trampoline machinery
-// cannot relocate refuses the prologue instead of being spliced anyway.
-TEST(InstrumentorEntryPrologue, UnrelocatableKernelEntryFailsClosed) {
+// The stub's s_branch back to the entry has to reach it, and the alignment
+// padding ahead of the stub is what moves it out of range. With the entry at 0
+// and a one-word probe body, the stub lands at the first 256-byte boundary past
+// .text + 4: a .text of 130812 bytes puts it at 130816, from where its branch
+// still reaches the entry; 130816 bytes pushes it to 131072, past the 128 KiB a
+// backward s_branch covers. The site sits 8 bytes before the end of .text so its own forward
+// branch stays in range and the stub's is the only one that can fail.
+namespace {
+
+InstrumentedCodeObjectDebug patch_kernel_of_size(uint64_t text_bytes) {
+  std::vector<uint32_t> words(text_bytes / sizeof(uint32_t), 0xBF800000u);
+  words.back() = 0xBF810000u;
+  auto target = test::make_kernarg_kernel_elf(words, /*private_bytes=*/0,
+                                              EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/text_bytes - 8));
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+TEST(InstrumentorEntryPrologue, StubAtTheEdgeOfBranchRangeIsAccepted) {
+  auto result = patch_kernel_of_size(130812);
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_EQ(*stub, 130816u);
+}
+
+TEST(InstrumentorEntryPrologue, StubPaddedOutOfBranchRangeFailsClosed) {
+  auto result = patch_kernel_of_size(130816);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("out of branch range of the kernel entry"),
+            std::string::npos)
+      << result.errors.front();
+  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+      << result.errors.front();
+  EXPECT_TRUE(result.elf_bytes.empty()) << "a rejected patch still produced an ELF";
+}
+
+// The stub keeps the entry's residue modulo 256, not merely a 256-byte
+// alignment, so an entry that is not at a residue of 0 lands the stub off one
+// too. Hardware alignment then follows from the entry's own.
+TEST(InstrumentorEntryPrologue, StubKeepsANonzeroEntryResidue) {
+  constexpr uint64_t kEntry = 8;
+  auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF810000u}, /*private_bytes=*/0,
+      EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, /*wave32=*/false,
+      /*granulated_sgpr_count=*/3, kEntry);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/12));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  EXPECT_EQ(*stub % 256, kEntry);
+
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  EXPECT_EQ(text[kEntry / sizeof(uint32_t)], 0xBF800000u) << "the kernel entry was overwritten";
+  const uint64_t branch_pc = result.patches[0].trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, kEntry);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(text[branch_pc / sizeof(uint32_t)], build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the entry";
+}
+
+// Nothing is written over the entry, so an entry that could not be an anchor is
+// no obstacle.
+TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   const uint32_t branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
-  auto target = make_gfx950_kernel_elf({branch, 0xBF800000u}, /*private_bytes=*/0);
+  auto target = test::make_kernarg_kernel_elf({branch, 0xBF800000u}, /*private_bytes=*/0,
+                                              EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2385,9 +2487,14 @@ TEST(InstrumentorEntryPrologue, UnrelocatableKernelEntryFailsClosed) {
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
   auto result = instr.patch_with_debug_summaries();
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("cannot anchor the entry prologue"), std::string::npos)
-      << result.errors.front();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  ASSERT_FALSE(text.empty());
+  EXPECT_EQ(text[0], branch) << "the kernel entry was overwritten";
 }
 
 // patch() is the production entry point, and no runtime builds the kernarg
@@ -2428,9 +2535,8 @@ TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
       << result.errors.front();
 }
 
-// Nothing asks for the storage, so no prologue is planned and no gate applies.
-// The entry keeps its original instruction, which is what makes every other
-// probe-call test independent of this machinery.
+// Nothing asks for the storage, so no prologue is planned and no gate applies:
+// the descriptor still enters at the original entry.
 TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
@@ -2451,14 +2557,15 @@ TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> text = section_words(patched, ".text");
-  ASSERT_FALSE(text.empty());
-  EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry must still hold its original s_nop";
+  const auto entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry.has_value());
+  EXPECT_EQ(*entry, 0u) << "the descriptor was redirected with no prologue to run";
 }
 
-// The cave is [probe bodies][entry prologue][trampolines]. Without this the
-// middle region is unasserted: deleting the prologue's append leaves the rest of
-// the suite green, since every other test reaches a rejection instead.
+// The cave is [probe bodies][s_nop padding][entry stub][trampolines], with the
+// descriptor entering at the stub. This is what pins the stub's contents: both
+// loads at the offsets the record declares, the restores, and the wait ordered
+// between them.
 TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampoline) {
   auto target = make_gfx950_kernarg_kernel_elf();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
@@ -2478,14 +2585,22 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> text = section_words(patched, ".text");
 
-  // One probe body, one word long, at the front of the cave. What follows it up
-  // to the site's trampoline can only be the entry prologue.
+  // One probe body, one word long, at the front of the cave, then padding up to
+  // the stub the descriptor now enters at, then the stub up to the site's
+  // trampoline.
   const uint64_t probe_end = p.probe_target_offset + sizeof(uint32_t);
-  ASSERT_GT(p.trampoline_offset, probe_end)
-      << "nothing lies between the probe body and the site trampoline";
+  const auto stub = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(stub.has_value());
+  ASSERT_GE(*stub, probe_end) << "the descriptor does not enter at a stub in the cave";
+  ASSERT_GT(p.trampoline_offset, *stub) << "nothing lies between the stub and the trampoline";
   ASSERT_LE(p.trampoline_offset / sizeof(uint32_t), text.size());
+  // The original entry is .text offset 0, and hardware takes the entry address
+  // shifted right by 8, so the stub keeps the entry's 256-byte residue.
+  EXPECT_EQ(*stub % 256, 0u) << "the stub is not at a launchable entry address";
+  for (uint64_t off = probe_end; off < *stub; off += sizeof(uint32_t))
+    EXPECT_EQ(text[off / sizeof(uint32_t)], 0xBF800000u) << "padding at " << off << " is not s_nop";
   const std::vector<uint32_t> prologue(
-      text.begin() + static_cast<ptrdiff_t>(probe_end / sizeof(uint32_t)),
+      text.begin() + static_cast<ptrdiff_t>(*stub / sizeof(uint32_t)),
       text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)));
   const std::vector<uint32_t> trampoline(
       text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)), text.end());
@@ -2532,11 +2647,13 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   EXPECT_LT(guest_ptr_load_it, wait_it) << "the wait runs before a load it is meant to cover";
   EXPECT_LT(wait_it, std::find(prologue.begin(), prologue.end(), restore_lo));
 
-  // The kernel entry reaches all of it: its original s_nop was replaced by a
-  // branch, and the original runs from the cave instead.
-  EXPECT_NE(text[0], 0xBF800000u) << "the kernel entry still holds its original s_nop";
-  EXPECT_NE(std::find(prologue.begin(), prologue.end(), 0xBF800000u), prologue.end())
-      << "the entry's original instruction was not relocated into the cave";
+  // The stub ends by branching to the untouched original entry.
+  EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry no longer holds its original s_nop";
+  const uint64_t branch_pc = p.trampoline_offset - sizeof(uint32_t);
+  const auto back = compute_sopp_branch_simm16(branch_pc, /*target=*/0);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(prologue.back(), build_s_branch(*back, ROCJITSU_CODE_ARCH_CDNA4))
+      << "the stub does not branch to the original entry";
 }
 
 namespace {
@@ -2633,7 +2750,7 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
   ASSERT_TRUE(baseline.has_value()) << err;
   const uint16_t low = *baseline;
 
-  // Three words, so both sites can sit clear of the entry the prologue needs.
+  // Three words, so the two probes get distinct sites.
   auto target = test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u, 0xBF800000u},
                                               /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                               kTestKernargSize);
@@ -2735,8 +2852,8 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
 
 // The loader-side reader stops at the first section of this name, so a second
 // record would be silently ignored. The fixture appends one directly rather than
-// instrumenting twice: a second pass never reaches this check, since the entry
-// is a branch by then and the prologue is refused first.
+// instrumenting twice, so the test isolates this check from whatever else a
+// second pass over a patched object would run into first.
 TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClosed) {
   auto target = make_gfx950_kernarg_kernel_elf();
   AmdGpuCodeObject plain(target.data(), target.size());
