@@ -27,6 +27,9 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 
+#include <atomic>
+#include <cstdint>
+
 namespace rocprofiler
 {
 namespace counters
@@ -39,6 +42,13 @@ counter_contexts_filter()
     return [](const context::context* ctx) -> bool {
         return ctx && ctx->dispatch_counter_collection != nullptr;
     };
+}
+
+std::atomic<uint32_t>&
+running_services()
+{
+    static auto _v = std::atomic<uint32_t>{0};
+    return _v;
 }
 }  // namespace
 
@@ -125,15 +135,32 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue* /*queue*/,
     }
 }
 
+void
+note_counting_started()
+{
+    running_services().fetch_add(1, std::memory_order_acq_rel);
+}
+
+void
+note_counting_stopped()
+{
+    running_services().fetch_sub(1, std::memory_order_acq_rel);
+}
+
 bool
 is_any_active()
 {
+    if(running_services().load(std::memory_order_acquire) == 0) return false;
     return !context::get_active_contexts(counter_contexts_filter()).empty();
 }
 
 bool
 is_active_on_agent(rocprofiler_agent_id_t agent_id)
 {
+    // The write interceptor calls this for every queue on every write, so the common case of no
+    // running counter collection must not scan the active contexts: the scan builds a
+    // small_vector, which heap-allocates once more than six contexts are active.
+    if(running_services().load(std::memory_order_acquire) == 0) return false;
     for(const auto* ctx : context::get_active_contexts(counter_contexts_filter()))
     {
         if(ctx->dispatch_counter_collection->collects_on(agent_id)) return true;
