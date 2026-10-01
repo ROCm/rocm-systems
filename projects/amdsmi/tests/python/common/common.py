@@ -1356,6 +1356,19 @@ class Common:
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
             return []
 
+    def skip_without_cpu(self):
+        """CPU socket handles, skipping the calling test when there are none.
+
+        For CPU tests that iterate handles inline (rather than through
+        Test_API_Per_CPU) but still need to skip cleanly on CPU-less hosts.
+        """
+        handles = self._cpu_socket_handles()
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        return handles
+
     def _Test_API_Per_Handles(self, handles, label, **kwargs):
         params = kwargs
         iterator = iter(params.items())
