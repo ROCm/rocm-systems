@@ -141,6 +141,10 @@ NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(MultiRankGpuEnable, "MULTI_RANK_GPU_ENABLE", 0);
 NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
+// A partition reaches the network, and xGMI, over the physical device's paths, so GIN is as
+// available to a partition as it is to the whole GPU. This mirrors NCCL_NET_GDR_MLOPART, which
+// already lets partitions keep GDR. Set to 0 to opt every partition out of GIN again.
+NCCL_PARAM(GinMloPart, "GIN_MLOPART", 1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -2586,7 +2590,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (globalGinTypeBitMask && globalCuMemGdrSupport && !comm->hasMloPart) {
+  if (globalGinTypeBitMask && globalCuMemGdrSupport && (!comm->hasMloPart || ncclParamGinMloPart())) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;

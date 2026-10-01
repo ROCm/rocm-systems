@@ -34,6 +34,8 @@ struct ncclDevrWindow {
   // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
   void** ipcPeerPtrs;
   void** ipcPeerPtrsAllocBase;
+  // A peer mapping is either a legacy IPC handle or a cuMem import, and the two unmap differently.
+  uint8_t* ipcPeerIsCuMem;
   int ipcPeerCount;
 #endif
 };

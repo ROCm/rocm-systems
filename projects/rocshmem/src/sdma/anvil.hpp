@@ -54,8 +54,17 @@ class SdmaQueue {
   SdmaQueueDeviceHandle* deviceHandle() const;
   SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle() const;
   void dump(std::ofstream& logFile);
+  // False when the constructor could not create an SDMA queue. The constructor releases whatever it
+  // acquired before giving up, so an invalid queue must be dropped without being used or destroyed
+  // any further.
+  bool valid() const;
+  // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
+  // (NO_MEMORY) apart from other failures.
+  HSAKMT_STATUS createStatus() const;
 
  private:
+  bool valid_{false};
+  HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_;
   uint64_t* cachedWptr_;
   uint64_t* committedWptr_;
@@ -114,6 +123,12 @@ class AnvilLib {
   uint32_t numSdmaEngines_{0};
   uint32_t numSdmaXgmiEngines_{0};
   uint32_t numSdmaEnginesTotal_{0};
+  // KFD caps user SDMA queues per engine, so a partition with few engines also has a small total
+  // queue budget. Track usage per engine to refuse a mesh that cannot fit before KFD returns
+  // NO_MEMORY part way through building it.
+  uint32_t numSdmaQueuesPerEngine_{0};
+  std::unordered_map<uint32_t, uint32_t> queuesPerEngine_;
+  HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
   // Last preferred-engine query, so a getOamId failure can print status and mask.
   hsa_status_t lastPreferredStatus_{HSA_STATUS_ERROR};
   uint32_t lastPreferredMask_{0};
