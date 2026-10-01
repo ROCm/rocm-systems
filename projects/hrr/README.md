@@ -52,6 +52,15 @@ cmake --build <hrr-build> --target hrr-playback -j"$(nproc)"
 Locate the binary: `find <hrr-build> -name hrr-playback -type f`
 (installed to `<prefix>/bin/hrr-playback`).
 
+### CMake options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `HRR_BUILD_PLAYBACK` | `ON` | Build the `hrr-playback` tool (requires HIP) |
+| `HRR_BUILD_TESTS` | `OFF` | Build the HRR unit tests |
+| `HRR_BUILD_INTEGRATION_TESTS` | `OFF` | Build the GPU capture/replay integration tests (requires `HRR_BUILD_PLAYBACK`) |
+| `HRR_ENABLE_WERROR` | `OFF` | Build the HRR targets with `-Wall -Werror` (Linux, GCC/Clang only). Off by default. |
+
 Details: [DESIGN.md § Build System](DESIGN.md#build-system).
 
 ## Inspecting and replaying captures
