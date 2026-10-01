@@ -67,6 +67,9 @@
 #if defined(__HIP_PLATFORM_AMD__) && \
     !((HIP_VERSION) >= 71260540 || ((HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000))
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#elif defined(__HIP_PLATFORM_AMD__) && (HIP_VERSION) < 70060000 && !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
+// The backport's hipify does not rename the CUDA spelling, so alias the real enumerator.
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
