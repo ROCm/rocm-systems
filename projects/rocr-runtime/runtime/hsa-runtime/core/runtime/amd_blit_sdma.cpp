@@ -1917,19 +1917,31 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
     const size_t plane = static_cast<size_t>(range->x) * range->y;
     const bool rows_packed = range->y == 1 || (src->pitch == range->x && dst->pitch == range->x);
     const bool layers_packed = range->z == 1 || (src->slice == plane && dst->slice == plane);
+    char* dst_layer =
+        static_cast<char*>(dst->base) + dst_offset->z * dst->slice + dst_offset->y * dst->pitch;
+    char* src_layer =
+        static_cast<char*>(src->base) + src_offset->z * src->slice + src_offset->y * src->pitch;
 
     if (rows_packed && layers_packed) {
       // Whole rect is contiguous: linear packets, merged with adjacent rects.
-      char* block_dst = static_cast<char*>(dst->base) + dst_offset->z * dst->slice +
-          dst_offset->y * dst->pitch + dst_offset->x;
-      const char* block_src = static_cast<const char*>(src->base) + src_offset->z * src->slice +
-          src_offset->y * src->pitch + src_offset->x;
+      char* block_dst = dst_layer + dst_offset->x;
+      const char* block_src = src_layer + src_offset->x;
       if (run_dst + run_size != block_dst || run_src + run_size != block_src) {
         flush_run();
         run_dst = block_dst;
         run_src = block_src;
       }
       run_size += plane * range->z;
+    } else if (rows_packed && plane <= UINT32_MAX) {
+      // Only layers (X x Y) are contiguous: one rect row per layer, slice as pitch.
+      flush_run();
+      const hsa_pitched_ptr_t folded_dst = {dst_layer, dst->slice, 0};
+      const hsa_pitched_ptr_t folded_src = {src_layer, src->slice, 0};
+      const hsa_dim3_t folded_dst_offset = {dst_offset->x, 0, 0};
+      const hsa_dim3_t folded_src_offset = {src_offset->x, 0, 0};
+      const hsa_dim3_t folded_range = {static_cast<uint32_t>(plane), range->z, 1};
+      BuildCopyRectCommand(append, &folded_dst, &folded_dst_offset, &folded_src, &folded_src_offset,
+                           &folded_range);
     } else {
       flush_run();
       BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
