@@ -908,11 +908,12 @@ TEST_F(GinDeviceTest, Flush_PostsOneLocalFlushGfdPerPeer) {
 //   only from the thread whose strided peer set holds a peer with pi != ci; all other threads return ncclSuccess.
 // ---------------------------------------------------------------------------
 
-__global__ void kernelGinApiFlushTimeout(ncclGinCtx ctx, uint64_t timeoutCycles, ncclResult_t* rets) {
+__global__ void kernelGinApiFlushTimeout(ncclGinCtx ctx, uint64_t timeoutCycles, ncclResult_t* rets,
+                                         uint32_t* abortFlag = nullptr) {
   rets[threadIdx.x] =
     ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, ncclCoopCta{}, /*hasDescriptor=*/false,
-                                                      /*descriptor=*/nullptr, cuda::memory_order_acquire,
-                                                      /*abortFlag=*/nullptr, timeoutCycles);
+                                                      /*descriptor=*/nullptr, cuda::memory_order_acquire, abortFlag,
+                                                      timeoutCycles);
 }
 
 TEST_F(GinDeviceTest, FlushTimeout_ReportsLaggingPeer) {
@@ -987,6 +988,78 @@ TEST_F(GinDeviceTest, FlushTimeout_ReportsLaggingPeer) {
   // Current behavior: unlike the blocking overload, the timeout path only waits per peer and posts no flush GFD.
   EXPECT_EQ(d_pis.copyTo(), hostPis) << "timeout Flush moved a producer index";
   EXPECT_EQ(d_cis.copyTo(), hostCis) << "timeout Flush moved a consumer index";
+  std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
+  for (size_t s = 0; s < queues.size(); s++) {
+    EXPECT_TRUE(GinApiFlushSlotIsZero(queues[s])) << "timeout Flush posted to queue slot " << s;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FlushTimeout_LeavesPendingGetsInvisible: with gets pending on drained peers, the timeout overload returns
+//   ncclSuccess without posting a local flush GFD or advancing lastVisibleGet.
+//   Separate from ReportsLaggingPeer: only raised abort + no-expiry timeout lets a fixed path advance lastVisibleGet.
+// ---------------------------------------------------------------------------
+
+TEST_F(GinDeviceTest, FlushTimeout_LeavesPendingGetsInvisible) {
+  constexpr uint32_t kNranks = 5;
+  constexpr uint32_t kQueueSize = 16; // Covers one flush GFD per peer if the timeout path ever posts them.
+  constexpr uint32_t kRank = 2;
+  constexpr uint32_t kThreads = 3;
+  constexpr uint32_t kGetBase = 100;
+  constexpr uint64_t kTimeoutCycles = 1ULL << 62; // Never expires, so a posted local flush could only end via abort.
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kNranks);
+  DeviceBuffer<uint32_t> d_cis(kNranks);
+  DeviceBuffer<uint32_t> d_lastIssuedGet(kNranks);
+  DeviceBuffer<uint32_t> d_lastVisibleGet(kNranks);
+  DeviceBuffer<uint32_t> d_abortFlag(1);
+  DeviceBuffer<ncclResult_t> d_rets(kThreads);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_lastVisibleGet.zero();
+  std::vector<uint32_t> hostIssued(kNranks);
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    hostIssued[pe] = kGetBase + pe;
+  }
+  d_lastIssuedGet.copyFrom(hostIssued);
+  // Raised abort bounds any local flush wait (no consumer runs); drained peers never reach testAbort.
+  d_abortFlag.upload(1u);
+  d_rets.copyFrom(std::vector<ncclResult_t>(kThreads, ncclInternalError));
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize = kQueueSize;
+  hostProxyCtx.queues = d_queues.ptr;
+  hostProxyCtx.pis = d_pis.ptr;
+  hostProxyCtx.cis = d_cis.ptr;
+  hostProxyCtx.lastIssuedGet = d_lastIssuedGet.ptr;
+  hostProxyCtx.lastVisibleGet = d_lastVisibleGet.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.rank = static_cast<int>(kRank);
+  ctx.nRanks = static_cast<int>(kNranks);
+  ctx.handle = d_proxyCtx.ptr;
+  ctx.contextId = 0;
+
+  kernelGinApiFlushTimeout<<<1, kThreads>>>(ctx, kTimeoutCycles, d_rets.ptr, d_abortFlag.ptr);
+  syncAndCheck();
+
+  std::vector<ncclResult_t> rets = d_rets.copyTo();
+  for (uint32_t t = 0; t < kThreads; t++) {
+    EXPECT_EQ(rets[t], ncclSuccess) << "thread " << t;
+  }
+
+  // Current behavior (known gap): unlike the blocking overload, gets stay invisible and no local flush GFD is posted.
+  const std::vector<uint32_t> zeros(kNranks, 0u);
+  EXPECT_EQ(d_lastVisibleGet.copyTo(), zeros) << "timeout Flush advanced lastVisibleGet";
+  EXPECT_EQ(d_pis.copyTo(), zeros) << "timeout Flush moved a producer index";
+  EXPECT_EQ(d_cis.copyTo(), zeros) << "timeout Flush moved a consumer index";
   std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
   for (size_t s = 0; s < queues.size(); s++) {
     EXPECT_TRUE(GinApiFlushSlotIsZero(queues[s])) << "timeout Flush posted to queue slot " << s;
