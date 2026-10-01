@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/execution_backend.h"
@@ -16,7 +17,7 @@
 namespace rocjitsu {
 namespace cdna5 {
 
-class Operand final : public IsaOperand<Isa> {
+class RJ_API_TYPE_EXPORT Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   static constexpr bool kStaticRegisterAccess = true;
@@ -45,7 +46,7 @@ private:
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                         const uint32_t *vals, uint64_t mask) const override;
-  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
+  RJ_API_EXPORT uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
   void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
   void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;

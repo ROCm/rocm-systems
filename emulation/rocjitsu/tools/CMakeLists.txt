@@ -8,6 +8,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_code
     rocjitsu_code_object
     rocjitsu_isa
+    rocjitsu_fp_math_embedded
     rocjitsu_amdgpu_isa_registry
     simdojo
     rocjitsu_vm_amdgpu

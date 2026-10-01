@@ -111,6 +111,16 @@ from amdisa.codegen.execute.matrix import (
     gen_mfma,
 )
 
+# Ordered to match cdna5::WmmaV4Form in wmma_v4_provider.h.  The focused
+# provider is emitted from the same semantic bodies as the baseline callbacks.
+_CDNA5_WMMA_V4_CALLBACKS = {
+    'V_WMMA_F32_16X16X32_F16': 'execute_wmma_f32_f16_v4',
+    'V_WMMA_F16_16X16X32_F16': 'execute_wmma_f16_f16_v4',
+    'V_WMMA_F32_16X16X32_BF16': 'execute_wmma_f32_bf16_v4',
+    'V_WMMA_BF16_16X16X32_BF16': 'execute_wmma_bf16_bf16_v4',
+    'V_WMMA_BF16F32_16X16X32_BF16': 'execute_wmma_bf16f32_bf16_v4',
+}
+
 
 class _Literal32Widening(Enum):
     ZERO_EXTEND = 'ZeroExtend'
@@ -10112,6 +10122,7 @@ class CodeGenerator:
         encoding fields for correct struct member access.
         """
         decoder_factories = self._distributed_decoder_factories()
+        focused_wmma_v4_bodies: dict[str, tuple[str, str]] = {}
 
         # Build a mapping of parent encoding names to their child alt
         # encodings that have their own instructions (Category 1 alts).
@@ -11941,6 +11952,16 @@ class CodeGenerator:
                             enc.enc_name,
                             result_writer=_mask_result_writer,
                         )
+                        if (
+                            self.generated_dir_name == 'cdna5'
+                            and inst.name in _CDNA5_WMMA_V4_CALLBACKS
+                        ):
+                            assert enc.enc_name.upper() == 'ENC_VOP3P'
+                            assert inst.name not in focused_wmma_v4_bodies
+                            focused_wmma_v4_bodies[inst.name] = (
+                                inst.fmt_name,
+                                body,
+                            )
                         body_true16_vop3 = self._true16_vop3_info(
                             inst, sem, enc.enc_name
                         ).body_uses_true16
@@ -13525,9 +13546,76 @@ class CodeGenerator:
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
+        if self.generated_dir_name == 'cdna5' and len(focused_wmma_v4_bodies) == len(
+            _CDNA5_WMMA_V4_CALLBACKS
+        ):
+            self._write_cdna5_wmma_v4_exec(focused_wmma_v4_bodies)
+
         # Shared execute templates are written by the CLI after all ISAs
         # are processed, using the accumulated _shared_execute_bodies dict.
         # Individual ISA codegens just collect; they don't write.
+
+    def _write_cdna5_wmma_v4_exec(self, callbacks: dict[str, tuple[str, str]]) -> None:
+        """Emit the five CDNA5 WMMA execute callbacks without duplicate methods.
+
+        Each body is captured from the ordinary semantic generation above.
+        Only the member names are introduced as local aliases, so it remains
+        byte-for-byte the same body used by the baseline execute_impl.
+        """
+        lines = [
+            CppFile._prologue_comment(),
+            '\n',
+            '#include "rocjitsu/isa/arch/amdgpu/cdna5/mma_exec.h"\n',
+            '#include "rocjitsu/isa/arch/amdgpu/cdna5/wmma_v4_provider.h"\n',
+            '#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"\n',
+            '#include "rocjitsu/vm/amdgpu/register_access.h"\n',
+            '#include "rocjitsu/vm/amdgpu/wavefront.h"\n',
+            '\nnamespace rocjitsu::cdna5 {\nnamespace {\n\n',
+            'const IsaExecutionBackend *provider_backend = nullptr;\n\n',
+            'void bind_provider_backend(const IsaExecutionBackend *backend) noexcept {\n',
+            '  provider_backend = backend;\n',
+            '}\n\n',
+        ]
+        for name, callback in _CDNA5_WMMA_V4_CALLBACKS.items():
+            class_name, body = callbacks[name]
+            lines.extend(
+                [
+                    f'void {callback}(Instruction &instruction, void *context) {{\n',
+                    '  ScopedIsaExecutionBackend scope(provider_backend);\n',
+                    f'  auto &inst = static_cast<{class_name} &>(instruction);\n',
+                    '  auto &wf = *static_cast<amdgpu::Wavefront *>(context);\n',
+                    '  const auto &inst_ = inst.inst_;\n' if 'inst_' in body else '',
+                    '  auto &vdst = inst.vdst;\n',
+                    '  auto &src0 = inst.src0;\n',
+                    '  auto &src1 = inst.src1;\n',
+                    '  auto &src2 = inst.src2;\n',
+                    body,
+                    '\n}\n\n',
+                ]
+            )
+        lines.extend(
+            [
+                '} // namespace\n\n',
+                'extern "C" const WmmaV4ProviderDescriptor *\n',
+                'rj_cdna5_wmma_v4_provider_v1() noexcept {\n',
+                '  static const WmmaV4ProviderDescriptor descriptor{\n',
+                '      kWmmaV4ProviderAbi,\n',
+                '      ROCJITSU_CDNA5_WMMA_BUILD_DIGEST,\n',
+                '      {{',
+                ', '.join(
+                    f'&{callback}' for callback in _CDNA5_WMMA_V4_CALLBACKS.values()
+                ),
+                '}},\n',
+                '      &bind_provider_backend,\n',
+                '  };\n',
+                '  return &descriptor;\n',
+                '}\n\n',
+                '} // namespace rocjitsu::cdna5\n',
+            ]
+        )
+        path = os.path.join(self.out_path, 'cdna5', 'wmma_v4_exec.cpp')
+        with open(path, 'w') as f:
+            f.write(''.join(lines))
 
     def _write_inst_impl_files(
         self,
@@ -14924,12 +15012,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         # WARNING: final, kStaticRegisterAccess, and this friendship form the typed-access
         # contract. Removing any of these restores vtable dispatch, silently degrading performance.
+        read_scalar_export = (
+            'RJ_API_EXPORT ' if self.generated_dir_name == 'cdna5' else ''
+        )
+        operand_type_export = (
+            'RJ_API_TYPE_EXPORT ' if self.generated_dir_name == 'cdna5' else ''
+        )
         execution_decls = (
             f'{simd_public_decl}'
             'private:\n'
             '  friend class amdgpu::RegisterAccess;\n'
             f'{simd_private_decl}'
-            '  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
+            f'  {read_scalar_export}uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
             '  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
             '  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
             '  void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;\n'
@@ -14938,11 +15032,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
             '  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
         )
-        operand_base_decl = 'class Operand final : public AmdgpuIsaOperand<Isa> {\n'
+        operand_base_decl = f'class {operand_type_export}Operand final : public AmdgpuIsaOperand<Isa> {{\n'
         operand_base_init = 'AmdgpuIsaOperand<Isa>'
         execution_backend_ctor_init = ''
         if self.isa_spec.profile.split_execution_sources:
-            operand_base_decl = 'class Operand final : public IsaOperand<Isa> {\n'
+            operand_base_decl = f'class {operand_type_export}Operand final : public IsaOperand<Isa> {{\n'
             operand_base_init = 'IsaOperand<Isa>'
             execution_backend_public_decl = (
                 '  /// @brief Return the immutable full-simulator operand table.\n'
@@ -16237,6 +16331,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ]
         if self.isa_spec.profile.split_execution_sources:
             operand_header_includes.append(('rocjitsu/isa/execution_backend.h', False))
+        if self.generated_dir_name == 'cdna5':
+            operand_header_includes.append(('rocjitsu/base/rj_compiler.h', False))
 
         header_file = CppFile(
             'operand',

@@ -5,6 +5,8 @@
 /// @brief Phase C unit tests for shared transcendental functions.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
+#include "util/amdgpu_exp.h"
+#include "util/amdgpu_log.h"
 
 #include <gtest/gtest.h>
 
@@ -215,6 +217,19 @@ TEST(TranscendentalTest, ExpF32CompleteFractionHardwareDigests) {
     }
     EXPECT_EQ(digest, expected[sign]) << "sign=" << sign;
   }
+}
+
+TEST(ExpLogScalarModelTest, ExpPreservesSignalingNanPolicy) {
+  EXPECT_EQ(util::detail::exp::evaluate(0x7fa12345u), 0x7fe12345u);
+  EXPECT_EQ(util::detail::exp::evaluate(0x7fa12345u, false), 0x7fa12345u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(util::amdgpu_exp_f32(1.0f)), 0x40000000u);
+}
+
+TEST(ExpLogScalarModelTest, LogPreservesSignalingNanPolicy) {
+  EXPECT_EQ(util::detail::log::evaluate(0x7fa12345u), 0x7fe12345u);
+  EXPECT_EQ(util::detail::log::evaluate(0x7fa12345u, false), 0x7fa12345u);
+  EXPECT_EQ(util::detail::log::evaluate(0x80000001u), 0xff800000u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(util::amdgpu_log_f32(1.0f)), 0u);
 }
 
 TEST(TranscendentalTest, SinCosF32SpecialCases) {

@@ -681,7 +681,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'rocjitsu/isa/arch/amdgpu/cdna5/isa.h' in operand_h
     assert 'rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h' in operand_h
     assert 'ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_' in operand_h
-    assert 'class Operand final : public IsaOperand<Isa>' in operand_h
+    assert (
+        'class RJ_API_TYPE_EXPORT Operand final : public IsaOperand<Isa>' in operand_h
+    )
     assert 'static constexpr bool kStaticRegisterAccess = true;' in operand_h
     assert 'friend class amdgpu::RegisterAccess;' in operand_h
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_h

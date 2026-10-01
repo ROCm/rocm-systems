@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <cstddef>
@@ -33,8 +34,8 @@ const void *current_isa_operand_backend() noexcept;
 /// @brief Temporarily select one ISA backend for generated constructors.
 class ScopedIsaExecutionBackend final {
 public:
-  explicit ScopedIsaExecutionBackend(const IsaExecutionBackend *backend) noexcept;
-  ~ScopedIsaExecutionBackend();
+  RJ_API_EXPORT explicit ScopedIsaExecutionBackend(const IsaExecutionBackend *backend) noexcept;
+  RJ_API_EXPORT ~ScopedIsaExecutionBackend();
 
   ScopedIsaExecutionBackend(const ScopedIsaExecutionBackend &) = delete;
   ScopedIsaExecutionBackend &operator=(const ScopedIsaExecutionBackend &) = delete;

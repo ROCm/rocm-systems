@@ -17,6 +17,7 @@ set(RJ_HOOKS_LINK_LIBS
     rocjitsu_dbt_config
     rocjitsu_ip_discovery
     rocjitsu_isa
+    rocjitsu_fp_math_embedded
     rocjitsu_amdgpu_isa_registry
     rocjitsu_vm_amdgpu
     util

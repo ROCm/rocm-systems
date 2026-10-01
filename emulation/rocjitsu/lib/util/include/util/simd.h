@@ -120,7 +120,17 @@ inline bool init_force_scalar() {
 ///
 /// Safe as a dynamic-init global because force_scalar() is only ever read at
 /// runtime instruction-execute, never during another TU's static construction.
+#if defined(ROCJITSU_DEFER_FORCE_SCALAR_INIT)
+// Focused v4 objects may also be embedded in a baseline image. Defer their
+// private environment initialization until a qualified callback executes,
+// rather than running a v4-compiled initializer at baseline image load.
+inline bool &deferred_force_scalar() {
+  static bool value = init_force_scalar();
+  return value;
+}
+#else
 inline bool g_force_scalar = init_force_scalar();
+#endif
 
 } // namespace detail
 
@@ -135,7 +145,13 @@ inline bool g_force_scalar = init_force_scalar();
 /// (each module parses it at its own load), while a test-seam override applies
 /// only within the caller's module. e2e runs force the scalar codepath by
 /// setting the env var before launch, without recompiling.
-inline bool force_scalar() { return detail::g_force_scalar; }
+inline bool force_scalar() {
+#if defined(ROCJITSU_DEFER_FORCE_SCALAR_INIT)
+  return detail::deferred_force_scalar();
+#else
+  return detail::g_force_scalar;
+#endif
+}
 
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;

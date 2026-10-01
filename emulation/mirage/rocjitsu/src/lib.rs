@@ -442,14 +442,18 @@ impl Rocjitsu {
         // configuration. Without it the in-container host fails to locate
         // the library and the exec can never start.
         let libraries = if ctx.profile.containerize.is_some() {
-            // Bind-mount the interposer plus the shared object for each
-            // plugin this profile enables so the in-container plugin loader
-            // can resolve it next to the interposer (the loader searches the
-            // interposer's own directory / `LD_LIBRARY_PATH`, both of which
-            // include `CONTAINER_LIB_DIR`). A plugin the interposer build
-            // does not ship is silently skipped here and by the loader at
-            // runtime.
+            // Bind-mount the interposer, its optional x86-v4 provider, and
+            // the shared object for each plugin this profile enables. The
+            // provider resolver loads its sibling beside the interposer;
+            // the plugin loader searches that directory / `LD_LIBRARY_PATH`,
+            // both of which include `CONTAINER_LIB_DIR`. Older and non-x86
+            // builds do not ship the provider, just as a build may not ship
+            // every plugin.
             let mut libs = vec![ld_preload.display().to_string()];
+            let provider = ld_preload.with_file_name(X86_V4_PROVIDER_LIB_NAME);
+            if provider.is_file() {
+                libs.push(provider.display().to_string());
+            }
             libs.extend(
                 enabled_plugin_libs(&ld_preload, &def.plugins)
                     .into_iter()
@@ -530,6 +534,9 @@ pub const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
 /// `librocjitsu.so` exports both the KMD interposer (LD_PRELOAD) and the
 /// HSA tools hooks (`HSA_TOOLS_LIB`).
 pub const LIB_NAME: &str = "librocjitsu.so";
+
+/// Optional same-build x86-v4 provider loaded beside the KMD interposer.
+const X86_V4_PROVIDER_LIB_NAME: &str = "librocjitsu_x86_v4.so";
 
 /// Filename prefix of a rocjitsu runtime plugin shared object. Together
 /// with [`PLUGIN_LIB_SUFFIX`] it brackets the plugin's `<name>`:
@@ -2741,6 +2748,67 @@ mod tests {
         let lib = root.join(LIB_NAME);
         std::fs::write(&lib, b"").unwrap();
         Some(lib)
+    }
+
+    #[test]
+    fn a_containerised_injection_mounts_the_sibling_x86_v4_provider() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let preload = stand_in_interposer(tmp.path()).unwrap();
+        let provider = tmp.path().join(X86_V4_PROVIDER_LIB_NAME);
+        let plugin = tmp.path().join("librocjitsu_plugin_logging.so");
+        std::fs::write(&provider, b"").unwrap();
+        std::fs::write(&plugin, b"").unwrap();
+        std::fs::write(tmp.path().join("librocjitsu_plugin_race.so"), b"").unwrap();
+        let mut def = def_with_gpus(1);
+        def.plugins = PluginsDef::from([("logging".to_string(), SimpleMap::new())]);
+        let mut ctx = ctx_for(def, tmp.path(), "container-with-provider");
+        containerise(&mut ctx);
+
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, Some(preload.clone()))
+            .unwrap();
+        assert_eq!(
+            injection.libraries,
+            [preload, provider, plugin]
+                .map(|path| path.display().to_string())
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn a_containerised_injection_allows_a_build_without_an_x86_v4_provider() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let preload = stand_in_interposer(tmp.path()).unwrap();
+        let mut ctx = ctx_for(def_with_gpus(1), tmp.path(), "container-without-provider");
+        containerise(&mut ctx);
+
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, Some(preload.clone()))
+            .unwrap();
+        assert_eq!(injection.libraries, vec![preload.display().to_string()]);
+    }
+
+    #[test]
+    fn a_local_injection_does_not_mount_an_x86_v4_provider() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let preload = stand_in_interposer(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join(X86_V4_PROVIDER_LIB_NAME), b"").unwrap();
+        let ctx = ctx_for(def_with_gpus(1), tmp.path(), "local-with-provider");
+
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, Some(preload.clone()))
+            .unwrap();
+        assert!(injection.libraries.is_empty());
+        assert_eq!(injection.ld_preload, Some(preload.display().to_string()));
     }
 
     /// The target a session emulates is the one its agent names.

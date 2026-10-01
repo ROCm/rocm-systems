@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
@@ -151,7 +152,7 @@ class ScopedOperandDelegate;
 /// capability. It must not read or write operand values directly. Value access
 /// is private backend API used by amdgpu::RegisterAccess so all VGPR reads pass
 /// through the observed register-access facade.
-class Operand {
+class RJ_API_TYPE_EXPORT Operand {
 public:
   // RegisterAccess is the only instruction-facing facade allowed to enter the
   // operand value-access backend. Keep these hooks private so generated

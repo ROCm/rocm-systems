@@ -2650,6 +2650,17 @@ def simd_probe_line(
     probe = _simd_probe_line(
         template_name, true16_vop3=true16_vop3, result_writer=result_writer
     )
+    qualified_f32_math = {
+        'v_exp_f32_vop1': ('Exp', 'Vop1'),
+        'v_log_f32_vop1': ('Log', 'Vop1'),
+    }
+    if template_name in qualified_f32_math:
+        operation, form = qualified_f32_math[template_name]
+        probe = (
+            f'  if (fp_math::try_execute_qualified_f32_math<'
+            f'fp_math::Operation::{operation}, fp_math::InstructionForm::{form}>(inst, wf)) '
+            f'return;\n{probe}'
+        )
     return _guard_mode_arithmetic_probe(template_name, probe)
 
 
@@ -3306,11 +3317,13 @@ def simd_probe_arch_portable(
 def simd_extra_includes() -> list[str]:
     """Extra `#include` lines required by the SIMD probe call sites.
 
-    The helper templates live in ``simd_glue.h``, which pulls in
-    ``util/simd.h`` transitively (for ``util::has_stdx_simd``), so this is
-    the only SIMD-specific include the generated shared header needs.
+    The helpers live in ``simd_glue.h`` and ``fp_math_provider.h``;
+    ``util/simd.h`` is pulled in transitively.
     """
-    return ['#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"']
+    return [
+        '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/shared/fp_math_provider.h"',
+    ]
 
 
 def local_coverage_probe(
