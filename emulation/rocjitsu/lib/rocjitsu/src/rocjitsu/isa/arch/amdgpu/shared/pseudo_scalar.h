@@ -5,13 +5,17 @@
 
 /// @file Shared pseudo-scalar transcendental implementations.
 ///
-/// @details Architectural numeric behavior follows the AMD RDNA4 Instruction Set Architecture
-/// Reference Guide: section 7.10 requires the usual DENORMAL and ROUND mode bits, and section
-/// 7.2.3.1 requires nonzero OMOD to flush output denormals and map negative zero to positive zero.
-/// The functional examples for the vector V_LOG_F32, V_RSQ_F32, and V_SQRT_F32 equivalents specify
-/// negative quiet NaNs for invalid domains. The host standard-library functions below provide the
-/// approximate transcendental values; the surrounding logic applies these architectural rules.
+/// @details Physical gfx1201 F32 operations match their vector equivalents: fixed rounding
+/// and unconditional denormal flushing. Half execution shares the vector mapping in
+/// transcendental.h. Section 7.2.3.1 requires nonzero OMOD to flush
+/// output denormals and map negative zero to positive zero. Vector LOG, RSQ and SQRT
+/// functional examples specify negative quiet NaNs for invalid domains.
 
+#include "util/amdgpu_exp.h"
+#include "util/amdgpu_log.h"
+#include "util/amdgpu_rcp.h"
+#include "util/amdgpu_rsq.h"
+#include "util/amdgpu_sqrt.h"
 #include "util/data_types.h"
 
 #include <bit>
@@ -55,55 +59,6 @@ inline float quiet_nan(float value) {
   if ((bits & 0x7fc00000u) == 0x7f800000u && (bits & 0x003fffffu) != 0)
     bits |= 0x00400000u;
   return std::bit_cast<float>(bits);
-}
-
-inline EvaluationResult evaluate(Operation operation, double value) {
-  if (std::isnan(value))
-    return {value, ResultProvenance::VALUE};
-
-  switch (operation) {
-  case Operation::EXP2: {
-    if (std::isinf(value))
-      return {value < 0.0 ? 0.0 : value, ResultProvenance::VALUE};
-    const double result = std::exp2(value);
-    if (std::isinf(result))
-      return {result, ResultProvenance::FINITE_OVERFLOW};
-    if (result == 0.0)
-      return {result, ResultProvenance::FINITE_UNDERFLOW};
-    return {result, ResultProvenance::VALUE};
-  }
-  case Operation::LOG2:
-    if (value == 0.0)
-      return {-std::numeric_limits<double>::infinity(), ResultProvenance::VALUE};
-    if (value < 0.0)
-      return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::INVALID_DOMAIN};
-    if (std::isinf(value))
-      return {value, ResultProvenance::VALUE};
-    return {std::log2(value), ResultProvenance::VALUE};
-  case Operation::RCP:
-    if (value == 0.0)
-      return {std::copysign(std::numeric_limits<double>::infinity(), value),
-              ResultProvenance::VALUE};
-    if (std::isinf(value))
-      return {std::copysign(0.0, value), ResultProvenance::VALUE};
-    return {1.0 / value, ResultProvenance::VALUE};
-  case Operation::RSQ:
-    if (value == 0.0)
-      return {std::copysign(std::numeric_limits<double>::infinity(), value),
-              ResultProvenance::VALUE};
-    if (value < 0.0)
-      return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::INVALID_DOMAIN};
-    if (std::isinf(value))
-      return {0.0, ResultProvenance::VALUE};
-    return {1.0 / std::sqrt(value), ResultProvenance::VALUE};
-  case Operation::SQRT:
-    if (value < 0.0)
-      return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::INVALID_DOMAIN};
-    if (std::isinf(value))
-      return {value, ResultProvenance::VALUE};
-    return {std::sqrt(value), ResultProvenance::VALUE};
-  }
-  return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::VALUE};
 }
 
 inline EvaluationResult apply_output_modifiers(EvaluationResult result, uint32_t omod, bool clamp) {
@@ -308,63 +263,53 @@ inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omo
 }
 
 /// @brief Execute a pseudo-scalar F32 transcendental operation.
-/// @details Source absolute value and negation are applied before input-denormal handling and
-/// operation evaluation. OMOD is then applied before CLAMP, result rounding, and output-denormal
-/// handling. Round modes are 0 for nearest-even, 1 for positive infinity, 2 for negative infinity,
-/// and 3 for zero. Denormal mode bit 0 allows input denormals and bit 1 allows output denormals.
+/// @details Apply source modifiers and quiet NaNs before the hardware mapping, then apply
+/// OMOD and CLAMP before nearest-even narrowing and unconditional output-denormal flushing.
+/// All F32 operations ignore MODE rounding and denormal fields, matching their vector
+/// equivalents. Output-modifier overflow rounds to infinity.
 /// @param operation Transcendental operation to execute.
 /// @param source Raw F32 source value.
 /// @param absolute Whether to clear the source sign bit before evaluation.
 /// @param negate Whether to toggle the source sign bit after applying absolute value.
-/// @param round_mode Numeric MODE.FP_ROUND encoding for F32.
-/// @param denorm_mode Numeric MODE.FP_DENORM encoding for F32.
+/// @param round_mode Ignored F32 rounding mode; retained for the shared instruction interface.
+/// @param denorm_mode Ignored F32 denormal mode; retained for the shared instruction interface.
 /// @param omod Numeric VOP3 OMOD encoding: 0 unchanged, 1 multiply by 2, 2 multiply by 4, and 3
 /// multiply by 0.5.
 /// @param clamp Whether to clamp NaN and negative results to zero and results above one to one.
 /// @returns Raw 32-bit F32 result encoding.
 inline uint32_t execute_f32(Operation operation, float source, bool absolute, bool negate,
-                            uint32_t round_mode, uint32_t denorm_mode, uint32_t omod, bool clamp) {
+                            [[maybe_unused]] uint32_t round_mode,
+                            [[maybe_unused]] uint32_t denorm_mode, uint32_t omod, bool clamp) {
   source = detail::apply_source_modifiers(source, absolute, negate);
-  source = detail::flush_input_f32(source, denorm_mode);
   source = detail::quiet_nan(source);
-  const detail::EvaluationResult value = detail::apply_output_modifiers(
-      detail::evaluate(operation, static_cast<double>(source)), omod, clamp);
-  uint32_t result = detail::round_f64_to_f32(value, round_mode);
-  if (((denorm_mode & 2u) == 0 || omod != 0) && (result & 0x7f800000u) == 0 &&
-      (result & 0x007fffffu) != 0)
+  // Physical GFX12 scalar and vector mappings agree in every FP MODE.
+  float mapped = 0.0f;
+  switch (operation) {
+  case Operation::EXP2:
+    mapped = util::amdgpu_exp_f32(source);
+    break;
+  case Operation::LOG2:
+    mapped = util::amdgpu_log_f32(source);
+    break;
+  case Operation::RCP:
+    mapped = util::amdgpu_rcp_f32(source);
+    break;
+  case Operation::RSQ:
+    mapped = util::amdgpu_rsq_f32(source);
+    break;
+  case Operation::SQRT:
+    mapped = util::amdgpu_sqrt_f32(source);
+    break;
+  }
+  const detail::EvaluationResult evaluated{mapped, detail::ResultProvenance::VALUE};
+  detail::EvaluationResult value = detail::apply_output_modifiers(evaluated, omod, clamp);
+  // Output scaling is exact in F64. Detect F32 overflow before narrowing,
+  // so directed host rounding cannot replace the required infinity with a finite value.
+  if (std::isfinite(value.value) && std::abs(value.value) > std::numeric_limits<float>::max())
+    value.provenance = detail::ResultProvenance::FINITE_OVERFLOW;
+  uint32_t result = detail::round_f64_to_f32(value, 0);
+  if ((result & 0x7f800000u) == 0 && (result & 0x007fffffu) != 0)
     result &= 0x80000000u;
-  return result;
-}
-
-/// @brief Execute a pseudo-scalar F16 transcendental operation.
-/// @details Source absolute value and negation are applied before input-denormal handling and
-/// operation evaluation. OMOD is then applied before CLAMP, result rounding, and output-denormal
-/// handling. Round modes are 0 for nearest-even, 1 for positive infinity, 2 for negative infinity,
-/// and 3 for zero. Denormal mode bit 0 allows input denormals and bit 1 allows output denormals.
-/// FP16_OVFL clamps finite overflow to signed maximum finite F16 regardless of round mode, but does
-/// not clamp true infinity or divide-by-zero results.
-/// @param operation Transcendental operation to execute.
-/// @param source F16 source value represented exactly as an F32 value.
-/// @param absolute Whether to clear the source sign bit before evaluation.
-/// @param negate Whether to toggle the source sign bit after applying absolute value.
-/// @param round_mode Numeric MODE.FP_ROUND encoding for F16.
-/// @param denorm_mode Numeric MODE.FP_DENORM encoding for F16.
-/// @param omod Numeric VOP3 OMOD encoding: 0 unchanged, 1 multiply by 2, 2 multiply by 4, and 3
-/// multiply by 0.5.
-/// @param clamp Whether to clamp NaN and negative results to zero and results above one to one.
-/// @param fp16_ovfl Whether MODE.FP16_OVFL finite-overflow saturation is enabled.
-/// @returns Raw F16 encoding in bits 15:0 with bits 31:16 cleared.
-inline uint32_t execute_f16(Operation operation, float source, bool absolute, bool negate,
-                            uint32_t round_mode, uint32_t denorm_mode, uint32_t omod, bool clamp,
-                            bool fp16_ovfl) {
-  source = detail::apply_source_modifiers(source, absolute, negate);
-  source = detail::flush_input_f16(source, denorm_mode);
-  source = detail::quiet_nan(source);
-  const detail::EvaluationResult value = detail::apply_output_modifiers(
-      detail::evaluate(operation, static_cast<double>(source)), omod, clamp);
-  uint16_t result = detail::round_f64_to_f16(value, round_mode, fp16_ovfl);
-  if (((denorm_mode & 2u) == 0 || omod != 0) && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
-    result &= 0x8000u;
   return result;
 }
 

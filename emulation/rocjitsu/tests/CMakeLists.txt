@@ -573,7 +573,7 @@ add_executable(
     aql_packet_processor_test.cpp
     pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
-    pm4_queue_controller_test.cpp
+    pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
@@ -667,10 +667,14 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
+    swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
     simd_correctness/swmmac_k64_simd_exact_test.cpp
+    simd_correctness/smfmac_simd_exact_test.cpp
+    simd_correctness/swmmac_k128_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -1883,8 +1887,41 @@ add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
+# Present servers pass real DRM descriptors through IPC. A second preload
+# supplies that identity on GPU-less runners, beneath rocjitsu's stat wrappers.
+add_library(host_drm_preload SHARED host_drm_preload_test.cpp)
+rj_configure_target(host_drm_preload TEST)
+target_link_libraries(host_drm_preload PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(interposer_dup_test host_drm_preload)
+if(RJ_INSTALL_TESTS)
+    install(
+        TARGETS host_drm_preload
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+    )
+endif()
+foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
+    rj_add_test(
+        NAME "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
+        COMMAND
+            ${RJ_CLI}
+            --config "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+            -- $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
+        ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            --config "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
+            -- bin/interposer_dup_test
+            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
+        INSTALL_ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+endforeach()
+
 function(rj_add_interposer_test_suite _suite)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "ENVIRONMENT")
     set(_config "${RJ_CDNA4_KMD_CONFIG}")
     set(_suffix "")
     if(ARG_CONFIG)
@@ -1903,6 +1940,7 @@ function(rj_add_interposer_test_suite _suite)
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
+            ENVIRONMENT ${ARG_ENVIRONMENT}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             INSTALL_COMMAND
@@ -1912,6 +1950,7 @@ function(rj_add_interposer_test_suite _suite)
                 "--"
                 "bin/interposer_dup_test"
                 "--gtest_filter=${_suite}.${_case}"
+            INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
         )
     endforeach()
 endfunction()
@@ -1950,13 +1989,38 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    CanonicalSysfsPathsRetainSimulatedDevice
     DeviceInfoReportsActiveCuCount
     OpensWithinCurrentDescriptorLimit
+    PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
 
 set(_rj_interposer_pm4_tests
+    SparseReplacementPreservesResidentTail
+    SubmissionFenceQueryPollsAndWaitsForCompletion
+    SubmissionFenceSequencesAreLocalToContextAndEngine
+    SubmissionFenceQueryRejectsInvalidIdentityAndReportsFailure
+    SubmissionFenceQueryRetiresOldHistory
+    TransferWaitsForSubmissionWithoutWaitingForCompletion
+    GraphicsRegistersRetainAllPacketForms
+    ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState
+    DispatchInterleaveShadowIsQualifiedForGfx12
+    ComputeTranslationPrefetchIgnoresPfpSelector
+    StreamoutQuerySamplesAllFourMemoryCounterPairs
+    StreamoutQueryEventMarksZeroCounterSamplesValid
+    InterleavedDispatchExecutesDirectAndIndirectShaders
+    ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters
+    ContextRegisterLoadRejectsRangeOverflow
+    ContextRegisterLoadsRejectComputeEngine
+    ClearStatePushPopRestoresContextAcrossSubmissions
+    ClearStateResetUsesRdna3Defaults
+    InvalidClearStateFailsBeforeFollowingWrite
+    ShadowRegisterLoadsUseSparseMemoryOffsets
+    MemoryAtomicsApplyIntegerOperationsAtBothWidths
+    InvalidMemoryPacketsFailFenceWithoutWritingMemory
+    MalformedPackedGraphicsRegistersFailFence
     DependencyDefersMemoryWriteAndCompletion
     MalformedPacketFailsCompletion
     FaultedQueueRejectsNewSubmission
@@ -1971,7 +2035,9 @@ set(_rj_interposer_pm4_tests
     TimelineSubmissionWaitsForEarlierQueue
     RepeatedTimelineTransfersVisitSharedDependenciesOnce
     GraphicsQueueAcceptsBufferOwnershipFlushEvents
+    ComputeQueueAcceptsPipelineStatisticsControls
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
+    ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch
     GridProductOverflowFailsFence
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
@@ -2034,6 +2100,7 @@ rj_add_interposer_test_suite(
 
 rj_add_interposer_test_suite(
     InterposerGemTest
+    SparseReservationsPreserveRangesAndFileOwnership
     GemNamespaceIsPrivateButSharedByDuplicates
     IndependentDrmFilesRejectOverlappingMappings
     ReusedDmabufFdMintsDistinctHandles
@@ -2063,6 +2130,18 @@ set(_rj_interposer_syncobj_tests
 rj_add_interposer_test_suite(
     InterposerSyncobjTest
     ${_rj_interposer_syncobj_tests}
+)
+set(_rj_signal_exit_env)
+if(RJ_ENABLE_TSAN)
+    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
+    # allocates and frees memory, so disable only this test's signal-safety
+    # diagnostic; retain TSan's race and mutex checks.
+    set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
+endif()
+rj_add_interposer_test_suite(
+    InterposerSyncobjTest
+    TimelineWaitAllowsThreadExitFromSignal
+    ENVIRONMENT ${_rj_signal_exit_env}
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---

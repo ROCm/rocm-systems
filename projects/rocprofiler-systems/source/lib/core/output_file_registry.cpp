@@ -86,7 +86,7 @@ output_file_registry::print_summary() const
     auto it = m_files.begin();
     while(it != m_files.end())
     {
-        auto        next    = std::next(it);
+        auto const  next    = std::next(it);
         const bool  is_last = (next == m_files.end());
         const auto* branch  = is_last ? "└─" : "├─";
         const auto* cont    = is_last ? "  " : "│ ";
