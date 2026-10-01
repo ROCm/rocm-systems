@@ -1484,6 +1484,214 @@ TEST_F(GinProxyFlushWaitTest, WaitPublishesLastIssuedGetOnceFlushConsumed) {
 }
 
 // ---------------------------------------------------------------------------
+// ProxyPut: puts above DataChunkSize split into chunk GFDs; only the last has counter/indexed signal, VA gets its own.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct ProxyPutArgs {
+  uint32_t peer;
+  uint64_t dstWnd;
+  uint64_t dstOff;
+  uint64_t srcWnd;
+  uint64_t srcOff;
+  uint64_t bytes;
+  ncclGinSignalType signalType;
+  ncclGinSignal_t signalId;
+  uint64_t signalWindow;
+  uint64_t signalOffset;
+  bool isStrong;
+  ncclGinSignalOp_t signalOp;
+  uint64_t signalVal;
+  bool hasCounter;
+  ncclGinCounter_t counterId;
+};
+
+struct ExpectedGfd {
+  uint64_t op;
+  uint64_t size;
+  uint64_t srcOff; // vaSignalOff for a VA signal GFD
+  uint64_t srcHandle; // vaSignalHandle for a VA signal GFD
+  uint64_t dstOff;
+  uint64_t dstHandle;
+  uint64_t counterId;
+  uint64_t signalId;
+  uint64_t signalVal;
+  uint64_t isStrong;
+};
+
+}  // namespace
+
+__global__ void kernelProxyPut(ncclGinProxyGpuCtx_t* ctx, ProxyPutArgs args) {
+  ncclGinSignalDescriptor signal{};
+  signal.type = args.signalType;
+  signal.isStrong = args.isStrong;
+  if (args.signalType == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
+    signal.indexedSignal.signalId = args.signalId;
+  } else if (args.signalType == NCCL_GIN_SIGNAL_TYPE_VA) {
+    signal.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(args.signalWindow);
+    signal.vaSignal.signalOffset = args.signalOffset;
+  }
+  ncclGinProxyGfd_t gfd;
+  // Matching system scopes skip the release fence; the fake windows are never dereferenced.
+  nccl::gin::proxy::put<ncclCoopCta, uint64_t>(ncclCoopCta{}, &gfd, ctx, static_cast<int>(args.peer),
+                                               reinterpret_cast<ncclGinWindow_t>(args.dstWnd), args.dstOff,
+                                               /*srcVal=*/0ULL, /*hasInline=*/false,
+                                               reinterpret_cast<ncclGinWindow_t>(args.srcWnd), args.srcOff, args.bytes,
+                                               signal, args.signalOp, args.signalVal, args.hasCounter, args.counterId,
+                                               cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+class GinProxyPutTest : public GinDeviceTest {
+protected:
+  static constexpr uint64_t kChunk = nccl::gin::proxy::DataChunkSize;
+  static constexpr uint32_t kNranks = 2;
+  static constexpr uint32_t kQueueSize = 8;
+
+  // Posts one proxy::put on a zeroed 2-rank ring and reads back PIs and both peers' queues.
+  void runProxyPut(const ProxyPutArgs& args, std::vector<uint32_t>* pis, std::vector<ncclGinProxyGfd_t>* queues) {
+    DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+    DeviceBuffer<uint32_t> d_pis(kNranks);
+    DeviceBuffer<uint32_t> d_cis(kNranks);
+    DeviceBuffer<ncclGinProxyGpuCtx_t> d_ctx(1);
+    ASSERT_NO_FATAL_FAILURE(d_queues.zero());
+    ASSERT_NO_FATAL_FAILURE(d_pis.zero());
+    ASSERT_NO_FATAL_FAILURE(d_cis.zero());
+
+    ncclGinProxyGpuCtx_t hostCtx{};
+    hostCtx.nranks = static_cast<int>(kNranks);
+    hostCtx.queueSize = kQueueSize;
+    hostCtx.queues = d_queues.ptr;
+    hostCtx.pis = d_pis.ptr;
+    hostCtx.cis = d_cis.ptr;
+    hostCtx.counters = nullptr;
+    hostCtx.signals = nullptr;
+    ASSERT_NO_FATAL_FAILURE(d_ctx.upload(hostCtx));
+
+    kernelProxyPut<<<1, 1>>>(d_ctx.ptr, args);
+    ASSERT_NO_FATAL_FAILURE(syncAndCheck());
+
+    *pis = d_pis.copyTo();
+    *queues = d_queues.copyTo();
+  }
+
+  static void expectGfd(const ncclGinProxyGfd_t& gfd, const ExpectedGfd& expected, uint32_t slot) {
+    SCOPED_TRACE(::testing::Message() << "GFD slot " << slot);
+    for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[i].flag.v), 1ULL) << "qword " << i << " flag must be set";
+    }
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+              static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op), expected.op) << "op";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), expected.size) << "size";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcOff].srcOff.srcOff), expected.srcOff)
+      << "qword 1 offset";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcHandle].srcHandle.srcHandle), expected.srcHandle)
+      << "qword 2 handle";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstOff].dstOff.dstOff), expected.dstOff) << "dstOff";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstHandle].dstHandle.dstHandle), expected.dstHandle)
+      << "dstHandle";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.counterId), expected.counterId)
+      << "counterId";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalId), expected.signalId)
+      << "signalId";
+    const uint64_t signalVal =
+      static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalValLow) |
+      (static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValLow2) << 16) |
+      (static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh) << 32);
+    EXPECT_EQ(signalVal, expected.signalVal) << "signalVal";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal), expected.isStrong)
+      << "isStrongSignal";
+  }
+
+  // Slots [0, kQueueSize) are peer 0's ring; peer 1's ring holds numPosted GFDs and nothing after them.
+  static void expectOnlyPeer1Posted(const std::vector<uint32_t>& pis, const std::vector<ncclGinProxyGfd_t>& queues,
+                                    uint32_t numPosted) {
+    EXPECT_EQ(pis[1], numPosted) << "peer 1 PI";
+    EXPECT_EQ(pis[0], 0u) << "peer 0 PI must be untouched";
+    for (uint32_t s = 0; s < kNranks * kQueueSize; s++) {
+      if (s >= kQueueSize && s < kQueueSize + numPosted) {
+        continue;
+      }
+      for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+        EXPECT_EQ(queues[s].qword[i].raw, 0ULL) << "queue slot " << s << " qword " << i << " was written";
+      }
+    }
+  }
+
+  static ExpectedGfd plainChunk(const ProxyPutArgs& args, uint32_t chunk, uint64_t isStrong) {
+    return {ncclGinProxyOpPut, kChunk, args.srcOff + chunk * kChunk, args.srcWnd, args.dstOff + chunk * kChunk,
+            args.dstWnd, 0, 0, 0, isStrong};
+  }
+};
+
+TEST_F(GinProxyPutTest, SplitsAboveDataChunkSize) {
+  constexpr uint64_t kTail = 0x1234;
+  constexpr uint64_t kSigVal = 0x1122334455667788ULL;
+  constexpr uint64_t kLastOp = ncclGinProxyOpPut | ncclGinProxyOpWithCounter | ncclGinProxyOpWithSignalAdd;
+
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x80;
+  args.srcWnd = 0x00005A5A00001000ULL;
+  args.srcOff = 0x40;
+  args.bytes = 2 * kChunk + kTail;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  args.signalId = 5;
+  args.isStrong = true;
+  args.signalOp = ncclGinSignalAdd;
+  args.signalVal = kSigVal;
+  args.hasCounter = true;
+  args.counterId = 7;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  // Two full chunks plus the tail; the loop chunks are plain puts: no counter, no signal, not strong.
+  expectOnlyPeer1Posted(pis, queues, 3);
+  expectGfd(queues[kQueueSize + 0], plainChunk(args, 0, 0), 0);
+  expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 0), 1);
+  expectGfd(queues[kQueueSize + 2],
+            {kLastOp, kTail, args.srcOff + 2 * kChunk, args.srcWnd, args.dstOff + 2 * kChunk, args.dstWnd,
+             args.counterId, args.signalId, kSigVal, 1},
+            2);
+}
+
+TEST_F(GinProxyPutTest, ExactChunkMultipleWithVASignal) {
+  constexpr uint64_t kSigVal = 0x0000000300000002ULL;
+  constexpr uint64_t kVaOp = ncclGinProxyOpWithSignalInc | ncclGinProxyOpVASignal;
+
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x100;
+  args.srcWnd = 0x00005A5A00001000ULL;
+  args.srcOff = 0x200;
+  args.bytes = 2 * kChunk;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_VA;
+  args.signalWindow = 0x00003C3C00003000ULL;
+  args.signalOffset = 0x48;
+  args.isStrong = true;
+  args.signalOp = ncclGinSignalInc;
+  args.signalVal = kSigVal;
+  args.hasCounter = false;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  // One loop chunk, a full-chunk final put, then the VA signal GFD; no extra empty put for an exact multiple.
+  expectOnlyPeer1Posted(pis, queues, 3);
+  expectGfd(queues[kQueueSize + 0], plainChunk(args, 0, 0), 0);
+  // The VA signal never rides on the put, but put() still copies signal.isStrong onto the signal-less final put.
+  expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 1), 1);
+  // The VA signal GFD has no put bit, no size and no destination; qwords 1-2 carry the signal VA.
+  expectGfd(queues[kQueueSize + 2], {kVaOp, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0, kSigVal, 1}, 2);
+}
+
+// ---------------------------------------------------------------------------
 // ResetSignal: proxy signals use an offset/baseline model. The effective value
 //   of an indexed signal is signals[id] measured against a baseline held in
 //   signalOffsets[id] (see ncclGinApi_GetSignalPtr, which returns
