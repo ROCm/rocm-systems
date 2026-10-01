@@ -157,7 +157,7 @@ TEST(StableVector, resize_helper_grows_and_default_constructs)
     constexpr size_t k_resize_target = 6;
 
     small_chunked_vector vec;
-    auto                 new_size = resize(vec, k_resize_target);
+    auto const           new_size = resize(vec, k_resize_target);
     EXPECT_EQ(new_size, k_resize_target);
     EXPECT_EQ(vec.size(), k_resize_target);
 }

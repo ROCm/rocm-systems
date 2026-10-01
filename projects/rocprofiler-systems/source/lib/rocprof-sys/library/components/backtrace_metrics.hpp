@@ -106,7 +106,7 @@ struct backtrace_metrics : comp::empty_base
     }
 
 private:
-    valid_array_t     m_valid      = {};
+    valid_array_t     m_valid;
     std::int64_t      m_cpu        = 0;
     std::int64_t      m_mem_peak   = 0;
     std::int64_t      m_ctx_swch   = 0;
