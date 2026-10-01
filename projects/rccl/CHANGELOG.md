@@ -22,6 +22,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * nccl4py: per-call collective configuration (`NCCLCollConfig`, `VendorOption`) including the launch completion event, communicator properties (`NCCLCommProperties`), and the `GIN_ONLY` window flag. On ROCm, the HIP `Event` shim provides only an event handle; `record()`, `sync()` and `query` are not implemented.
+* `NCCL_IB_QUERY_PORT_SPEED` is now honored by IB-CAST (`net_ib_cast`) as well as `net_ib`.
 
 ### Changed
 * Host-side device API declarations (`ncclDevCommCreate`, `ncclDevCommDestroy`, `ncclCommQueryProperties`, `ncclGetPeerDevicePointer`, the `*CreateRequirement` helpers, the `ncclDevCommRequirements` and `ncclCommProperties` structs and their initializers) moved to `nccl_device/host.h`. `nccl_device.h` still includes it; code that includes individual `nccl_device/*.h` headers directly must also include `nccl_device/host.h`.
