@@ -123,6 +123,8 @@ static int g_trRingChannelsInstalled = -1;
 
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
+// Above the #undefs, so the cpuset parsers' free() goes through the same g_microFree seam as the UUT's.
+#include "cpuset.h"
 
 #undef malloc  // scoped to the UUT: leaving it defined would silently reroute every malloc() in the tests below
 #undef free
@@ -1120,6 +1122,52 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_CalledTwice_AccumulatesAcrossCalls) {
   SetMicroEnv("NCCL_CTA_POLICY", "ZERO");
   getEnvCtaPolicyOnce();  // deliberately NOT reset in between
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
+}
+
+// cpuset.h's parsers call these; os_fakes.cc only fakes ncclOsCpuCount.
+void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
+void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+
+namespace {
+// strtok() has one process-wide save pointer (NCCL 2.32.3, NVIDIA/nccl#2361): a parser calling it on another thread
+// moves this thread's position into the parser's string. Runs `parse` on a second thread while this thread is
+// between strtok() calls on "a,b" and returns this thread's next token. The parser's free() is deferred so that a
+// clobbered save pointer still points into live memory.
+std::string NextTokenAcrossConcurrentParse(const std::function<void()>& parse) {
+  char buf[] = "a,b";
+  std::vector<void*> deferred;
+  const char* next = nullptr;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) { deferred.push_back(p); });
+    EXPECT_STREQ("a", strtok(buf, ","));
+    std::thread(parse).join();
+    next = strtok(nullptr, ",");
+  }
+  std::string result = next ? next : "(null)";
+  for (void* p : deferred) std::free(p);
+  return result;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, GetEnvCtaPolicy_ConcurrentParse_KeepsCallerStrtokState) {
+  SetMicroEnv("NCCL_CTA_POLICY", "EFFICIENCY|ZERO");
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([] { getEnvCtaPolicyOnce(); }));
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
+}
+
+TEST_F(InitMicrotest, StrToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
+  ncclAffinity set;
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([&] { EXPECT_EQ(ncclSuccess, ncclStrToCpuset("1,3", &set)); }));
+  // Most significant 32-bit word first: "1,3" is CPU 32 plus CPUs 0 and 1.
+  EXPECT_EQ(3, CPU_COUNT(&set));
+  EXPECT_TRUE(CPU_ISSET(0, &set) && CPU_ISSET(1, &set) && CPU_ISSET(32, &set));
+}
+
+TEST_F(InitMicrotest, StrListToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
+  ncclAffinity set;
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([&] { EXPECT_EQ(ncclSuccess, ncclStrListToCpuset("1,3", &set)); }));
+  EXPECT_EQ(2, CPU_COUNT(&set));
+  EXPECT_TRUE(CPU_ISSET(1, &set) && CPU_ISSET(3, &set));
 }
 
 // A fresh NCCL_CONFIG_INITIALIZER passes every arm; each test perturbs exactly one field.
