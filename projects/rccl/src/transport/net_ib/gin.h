@@ -25,13 +25,6 @@
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 
-static_assert(NCCL_RMA_MAX_DATA_WRS == 4 * NCCL_RMA_MAX_SEGMENTS,
-              "data WR budget must cover boundary splits plus UINT32_MAX SGE splits");
-static_assert(NCCL_RMA_MAX_SIGNAL_WRS == NCCL_RMA_MAX_DATA_WRS + 1,
-              "signal WR budget must cover the data chain plus the atomic");
-static_assert(NCCL_RMA_MAX_FLUSH_WRS == NCCL_RMA_MAX_SEGMENTS,
-              "flush WR budget must cover one RDMA_READ per physical segment");
-
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;
   if (localRemaining < chunk) chunk = localRemaining;
