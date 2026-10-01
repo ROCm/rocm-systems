@@ -63,9 +63,9 @@ thread allocation from the CPUs it can see rather than from the share of the
 runner it is entitled to — so several workers on one runner each plan as if
 they had the whole machine. The workflow matrix therefore names both numbers
 per lane: `corpus_worker_limit` for pytest-xdist fanout and
-`rocjitsu_cpu_threads_budget` for one ROCjitsu process, capped at `nproc`.
+`rocjitsu_thread_budget` for one ROCjitsu process, capped at `nproc`.
 
-The harness accepts `--cpu-thread-budget N` (default: 8) and passes the budget
+The harness accepts `--rocjitsu-thread-budget N` (default: 8) and passes the budget
 as `rocjitsu --cpu-thread-budget`, which replaces
 the JSON `cpu_thread_budget` for that launch without restricting process
 affinity: ROCjitsu picks the largest configured thread allocation that fits,
