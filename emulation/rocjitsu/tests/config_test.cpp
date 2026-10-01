@@ -453,10 +453,11 @@ TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths)
         ]}
       ]}, "links": []}
     })";
-    if (second_engine_cus)
+    if (second_engine_cus) {
       ASSERT_TRUE(
           replace_exactly_once(json, R"("children": [])",
                                R"("children": [{"name": "cu[0:2]", "type": "compute_unit"}])"));
+    }
 
     testing::internal::CaptureStderr();
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -509,8 +510,9 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
     ASSERT_EQ(cus.size(), num_cus);
     for (uint32_t cu_index = 0; cu_index < num_cus; ++cu_index) {
       EXPECT_EQ(cus[cu_index]->cus_per_shader_array(), num_cus == 4 ? 2u : 0u);
-      if (num_cus == 4)
+      if (num_cus == 4) {
         EXPECT_EQ(cus[cu_index]->shader_array_cu_id(), cu_index % 2);
+      }
     }
   }
 }
