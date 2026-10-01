@@ -285,6 +285,12 @@ enum class track_kind_t
     stream,
 };
 
+struct value_range_t
+{
+    double min{};
+    double max{};
+};
+
 struct track_info_t
 {
     size_t       id{};
@@ -310,6 +316,10 @@ struct track_info_t
 
     size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.
     size_t end_ts{};    ///< Nanosecond timestamp of the track's latest event.
+
+    /// Smallest/largest sample value. Only set for track_kind_t::pmc_agent
+    /// tracks that have at least one non-NULL sample value.
+    std::optional<value_range_t> value_range;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;

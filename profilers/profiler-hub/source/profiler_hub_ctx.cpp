@@ -272,6 +272,10 @@ ph_ctx::initialize_track_list()
             .stream_id   = static_cast<std::uint32_t>(track->stream_id),
             .start_ts    = static_cast<std::uint64_t>(track->start_ts),
             .end_ts      = static_cast<std::uint64_t>(track->end_ts),
+            .value_range = track->value_range ? ph_value_range_t{ track->value_range->min,
+                                                                  track->value_range->max,
+                                                                  1 }
+                                              : ph_value_range_t{},
         });
     }
 }

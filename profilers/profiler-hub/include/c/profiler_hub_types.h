@@ -61,6 +61,14 @@ extern "C"
                                        memory-copy, by (nid,pid,stream_id). */
     } ph_track_category_t;
 
+    /** @brief A min/max pair that may be absent. */
+    typedef struct
+    {
+        double   min; /**< Smallest value. Only meaningful if is_valid is non-zero. */
+        double   max; /**< Largest value. Only meaningful if is_valid is non-zero. */
+        uint32_t is_valid; /**< Non-zero if min and max hold real values. */
+    } ph_value_range_t;
+
     /**
      * @brief A single track in a trace.
      * @note track_name points into memory owned by the ph_ctx_t that
@@ -87,6 +95,9 @@ extern "C"
                                             earliest event. */
         uint64_t end_ts;              /**< Nanosecond timestamp of the track's
                                             latest event. */
+        ph_value_range_t value_range; /**< Sample value range. Only valid for
+                                            PH_TRACK_CATEGORY_PMC_AGENT tracks with
+                                            at least one sample value. */
     } ph_track_t;
 
     /**
