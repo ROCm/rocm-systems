@@ -35,8 +35,14 @@ Usage:
         --run-all-tests false \
         --therock-path _therock
 
-Output (to $GITHUB_OUTPUT), written as ``build_stages=<value>``:
-    a comma-separated allowlist of stages to build (empty string = build all)
+It also emits ``windows_amdgpu_families=none`` when every changed project is
+disabled on Windows in the topology, so TheRock skips the Windows build. Any
+other case emits an empty value, which keeps the workflow's default families.
+
+Output (to $GITHUB_OUTPUT):
+    build_stages=<value>: a comma-separated allowlist of stages to build
+        (empty string = build all)
+    windows_amdgpu_families=<value>: "none" to skip Windows, else empty
 """
 
 import argparse
@@ -81,6 +87,19 @@ def _parse_projects(changed_projects: str) -> List[str]:
     return projects
 
 
+def _load_topology(therock_path: str):
+    """Import TheRock's build topology from the checkout (read-only)."""
+    therock_build_tools = (Path(therock_path) / "build_tools").resolve()
+    therock_build_tools_str = os.fspath(therock_build_tools)
+
+    if therock_build_tools_str not in sys.path:
+        sys.path.insert(0, therock_build_tools_str)
+
+    from _therock_utils.build_topology import get_topology
+
+    return get_topology()
+
+
 def compute_build_stages(
     changed_projects: str,
     therock_path: str,
@@ -106,18 +125,8 @@ def compute_build_stages(
         logger.info("Full-build project changed -> build all stages")
         return []
 
-    # Import TheRock's build topology from the checkout. TheRock is the source of
-    # truth for the build graph; we only read it.
-    therock_build_tools = (Path(therock_path) / "build_tools").resolve()
-    therock_build_tools_str = os.fspath(therock_build_tools)
-
-    if therock_build_tools_str not in sys.path:
-        sys.path.insert(0, therock_build_tools_str)
-
     try:
-        from _therock_utils.build_topology import get_topology
-
-        topology = get_topology()
+        topology = _load_topology(therock_path)
         all_stages = set(topology.get_all_stage_names())
     except Exception as e:  # noqa: BLE001 - never let this analysis break CI
         logger.warning(f"Topology load failed ({e}) -> build all stages")
@@ -156,14 +165,54 @@ def compute_build_stages(
     return build_stages
 
 
-def set_github_output(build_stages: List[str]) -> None:
-    value = ",".join(build_stages)
+def compute_windows_families(
+    changed_projects: str,
+    therock_path: str,
+    run_all_tests: bool = False,
+) -> str:
+    """Return "none" when every changed project is disabled on Windows, else "".
+
+    An empty value keeps the workflow's default Windows families.
+    """
+    if run_all_tests:
+        return ""
+
+    projects = _parse_projects(changed_projects)
+    if not projects:
+        return ""
+
+    try:
+        topology = _load_topology(therock_path)
+    except Exception as e:  # noqa: BLE001 - never let this analysis break CI
+        logger.warning(f"Topology load failed ({e}) -> keep Windows")
+        return ""
+
+    for project in projects:
+        artifact = topology.resolve_alias_to_artifact(project)
+        if artifact is None:
+            logger.info(f"Unrecognized project {project} -> keep Windows")
+            return ""
+        if "windows" not in topology.artifacts[artifact].disable_platforms:
+            logger.info(f"{project} builds on Windows -> keep Windows")
+            return ""
+
+    logger.info(
+        f"All changed projects are Linux-only {sorted(projects)} -> skip Windows"
+    )
+    return "none"
+
+
+def set_github_output(build_stages: List[str], windows_families: str) -> None:
+    lines = [
+        f"build_stages={','.join(build_stages)}",
+        f"windows_amdgpu_families={windows_families}",
+    ]
     output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not output_file:
-        print(f"build_stages={value}")
+        print("\n".join(lines))
         return
     with open(output_file, "a") as f:
-        f.write(f"build_stages={value}\n")
+        f.write("".join(f"{line}\n" for line in lines))
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -189,12 +238,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+    run_all_tests = str(args.run_all_tests).strip().lower() == "true"
     build_stages = compute_build_stages(
         changed_projects=args.changed_projects,
         therock_path=args.therock_path,
-        run_all_tests=str(args.run_all_tests).strip().lower() == "true",
+        run_all_tests=run_all_tests,
     )
-    set_github_output(build_stages)
+    windows_families = compute_windows_families(
+        changed_projects=args.changed_projects,
+        therock_path=args.therock_path,
+        run_all_tests=run_all_tests,
+    )
+    set_github_output(build_stages, windows_families)
     return 0
 
 
