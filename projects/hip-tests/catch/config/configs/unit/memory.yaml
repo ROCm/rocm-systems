@@ -2188,6 +2188,14 @@ memory:
   Unit_hipHostFree_Capture:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemcpyMmapPressure_Baseline:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyMmapPressure_UnderPressure:
+    <<: *level_2
+    tags: [transfer]
+    # Allocates most of host RAM to create memory pressure
+    disabled: [asan]
   Unit_hipMemcpySync:
     <<: *level_2
     tags: [transfer, P1]
