@@ -35,7 +35,7 @@ bool VmHeap::ReleaseAddressRange(void* addr) {
 }
 
 // ================================================================================================
-bool VmHeap::CommitMemory(void* addr, size_t size) {
+Memory* VmHeap::CommitMemory(void* addr, size_t size) {
   const auto& dev_info = device_->info();
   size_t granularity = dev_info.virtualMemAllocGranularityRecommended_;
   auto padded_size = alignUp(size, granularity);
@@ -45,16 +45,19 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
                                 dev_info.memBaseAddrAlign_, nullptr);
   if (ptr == nullptr) {
     LogPrintfError("Failed to allocate physical memory %zd", padded_size);
-    return false;
+    return nullptr;
   }
 
   size_t offset = 0;  // this is ignored
   // Find physical memory in the map of all objects
   Memory* phys_mem_obj = MemObjMap::FindMemObj(ptr, &offset);
 
-  // Map the physical memory to a virtual address
+  // Map the physical memory to a virtual address. The mapping must not get its own object in
+  // MemObjMap: allocations are views of base_memory_, and a chunk object would be returned by
+  // the lookup of any address past the chunk start instead of the allocation.
+  constexpr bool kTrackMapping = false;
   Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, padded_size,
-                                       phys_mem_obj);
+                                       phys_mem_obj, kTrackMapping);
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
@@ -63,16 +66,15 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
   if (!device_->SetMemAccess(addr, padded_size, Device::VmmAccess::kReadWrite)) {
     LogError("SetAccess failed for the commited memory in VmHeap!");
   }
-  return true;
+  return phys_mem_obj;
 }
 
 // ================================================================================================
-bool VmHeap::UncommitMemory(void* addr, size_t size) {
-  Memory* vaddr_sub_obj = MemObjMap::FindMemObj(addr);
-  Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
-
+bool VmHeap::UncommitMemory(void* addr, size_t size, Memory* phys_mem_obj) {
   // Unmap the physical memory from a virtual address
-  Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, size, nullptr);
+  constexpr bool kTrackMapping = false;
+  Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, size, nullptr,
+                                       kTrackMapping);
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
@@ -111,7 +113,7 @@ VmHeap::~VmHeap() {
       walk = next;
     }
 
-    if (mapped_mem_.size() > 0) {
+    if (mapped_chunks_.size() > 0) {
       // Unmap the entire memory range
       UnmapPhysMemory(0, va_size_);
     }
@@ -135,7 +137,7 @@ bool VmHeap::Create() {
   if (free_list_ == nullptr) {
     return false;
   }
-  mapped_mem_.resize(va_size_ / chunk_size_);
+  mapped_chunks_.resize(va_size_ / chunk_size_, nullptr);
   return true;
 }
 
@@ -145,16 +147,16 @@ bool VmHeap::MapPhysMemory(size_t offset, size_t size) {
   auto end_chunk = alignUp(offset + size, chunk_size_) / chunk_size_;
 
   for (auto i = start_chunk; i < end_chunk; ++i) {
-    if (!mapped_mem_[i]) {
+    if (mapped_chunks_[i] == nullptr) {
       auto address = base_address_ + i * chunk_size_;
-      if (CommitMemory(address, chunk_size_)) {
+      mapped_chunks_[i] = CommitMemory(address, chunk_size_);
+      if (mapped_chunks_[i] != nullptr) {
         mapped_size_ += chunk_size_;
         if (mapped_size_ > max_mapped_size_) {
           ClPrint(LOG_INFO, LOG_MEM_POOL, "VM heap grows in physical alloc to %d GB\n",
                   static_cast<int>(mapped_size_ / Gi));
         }
         max_mapped_size_ = std::max(max_mapped_size_, mapped_size_);
-        mapped_mem_[i] = true;
       } else {
         assert(false);
         return false;
@@ -177,17 +179,17 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
     if (free_mapped <= unmap_threshold_) {
       return;
     }
-    if (i >= mapped_mem_.size()) {
+    if (i >= mapped_chunks_.size()) {
       assert(false);
       LogError("VM heap allocation is beyond the range!");
       return;
     }
-    if (mapped_mem_[i]) {
+    if (mapped_chunks_[i] != nullptr) {
       auto address = base_address_ + i * chunk_size_;
-      if (UncommitMemory(address, chunk_size_)) {
+      if (UncommitMemory(address, chunk_size_, mapped_chunks_[i])) {
         mapped_size_ -= chunk_size_;
         free_mapped -= chunk_size_;
-        mapped_mem_[i] = false;
+        mapped_chunks_[i] = nullptr;
       } else {
         assert(false);
       }
@@ -219,20 +221,13 @@ address VmHeap::Alloc(size_t size) {
       return nullptr;
     }
   }
-  address ptr = nullptr;
-  size_t offset = 0;
-  auto hb = AllocBlock(size + block_alignment_);
-  if (hb != nullptr) {
-    // Add 256-byte offset if virtual address matches chunk address to avoid map conflicts
-    offset = ((hb->Offset() & (kChunkSize - 1)) == 0)
-               ? hb->Offset() + block_alignment_
-               : hb->Offset();
-    ptr = base_address_ + offset;
-  } else {
+  auto hb = AllocBlock(size);
+  if (hb == nullptr) {
     return nullptr;
   }
+  address ptr = base_address_ + hb->Offset();
   auto memory =
-      new (device_->context()) Buffer(*base_memory_, 0, offset, size, &device_->context());
+      new (device_->context()) Buffer(*base_memory_, 0, hb->Offset(), size, &device_->context());
   if (nullptr == memory || !memory->create(nullptr)) {
     FreeBlock(hb);
     return nullptr;
