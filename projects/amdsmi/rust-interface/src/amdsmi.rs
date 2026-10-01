@@ -302,6 +302,55 @@ pub fn amdsmi_get_processor_type(
     Ok(processor_type)
 }
 
+/// Get whether the GPU with the specified processor handle is the integrated GPU of an APU.
+///
+/// Identification comes from the amdgpu driver's fusion flag. An APU's GPU keeps
+/// [`AmdsmiProcessorTypeT::AmdsmiProcessorTypeAmdGpu`], so this is the way to tell it apart from a
+/// discrete GPU.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which APU identification is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<bool>` - Returns `Ok(bool)` indicating whether the GPU is integrated in an APU if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Check whether the GPU is integrated in an APU
+///     match amdsmi_is_gpu_apu(processor_handle) {
+///         Ok(is_apu) => println!("GPU is an APU: {}", is_apu),
+///         Err(e) => panic!("Failed to identify APU: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_is_gpu_apu` call fails. A backend that cannot identify an APU, such as WSL, returns `AmdsmiStatusNotSupported` rather than `false`.
+pub fn amdsmi_is_gpu_apu(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult<bool> {
+    let mut is_apu: bool = false;
+    call_unsafe!(amdsmi_wrapper::amdsmi_is_gpu_apu(
+        processor_handle,
+        &mut is_apu as *mut bool
+    ));
+    Ok(is_apu)
+}
+
 ///Retrieves the processor handle for a given Bus-Device-Function (BDF) address.
 ///
 /// This function returns a handle to the processor associated with the specified BDF address.

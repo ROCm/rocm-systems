@@ -736,27 +736,25 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& soc
 }
 
 amdsmi_status_t AMDSmiSystem::cleanup() {
+  processors_.clear();
+  nic_processors_.clear();
+  switch_processors_.clear();
+  ainic_processors_.clear();
+  for (auto* socket : sockets_) {
+    delete socket;
+  }
+  sockets_.clear();
+  ai_nic_info_.clear();
+  if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
+    smi_nic_destroy_context(ainic_ctx_);
+    ainic_ctx_ = nullptr;
+  }
 #ifdef ENABLE_ESMI_LIB
   if (init_flag_ & AMDSMI_INIT_AMD_CPUS) {
-    for (uint32_t i = 0; i < sockets_.size(); i++) {
-      delete sockets_[i];
-    }
-    processors_.clear();
-    sockets_.clear();
     esmi_exit();
   }
 #endif
   if (init_flag_ & AMDSMI_INIT_AMD_GPUS) {
-    // we do not need to delete the processors, deleting sockets takes care of this
-    if (!processors_.empty()) {
-      processors_.clear();
-    }
-    for (uint32_t i = 0; i < sockets_.size(); i++) {
-      delete sockets_[i];
-    }
-    if (!sockets_.empty()) {
-      sockets_.clear();
-    }
     drm_.cleanup();
 #ifdef ENABLE_WSL_BACKEND
     bool used_wsl = WSLGPUBackend::IsActive();
@@ -771,9 +769,6 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
 #ifdef ENABLE_WSL_BACKEND
     }
 #endif
-  }
-  if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
-    smi_nic_destroy_context(ainic_ctx_);
   }
   return AMDSMI_STATUS_SUCCESS;
 }

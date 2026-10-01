@@ -110,7 +110,7 @@ configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
 
 add_custom_target(python_wrapper DEPENDS amdsmi_wrapper.py)
 
-# hard-linking instead of copying avoids unnecessarry regeneration of packaged files
+# Refresh staged files when their sources change during incremental builds.
 add_custom_command(
     OUTPUT
         ${PY_PACKAGE_DIR}/__init__.py
@@ -120,7 +120,15 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
         ${PY_BUILD_DIR}/setup.py
-    DEPENDS python_wrapper
+    DEPENDS
+        python_wrapper
+        ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface_utils.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+        ${PROJECT_SOURCE_DIR}/LICENSE
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/setup.py ${PY_BUILD_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
