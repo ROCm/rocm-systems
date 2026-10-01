@@ -214,7 +214,7 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !NCCL_CUMEM_HOST_GATE
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -246,7 +246,8 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
 #endif
-      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      // HIP rejects HostNuma. AMD probe matches alloc.h: hipMemLocationTypeHost,
+      // id 0. The #else is the CUDA HostNuma restore path, not a HIP compile arm.
 #if defined(__HIP_PLATFORM_AMD__)
       prop.location.type = hipMemLocationTypeHost;
 #else

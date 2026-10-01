@@ -43,6 +43,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -177,9 +178,18 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpc
 // ---------------------------------------------------------------------------
 void         ncclShadowPoolConstruct(struct ncclShadowPool*) {}
 ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t, void** outDevObj, void** outHostObj, hipStream_t) {
-  if (outDevObj) *outDevObj = nullptr;
-  if (outHostObj) *outHostObj = nullptr;
+ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj, hipStream_t) {
+  // One buffer for both views, leaked like allocateSpilled. A null host header
+  // is what windowRegisterNonSym memsets; this binary does not link a real pool.
+  if (size == 0) {
+    if (outDevObj) *outDevObj = nullptr;
+    if (outHostObj) *outHostObj = nullptr;
+    return ncclSuccess;
+  }
+  void* p = calloc(1, size);
+  if (p == nullptr) return ncclSystemError;
+  if (outDevObj) *outDevObj = p;
+  if (outHostObj) *outHostObj = p;
   return ncclSuccess;
 }
 ncclResult_t ncclShadowPoolFree(struct ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; }
@@ -366,6 +376,14 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
   if (prop) {
     *prop = hipMemAllocationProp{};
     prop->location.type = hipMemLocationTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) {
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
+      prop->location.type = hipMemLocationTypeHost;
+#else
+      prop->location.type = static_cast<hipMemLocationType>(2);
+#endif
+    }
   }
   return hipSuccess;
 }
@@ -392,11 +410,29 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
 }
+HIP_FAKE hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t) {
+  if (data == nullptr) return hipErrorInvalidValue;
+  if (attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+    hipMemoryType memType = hipMemoryTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) memType = hipMemoryTypeHost;
+    *static_cast<hipMemoryType*>(data) = memType;
+    return hipSuccess;
+  }
+  if (attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+    *static_cast<int*>(data) = 1;
+    return hipSuccess;
+  }
+  return hipErrorInvalidValue;
+}
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
-  // Host tests map one 4096-byte segment per LSA rank. Returning 0 would still
-  // call unmap once (the idx loop advances), but a real size matches destroy.
-  if (psize) *psize = 4096;
+  if (psize) {
+    const char* sz = std::getenv("RCCL_TEST_VMM_SEGMENT_SIZE");
+    // Host tests map one 4096-byte segment per LSA rank unless a test overrides
+    // the reported VMM range size explicitly.
+    *psize = (sz != nullptr && sz[0] != '\0') ? static_cast<size_t>(std::strtoull(sz, nullptr, 0)) : 4096;
+  }
   return hipSuccess;
 }
 
@@ -405,6 +441,12 @@ HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, 
 // throwaway streams for its teardown bookkeeping; none carry real work on the
 // host, so a non-null opaque handle and success returns are sufficient.
 // ---------------------------------------------------------------------------
+HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+  // The shadow stub uses one buffer for host and device, so this is a no-op
+  // copy. The real entry faults on the fake stream this binary creates.
+  if (dst != nullptr && src != nullptr && dst != src && size > 0) std::memcpy(dst, src, size);
+  return hipSuccess;
+}
 HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
   if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
   return hipSuccess;

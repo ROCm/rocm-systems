@@ -30,10 +30,9 @@ struct ncclComm;
 #include "cudawrap.h"
 #endif
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#include <hip/hip_runtime.h>
-#include "rocmwrap.h"
-#elif defined(ROCM_VERSION) && ROCM_VERSION >= 71200
+// Every AMD build defines this, including host-only. rocmwrap.h then provides
+// NCCL_CUMEM_HOST_GATE for the host-alloc gate below.
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
 #include "rocmwrap.h"
 #endif
@@ -290,7 +289,7 @@ struct ncclSideStreamScope {
   ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
 };
 
-#if CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE
 
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle* handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -391,7 +390,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return result;
 }
 
-#else /* CUDART_VERSION >= 12020 */
+#else /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE */
 
 static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
                                                    const char* callerFunc) {
@@ -412,7 +411,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return ncclInternalError;
 }
 
-#endif  /* CUDART_VERSION >= 12020 */
+#endif  /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_GATE */
 
 template <typename T>
 ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
@@ -855,9 +854,9 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
       CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
       CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
 #if defined(__HIP_PLATFORM_AMD__)
-#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
-      // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
-      // in native ROCm 7.12 and the 7.0.2.x backport.
+#if NCCL_CUMEM_HOST_GATE
+      // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
+      // ROCm 7.12 and the 7.0.2.x backport.
       if (prop.location.type == hipMemLocationTypeHost) {
         *hasSysmemSegment = true;
       }
