@@ -95,7 +95,7 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
-RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 1);
+RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
 // Returns true when the user has restricted the algorithm set via NCCL_ALGO.
 // When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
 // Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
@@ -1676,19 +1676,19 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
       // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
       // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      // It uses none of the hierarchical AllGather sub-communicators, which need not
+      // exist on this comm, so it is reported like the other CE branches.
       const bool hierCeAvailable =
         !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (hierCeAvailable && !hasSysmemSegment &&
           (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
         decision->algo = RCCL_CE_REGISTERED;
-        if (query) {
-          int a, p, ch;
-          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
         return ncclSuccess;
       }
+      // taskAppend's SYM_CE_THRESHOLD fallback is gated on !allGatherDecided.
+      // User AllGather always sets decisionValid before enqueue, so that arm
+      // never runs. Copying it here would take a symk-eligible AllGather and
+      // would ignore ceRegMax. Branch #3 above is the CE decision.
     }
 
     // (4) Symmetric kernel. Live path dispatches symk via the downstream extraction.
@@ -2006,16 +2006,11 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
          (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
+    // Require CTA_POLICY_ZERO and no sysmem segment, and report it like the other
+    // CE branches, matching the AllGather twin.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
-      if (query) {
-        int a, p, ch;
-        NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
-      }
       return ncclSuccess;
     }
 
