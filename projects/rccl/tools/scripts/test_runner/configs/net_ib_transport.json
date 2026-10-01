@@ -1028,6 +1028,11 @@
           "test_filter": "RmaMultiSegmentMPITest.PartialFinalSegmentRegistrationAndTransfer"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_SubPageBounds",
+          "description": "Window starting and ending inside a page: each per-segment DMA-BUF export covers the whole pages its MR spans",
+          "test_filter": "RmaMultiSegmentMPITest.SubPageBoundsRegistrationAndTransfer"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutCrossBoundaryAtOffset",
           "description": "IPut starting and ending mid-segment, so the WR builder splits on a non-zero per-segment offset on both sides",
           "test_filter": "RmaMultiSegmentMPITest.IPutCrossSegmentBoundaryAtOffset"
