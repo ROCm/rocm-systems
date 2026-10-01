@@ -37,10 +37,12 @@ register_gpu_pmc(std::uint32_t device_id)
     constexpr auto* k_msg         = "bytes";
     constexpr auto* k_target_arch = "GPU";
 
+    auto& metadata_registry = Externals::get_metadata_registry();
+
     auto register_rccl_info = [&](std::string_view direction_label,
                                   const char*      description) {
         const std::string label = fmt::format("{} GPU {}", direction_label, device_id);
-        Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
+        metadata_registry.add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
             .agent_type_index = device_id,
             .target_arch      = k_target_arch,
@@ -81,11 +83,17 @@ on_rccl_configure()
 {
     constexpr auto k_empty_json   = "{}";
     constexpr auto k_no_thread_id = std::nullopt;
-    Externals::get_metadata_registry().add_string(Externals::comm_data_name);
-    Externals::get_metadata_registry().add_track(typename Externals::track_t{
-        std::string{ Externals::rccl_send_track_name }, k_no_thread_id, k_empty_json });
-    Externals::get_metadata_registry().add_track(typename Externals::track_t{
-        std::string{ Externals::rccl_recv_track_name }, k_no_thread_id, k_empty_json });
+
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_string(Externals::comm_data_name);
+    metadata_registry.add_track(typename Externals::track_t{
+        .track_name = std::string{ Externals::rccl_send_track_name },
+        .thread_id  = k_no_thread_id,
+        .extdata    = k_empty_json });
+    metadata_registry.add_track(typename Externals::track_t{
+        .track_name = std::string{ Externals::rccl_recv_track_name },
+        .thread_id  = k_no_thread_id,
+        .extdata    = k_empty_json });
 
     rccl::device_id_resolver<SdkBackend>::template configure_comm_cu_device_function<
         Externals>();
