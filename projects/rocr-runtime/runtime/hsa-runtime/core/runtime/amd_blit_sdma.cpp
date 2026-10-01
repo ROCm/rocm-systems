@@ -1366,8 +1366,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   const bool is_swap = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
   const bool is_indirect = (indirect_src || indirect_dst);
 
-  // Dst-side size for an entry (asymmetric swap). Defaults to the src side, i.e.
-  // size_list[d], which keeps symmetric swaps and non-swap ops unchanged.
+  // Dst-side swap size; defaults to the src side.
   auto b_size = [&](uint32_t d) -> size_t {
     return (is_swap && dst_size_list != nullptr) ? dst_size_list[d] : size_list[d];
   };
@@ -1393,8 +1392,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     uint64_t total_bytes = 0;
     for (size_t i = 0; i < num_entries; ++i) {
       const uint32_t d = indices[i];
-      // For an asymmetric swap the chunk count is driven by the larger side;
-      // size_list is the src side, dst_size_list is the dst side.
+      // Asymmetric swap: chunk by the larger side.
       const size_t entry_size = is_swap ? std::max(size_list[d], b_size(d)) : size_list[d];
       if (is_indirect && entry_size > max_copy_size)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;

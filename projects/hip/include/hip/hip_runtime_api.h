@@ -6311,31 +6311,24 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 /**
  * @brief Perform Batch of 1D copies with extended operation support.
  *
- * Extended version of hipMemcpyBatchAsync. The operation for each copy (linear,
- * swap, indirect src/dst) and its hints (PreferCE, PreferComputeEngine, PreferLinear,
- * PreferBroadcast) are selected through attrs[i].flags, the same hipMemcpyFlags used by
- * hipMemcpyBatchAsync, range-mapped by attrsIdxs.
- * GPU-side wait/signal parameters are reserved for future use and must be NULL.
+ * Extended hipMemcpyBatchAsync. The operation and hints for each copy are selected
+ * through attrs[i].flags (hipMemcpyFlags). Not supported during stream capture.
  *
  * @param [in] dsts        - Array of destination pointers.
  * @param [in] srcs        - Array of source pointers.
- * @param [in] sizes       - Array of copy sizes in bytes: bytes read from srcs[i]
- *                            and written to dsts[i].
- * @param [in] sizesDst    - For swap entries, bytes read from dsts[i] and written
- *                            back to srcs[i] (NULL = symmetric). For each swap entry,
- *                            sizesDst[i] must be non-zero and <= sizes[i], otherwise
- *                            hipErrorInvalidValue is returned.
+ * @param [in] sizes       - Bytes copied from srcs[i] to dsts[i].
+ * @param [in] sizesDst    - Swap entries only: bytes copied from dsts[i] to srcs[i],
+ *                            0 < sizesDst[i] <= sizes[i]. NULL = symmetric.
  * @param [in] waits       - Reserved for future use. Must be NULL.
  * @param [in] signals     - Reserved for future use. Must be NULL.
  * @param [in] count       - Number of copy operations.
- * @param [in] attrs       - Array of hipExtMemcpyAttributes. Op selection is via
- *                            attrs[i].flags; reserved fields must be 0.
+ * @param [in] attrs       - Array of hipExtMemcpyAttributes.
  * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
  * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
  * @param [in] stream      - Stream to execute on.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
- *          #hipErrorInvalidResourceHandle
+ *          #hipErrorInvalidResourceHandle, #hipErrorStreamCaptureUnsupported
  */
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                                   size_t* sizes, size_t* sizesDst,

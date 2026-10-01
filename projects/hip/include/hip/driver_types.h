@@ -465,14 +465,10 @@ typedef enum hipMemcpyFlags {
                                                ///< than when it is submitted.
   hipMemcpyFlagExtOpIndirectDst = 0x800,       ///< Same as IndirectSrc, but for the dst pointer.
   hipMemcpyFlagExtPreferComputeEngine = 0x1000,///< Prefer compute engine over copy engine.
-                                               ///< Linear copies only; mutually exclusive with
-                                               ///< hipMemcpyFlagExtPreferCE.
-  hipMemcpyFlagExtPreferLinear = 0x2000,       ///< Prefer issuing each copy individually, without
-                                               ///< combining copies that share a source.
-                                               ///< Mutually exclusive with PreferBroadcast.
-  hipMemcpyFlagExtPreferBroadcast = 0x4000     ///< Prefer combining copies with the same src and
-                                               ///< size into one broadcast (src read once, written
-                                               ///< to every dst). Linear copies only.
+                                               ///< Linear copies only.
+  hipMemcpyFlagExtPreferLinear = 0x2000,       ///< Prefer issuing each copy individually.
+  hipMemcpyFlagExtPreferBroadcast = 0x4000     ///< Prefer one broadcast for copies with the same
+                                               ///< src and size. Linear copies only.
 } hipMemcpyFlags;
 
 /**
@@ -499,8 +495,7 @@ typedef struct hipExtMemcpyWait {
   uint32_t compareOp;   ///< Comparison function; see hipExtMemcpyWaitOp
   uint32_t reserved0;   ///< Reserved; must be 0
   uint64_t reserved[4]; ///< Reserved; must be 0 (future use)
-} hipExtMemcpyWait;      // 64 bytes; zero-initialize. Future fields carve out of the
-                        // reserved space so the size/ABI stays fixed.
+} hipExtMemcpyWait;      // 64 bytes; zero-initialize.
 
 /**
  * Atomic operation for a per-entry signal in hipExtMemcpyBatchAsync.
@@ -521,8 +516,7 @@ typedef struct hipExtMemcpySignal {
   uint32_t signalOp;    ///< Atomic operation; see hipExtMemcpySignalOp
   uint32_t reserved0;   ///< Reserved; must be 0
   uint64_t reserved[5]; ///< Reserved; must be 0 (future use)
-} hipExtMemcpySignal;    // 64 bytes; zero-initialize. Future fields carve out of the
-                        // reserved space so the size/ABI stays fixed.
+} hipExtMemcpySignal;    // 64 bytes; zero-initialize.
 
 /**
  * Flags to specify order in which source pointer is accessed by Batch memcpy
@@ -552,11 +546,7 @@ typedef struct hipMemcpyAttributes {
 
 /**
  * Attributes for copies within a batch submitted through hipExtMemcpyBatchAsync.
- *
- * The first four fields mirror hipMemcpyAttributes (the CUDA-compatible attributes), followed
- * by a reserved tail for forward-compatibility. Do not cast a hipMemcpyAttributes* to a
- * hipExtMemcpyAttributes* (the strides differ). Zero-initialize; a non-zero reserved field is
- * rejected.
+ * hipMemcpyAttributes plus a reserved tail; do not cast between the two.
  */
 typedef struct hipExtMemcpyAttributes {
   hipMemcpySrcAccessOrder srcAccessOrder;  ///< Source access ordering; see hipMemcpySrcAccessOrder.

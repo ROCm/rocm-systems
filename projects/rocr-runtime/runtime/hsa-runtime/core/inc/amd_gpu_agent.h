@@ -865,10 +865,7 @@ class GpuAgent : public GpuAgentInt {
       const size_t* size_list,
       uint32_t coord_engine = 0,
       uint32_t max_engines = 0,
-      // Optional per-entry B-side sizes for asymmetric LINEAR_SWAP (size_list is
-      // the A side). Null => symmetric. Asymmetric entries are rejected with
-      // HSA_STATUS_ERROR_INVALID_ARGUMENT unless native asymmetric swap is
-      // supported.
+      // Optional per-entry dst-side swap sizes (null = symmetric).
       const size_t* dst_size_list = nullptr);
 
   // Bind index of peer device that is connected via xGMI links

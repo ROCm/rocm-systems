@@ -1681,10 +1681,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     }
   }
 
-  // The swap packet carries a single count; reject asymmetric entries so the
-  // caller decomposes them (symmetric swap + linear tail copy). Checked before
-  // any engine is submitted, so it covers both the fused coordinator and the
-  // body paths.
+  // Reject asymmetric swaps up front; the caller decomposes them.
   if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && dst_size_list != nullptr) {
     for (uint32_t d = 0; d < num_entries; ++d) {
       if (dst_size_list[d] != size_list[d] && !engines[d].blit->NativeAsymmetricSwapSupported())
@@ -1788,7 +1785,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           coord_dsts.push_back(dst_list[d]);
           coord_srcs.push_back(src_list[d]);
           coord_sizes_a.push_back(size_list[d]);
-          // Dst side for asymmetric swap; defaults to the src side when not provided.
           coord_sizes_b.push_back(dst_size_list ? dst_size_list[d] : size_list[d]);
         }
       }
@@ -2051,8 +2047,6 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Scalar swap: A = src_size, B = dst_size. DmaCopyFanOutOp rejects A != B
-    // unless native asymmetric swap is supported.
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
@@ -2064,8 +2058,7 @@ hsa_status_t GpuAgent::DmaCopySwap(
                            /*coord_engine=*/0, /*max_engines=*/0, dst_size_arr);
   }
 
-  // Multi-entry swaps are symmetric only (the public op struct carries a single
-  // size_list); asymmetric batches are emitted by the caller as scalar ops.
+  // Multi-entry swaps are symmetric only.
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),

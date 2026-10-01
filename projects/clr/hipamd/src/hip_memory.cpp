@@ -2900,12 +2900,8 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
 }
 
 // ================================================================================================
-// hipExtMemcpyAttributes carries the same logical fields as the CUDA-compatible
-// hipMemcpyAttributes; the legacy wrapper converts by value (never casts the 24-byte
-// struct to the 56-byte one). Lock hipExtMemcpyAttributes at 56 bytes so its ABI can't drift.
+// Lock the public struct sizes (ABI).
 static_assert(sizeof(hipExtMemcpyAttributes) == 56, "hipExtMemcpyAttributes must stay 56 bytes");
-// The wait/signal structs promise a fixed 64-byte ABI (future fields carve out of their
-// reserved tail); lock the size the same way so a field addition can't silently grow them.
 static_assert(sizeof(hipExtMemcpyWait) == 64, "hipExtMemcpyWait must stay 64 bytes");
 static_assert(sizeof(hipExtMemcpySignal) == 64, "hipExtMemcpySignal must stay 64 bytes");
 
@@ -2949,8 +2945,7 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attr
     // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
   } else if (flags & hipMemcpyFlagExtPreferComputeEngine) {
-    // Route these copies onto the shader blit path instead of SDMA. PreferCE and
-    // PreferComputeEngine are mutually exclusive (validated earlier).
+    // Shader blit path instead of SDMA.
     metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::BLIT;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
@@ -3038,11 +3033,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                            size_t count,
                            hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                            size_t* failIdx, hip::Stream& stream, bool isAsync) {
-  // Initialize up front so every error path leaves failIdx deterministic:
-  // SIZE_MAX unless a specific offending entry is identified below.
+  // SIZE_MAX unless a specific entry is at fault.
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
-  // Common input validation for both hipMemcpyBatchAsync and hipExtMemcpyBatchAsync.
   if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
     return hipErrorInvalidValue;
   }
@@ -3069,29 +3062,24 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
         return hipErrorInvalidValue;
       }
-      // Unknown flag bits are a malformed request.
       const unsigned int f = attrs[i].flags;
       if (f & ~kValidFlagMask) {
         return hipErrorInvalidValue;
       }
-      // Swap and indirect are mutually exclusive within one attribute.
       if ((f & hipMemcpyFlagExtOpSwap) &&
           (f & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;
       }
-      // PreferCE (SDMA) and PreferComputeEngine (shader) select opposite engines.
       if ((f & hipMemcpyFlagExtPreferCE) && (f & hipMemcpyFlagExtPreferComputeEngine)) {
         return hipErrorInvalidValue;
       }
-      // The shader copy path only handles linear copies, so PreferComputeEngine cannot be
-      // combined with a swap or indirect operation.
+      // The shader copy path is linear only.
       if ((f & hipMemcpyFlagExtPreferComputeEngine) &&
           (f & (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc |
                 hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;
       }
-      // PreferLinear and PreferBroadcast are opposite grouping hints, and broadcast only
-      // applies to linear copies. Both are accepted but not yet acted on.
+      // Grouping hints: validated but not yet acted on.
       if ((f & hipMemcpyFlagExtPreferLinear) && (f & hipMemcpyFlagExtPreferBroadcast)) {
         return hipErrorInvalidValue;
       }
@@ -3100,7 +3088,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                 hipMemcpyFlagExtOpIndirectDst))) {
         return hipErrorInvalidValue;
       }
-      // Reserved fields must be zero.
       for (size_t r = 0; r < sizeof(attrs[i].reserved) / sizeof(attrs[i].reserved[0]); ++r) {
         if (attrs[i].reserved[r] != 0) {
           return hipErrorInvalidValue;
@@ -3116,7 +3103,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
-  // Per-entry waits/signals are not yet wired to the SDMA packet builder.
+  // Per-entry waits/signals are reserved.
   if (waits != nullptr || signals != nullptr) {
     return hipErrorNotSupported;
   }
@@ -3250,11 +3237,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
 
-    // sizesDst is only meaningful for swap entries, where it carries the dsts[i]
-    // length (sizes[i] is the srcs[i] length); HW requires count_a >= count_b (sizes[i] >= sizeB). For a
-    // non-swap entry it must be zero: a non-zero value is a caller error (a per-entry
-    // destination length is not supported for linear copies) rather than a silently
-    // ignored field.
+    // sizesDst applies to swap entries only (0 < sizesDst[i] <= sizes[i]); it must be 0 otherwise.
     size_t sizeB = 0;
     if (sizesDst != nullptr) {
       if (metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
@@ -3286,18 +3269,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         }
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
-          // Native asymmetric swap is unavailable: decompose into a symmetric
-          // swap of the first sizeB bytes plus a linear copy of the src-side tail
-          // (sizes[i] describes srcs[i], sizesDst[i] describes dsts[i]).
-          // The two ops touch DISJOINT byte ranges, split exactly at sizeB: the swap
-          // reads/writes only [0, sizeB) of src and dst, while the tail reads
-          // src[sizeB..) and writes dst[sizeB..). Because neither op reads or writes a
-          // byte the other touches, they carry no data dependency and are correct
-          // regardless of the order (or concurrency) in which the batch executes them.
+          // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
+          // [sizeB, sizes[i]). The ranges are disjoint, so the two ops are order-independent.
           copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
                                                      dstOffsets[i], sizeB, metadata);
-          // Tail copy src[sizeB..sizes[i]) -> dst[sizeB..sizes[i]). Inherit the
-          // swap metadata's engine preference, only overriding the op type.
           amd::CopyMetadata tailMeta = metadata;
           tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
           copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i],
@@ -3394,19 +3369,15 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   }
   CHECK_STREAM_DETACHED_API(stream);
 
-  // Validate the attribute-array shape up front so the conversion below never reads
-  // attrs[i] for an index the shared implementation would reject anyway.
   if (numAttrs > 0 && (attrs == nullptr || attrsIdxs == nullptr || numAttrs > count)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // The shared batch path takes hipExtMemcpyAttributes. Convert each CUDA-compatible
-  // hipMemcpyAttributes by value (never cast the 24-byte struct to the 56-byte one),
-  // leaving the reserved fields zeroed.
+  // Convert by value; the struct strides differ.
   std::vector<hipExtMemcpyAttributes> extAttrs;
   hipExtMemcpyAttributes* extAttrsPtr = nullptr;
   if (numAttrs > 0) {
-    extAttrs.resize(numAttrs);  // value-initializes reserved to 0
+    extAttrs.resize(numAttrs);
     for (size_t i = 0; i < numAttrs; ++i) {
       extAttrs[i].srcAccessOrder = attrs[i].srcAccessOrder;
       extAttrs[i].srcLocHint = attrs[i].srcLocHint;
@@ -3446,8 +3417,6 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
     HIP_RETURN(hipErrorStreamCaptureInvalidated);
   }
 
-  // The Ext API does not expose failIdx; the shared implementation still
-  // supports it for the legacy hipMemcpyBatchAsync path, so pass nullptr here.
   HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, sizesDst,
                              waits, signals, count,
                              attrs, attrsIdxs, numAttrs, /*failIdx=*/nullptr,
