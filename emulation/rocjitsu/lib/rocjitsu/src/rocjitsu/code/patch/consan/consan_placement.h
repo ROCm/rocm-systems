@@ -16,6 +16,7 @@
 #include <vector>
 
 namespace rocjitsu {
+class RegisterSet;
 class AmdGpuCodeObject;
 class BasicBlock;
 class Instruction;
@@ -81,6 +82,11 @@ scalar_clause_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t text_
 
 [[nodiscard]] bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks,
                                                   uint64_t text_offset);
+/// Merge a class's highest member into the running maximum; an absent class
+/// leaves the previous value unchanged.
+void update_max_vgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_vgpr);
+void update_max_sgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_sgpr);
+
 [[nodiscard]] KernelMaxRegisterRefs
 max_register_refs_in_kernel(const ProgramContainer &kernel, std::span<BasicBlock *const> blocks);
 

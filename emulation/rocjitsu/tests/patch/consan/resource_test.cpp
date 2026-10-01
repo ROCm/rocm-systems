@@ -5,8 +5,48 @@
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include <array>
+#include <random>
+
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSanPlacement, RegisterMaximaPreservePriorValuesAndMatchMembership) {
+  std::mt19937 rng(12584);
+  const std::array<std::optional<uint16_t>, 6> previous{std::nullopt, 0, 31, 105, 1023, 65535};
+  for (unsigned trial = 0; trial < 1000; ++trial) {
+    RegisterSet set;
+    std::array<std::optional<uint16_t>, 2> expected;
+    for (unsigned c = 0; c < 2; ++c) {
+      const auto cls = c == 0 ? RegClass::SGPR : RegClass::VGPR;
+      const unsigned cap = c == 0 ? REGISTER_SET_MAX_SGPRS : REGISTER_SET_MAX_VGPRS;
+      for (unsigned i = 0; i < cap; ++i) {
+        bool present = trial == 1 || (trial == 2 && i == 0) || (trial == 3 && i + 1 == cap) ||
+                       (trial > 3 && trial % 7 != c && rng() % (1 + trial % 103) == 0);
+        if (present) {
+          set.expand({cls, static_cast<uint16_t>(i), 1});
+          expected[c] = static_cast<uint16_t>(i);
+        }
+      }
+    }
+    // These must not change SGPR/VGPR maxima.
+    set.expand({RegClass::ACC_VGPR, 999, 1});
+    set.expand({RegClass::EXEC, 0, 1});
+    set.expand({RegClass::PC, 0, 1});
+    for (unsigned c = 0; c < 2; ++c) {
+      for (auto prior : previous) {
+        auto want = prior;
+        if (expected[c] && (!want || *expected[c] > *want))
+          want = expected[c];
+        if (c == 0)
+          update_max_sgpr_ref(set, prior);
+        else
+          update_max_vgpr_ref(set, prior);
+        EXPECT_EQ(prior, want) << "trial=" << trial << " class=" << c;
+      }
+    }
+  }
+}
 
 TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
   ProgramSite access;

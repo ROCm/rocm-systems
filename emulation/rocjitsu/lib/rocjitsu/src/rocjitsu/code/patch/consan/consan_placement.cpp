@@ -415,21 +415,25 @@ bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks, uint64_
 }
 
 void update_max_vgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_vgpr) {
+  // Iteration is ascending within each class, so only the last index matters.
+  std::optional<uint16_t> last;
   set.for_each([&](RegisterRef ref) {
-    if (ref.cls != RegClass::VGPR)
-      return;
-    if (!max_vgpr || ref.index > *max_vgpr)
-      max_vgpr = ref.index;
+    if (ref.cls == RegClass::VGPR)
+      last = ref.index;
   });
+  if (last && (!max_vgpr || *last > *max_vgpr))
+    max_vgpr = last;
 }
 
 void update_max_sgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_sgpr) {
+  // Iteration is ascending within each class, so only the last index matters.
+  std::optional<uint16_t> last;
   set.for_each([&](RegisterRef ref) {
-    if (ref.cls != RegClass::SGPR)
-      return;
-    if (!max_sgpr || ref.index > *max_sgpr)
-      max_sgpr = ref.index;
+    if (ref.cls == RegClass::SGPR)
+      last = ref.index;
   });
+  if (last && (!max_sgpr || *last > *max_sgpr))
+    max_sgpr = last;
 }
 
 [[nodiscard]] KernelMaxRegisterRefs
