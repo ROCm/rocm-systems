@@ -413,7 +413,7 @@ static inline bool ncclRmaRangeOk(const struct ncclRmaIbProxyMrHandle* h, int ra
 // caller reads its own buffer via base_vas[self]/rkeys[self][qp->remDevIdx]
 // on a loopback QP).
 static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr,
-                                             enum ibv_wr_opcode opcode, uint64_t wrId, const struct ncclIbQp* qp,
+                                             enum ibv_wr_opcode opcode, const struct ncclIbQp* qp,
                                              struct ncclRmaIbProxyMrHandle* localH, int localRank, uint64_t localOff,
                                              struct ncclRmaIbProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
                                              size_t size, const struct ibv_sge* flushSge) {
@@ -448,7 +448,6 @@ static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_
     memset(&wr[n], 0, sizeof(wr[n]));
     memset(&sge[n], 0, sizeof(sge[n]));
     wr[n].opcode = opcode;
-    wr[n].wr_id = wrId;
     wr[n].next = NULL;
     wr[n].wr.rdma.remote_addr = (uint64_t)rAddr;
     wr[n].wr.rdma.rkey = ncclRmaRemoteRkey(remoteH, remoteRank, rs, qp->remDevIdx);
@@ -972,7 +971,7 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   struct ibv_send_wr wr[NCCL_RMA_MAX_DATA_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_DATA_WRS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_WRITE, 0, qp, srcMrHandle,
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_WRITE, qp, srcMrHandle,
                                      rmaProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
 
   struct ncclIbRequest* req;
@@ -1018,7 +1017,7 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   struct ibv_send_wr wr[NCCL_RMA_MAX_DATA_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_DATA_WRS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_READ, 0, qp, localMrHandle,
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_READ, qp, localMrHandle,
                                      rmaProxyCtx->rank, localOffset, remoteMrHandle, rank, remoteOffset, size,
                                      /*flushSge=*/NULL));
 
@@ -1079,15 +1078,13 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   // Up to 2*NCCL_RMA_MAX_SEGMENTS slices for the segmented PUT plus one signal WR.
   struct ibv_send_wr wr[NCCL_RMA_MAX_SIGNAL_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_SIGNAL_WRS];
-  memset(&wr, 0, sizeof(wr));
-  memset(&sge, 0, sizeof(sge));
   int nPut = 0;
 
   // If size is 0, we only need to send the signal. srcMrHandle must be non-NULL
   if (size > 0 && dstMrHandle) {
     // PUT slices carry no CQE; only the trailing signal is signaled. Same-QP RC
     // ordering guarantees all writes land before the signal.
-    NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, 0, qp, srcMrHandle,
+    NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, qp, srcMrHandle,
                                        rmaProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
   }
 
@@ -1216,7 +1213,7 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   struct ibv_send_wr wr[NCCL_RMA_MAX_FLUSH_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_FLUSH_WRS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_FLUSH_WRS, &nWr, IBV_WR_RDMA_READ, 0, qp,
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_FLUSH_WRS, &nWr, IBV_WR_RDMA_READ, qp,
                                      /*localH=*/NULL, /*localRank=*/0, /*localOff=*/0,
                                      /*remoteH=*/rmaMrHandle, /*remoteRank=*/rmaProxyCtx->rank, /*remoteOff=*/0,
                                      /*size=*/ncclRmaMrBytes(rmaMrHandle, rmaProxyCtx->rank),
