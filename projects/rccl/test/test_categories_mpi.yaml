@@ -214,6 +214,28 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_LAUNCH_MODE=GROUP"
       - "RCCL_PAT_SHARED_QPS=0"
+  quick_env_profiler_kernelch:
+    description: "KernelCh profiling from the per-communicator profiler thread, checked with a recorder plugin. RCCL settles which profiler plugin it uses on the first communicator in the process and never retries, so these run in a process of their own; the fixture points NCCL_PROFILER_PLUGIN at the recorder. DDA is disabled because DDA collectives raise no profiler events, and a full single-node communicator would take it for AllReduce."
+    test_patterns:
+      - "ProfilerKernelChMPITest.*"
+      - "Share/ProfilerKernelChSplitMPITest.*"
+    exclude:
+      - "ProfilerKernelChMPITest.ShmTransportIsTimed"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_shm:
+    description: "KernelCh profiling over the SHM transport. NCCL_P2P_DISABLE is cached for the process lifetime, so ShmTransportIsTimed only runs when it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.ShmTransportIsTimed"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_P2P_DISABLE=1"
+      - "RCCL_DDA_ENABLE=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -424,6 +446,8 @@ execution_settings:
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
     quick_env_pat_shared_qps_off: 1200
+    quick_env_profiler_kernelch: 1200
+    quick_env_profiler_kernelch_shm: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
