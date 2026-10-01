@@ -392,6 +392,8 @@ struct DispatchEntry {
   /// Number of wave slices between adjacent shader-engine scratch regions.
   /// Zero selects the model's full physical capacity for simulator-owned backing.
   uint32_t scratch_wave_stride_per_se = 0;
+  /// Runtime-provided wave slice size; zero uses the architecture's minimum stride.
+  uint32_t scratch_wave_size_bytes = 0;
   uint32_t group_segment_fixed_size = 0;
   /// ROCr allocated primary scratch for this dispatch as a single-use block.
   bool scratch_use_once = false;
