@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -362,7 +363,17 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       result.thread_allocations.push_back(
           {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
   const auto &xcd = vm_config.soc.xcd;
-  const uint32_t capacity = xcd.num_shader_engines * xcd.shader_engine.num_compute_units;
+  auto checked_capacity = [](uint64_t n) {
+    if (n > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument("Checkpoint execution capacity exceeds uint32 range");
+    return static_cast<uint32_t>(n);
+  };
+  const uint32_t cus =
+      checked_capacity(uint64_t{xcd.num_shader_engines} * xcd.shader_engine.num_compute_units);
+  // The stored topology is uniform: each nonempty XCD contributes CUs-1 workers
+  // to the shared pool, whose inclusive width also counts one caller.
+  const uint32_t capacity =
+      checked_capacity(1 + uint64_t{vm_config.soc.num_xcds} * (std::max(cus, 1u) - 1));
   const uint32_t host_threads = amdgpu::available_host_threads();
   result.execution_threads = resolve_execution_threads(
       {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,

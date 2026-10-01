@@ -17,19 +17,17 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 struct binary_info
 {
-    std::shared_ptr<bfd_file>                bfd         = {};
-    std::vector<procfs::maps>                mappings    = {};
-    std::deque<symbol>                       symbols     = {};
-    std::deque<dwarf_entry>                  debug_info  = {};
-    std::vector<address_range>               ranges      = {};
-    std::vector<uintptr_t>                   breakpoints = {};
-    std::unordered_map<address_range, void*> sections    = {};
+    std::shared_ptr<bfd_file>                bfd;
+    std::vector<procfs::maps>                mappings;
+    std::deque<symbol>                       symbols;
+    std::deque<dwarf_entry>                  debug_info;
+    std::vector<address_range>               ranges;
+    std::vector<uintptr_t>                   breakpoints;
+    std::unordered_map<address_range, void*> sections;
 
     void        sort();
     std::string filename() const;
@@ -65,7 +63,6 @@ binary_info::find_section(uintptr_t _addr) const
 inline std::string
 binary_info::filename() const
 {
-    return (bfd) ? std::string{ bfd->name } : std::string{};
+    return bfd ? std::string{ bfd->name } : std::string{};
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

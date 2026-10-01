@@ -53,12 +53,13 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
   if (request.helpers < -1 || request.helpers > 128)
     throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
-  const uint32_t cpu_budget =
-      request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
   xcds = std::max(xcds, 1u);
-  if (clocked)
+  if (clocked) {
+    const uint32_t cpu_budget =
+        request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
     return {std::min(request.engines ? request.engines : cpu_budget, xcds),
             std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+  }
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
@@ -80,11 +81,6 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)
       cpu_cost += width - 1;
-    // Extra affinity can supply helpers without increasing the automatic
-    // engine/dispatch allocation beyond its existing cap. Explicit CPU knobs
-    // retain their override behavior.
-    if (!request.engines && !request.dispatch && cpu_cost > cpu_budget)
-      continue;
     const uint64_t cost = cpu_cost + candidate.helpers;
     if (cost <= budget && cost >= best_cost) {
       result = std::move(candidate);
@@ -859,11 +855,14 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
       }
       self(self, child, checked(copies * n));
     }
-    // Match do_wire_cps(): a CP drains its sibling SEs, or direct sibling CUs
-    // when the parent has no shader engines.
-    if (has_cp)
-      result.dispatch_capacity =
-          std::max(result.dispatch_capacity, checked(has_se ? se_cus : direct_cus));
+    // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
+    // use at most CUs-1 pool workers, but concurrent XCDs share the whole pool.
+    // This is maximum demand; fewer engine partitions can leave workers idle.
+    if (has_cp) {
+      const uint64_t cus = has_se ? se_cus : direct_cus;
+      if (cus)
+        result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
+    }
   };
   if (root)
     visit(visit, root, 1);

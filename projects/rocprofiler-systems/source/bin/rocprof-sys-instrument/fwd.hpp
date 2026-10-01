@@ -219,12 +219,12 @@ extern CodeCoverageMode coverage_mode;
 //
 struct symtab_data_s
 {
-    std::vector<symtab_module_t*>                           modules              = {};
-    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions            = {};
-    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols              = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names = {};
-    std::unordered_map<std::string, symtab_func_t*>         typed_func_names     = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names   = {};
+    std::vector<symtab_module_t*>                           modules;
+    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions;
+    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols;
+    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names;
+    std::unordered_map<std::string, symtab_func_t*>         typed_func_names;
+    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names;
 };
 
 extern symtab_data_s                 symtab_data;
@@ -352,19 +352,19 @@ symtab_func_t*
 get_symtab_function(procedure_t*);
 
 size_t
-get_object_procedure_count_lb(object_t*);
+get_object_procedure_count_lb(object_t const*);
 
 std::vector<object_t*>
-filter_objects(std::vector<object_t*>* app_objects);
+filter_objects(std::vector<object_t*> const* app_objects);
 
 std::vector<module_t*>
-filter_modules(std::vector<module_t*>* app_modules);
+filter_modules(std::vector<module_t*> const* app_modules);
 
 std::unique_ptr<std::vector<module_t*>>
-get_modules(std::vector<object_t*>* app_objects);
+get_modules(std::vector<object_t*> const* app_objects);
 
 std::unique_ptr<std::vector<procedure_t*>>
-get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
+get_procedures(std::vector<module_t*> const* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

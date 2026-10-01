@@ -11,7 +11,9 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -247,6 +249,11 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    // Reuse instruction-fetch snapshots only within this execution quantum.
+    // Restore the outer scope on exceptions and nested quantum execution too.
+    InstructionVmSnapshot snapshot;
+    snapshot.compute_unit = this;
+    ScopedInstructionVmSnapshot scope(&snapshot);
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
     FunctionalQuantumResult result;
@@ -284,7 +291,6 @@ public:
   /// @brief Check whether this CU has no runnable wavefronts.
   /// @retval true No wavefront can currently execute.
   /// @retval false At least one wavefront can execute.
-  /// @warning NOT thread-safe (see has_runnable_wfs()): engine-thread only.
   virtual bool is_idle() const { return !has_runnable_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
@@ -369,7 +375,6 @@ public:
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
-    instruction_vm_access_.reset();
     inst_cache_.invalidate_all();
     gpu_vm_ = gpu_vm;
     l1_vector_.set_gpu_vm(gpu_vm);
@@ -658,29 +663,19 @@ public:
   /// @brief Check whether any wavefront slot is actively executing.
   /// @retval true At least one resident wavefront is not halted.
   /// @retval false All slots are unallocated or halted.
-  /// @warning NOT thread-safe: reads the non-atomic per-wave state_. Safe only on the
-  ///   shared partition engine thread (CP and its CUs share one partition, asserted in
-  ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
-    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
-    for (const auto &w : wfs_)
-      if (w && !w->is_halted())
-        return true;
-    return false;
+    return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) != 0;
   }
 
   /// @brief Check whether any wavefront can currently make forward progress.
-  /// @details A debug-halted wave occupies its slot (so @ref has_active_wfs
+  /// @details A wave for which debug_paused() is true occupies its slot (so @ref has_active_wfs
   /// stays true and the wave is not retired) but cannot run, so it must not
   /// keep the CU's event loop spinning. Idle detection uses this instead of
   /// @ref has_active_wfs so the engine can quiesce while a wave is stopped at
-  /// a breakpoint. @retval true At least one non-halted, non-debug-halted wave.
+  /// a breakpoint or suspended by the debugger or runtime.
+  /// @retval true At least one resident wave is neither halted nor paused.
   bool has_runnable_wfs() const {
-    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
-    for (const auto &w : wfs_)
-      if (w && !w->is_halted() && !w->debug_paused())
-        return true;
-    return false;
+    return (wave_activity_.load(std::memory_order_acquire) >> 32) != 0;
   }
 
   template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
@@ -1062,7 +1057,7 @@ public:
   void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
     assert(decoder != nullptr);
     assert(!has_active_wfs());
-    decoder->enable_pool();
+    decoded_inst_cache_.clear();
     decoder_ = std::move(decoder);
   }
 
@@ -1217,6 +1212,10 @@ protected:
   SgprFile sgpr_file_{"sgpr"};
   /// Null slots are idle; materialized waves persist across dispatches.
   std::vector<std::unique_ptr<Wavefront>> wfs_;
+  friend class Wavefront;
+  // Low/high halves count active/runnable waves. Publish both in one update
+  // so a pause or retirement cannot expose half of an activity transition.
+  std::atomic<uint64_t> wave_activity_{0};
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
   /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running
@@ -1234,12 +1233,6 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
-      if (outermost && std::exchange(cu_.instruction_access_cleanup_pending_, false) &&
-          !cu_.has_active_wfs()) {
-        // Instruction issue has returned. Empty the cache before releasing owners
-        // whose destructors can reenter the CU.
-        auto retired = std::exchange(cu_.instruction_vm_access_, std::nullopt);
-      }
       std::function<void()> notification_flush_hook;
       if (outermost)
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
@@ -1277,8 +1270,6 @@ protected:
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
-  // The final wave retired inside a guard; keep its snapshot until issue returns.
-  bool instruction_access_cleanup_pending_ = false;
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
@@ -1301,6 +1292,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  DecodedInstructionCache decoded_inst_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
@@ -1333,10 +1325,32 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
-  // Keep the fetch snapshot across instructions, including ones that release their wavefront.
-  std::optional<GpuVmAccess> instruction_vm_access_;
-  AddressSpaceHandle instruction_address_space_;
-  uint32_t instruction_vmid_ = 0;
+
+  /// @brief Instruction-fetch access retained for one CU's functional quantum.
+  /// @details CU, VM and address-space identity prevent reuse across nested dispatches.
+  struct InstructionVmSnapshot {
+    ComputeUnitCore *compute_unit = nullptr;
+    GpuVm *owner = nullptr;
+    AddressSpaceHandle address_space;
+    uint32_t vmid = 0;
+    std::optional<GpuVmAccess> access;
+  };
+  /// Only the scope pointer is thread-local; the snapshot itself lives on the
+  /// quantum's stack and releases all backing references before returning.
+  static thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
+  /// @brief Restore the enclosing fetch scope after a quantum or nested issue.
+  /// @details A null scope prevents nested memory requests from borrowing fetch access.
+  class ScopedInstructionVmSnapshot {
+  public:
+    explicit ScopedInstructionVmSnapshot(InstructionVmSnapshot *snapshot)
+        : previous_(std::exchange(instruction_vm_snapshot_, snapshot)) {}
+    ScopedInstructionVmSnapshot(const ScopedInstructionVmSnapshot &) = delete;
+    ScopedInstructionVmSnapshot &operator=(const ScopedInstructionVmSnapshot &) = delete;
+    ~ScopedInstructionVmSnapshot() { instruction_vm_snapshot_ = previous_; }
+
+  private:
+    InstructionVmSnapshot *previous_;
+  };
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
@@ -1421,6 +1435,10 @@ inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline bool InstructionComputeUnitView::observes_register_access() const {
+  return raw_cu().observes_register_access();
+}
+inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;

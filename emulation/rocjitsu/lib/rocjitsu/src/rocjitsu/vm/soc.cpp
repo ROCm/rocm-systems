@@ -258,11 +258,16 @@ void SoC::set_dispatch_threads(uint32_t threads) {
 }
 
 void SoC::apply_dispatch_threads() {
-  size_t max_cp_cus = 1;
-  for_each_cp(
-      [&max_cp_cus](auto *cp) { max_cp_cus = std::max(max_cp_cus, cp->compute_units().size()); });
+  // Each XCD caller uses at most CUs-1 workers. Concurrent callers share the
+  // SoC pool, so its capacity is not limited to the largest individual XCD.
+  // Fewer engine partitions can leave some of this maximum capacity unused.
+  size_t capacity = 1;
+  for_each_cp([&capacity](auto *cp) {
+    if (!cp->compute_units().empty())
+      capacity += cp->compute_units().size() - 1;
+  });
   uint32_t effective_threads =
-      static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, max_cp_cus));
+      static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, capacity));
   if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
     effective_threads = 1;
 
