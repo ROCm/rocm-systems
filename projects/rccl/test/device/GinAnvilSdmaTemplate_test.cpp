@@ -301,31 +301,70 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_FusedSdmaSignalPath) {
   EXPECT_TRUE(d_fused.download());
 }
 
-// H7: PutValue SDMA scalar path.
-__global__ void kernelPutValueSdma(TemplateHarness* h) {
-  if (threadIdx.x != 0) return;
+// H7: PutValue without a signal; the threshold picks the IPC or SDMA path.
+__global__ void kernelPutValueNoSignal(TemplateHarness* h, uint64_t value) {
+  if (threadIdx.x != 0) {
+    return;
+  }
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinSignalDescriptor sig{};
   sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
   ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
-      static_cast<uint64_t>(0xAABBCCDDEEFF0011ULL), sig, ncclGinSignalInc, 0, false, nullptr,
-      cuda::thread_scope_system, cuda::thread_scope_system);
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, value, sig,
+      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
+static uint64_t downloadU64(const DeviceBuffer<uint8_t>& buf) {
+  auto got = buf.copyTo();
+  uint64_t v = 0;
+  std::memcpy(&v, got.data(), sizeof(v));
+  return v;
+}
+
+// Peer 1, one channel, sdmaChannel 0: markSdmaDirty sets bit peer * numCh + effCh.
+constexpr uint64_t kPeer1DirtyBit = 1ULL << 1;
+
 TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaScalar) {
-  DeviceBuffer<uint8_t> d_dst(8);
+  constexpr uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
+  DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
   d_dst.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 0);
-  kernelPutValueSdma<<<1, 1>>>(d_h.ptr);
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  d_h.upload(host);
+  kernelPutValueNoSignal<<<1, 1>>>(d_h.ptr, kVal);
   syncAndCheck();
+  EXPECT_EQ(downloadU64(d_dst), kVal);
+  EXPECT_EQ(d_dirty.download(), kPeer1DirtyBit);
+}
+
+// sizeof(T) == sdmaThreshold must stay on the IPC path (bytes <= threshold) and leave the queue clean.
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_AtThresholdTakesIpcPathSkipsDirty) {
+  constexpr uint64_t kVal = 0x0123456789ABCDEFULL;
+  DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, static_cast<int>(sizeof(uint64_t)));
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  d_h.upload(host);
+  kernelPutValueNoSignal<<<1, 1>>>(d_h.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(downloadU64(d_dst), kVal);
+  EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
 // H8: Flush quiet on dirty queue with non-null handle (stub quiet).
@@ -1029,6 +1068,68 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentSplitsAtSegCap) {
       }
     }
   }
+}
+
+// SDMA-path PutValue with a signal lands the value, marks dirty, quiets once and signals (counts only, not order).
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaPathSignalQuietsQueue) {
+  constexpr uint64_t kVal = 0x1122334455667788ULL;
+  DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_signals(2);
+  d_signals.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 0);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.nSignals = 2;
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  mapIpcToTwo(&host, &d_entry, &d_dst, sizeof(uint64_t), &d_signals, 2 * sizeof(uint64_t));
+  d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
+  kernelPutValueIpcSignalQuiesce<<<1, 1>>>(d_h.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(downloadU64(d_dst), kVal);
+  EXPECT_EQ(d_dirty.download(), kPeer1DirtyBit);
+  EXPECT_EQ(d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+}
+
+// Unresolvable dst on the SDMA path drops the value, clears sdmaDataPath (no quiet) and still fences and signals.
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaResolveMissSignalsWithoutQuiet) {
+  constexpr uint64_t kVal = 0xDEADBEEFCAFEF00DULL;  // Must not land: dst is unmapped.
+  DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_signals(2);
+  d_signals.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 0);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.nSignals = 2;
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  mapIpcTo(&host, &d_entry, &d_signals, 2 * sizeof(uint64_t));
+  d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
+  kernelPutValueIpcSignalQuiesce<<<1, 1>>>(d_h.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(downloadU64(d_dst), 0ULL);
+  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
