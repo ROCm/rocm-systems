@@ -36,10 +36,21 @@
     INFO("hiprtcGetErrorString: " << hiprtcGetErrorString(_hrr_rtc));          \
     REQUIRE(_hrr_rtc == HIPRTC_SUCCESS);                                       \
   } while (0)
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <pthread.h>
+#include <signal.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Workload parameters
@@ -3410,3 +3421,109 @@ TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
+
+#ifndef _WIN32
+// ---------------------------------------------------------------------------
+// Unit_HRR_CaptureCrashSmallStack_Direct
+//
+// Records a few events, then dies of SIGSEGV on a thread with a 64 KiB stack.
+// CLR's crash handler runs on the faulting thread's own stack, so the
+// emergency manifest has to be built off it: the 129 KiB buffer it needs
+// cannot fit there. The 1 MiB guard makes an overflow fault instead of landing
+// in whatever is mapped below the stack. Unit_HRR_CaptureCrashOnSmallStack
+// checks the manifest the crash leaves.
+// ---------------------------------------------------------------------------
+static void* hrr_raise_segv(void*) {
+  raise(SIGSEGV);
+  return nullptr;
+}
+
+TEST_CASE("Unit_HRR_CaptureCrashSmallStack_Direct", "[.][hrr-direct]") {
+  // The crash is the point; a core file is not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  HRR_HIP_CHECK(hipMemset(d, 0, SZ));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  pthread_attr_t attr;
+  REQUIRE(pthread_attr_init(&attr) == 0);
+  REQUIRE(pthread_attr_setstacksize(&attr, 64 * 1024) == 0);
+  REQUIRE(pthread_attr_setguardsize(&attr, 1024 * 1024) == 0);
+  pthread_t t;
+  REQUIRE(pthread_create(&t, &attr, hrr_raise_segv, nullptr) == 0);
+  pthread_join(t, nullptr);
+  FAIL("the process outlived its own SIGSEGV");
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileRecording_Direct
+//
+// Forks kHrrForkWhileRecordingForks times while a second thread records copies
+// of fresh data, so some forks land while that thread holds a writer lock. The
+// atfork handler reopens an archive in every child, under both writer
+// mutexes; a child that inherited one locked would block there forever. Each
+// child exits as soon as it returns from fork, and the parent waits for it
+// under a deadline, so a hang fails the case rather than the job.
+//
+// The lock windows are narrow, so a regression is caught by chance, not on
+// every run. A clean run also leaves one archive per child, which
+// Unit_HRR_ForkWhileRecording counts.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+
+  // Nothing below may REQUIRE before the join: unwinding past a joinable
+  // std::thread terminates the process.
+  std::atomic<bool> stop{false};
+  std::atomic<bool> recorder_ok{true};
+  std::thread recorder([&] {
+    std::vector<int> h(N);
+    for (int iter = 0; !stop.load(std::memory_order_relaxed); ++iter) {
+      // A fresh value every pass makes each H2D source a new blob.
+      h[0] = iter;
+      if (hipMemcpy(d, h.data(), SZ, hipMemcpyHostToDevice) != hipSuccess ||
+          hipMemcpy(h.data(), d, SZ, hipMemcpyDeviceToHost) != hipSuccess) {
+        recorder_ok = false;
+        return;
+      }
+    }
+  });
+
+  int forked = 0, hung = 0, failed = 0;
+  for (; forked < kHrrForkWhileRecordingForks; ++forked) {
+    pid_t pid = fork();
+    if (pid == 0) _exit(0);
+    if (pid < 0) break;
+
+    int status = 0;
+    pid_t got = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while ((got = waitpid(pid, &status, WNOHANG)) == 0 &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (got == 0) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      ++hung;
+    } else if (got != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      ++failed;
+    }
+  }
+
+  stop = true;
+  recorder.join();
+  HRR_HIP_CHECK(hipFree(d));
+
+  INFO("forked " << forked << ", hung " << hung << ", failed " << failed);
+  REQUIRE(recorder_ok);
+  REQUIRE(forked == kHrrForkWhileRecordingForks);
+  REQUIRE(hung == 0);
+  REQUIRE(failed == 0);
+}
+#endif  // !_WIN32

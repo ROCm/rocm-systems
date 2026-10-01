@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -1483,5 +1484,58 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   INFO("Playback exit code: " << ret);
   REQUIRE(ret != 0);   // parser rejects malformed spec
   REQUIRE(ret < 128);  // ...with a clean error, not a crash
+}
+#endif  // !_WIN32
+
+#ifndef _WIN32
+/**
+ * Unit_HRR_CaptureCrashOnSmallStack
+ * ---------------------------------
+ *   - A recorded process that dies of SIGSEGV on a thread with a 64 KiB stack
+ *     must still leave a manifest marked "complete": false. The crash handler
+ *     runs on that stack, and the emergency manifest buffer is larger than it.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_small_stack"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashSmallStack_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 128 + SIGSEGV);
+  }
+
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "manifest.json"));
+  const std::string manifest = read_text_file(archive_path / "manifest.json");
+  INFO("Process manifest:\n" << manifest);
+  REQUIRE(manifest.find("\"complete\": false") != std::string::npos);
+}
+
+/**
+ * Unit_HRR_ForkWhileRecording
+ * ---------------------------
+ *   - Forking while another thread records must not leave a child blocked on a
+ *     writer mutex it inherited locked. The workload fails on a child that
+ *     does not exit within its deadline.
+ *   - Every child opens its own archive from the atfork handler, so the
+ *     capture holds one archive per child besides the parent's.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_recording"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileRecording_Direct\"", 600);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() ==
+        static_cast<size_t>(kHrrForkWhileRecordingForks) + 1);
 }
 #endif  // !_WIN32
