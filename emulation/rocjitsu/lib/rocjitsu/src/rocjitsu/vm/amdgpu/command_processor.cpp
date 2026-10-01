@@ -2940,8 +2940,15 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     return;
   }
   const auto consumer = queue.read_pointer_journal.cursor();
-  const auto producer =
-      normalize_pm4_producer_cursor(queue.last_doorbell, consumer, queue.ring_size / 4);
+  auto producer = normalize_pm4_producer_cursor(queue.last_doorbell, consumer, queue.ring_size / 4);
+  // Native PM4 RPTR is ring-relative while the doorbell can carry a 64-bit
+  // software epoch. KFD hqd_load reconstructs WPTR using the ring-masked RPTR
+  // and the saved WPTR epoch. Accept a different epoch on polled doorbells;
+  // explicit submissions retain their bounded monotonic cursor contract.
+  // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gfx_v11.c
+  if (!producer && queue.doorbell_mode != QueueDoorbellMode::Explicit)
+    producer = normalize_pm4_producer_cursor(queue.last_doorbell % (queue.ring_size / 4), consumer,
+                                             queue.ring_size / 4);
   if (outcome != VmAccessOutcome::Complete || !producer) {
     fail_pm4_queue(queue, queue.dispatches);
     return;

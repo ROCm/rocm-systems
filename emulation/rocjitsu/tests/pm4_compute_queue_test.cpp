@@ -407,6 +407,37 @@ TEST_F(Pm4ComputeQueueTest, NormalizesWrappedNativeProducerBeforeRetainingProgre
   EXPECT_EQ(writes, 1u);
 }
 
+TEST_F(Pm4ComputeQueueTest, PolledDoorbellAcceptsSoftwareEpochAbove32Bits) {
+  uint32_t writes = 0;
+  const auto id = cp->register_queue({
+      .address_space = address_space,
+      .ring_base_va = kRing,
+      .ring_size = kRingBytes,
+      .read_ptr_va = kReadPointer,
+      .last_doorbell = ~uint64_t{0},
+      .doorbell_mode = QueueDoorbellMode::HostPolled,
+      .packet_format = QueuePacketFormat::Pm4,
+      .packet_callbacks = {.write_uconfig_register =
+                               [&](uint64_t, uint32_t) {
+                                 ++writes;
+                                 return Pm4RegisterWriteStatus::Complete;
+                               }},
+  });
+  ASSERT_NE(id, 0u);
+  constexpr uint64_t ring_dwords = kRingBytes / 4;
+  for (uint64_t packet = 0; packet < ring_dwords; ++packet) {
+    const uint64_t cursor = packet * 3;
+    memory->store<uint32_t>(kRing + (cursor % ring_dwords) * 4, 0xc0017900);
+    memory->store<uint32_t>(kRing + ((cursor + 1) % ring_dwords) * 4, 0x40);
+    memory->store<uint32_t>(kRing + ((cursor + 2) % ring_dwords) * 4, 0xdeadbeef);
+    cp->notify_queue_doorbell(id, (2ull << 32) - ring_dwords + cursor + 3);
+    service();
+    EXPECT_EQ(writes, packet + 1);
+    EXPECT_EQ(memory->load<uint32_t>(kReadPointer), (cursor + 3) % ring_dwords);
+  }
+  EXPECT_TRUE(cp->unregister_queue_registration(id));
+}
+
 TEST_F(Pm4ComputeQueueTest, BlockedQueuesRetryIndependently) {
   constexpr uint64_t kOtherRing = 0x300;
   constexpr uint64_t kOtherReadPointer = 0x380;
