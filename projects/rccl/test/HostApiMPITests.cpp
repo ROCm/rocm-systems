@@ -22,6 +22,7 @@
  *   E3  - PutSignalOffsetOutOfBounds: offset past end → error (or skip)
  *   E4  - PutSignalInvalidSigIdx:  sigIdx=1 on default numRmaSig=1 → error
  *   MS1 - PutSignalMultiSigIdx:    numRmaSig=2, two independent waits
+ *   MC1 - PutSignalMultiCtx:       numRmaCtx=2, striped puts + waits
  *   M1  - TwoCommunicatorsIndependentWindows: two comms, independent windows
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
@@ -31,8 +32,8 @@
  * Constraints (proxy GIN path):
  *   flags = 0, winFlags = winMode()
  *     (NCCL_WIN_COLL_SYMMETRIC when NCCL_CUMEM_ENABLE=1, else NCCL_WIN_DEFAULT)
- *   Default communicators still use numRmaSig=1, so E4 rejects sigIdx=1.
- *   The multi-signal happy path uses HostApiConfigTest.
+ *   Default communicators still use numRmaSig=1 / numRmaCtx=1, so E4/E5 reject
+ *   sigIdx=1 / ctx=1. Multi-signal/context happy paths use HostApiConfigTest.
  *
  * API signatures (from src/nccl.h.in):
  *   ncclResult_t ncclMemAlloc(void** ptr, size_t size);
@@ -189,6 +190,12 @@ class HostApiMultiSigTest : public HostApiConfigTest
 {
 protected:
     HostApiMultiSigTest() { wantNumRmaSig_ = 2; }
+};
+
+class HostApiMultiCtxTest : public HostApiConfigTest
+{
+protected:
+    HostApiMultiCtxTest() { wantNumRmaCtx_ = 2; }
 };
 
 // ============================================================================
@@ -1651,10 +1658,11 @@ TEST_F(HostApiTest, SignalImpliesPriorPutsDelivered)
 
 /**
  * @test HostApiTest.PutSignalInvalidCtx
- * @brief ncclPutSignal with ctx=1 (reserved, must be 0) should error.
+ * @brief ncclPutSignal with ctx=1 on the default communicator (numRmaCtx=1)
+ *        should error. ctx is no longer hard-wired to 0; it must fall in
+ *        [0, numRmaCtx).
  *
- * Non-collective: only rank 0 calls the API.  Skip if argcheck is not
- * implemented (i.e., the call returns ncclSuccess).
+ * Non-collective: only rank 0 calls the API.
  */
 TEST_F(HostApiTest, PutSignalInvalidCtx)
 {
@@ -1687,6 +1695,86 @@ TEST_F(HostApiTest, PutSignalInvalidCtx)
     }
     ASSERT_MPI_NE(ncclSuccess, res);
     TEST_INFO("E5 rank %d: PutSignalInvalidCtx done.", myRank);
+}
+
+// ============================================================================
+// MC1 — PutSignalMultiCtx
+// ============================================================================
+
+/**
+ * @test HostApiMultiCtxTest.PutSignalMultiCtx
+ * @brief Stripe two puts across ctx 0 and ctx 1 on numRmaCtx=2.
+ *
+ * Rank 0 issues one put per context to distinct window offsets. Rank 1 waits
+ * on matching per-descriptor ctx values, then verifies both payloads.
+ */
+TEST_F(HostApiMultiCtxTest, PutSignalMultiCtx)
+{
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    constexpr size_t kWin = 4 * kTransferSize;
+    constexpr size_t kSend0 = 0;
+    constexpr size_t kSend1 = kTransferSize;
+    constexpr size_t kRecv0 = 2 * kTransferSize;
+    constexpr size_t kRecv1 = 3 * kTransferSize;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kWin));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kWin, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t putRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        void* src0 = static_cast<uint8_t*>(winBuf) + kSend0;
+        void* src1 = static_cast<uint8_t*>(winBuf) + kSend1;
+        FillBuf(src0, kTransferSize, /*senderRank=*/0);
+        FillBuf(src1, kTransferSize, /*senderRank=*/2);
+        putRes = ncclPutSignal(src0, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecv0,
+                               kSigIdx, /*ctx=*/0, kFlags, comm, stream);
+        if(putRes == ncclSuccess)
+        {
+            putRes = ncclPutSignal(src1, kTransferSize, ncclUint8,
+                                   /*peer=*/1, win, /*peerWinOffset=*/kRecv1,
+                                   kSigIdx, /*ctx=*/1, kFlags, comm, stream);
+        }
+    }
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+    ncclResult_t waitRes = ncclSuccess;
+    if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t d0{/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/0};
+        ncclWaitSignalDesc_t d1{/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/1};
+        waitRes = ncclWaitSignal(/*nDesc=*/1, &d0, comm, stream);
+        if(waitRes == ncclSuccess)
+            waitRes = ncclWaitSignal(/*nDesc=*/1, &d1, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, waitRes);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    bool ok = true;
+    if(myRank == 1)
+    {
+        const uint8_t* base = static_cast<const uint8_t*>(winBuf);
+        ok = VerifyBuf(base + kRecv0, kTransferSize, /*seed=*/0) &&
+             VerifyBuf(base + kRecv1, kTransferSize, /*seed=*/2);
+    }
+    ASSERT_MPI_TRUE(ok);
+
+    TEST_INFO("MC1 rank %d: PutSignalMultiCtx passed.", myRank);
 }
 
 // ============================================================================
