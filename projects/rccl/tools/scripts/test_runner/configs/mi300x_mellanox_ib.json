@@ -1203,6 +1203,7 @@
         {"name": "ReduceScatter.ManagedMem", "description": "ReduceScatter managed memory", "test_filter": "ReduceScatter.ManagedMem"},
         {"name": "ReduceScatter.ManagedMemGraph", "description": "ReduceScatter managed memory graph", "test_filter": "ReduceScatter.ManagedMemGraph"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
+        {"name": "Register.P2pIpcSegmentReuse", "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments", "test_filter": "Register.P2pIpcSegmentReuse"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
