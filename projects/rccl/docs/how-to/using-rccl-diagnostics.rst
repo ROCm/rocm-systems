@@ -88,7 +88,8 @@ The check does not test the network between nodes.
 
 Pairs that can only reach each other through an intermediate GPU are not
 tested. They are listed as ``(skipped indirect=<count>)`` at the end of the
-summary line.
+summary line. On AMD GPUs RCCL does not route P2P through an intermediate GPU,
+so this suffix does not appear.
 
 .. note::
 
@@ -171,6 +172,25 @@ suggested next step. The table lists the kinds of failure.
      - A test kernel could not be launched or did not complete. Look for earlier
        HIP or RCCL warnings.
 
+The following lines report that the check itself failed, not a single edge.
+They carry a rank and an ``ncclResult_t`` code, or only the code, instead of
+edge fields:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Message
+     - Meaning
+   * - ``p2p: setup failed on rank <r>``
+     - The check could not set up on that rank, so its edges were not tested.
+   * - ``p2p: resource cleanup failed rank=<r>``
+     - Temporary test resources may not have been released on that rank.
+   * - ``transport detect returned <n>``
+     - The transport scan failed.
+   * - ``p2p: active check returned <n>``
+     - The P2P check stopped before it completed.
+
 The edge fields have the following meaning:
 
 .. list-table::
@@ -191,10 +211,10 @@ The edge fields have the following meaning:
        PCIe path type such as ``PIX``, ``PXB``, ``PHB``, or ``SYS``.
    * - ``handle``
      - How the destination memory was shared: ``DIRECT`` (both GPUs in one
-       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or,
-       when cuMem is enabled, a HIP virtual-memory handle between processes:
-       ``CUMEM_POSIX_FD`` (file descriptor, the default), ``CUMEM_FABRIC``, or
-       ``CUMEM_OTHER``.
+       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or
+       ``CUMEM_OTHER`` (HIP virtual-memory handle between processes, when cuMem
+       is enabled). The report format also defines ``CUMEM_POSIX_FD`` and
+       ``CUMEM_FABRIC``, but RCCL does not report them on AMD GPUs.
 
 .. note::
 
@@ -221,7 +241,7 @@ On AMD GPUs, use the following commands instead:
    * - ``handle=LEGACY_CUDA_IPC``
      - Check that all processes see the GPUs and can share IPC handles, see
        :ref:`diagnostics-containers`.
-   * - ``handle=CUMEM_POSIX_FD`` and other ``CUMEM_*`` values
+   * - ``handle=CUMEM_OTHER``
      - Check that HIP virtual memory is supported and that the processes can
        share memory handles, see :ref:`diagnostics-containers`.
    * - ``handle=DIRECT``
@@ -263,7 +283,10 @@ reports depends on the containers:
   ``destination buffer unavailable ... reason=noDescriptor`` means that the
   destination rank did not provide its buffer.
   ``peer-memory import failed ... reason=import`` means that the source rank
-  could not map a buffer that the destination provided.
+  could not map a buffer that the destination provided. Such failures are
+  typical for HIP IPC handles (``handle=LEGACY_CUDA_IPC``). With cuMem enabled,
+  the processes pass the memory handles as file descriptors, and the same
+  split can pass.
 
 Collecting the report
 =====================

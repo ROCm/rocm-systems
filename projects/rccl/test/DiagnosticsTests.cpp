@@ -178,12 +178,15 @@ static void expectEdgeSummaries(const DiagReport& report, const std::vector<std:
 }
 
 // The parent test environment (e.g. CI categories) may carry these; each case sets what it needs.
+// cuMem is pinned off rather than unset: the default auto-enables it on gfx1250, and the check cannot map a
+// same-process peer buffer through cuMem on ROCm, so every cross-device edge would report an import failure.
 static void clearDiagEnv()
 {
     unsetenv("NCCL_RUN_DIAGNOSTICS");
     unsetenv("NCCL_RUN_RAS_DIAGNOSTICS");
     unsetenv("NCCL_P2P_DISABLE");
     unsetenv("NCCL_P2P_LEVEL");
+    setenv("NCCL_CUMEM_ENABLE", "0", 1);
 }
 
 // Creates nGpus communicators on devices 0..nGpus-1 while capturing stdout. Callers wrap the call in
@@ -469,7 +472,6 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
     RUN_ISOLATED_TESTS(diagCase("SingleProcessPeerAccessNotice", []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
-        setenv("NCCL_CUMEM_ENABLE", "0", 1);
         const int nGpus = usableGpus();
         if(nGpus < 2)
             GTEST_SKIP() << "Requires >= 2 GPUs";

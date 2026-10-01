@@ -106,7 +106,8 @@
         {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula", "description": "ncclGinInboxA2ACreateRequirement bufferSize/ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula"},
         {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero", "description": "Pin: ncclGinInboxA2ACreateRequirement(nRanks=1) divides by zero (SIGFPE), contained by ProcessIsolatedTestRunner", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero"},
         {"name": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula", "description": "ncclLsaBarrierCreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula"},
-        {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"}
+        {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"},
+        {"name": "Diagnostics", "description": "NCCL_RUN_DIAGNOSTICS report and P2P check at communicator init", "test_filter": "Diagnostics.*", "timeout": 600}
       ]
     },
     "unit_tests_fixtures": {
