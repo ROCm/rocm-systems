@@ -60,16 +60,17 @@
 // provide the real API) untouched.
 ////////////////////////////////////////////////////////////////////////////////
 
-// AMD: the 7.0.2.x backport provides hipMemLocationTypeHostNuma, so the shim
-// is also off on HIP_VERSION [70051831, 70060000), the same window as native
-// HIP >= 71260540. Spelled with HIP_VERSION; this header is included before
-// rocmwrap.h.
-#if defined(__HIP_PLATFORM_AMD__) && \
-    !((HIP_VERSION) >= 71260540 || ((HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000))
-#define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
-#elif defined(__HIP_PLATFORM_AMD__) && (HIP_VERSION) < 70060000 && !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
-// The backport's hipify does not rename the CUDA spelling, so alias the real enumerator.
+// AMD: the 7.0.2.x backport provides hipMemLocationTypeHostNuma; its hipify does
+// not rename the CUDA spelling, so alias the real enumerator there. Stock 7.0.2
+// has the same HIP_VERSION without it, so the CMake probe picks the branch.
+// Spelled with HIP_VERSION; this header is included before rocmwrap.h.
+#if defined(__HIP_PLATFORM_AMD__) && (HIP_VERSION) < 71260540 && !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
+#if (HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000 && defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+// TODO: drop this alias once the 7.0.2.2 hipify ships the LCOMPILER-2603 mapping.
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
+#else
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#endif
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
