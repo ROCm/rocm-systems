@@ -450,6 +450,9 @@ public:
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
+  /// Unlike patch(), accepts `LogBufferPtr*` arguments, for callers that supply
+  /// the kernarg wrapper themselves.
+  ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
   /// of which instructions were instrumented and should be analyzed further

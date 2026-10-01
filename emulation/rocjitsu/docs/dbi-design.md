@@ -409,13 +409,13 @@ A point may carry `probe_args`, a list of 32-bit values handed to the probe, eac
 
 `kMaxProbeArgVgprs` is 16, an arbitrary cap. The convention fills `v0` upward through `v30` (`v31` is the packed workitem id), so 31 dwords is the most that arrive in registers; the cap sits well inside that because the free-register search would refuse an argument block near 31 long before the convention did, and only single-dword integer arguments have been measured.
 
-**Emission.** `emit_probe_call()` writes the values with `v_mov_b32 vN, <literal>` (or `v_mov_b32 vN, <sgpr>` for a mask-sourced slot, which costs one word rather than two) **inside the full-mask window**, after the spill prologue and last before the call is set up. Three things fix that position:
+**Emission.** `emit_probe_call()` writes the values with `v_mov_b32 vN, <literal>` (or `v_mov_b32 vN, <sgpr>` for a register-sourced slot, anchor `EXEC` or entry storage, which costs one word rather than two) **inside the full-mask window**, after the spill prologue and last before the call is set up. Three things fix that position:
 
 - It follows the spill prologue, so an argument VGPR that was live at the anchor is already stored. The prologue ends in a store-completion wait, so the store has finished reading the register before the `v_mov` overwrites it.
 - It runs under `EXEC = -1`, so the argument is defined in *every* lane. Written under the anchor mask instead, the inactive lanes would keep whatever the guest left in that register, and a probe reading an argument through an EXEC-independent op — `v_readlane_b32` of a fixed lane, or anything it runs after widening EXEC itself — would see stale data.
 - `v_mov_b32` writes no SCC, so it cannot disturb the save/restore pair straddling it.
 
-Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and the window's EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without `plan.arch`. An immediate argument adds two words to `before_word_count` and a mask-sourced one adds a single word, so the existing plan/emit drift guard covers them.
+Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and the window's EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without `plan.arch`. An immediate argument adds two words to `before_word_count` and a register-sourced one adds a single word, so the existing plan/emit drift guard covers them.
 
 **The argument VGPRs are builder clobbers**, which is what routes a live one into the spill set. They are the one builder clobber not *chosen* dead — the ABI fixes them — so unlike the envelope's SGPR temps they can collide with a live value, and the site's `will_spill` decision has to account for them or a spilling site would skip the EXEC save that bracketing the stores requires.
 
