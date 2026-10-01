@@ -7,23 +7,11 @@ the full per-file reference, see
 
 ## Three test families
 
-```text
-                        AMD SMI test estate
-                                │
-        ┌───────────────────────┼───────────────────────────┐
-        │                       │                           │
-   ┌────▼─────┐         ┌───────▼────────┐         ┌────────▼─────────┐
-   │  C++     │         │    Python      │         │   Packaging /    │
-  │ 2 runners│         │  3 runners     │         │   Build / ABI    │
-   │ (GTest)  │         │  (unittest)    │         │   (stdlib only)  │
-   └────┬─────┘         └───────┬────────┘         └────────┬─────────┘
-        │                       │                           │
- tests/amd_smi_test/     tests/python/            tests/abi_check/
-                                                  tests/amdsmi_build/
-                                                  tests/dme_integration/
-                                                  tests/python/test_*_guard.py
-                                                  tests/run_amdsmi_*.py
-```
+| Family | Runners | Location |
+| --- | --- | --- |
+| C++ | Two GTest executables | `tests/amd_smi_test/` |
+| Python | Three unittest runners | `tests/python/` |
+| Packaging / Build / ABI | Standalone checks and harnesses | `tests/abi_check/`, `tests/amdsmi_build/`, `tests/dme_integration/`, `tests/python/test_*_guard.py`, `tests/run_amdsmi_*.py` |
 
 Only the first two families touch hardware. The third is pure logic plus
 package-manager harnesses.
@@ -72,10 +60,10 @@ CMake globs the tree and builds the PCIe source separately:
 ```text
 CMakeLists.txt (root)
   └─ add_subdirectory(tests/amd_smi_test)
-          ├─ file(GLOB_RECURSE ... CONFIGURE_DEPENDS unit/*.cc functional/*.cc)
-          │     └─ amdsmitst (excluding unit/gpu/pcie_metrics_test.cc)
-          └─ amdsmi_pcie_metrics_test (unit/gpu/pcie_metrics_test.cc)
-            both install → <share>/amd_smi/tests/
+        ├─ file(GLOB_RECURSE ... CONFIGURE_DEPENDS unit/*.cc functional/*.cc)
+        │     └─ amdsmitst (excluding unit/gpu/pcie_metrics_test.cc)
+        ├─ amdsmi_pcie_metrics_test (unit/gpu/pcie_metrics_test.cc)
+        └─ install both → <share>/amd_smi/tests/
 ```
 
 Within each executable, select suites with `<Component><Type>[<Operation>]`:
@@ -180,7 +168,7 @@ The install target remaps the tree to the historical path:
 For all C++ unit tests, run both binaries from the build or installed tests directory:
 
 ```sh
-./amdsmitst --gtest_filter='*Unit*' && ./amdsmi_pcie_metrics_test
+./amdsmitst --gtest_filter="*Unit*" && ./amdsmi_pcie_metrics_test
 ```
 
 For the PCIe suite alone, see the [scoped CTest command](../docs/conceptual/test-design.md#cmake-integration).
