@@ -90,6 +90,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
+  - `diagnostics/p2p.cc` (`DIAG_P2P_CC_PATH`, from `diagnostics-p2p-test.cc`);
+    suites `DiagnosticsP2pMicrotest.*`, `DiagnosticsP2pReport/*`. Covers the
+    AMD remediation advice for every path and handle type and the free text of
+    every failure report line. Only the advice and report helpers are called;
+    `--gc-sections` drops `ncclDiagP2pRun` and its bootstrap, topology, and HIP
+    dependencies. `graph/topo.cc` is not in this binary, so the test TU
+    supplies `topoPathTypeStr` under a private name.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this

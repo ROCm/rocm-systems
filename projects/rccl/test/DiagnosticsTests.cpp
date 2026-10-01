@@ -46,7 +46,7 @@ static const char* const kDiagFailureMarkers[] = {
     "p2p: active check returned",
     "p2p: setup failed",
     "p2p: destination buffer unavailable",
-    "p2p: local CUDA setup failed",
+    "p2p: local HIP setup failed",
     "p2p: peer-memory import failed",
     "p2p: write mismatch",
     "p2p: read mismatch",
@@ -481,7 +481,7 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 
         const std::vector<int> devices = firstDevices(nGpus);
         const bool full                = xgmiFullMesh(devices);
-        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=";
+        const std::string notice = "NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=";
         EXPECT_LE(report.count(notice), nGpus) << report.dump();
         for(int rank = 0; rank < nGpus; ++rank)
         {
