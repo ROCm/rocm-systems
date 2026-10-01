@@ -514,8 +514,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
     return;
 
   const size_t observed_address_count = static_cast<size_t>(
-      std::count_if(state.elements.begin(), state.elements.end(),
-                    [](const TensorDmaTransferElement &element) { return element.in_bounds; }));
+      std::ranges::count_if(state.elements, &TensorDmaTransferElement::in_bounds));
   if (observed_address_count == 0)
     return;
 

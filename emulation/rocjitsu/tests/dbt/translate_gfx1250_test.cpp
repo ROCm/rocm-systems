@@ -2146,8 +2146,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarPreservesReservedBytesAfterTextGrowth
 
   const auto sidecar_kd = read_virtual_lds_sidecar_descriptor_for_test(result.elf_bytes, "kernel");
   ASSERT_TRUE(sidecar_kd.has_value());
-  EXPECT_TRUE(std::equal(std::begin(sidecar_kd->reserved1), std::end(sidecar_kd->reserved1),
-                         reserved1_pattern.begin()))
+  EXPECT_TRUE(std::ranges::equal(sidecar_kd->reserved1, reserved1_pattern))
       << "sidecar reserved1 was not copied from the source descriptor snapshot";
 }
 
@@ -2361,7 +2360,7 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   EXPECT_EQ((target_words[0] >> 16) & 0x7fu, cdna5::kSCbranchScc1Sopp);
   EXPECT_EQ(target_words[1], marker);
   const auto translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  EXPECT_EQ(std::count(target_words, target_words + translated_word_count, marker), 2);
+  EXPECT_EQ(std::ranges::count(target_words, target_words + translated_word_count, marker), 2);
 
   rocjitsu::BinaryTranslator verifier(
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
@@ -3497,8 +3496,8 @@ TEST(BinaryTranslatorE2E, FullSgprConditionalPreservesPoolAfterUnconditionalBran
     }
     const size_t first_slot = i + rocjitsu::kGeneratedIslandPoolHeaderWords;
     const size_t past_slots = first_slot + rocjitsu::kDirectBranchIslandPoolSlots;
-    if (std::any_of(target_words + first_slot, target_words + past_slots,
-                    [&](uint32_t word) { return word != unused_slot; })) {
+    if (std::ranges::any_of(target_words + first_slot, target_words + past_slots,
+                            [&](uint32_t word) { return word != unused_slot; })) {
       found_live_skipped_pool = true;
       break;
     }
@@ -3920,13 +3919,11 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaEmitsShiftAndCarryAdd) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
-  const bool has_shift = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_lshlrev_b64";
-  });
+  const bool has_shift = std::ranges::any_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_lshlrev_b64"; });
   EXPECT_TRUE(has_shift) << "lowering must materialize the shift, not drop it";
-  const bool has_add = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_add_co_u32";
-  });
+  const bool has_add = std::ranges::any_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_add_co_u32"; });
   EXPECT_TRUE(has_add) << "lowering must emit the 64-bit carry add";
 }
 
@@ -3953,9 +3950,8 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
 
-  const auto shift = std::find_if(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_lshlrev_b64";
-  });
+  const auto shift = std::ranges::find_if(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_lshlrev_b64"; });
   ASSERT_NE(shift, decoded.end()) << "lowering must materialize the shift";
   // The shift destination must not be v2/v3 (the aliased addend); it must land in
   // a separate scratch pair so the following add can still read the addend.
@@ -6974,8 +6970,8 @@ TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
   // The trailing S_ENDPGM (a real terminator) prevents a bogus fallthrough into
   // the following ELF function bytes, so the unrecovered S_SETPC_B64 is never
   // reached and translation does not emit it.
-  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
-                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
 TEST(BinaryTranslatorE2E, ResumableTrapFallsThroughAndDoesNotHideFollowingCode) {
@@ -7024,8 +7020,8 @@ TEST(BinaryTranslatorE2E, RocrAbortTrapTerminatesCfgBeforeFollowingCode) {
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_FALSE(decoded.empty());
   EXPECT_EQ(decoded[0]->mnemonic(), "s_trap");
-  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
-                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
 TEST(BinaryTranslatorE2E, RocrAbortDeadEdgeDoesNotPoisonRecoveredCall) {
@@ -7104,9 +7100,8 @@ TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {
     EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
         result, rocjitsu::DiagnosticKind::Legalization,
         "indirect branch or call target recovery is not implemented"));
-    const auto diagnostic =
-        std::find_if(result.diagnostics.begin(), result.diagnostics.end(),
-                     [&](const auto &d) { return d.mnemonic == test_case.mnemonic; });
+    const auto diagnostic = std::ranges::find_if(
+        result.diagnostics, [&](const auto &d) { return d.mnemonic == test_case.mnemonic; });
     EXPECT_NE(diagnostic, result.diagnostics.end());
   }
 }
@@ -8132,8 +8127,8 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   const auto contains_word = [&](uint32_t value) {
-    return std::any_of(target_words, target_words + target_word_count,
-                       [&](uint32_t w) { return w == value; });
+    return std::ranges::any_of(target_words, target_words + target_word_count,
+                               [&](uint32_t w) { return w == value; });
   };
   EXPECT_TRUE(contains_word(0xffu)) << "missing E5M3 NaN threshold literal 0xff";
   EXPECT_TRUE(contains_word(0xf7u)) << "missing E5M3 exponent-clamp literal 0xf7";

@@ -482,6 +482,67 @@ TEST(GeneratedInstDefUse, Gfx1250BufferCmpswapReturnUsesElementWidth) {
                                                                               0);
 }
 
+TEST(GeneratedInstDefUse, Gfx1250K64SwmmacUsesCAndReportsTrueResultWidth) {
+  struct TestCase {
+    std::array<uint32_t, 2> words;
+    std::string_view mnemonic;
+    uint8_t def_width;
+    uint8_t tied_use_width;
+    std::string_view disassembly;
+  };
+
+  constexpr std::array cases{
+      TestCase{{0xCC650018u, 0x1C821100u},
+               "v_swmmac_f32_16x16x64_f16",
+               8,
+               8,
+               "v_swmmac_f32_16x16x64_f16 v[24:31], v[0:7], v[8:23], v32"},
+      TestCase{{0xCC660018u, 0x1C821100u},
+               "v_swmmac_f32_16x16x64_bf16",
+               8,
+               8,
+               "v_swmmac_f32_16x16x64_bf16 v[24:31], v[0:7], v[8:23], v32"},
+      TestCase{{0xCC670018u, 0x1C821100u},
+               "v_swmmac_f16_16x16x64_f16",
+               4,
+               4,
+               "v_swmmac_f16_16x16x64_f16 v[24:27], v[0:7], v[8:23], v32"},
+      TestCase{{0xCC680018u, 0x1C821100u},
+               "v_swmmac_bf16_16x16x64_bf16",
+               4,
+               4,
+               "v_swmmac_bf16_16x16x64_bf16 v[24:27], v[0:7], v[8:23], v32"},
+      // The encoded destination names the eight-register F32 C tuple, while
+      // the architectural BF16 result writes only its lower four registers.
+      TestCase{{0xCC690018u, 0x1C821100u},
+               "v_swmmac_bf16f32_16x16x64_bf16",
+               4,
+               8,
+               "v_swmmac_bf16f32_16x16x64_bf16 v[24:31], v[0:7], v[8:23], v32"},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.mnemonic);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test.words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->mnemonic(), test.mnemonic);
+    EXPECT_EQ(inst->disassemble(), test.disassembly);
+    ASSERT_EQ(inst->num_dst_operands(), 1);
+    ASSERT_NE(inst->dst_operand(0), nullptr);
+    EXPECT_EQ(inst->dst_operand(0)->size_bits(), test.def_width * 32u);
+
+    InstDefUse def_use(*inst);
+    EXPECT_EQ(def_use.defs.size(), test.def_width);
+    EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 24, test.def_width}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::VGPR, 24, 8}), test.def_width == 8);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 24, test.tied_use_width}));
+    EXPECT_EQ(def_use.uses.contains({RegClass::VGPR, 24, 8}), test.tied_use_width == 8);
+  }
+}
+
 TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
   cdna3::MubufMachineInst cdna_raw{};
   cdna_raw.vdata = 4;
@@ -4840,6 +4901,47 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
       << "the low-bank alias must not be treated as the read register";
 }
 
+TEST(LivenessAnalysis, Gfx1250SwmmacTiedCAndNarrowResultResolveDestinationBank) {
+  // BF16F32 reads an eight-register F32 C tuple through its encoded VDST but
+  // defines only the lower four registers as packed BF16 D. Resolve both views
+  // through the destination bank; the raw low-bank tuple must not leak into
+  // production def-use analysis.
+  constexpr auto set_dst_bank_two = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  constexpr auto swmmac =
+      cdna5::build_vop3p(cdna5::kVSwmmacBf16f3216x16x64Bf16Vop3p,
+                         {.vdst = 24, .src0 = 256, .src1 = 256 + 8, .src2 = 256 + 32});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  TestCodeObject co({set_dst_bank_two[0], swmmac[0], swmmac[1], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  ASSERT_NE(liveness.gfx1250_vgpr_msb(), nullptr);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+
+  const InstDefUse def_use(*instruction, liveness.gfx1250_vgpr_msb());
+  EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 536, 4}));
+  EXPECT_EQ(def_use.defs.size(), 4u);
+  EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 536, 8}));
+  EXPECT_FALSE(def_use.defs.intersects({RegClass::VGPR, 24, 4}));
+  EXPECT_FALSE(def_use.uses.intersects({RegClass::VGPR, 24, 8}));
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 536, 8}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 24, 8}));
+}
+
 TEST(LivenessAnalysis, Gfx1250D16LoadDoesNotReadDestination) {
   // gfx1250 SRAM ECC makes a D16 load a full-dword write by zero-filling the
   // unselected half. Even with DST bank 2 (0x80), neither physical v513 nor its
@@ -6780,7 +6882,7 @@ constexpr uint32_t kVop3DppFi = 1u << 18;
 // decode when a caller supplies fewer words than the decoded length.
 std::unique_ptr<Instruction> decode_rdna4(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
@@ -7044,14 +7146,14 @@ TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
 // stays 0 (v0).
 std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
 std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
@@ -7139,6 +7241,110 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+// explicit_ordinary_sgpr_bound is the cheap whole-scope scan shared by DBT's
+// virtual-LDS reservation and DBI's entry-prologue storage selection. It answers
+// only "how far up the scalar file does this kernel reach", with no dataflow.
+
+// A scope with no scalar operands leaves a caller free to place storage at s0.
+TEST(ExplicitOrdinarySgprBound, ReportsZeroForAScopeNamingNoScalars) {
+  std::vector<uint32_t> words = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 0u);
+}
+
+// The bound is one past the highest index, and an operand's width counts: the
+// pair write ends at s22 even though its base is lower than the single write.
+TEST(ExplicitOrdinarySgprBound, CountsOperandWidthNotJustTheBase) {
+  std::vector<uint32_t> words = {
+      build_s_mov_b32(/*sdst=*/8, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 128, .sdst = 20})[0],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 22u);
+}
+
+// RDNA exposes 106 ordinary SGPRs against CDNA's 102, and both consumers bound
+// selection by the cross-family minimum. An operand above that bound must not
+// push the result out of reach of every caller.
+TEST(ExplicitOrdinarySgprBound, IgnoresIndicesPastTheAllocatableMaximum) {
+  std::vector<uint32_t> words = {
+      build_s_mov_b32(/*sdst=*/104, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(/*sdst=*/12, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 13u);
+}
+
+// s_and_saveexec_b64 s[0:1], s[0:1] names one pair twice and additionally
+// touches EXEC and SCC. Those are special classes, so they cannot raise the
+// bound; a scan that folded in implicit operands would still have to filter
+// them out by class.
+TEST(ExplicitOrdinarySgprBound, SpecialRegisterEffectsDoNotRaiseTheBound) {
+  std::vector<uint32_t> words = {
+      0xBE802000u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 2u);
+}
+
+// FLAT/GLOBAL saddr appears in both the explicit operand list and
+// Flat::implicit_uses. The explicit-only scan must still see it, or a caller
+// placing storage above the bound would take a pair the kernel is addressing
+// memory through.
+TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
+  // global_load_dwordx2 v[0:1], v[2:3], s[10:11]
+  std::vector<uint32_t> words = {
+      0xDC548000u,
+      0x000A0002u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 12u);
 }
 
 } // namespace

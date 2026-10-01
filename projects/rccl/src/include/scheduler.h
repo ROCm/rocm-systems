@@ -19,7 +19,7 @@ static inline int rcclProtoGrainSize(int proto, ncclComm* comm) {
   case NCCL_PROTO_LL:
     return 16;
   case NCCL_PROTO_LL128:
-    return comm->WarpSize * NCCL_LL128_SHMEM_ELEMS_PER_THREAD * comm->ll128DataElems * sizeof(uint64_t) /
+    return comm->WarpSize * comm->ll128ShmemElemsPerThread * comm->ll128DataElems * sizeof(uint64_t) /
            comm->ll128LineElems;
   case NCCL_PROTO_SIMPLE:
     return 512;

@@ -353,12 +353,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     // contains its s_getpc_b64. Blocks are in ascending source order and cover
     // the decoded stream without overlap, so the owning block is the last one
     // starting at or before the producer.
-    const auto starts_after = [](uint64_t offset, const std::unique_ptr<BasicBlock> &block) {
-      return offset < block->start_offset();
-    };
     for (const PcAddressBuilder &builder : pc_address_builders) {
-      const auto it = std::upper_bound(section_blocks.begin(), section_blocks.end(),
-                                       builder.source_getpc_offset, starts_after);
+      const auto it = std::ranges::upper_bound(
+          section_blocks, builder.source_getpc_offset, {},
+          [](const std::unique_ptr<BasicBlock> &block) { return block->start_offset(); });
       if (it == section_blocks.begin())
         continue;
       BasicBlock &owner = **(it - 1);

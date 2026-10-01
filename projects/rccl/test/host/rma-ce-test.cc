@@ -522,6 +522,13 @@ protected:
     };
   }
 
+  // What every teardown leaves behind, whatever it reported on the way out.
+  void ExpectTornDown() {
+    EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxCount, 0);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxs, nullptr);
+  }
+
 };
 
 // The whole point: after teardown the comm reports no CE state, so a later
@@ -579,24 +586,31 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   }
 }
 
-// Releasing the stream is the first thing teardown does after the task queue, so
-// a failure there propagates with the contexts still standing.
-TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_Propagates) {
+// Destroying the stream is best-effort: teardown swallows a failure there
+// (CUDACHECKIGNORE), reports a clean finalize, and still runs to completion,
+// clearing the initialized flag.
+TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
-  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  EXPECT_EQ(destroy.calls, 1);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceStream, nullptr);
+  ExpectTornDown();
 }
 
-// A device buffer that will not release stops teardown rather than carrying on
-// and reporting a clean finalize.
+// A device buffer that will not release surfaces as the return value, but
+// teardown is best-effort: it carries on releasing the rest and finishes with
+// the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  // The deregister runs after two of the failing frees, so seeing it proves the
+  // loop carried on instead of abandoning the context at the first one.
+  EXPECT_EQ(deregistered_.size(), 1u);
+  ExpectTornDown();
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it
@@ -623,17 +637,23 @@ TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->rmaCeInitTaskQueue));
 }
 
-// A failed deregistration stops teardown and surfaces, rather than carrying on
-// and reporting the state as cleanly torn down.
-TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarked) {
+// A failed deregistration surfaces as the return value, but teardown is
+// best-effort: it keeps releasing the remaining resources and finishes with the
+// state cleared rather than stopping at the failure.
+TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_Propagates) {
+  comm_->config.numRmaCtx = 3;   // so "kept going" is observed, not inferred
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-  g_devrNcclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
+  // Distinct codes after the first, so the returned one pins NCCLCHECKIGNORE's
+  // first-wins rule (checks.h:171) rather than merely "some error surfaced".
+  int seen = 0;
+  ScopedHook dereg(g_devrNcclCommWindowDeregister,
+                   [&seen](ncclComm_t, ncclWindow_t) {
+                     return ++seen == 1 ? ncclInternalError : ncclSystemError;
+                   });
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
-  // Not retried here, and the state is left allocated on purpose: the failed
-  // attempt already released this context's buffers before the deregister, and
-  // Finalize restarts at context 0, so a second call double-frees them.
+  EXPECT_EQ(dereg.calls, 3);   // attempted for every context, not just the first
+  ExpectTornDown();
 }
 
 // ---------------------------------------------------------------------------

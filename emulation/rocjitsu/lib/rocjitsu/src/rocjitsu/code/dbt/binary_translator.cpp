@@ -85,7 +85,7 @@ public:
       return decoder_->decode(inst, emit_error);
 
     std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
-    std::copy_n(inst, kLookaheadWords, canonical.begin());
+    std::ranges::copy_n(inst, kLookaheadWords, canonical.begin());
     constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
     canonical[1] = (canonical[1] & ~kSrc2Mask) | (0x100u << 18);
     return decoder_->decode(canonical.data(), emit_error);

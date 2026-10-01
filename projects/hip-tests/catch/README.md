@@ -69,7 +69,9 @@ All configuration for the test cases is done through the `hip_tests_config.yaml`
 Every test case has its own entry. Currently supported options are:
 - level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
 - tags : List all Catch2 tags that the case is associated with
-- disabled : List all platforms where the case should be disabled
+- disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
+- unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
+`disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
@@ -80,8 +82,12 @@ unit:
     Unit_atomicExch_system_Positive_Peer_GPUs:
       <<: *level_2
       tags: [multigpu]
-      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-      disabled: [amd_wsl]
+      disabled:
+        targets: [amd_wsl]
+        reason: "SWDEV-435667: fails randomly in stress test"
+      unsupported:
+        targets: [gfx900]
+        reason: requires a hardware feature not present on this architecture
 ```
 will be generated (on an AMD linux machine) as:
 ```cpp
@@ -112,17 +118,45 @@ Tests are assigned a level in the YAML configuration (`level: 0` through `level:
 
 ### Running at a specific level
 
-Use the `HIP_TEST_LEVEL` environment variable:
+The active level always supplies the workload parameters. It selects which
+tests run **only when it was requested explicitly**. The level is resolved once
+per process, in strict priority order:
 
-```bash
-HIP_TEST_LEVEL=level_0 ./MemoryTest1 "Unit_hipMemsetSync"
-```
+1. A Catch2 tag filter on the command line: `./MemoryTest1 "[level_0]"`
+2. The `HIP_TEST_LEVEL` environment variable: `HIP_TEST_LEVEL=level_0 ./MemoryTest1`
+3. The default, `level_2`
 
-Or use Catch2 tag filters:
+| Invocation | Parameters | Tests that run |
+|---|---|---|
+| `./MemoryTest1` | `level_2` (default) | every test in the binary |
+| `./MemoryTest1 Unit_hipMemsetSync` | `level_2` (default) | `Unit_hipMemsetSync` |
+| `./MemoryTest1 "[level_0]"` | `level_0` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1` | `level_0` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 Unit_hipMemsetSync` | `level_0` | `Unit_hipMemsetSync` if it is tagged `level_0`, otherwise nothing |
+| `HIP_TEST_LEVEL=level_0,level_2 ./MemoryTest1` | `level_2` (highest requested) | `[level_0]` **or** `[level_2]` |
+| `HIP_TEST_LEVEL=~level_4 ./MemoryTest1` | `level_3` (highest remaining) | `level_0` through `level_3` |
+| `ctest` | `level_2` (default) | every test |
+| `HIP_TEST_LEVEL=level_0 ctest` | `level_0` | `level_0` tests run, the rest reported **Skipped** |
+| `ctest -L level_0` | `level_2` (default) | the `level_0`-labelled entries, on default parameters |
+| `ctest -N`, `--list-tests`, `--help` | — | no level is resolved at all |
 
-```bash
-./MemoryTest1 "[level_0]"
-```
+Two rules explain every row. First, naming a test is itself a statement about
+what to run, so a merely-default level never overrides it — which is also why
+plain `ctest` behaves exactly as it always has, since every ctest entry names a
+test. Second, when several levels are requested at once, **all** of them run
+while the **highest** supplies the parameters: there is one parameter store per
+process, so one level has to win, but nothing that was asked for is dropped
+from the run.
+
+An explicit request that matches nothing is not a failure: the process exits
+with code 4 ("all tests skipped"), and CTest reports such entries as **Skipped**
+rather than **Failed**. Given that levels partition rather than nest, this is
+how `HIP_TEST_LEVEL=level_0 ctest` leaves every non-`level_0` entry.
+
+> `ctest -L level_0` selects the level_0-labelled entries but still runs them
+> with the default `level_2` parameters — `-L` is consumed by ctest and never
+> reaches the test binary. Use `HIP_TEST_LEVEL=level_0 ctest`, which selects and
+> parameterises in one go and needs no `-L`.
 
 ### Writing level-aware tests with `isQuickLevel()`
 
@@ -140,7 +174,7 @@ HIP_TEST_CASE(Unit_hipMemsetSync) {
 #### Guidelines for `isQuickLevel()` trimming
 
 - **Prefer reducing iteration counts and buffer sizes** over skipping code paths, so the same API surface is exercised with less data.
-- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is detected at runtime by the Catch2 listener, which runs after static initialization.
+- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is resolved in `main()` before any test runs, which is after static initialization.
 - **Use reproducible seeds** when tests involve randomization. Log the seed and allow overriding (e.g., via `HIP_TEST_SEED`) so failures can be replayed.
 
 #### Example: reducing a memset size
