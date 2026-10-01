@@ -3,13 +3,36 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#ifdef _WIN32
+#    include <windows.h>
+#else
+#    include <time.h>
+#endif
 
 #define MAX_BENCH_ENTRIES 32
 
 static const char* g_bench_labels[MAX_BENCH_ENTRIES];
 static double      g_bench_ms[MAX_BENCH_ENTRIES];
 static int         g_bench_count = 0;
+
+static double
+monotonic_ms(void)
+{
+#ifdef _WIN32
+    static LARGE_INTEGER freq = { 0 };
+    LARGE_INTEGER        now;
+    if(freq.QuadPart == 0)
+    {
+        QueryPerformanceFrequency(&freq);
+    }
+    QueryPerformanceCounter(&now);
+    return (double) now.QuadPart * 1000.0 / (double) freq.QuadPart;
+#else
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double) t.tv_sec * 1000.0 + (double) t.tv_nsec / 1e6;
+#endif
+}
 
 static void
 record_bench(const char* label, double ms)
@@ -25,13 +48,9 @@ record_bench(const char* label, double ms)
 #define TIME_CALL(label, call)                                                           \
     do                                                                                   \
     {                                                                                    \
-        struct timespec _bench_t0, _bench_t1;                                            \
-        clock_gettime(CLOCK_MONOTONIC, &_bench_t0);                                      \
+        const double _bench_t0 = monotonic_ms();                                         \
         call;                                                                            \
-        clock_gettime(CLOCK_MONOTONIC, &_bench_t1);                                      \
-        record_bench(label,                                                              \
-                     (_bench_t1.tv_sec - _bench_t0.tv_sec) * 1000.0 +                    \
-                         (_bench_t1.tv_nsec - _bench_t0.tv_nsec) / 1e6);                 \
+        record_bench(label, monotonic_ms() - _bench_t0);                                 \
     } while(0)
 
 static void
@@ -352,8 +371,7 @@ read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
     track_events_job_t*  events_jobs  = calloc(n, sizeof(track_events_job_t));
     track_samples_job_t* samples_jobs = calloc(n, sizeof(track_samples_job_t));
 
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    const double t0 = monotonic_ms();
 
     for(uint32_t i = 0; i < n; ++i)
     {
@@ -394,10 +412,7 @@ read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
             counter_tracks++;
         }
     }
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-
-    const double read_ms =
-        (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    const double read_ms = monotonic_ms() - t0;
     record_bench("read all tracks (async)", read_ms);
 
     printf("\n=== Read all tracks (async), all data ===\n");
