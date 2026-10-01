@@ -1472,8 +1472,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_HD_Swap) {
 /**
  * Test Description
  * ------------------------
- * - Verify asymmetric swap: size_a > size_b.
- *   Asymmetric swap decomposes on the CLR side into:
+ * - Verify asymmetric swap: size_a > size_b, with A = srcs[i] (sizes[i]) and
+ *   B = dsts[i] (sizesDst[i]). Asymmetric swap decomposes on the CLR side into:
  *   1. Swap min(size_a, size_b) bytes between A and B
  *   2. Copy remaining (size_a - size_b) bytes from A to B
  * Test source
@@ -1501,8 +1501,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[] = {d_a};
-  void* srcs[] = {d_b};
+  void* dsts[] = {d_b};
+  void* srcs[] = {d_a};
   size_t sizes[] = {kSizeA};
   size_t sizesDst[] = {kSizeB};
   size_t attrsIdxs[] = {0};
@@ -1592,8 +1592,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[] = {dA0, dA1};
-  void* srcs[] = {dB0, dB1};
+  void* dsts[] = {dB0, dB1};
+  void* srcs[] = {dA0, dA1};
   size_t sizes[] = {8192, 4096};
   size_t sizesDst[] = {4096, 2048};
 
@@ -2057,8 +2057,8 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative) {
  * Test Description
  * ------------------------
  * - Asymmetric swap (sizes > sizesDst) between device and pinned host memory.
- *   The first sizesDst bytes are swapped between the two buffers; the A-side tail
- *   (sizes - sizesDst) is copied into B. Verifies the exchanged head and copied
+ *   The first sizesDst bytes are swapped between the two buffers; the srcs-side tail
+ *   (sizes - sizesDst) is copied into dsts. Verifies the exchanged head and copied
  *   tail on both operands.
  * Test source
  * ------------------------
@@ -2083,8 +2083,8 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[] = {h_a};   // A = pinned host
-  void* srcs[] = {d_b};   // B = device
+  void* dsts[] = {d_b};   // B = device
+  void* srcs[] = {h_a};   // A = pinned host
   size_t sizes[] = {kSizeA};
   size_t sizesDst[] = {kSizeB};
   size_t attrsIdxs[] = {0};
@@ -2165,8 +2165,8 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_MixedAsymmetricSwapAndLinear) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[] = {h_a, d_lin};
-  void* srcs[] = {d_b, h_lin};
+  void* dsts[] = {d_b, d_lin};
+  void* srcs[] = {h_a, h_lin};
   size_t sizes[] = {kSizeA, kSizeA};
   size_t sizesDst[] = {kSizeB, 0};  // entry0 asymmetric; entry1 non-swap => 0
   size_t attrsIdxs[] = {0, 1};

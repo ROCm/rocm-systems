@@ -6319,10 +6319,11 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  *
  * @param [in] dsts        - Array of destination pointers.
  * @param [in] srcs        - Array of source pointers.
- * @param [in] sizes       - Array of copy sizes in bytes (source / A side).
- * @param [in] sizesDst    - Array of destination / B-side sizes for swap
- *                            (NULL = symmetric). For each swap entry, sizesDst[i]
- *                            must be non-zero and <= sizes[i], otherwise
+ * @param [in] sizes       - Array of copy sizes in bytes: bytes read from srcs[i]
+ *                            and written to dsts[i].
+ * @param [in] sizesDst    - For swap entries, bytes read from dsts[i] and written
+ *                            back to srcs[i] (NULL = symmetric). For each swap entry,
+ *                            sizesDst[i] must be non-zero and <= sizes[i], otherwise
  *                            hipErrorInvalidValue is returned.
  * @param [in] waits       - Reserved for future use. Must be NULL.
  * @param [in] signals     - Reserved for future use. Must be NULL.

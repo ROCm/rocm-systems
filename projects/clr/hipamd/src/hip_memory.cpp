@@ -3250,8 +3250,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
 
-    // sizesDst is only meaningful for swap entries, where it carries the B-side
-    // (destination) length; HW requires count_a >= count_b (sizes[i] >= sizeB). For a
+    // sizesDst is only meaningful for swap entries, where it carries the dsts[i]
+    // length (sizes[i] is the srcs[i] length); HW requires count_a >= count_b (sizes[i] >= sizeB). For a
     // non-swap entry it must be zero: a non-zero value is a caller error (a per-entry
     // destination length is not supported for linear copies) rather than a silently
     // ignored field.
@@ -3287,22 +3287,21 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
           // Native asymmetric swap is unavailable: decompose into a symmetric
-          // swap of the first sizeB bytes plus a linear copy of the A-side tail.
+          // swap of the first sizeB bytes plus a linear copy of the src-side tail
+          // (sizes[i] describes srcs[i], sizesDst[i] describes dsts[i]).
           // The two ops touch DISJOINT byte ranges, split exactly at sizeB: the swap
-          // reads/writes only [0, sizeB) of A and B, while the tail reads A[sizeB..)
-          // and writes B[sizeB..). Because neither op reads or writes a byte the other
-          // touches, they carry no data dependency and are correct regardless of the
-          // order (or concurrency) in which the batch executes them.
+          // reads/writes only [0, sizeB) of src and dst, while the tail reads
+          // src[sizeB..) and writes dst[sizeB..). Because neither op reads or writes a
+          // byte the other touches, they carry no data dependency and are correct
+          // regardless of the order (or concurrency) in which the batch executes them.
           copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
                                                      dstOffsets[i], sizeB, metadata);
-          // Tail copy A[sizeB..sizeA-1] -> B[sizeB..sizeA-1]. In swap semantics
-          // dsts[i]=A (dstMemory) and srcs[i]=B (srcMemory), so the tail source
-          // is A (dstMemories) and the tail dest is B (srcMemories). Inherit the
+          // Tail copy src[sizeB..sizes[i]) -> dst[sizeB..sizes[i]). Inherit the
           // swap metadata's engine preference, only overriding the op type.
           amd::CopyMetadata tailMeta = metadata;
           tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
-          copy_ops_by_device[device_id].emplace_back(dstMemories[i], srcMemories[i],
-                                                     dstOffsets[i] + sizeB, srcOffsets[i] + sizeB,
+          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i],
+                                                     srcOffsets[i] + sizeB, dstOffsets[i] + sizeB,
                                                      sizes[i] - sizeB, tailMeta);
         } else {
           copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
