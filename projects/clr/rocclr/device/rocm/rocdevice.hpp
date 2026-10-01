@@ -485,8 +485,8 @@ class Device : public NullDevice {
   //! whose placement the kernel could not describe, or (under ROCR_DLL_LOAD) a
   //! ROCr too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on
   //! its default.
-  bool getVmmAllocInfo(uint64_t handle, amd::Device::VmmLocationType* location_type, int* device_id,
-                       size_t* size) const override;
+  bool getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                       int* device_id, size_t* size) const override;
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;

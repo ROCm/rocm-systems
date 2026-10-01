@@ -329,8 +329,7 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   amd::Device::VmmLocationType location_type = amd::Device::VmmLocationType::kDevice;
   int owner_device_id = static_cast<int>(amd::InvalidDeviceId);
   size_t alloc_size = 0;
-  if (!device->getVmmAllocInfo(phys_mem_obj->getUserData().hsa_handle, &location_type,
-                               &owner_device_id, &alloc_size)) {
+  if (!device->getVmmAllocInfo(*phys_mem_obj, &location_type, &owner_device_id, &alloc_size)) {
     // Supported fallback, not a failure: the import still succeeds.
     LogPrintfInfo("Could not recover allocation properties for imported handle %p, "
                   "reporting device memory", osHandle);
