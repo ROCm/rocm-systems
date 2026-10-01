@@ -7,9 +7,11 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
 #include <array>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -39,16 +41,25 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
   }
 
   const uint32_t floor = dbi_entry_storage_floor(blocks, desc, arch);
-  const uint32_t bound = std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+  // A CDNA allocation's top SGPRs alias VCC, FLAT_SCRATCH and XNACK_MASK, so
+  // storage there would be overwritten by any write to those.
+  const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
+  const uint32_t allocated = std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+  const uint32_t bound = allocated > tail ? allocated - tail : 0;
+  const std::string limit =
+      tail == 0 ? "within the kernel's " + std::to_string(kernel_sgpr_count) + "-SGPR allocation"
+                : "below s" + std::to_string(bound) + ", where the kernel's " +
+                      std::to_string(kernel_sgpr_count) + "-SGPR allocation reserves its top " +
+                      std::to_string(tail) + " for special registers";
 
   // find_free_run takes a uint16_t search start. Rejecting a floor at or past
   // the bound here keeps a floor that outgrew the type from narrowing into a low
   // index that looks available.
   if (floor >= bound) {
     if (error_out != nullptr)
-      *error_out = "kernel and its ABI reach s" + std::to_string(floor) + ", and it allocates " +
-                   std::to_string(kernel_sgpr_count) + ", leaving no room for the " +
-                   std::to_string(kDbiEntryStorageRegisters) + " SGPRs the entry prologue reserves";
+      *error_out = "kernel and its ABI reach s" + std::to_string(floor) + ", leaving no room " +
+                   limit + " for the " + std::to_string(kDbiEntryStorageRegisters) +
+                   " SGPRs the entry prologue reserves";
     return std::nullopt;
   }
 
@@ -57,9 +68,8 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
   if (!base) {
     if (error_out != nullptr)
       *error_out = "no free SGPR pair run of " + std::to_string(kDbiEntryStorageRegisters) +
-                   " above s" + std::to_string(floor) + " within the kernel's " +
-                   std::to_string(kernel_sgpr_count) +
-                   "-SGPR allocation for the entry prologue's reserved storage";
+                   " above s" + std::to_string(floor) + " " + limit +
+                   " for the entry prologue's reserved storage";
     return std::nullopt;
   }
 
