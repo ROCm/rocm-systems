@@ -586,13 +586,30 @@ static void save_writer_state_locked() {
   fclose(f);
 }
 
+// A blob or code object found on resume counts as already written only if this
+// user wrote it: a regular file with a single link owned by the effective user.
+// The directories were claimed first, so nobody else can add one now, but a
+// file another user planted before the claim, or a hard link to a file
+// elsewhere, would otherwise be trusted and never rewritten. Left unindexed,
+// it is replaced by the next atomic write of that hash, which renames over it.
+static bool resumed_file_is_ours(const fs::path& p) {
+#ifdef _WIN32
+  std::error_code ec;
+  return fs::symlink_status(p, ec).type() == fs::file_type::regular;
+#else
+  struct stat st{};
+  return ::lstat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+         owned_by_euid(st);
+#endif
+}
+
 static void index_existing_blobs_locked() {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
 
   // error_code overloads throughout: a missing or unreadable directory only
   // means fewer blobs are known to exist, and a blob written twice is harmless.
-  // Only a regular file counts, so a link planted in place of a blob is replaced.
+  // Only a file resumed_file_is_ours() accepts counts; anything else is replaced.
   // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
   // claim_private_dir contributes nothing, and write_blob refuses it later.
   std::error_code ec;
@@ -612,9 +629,7 @@ static void index_existing_blobs_locked() {
 #endif
     for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
          it.increment(entry_ec)) {
-      std::error_code file_ec;
-      if (it->symlink_status(file_ec).type() == fs::file_type::regular &&
-          it->path().extension() == ".blob")
+      if (it->path().extension() == ".blob" && resumed_file_is_ours(it->path()))
         g_written_blobs.insert(it->path().stem().string());
     }
   }
@@ -622,9 +637,7 @@ static void index_existing_blobs_locked() {
   ec.clear();
   const fs::path co_root = g_output_dir + "/code_objects";
   for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
-    std::error_code entry_ec;
-    if (it->symlink_status(entry_ec).type() == fs::file_type::regular &&
-        it->path().extension() == ".hsaco")
+    if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
       g_written_blobs.insert(std::string("co:") + it->path().stem().string());
   }
 }
