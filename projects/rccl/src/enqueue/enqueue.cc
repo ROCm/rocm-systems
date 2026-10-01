@@ -646,7 +646,7 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   int fnOpTyIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
   int fnOpTyCount = 0;
 
-  // CE receive-window agreement also runs here. Cross-clique comms still enter
+  // The CE receive-window fast path is also set here. Cross-clique comms still enter
   // the preparation pass, while wantSym remains disabled in the scheduler.
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclMakeSymmetricTaskList(comm, task, &planner->collSymTaskQueue, &task));

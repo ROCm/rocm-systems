@@ -13,12 +13,10 @@
 #include "scheduler.h"
 #include "tuning.h"
 #include "enqueue.h"
-#include "bootstrap.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
 #include "ce_coll.h"
 #include <cuda_fp16.h>
-#include <vector>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
 #endif
@@ -85,31 +83,21 @@ static bool symBatchAligned16B(struct ncclTaskColl* headTask) {
   return true;
 }
 
-static ncclResult_t agreeCeAllReduceFastPath(struct ncclComm* comm) {
+// Symmetric windows require equal offsets on every rank, and the containment
+// bound is the minimum window size across ranks, so every rank reaches the
+// same answer without a bootstrap exchange.
+static void setCeAllReduceFastPath(struct ncclComm* comm) {
   struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue);
   while (task != nullptr) {
     task->ceAllReduceFastPath = false;
     if (task->func == ncclFuncAllReduce) {
       const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
-      bool fastPath = task->recvWin != nullptr &&
-                      (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-                      ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
-      if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
-        std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
-        flags[(size_t)comm->rank] = fastPath ? 1 : 0;
-        NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
-        for (int r = 0; r < comm->nRanks; r++) {
-          if (flags[(size_t)r] == 0) {
-            fastPath = false;
-            break;
-          }
-        }
-      }
-      task->ceAllReduceFastPath = fastPath;
+      task->ceAllReduceFastPath = task->recvWin != nullptr &&
+                                  (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+                                  ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
     }
     task = task->next;
   }
-  return ncclSuccess;
 }
 
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
@@ -125,7 +113,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
 
   memset(tasksSymByFnOpTy, 0, sizeof(tasksSymByFnOpTy));
   *remainTasksHead = nullptr;
-  NCCLCHECK(agreeCeAllReduceFastPath(comm));
+  setCeAllReduceFastPath(comm);
   if (task) {
     NCCLCHECK(ncclDevrInitOnce(comm));
   }

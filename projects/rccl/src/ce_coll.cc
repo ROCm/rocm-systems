@@ -3000,9 +3000,9 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (recvWin == nullptr) {
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
-  // The scheduler agrees this bit across ranks during launch preparation. Do
-  // not perform host-blocking bootstrap collectives from the per-comm launch:
-  // grouped comms may be driven serially by one host thread.
+  // The scheduler sets this bit during launch preparation. Do not perform
+  // host-blocking bootstrap collectives from the per-comm launch: grouped
+  // comms may be driven serially by one host thread.
   fastPath = fastPath && recvWin != nullptr &&
              (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
              ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
