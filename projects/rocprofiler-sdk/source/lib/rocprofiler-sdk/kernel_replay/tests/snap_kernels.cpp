@@ -32,7 +32,7 @@ namespace
 // Module-scope __device__ global. It lives in the loaded executable's data segment, not a tracked
 // hipMalloc allocation, so only snap()'s HSA_SYMBOL_KIND_VARIABLE path captures it. Kernels bump it
 // in place (single thread) so replay must restore it between passes, else it accumulates per pass.
-__device__ int g_module_counter = 0;
+__device__ int   g_module_counter  = 0;
 __constant__ int g_module_constant = 17;
 
 __global__ void
