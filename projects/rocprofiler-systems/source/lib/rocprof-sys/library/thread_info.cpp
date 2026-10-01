@@ -139,7 +139,7 @@ grow_data(std::int64_t _tid)
     // and _tid >= max_supported_threads returns above. Retained for future use.
     if(_tid >= peak_num_threads)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const auto_lock_t _lk{ type_mutex<data_growth>() };
 
         // check again after locking
@@ -287,7 +287,7 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
     {
         return get_info_data(_tid);
     }
-    else if(_type == ThreadIdType::SystemTID)
+    if(_type == ThreadIdType::SystemTID)
     {
         const auto& _v = get_info_data();
         if(_v)

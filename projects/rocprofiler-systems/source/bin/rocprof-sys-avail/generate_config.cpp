@@ -87,14 +87,14 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
             return true;
         }
     }
-    if(category_view.count("deprecated") == 0 &&
-       category_view.count("settings::deprecated") == 0 &&
+    if(!category_view.contains("deprecated") &&
+       !category_view.contains("settings::deprecated") &&
        _v->get_categories().count("deprecated") > 0)
     {
         return true;
     }
-    if(!fmt_opts.print_advanced && category_view.count("advanced") == 0 &&
-       category_view.count("settings::advanced") == 0 &&
+    if(!fmt_opts.print_advanced && !category_view.contains("advanced") &&
+       !category_view.contains("settings::advanced") &&
        _v->get_categories().count("advanced") > 0)
     {
         return true;
@@ -136,6 +136,8 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
             return;
         }
 
+        // NOLINTNEXTLINE(misc-const-correctness) - reassigned below for the config_file
+        // setting
         auto _save = std::shared_ptr<value_type>{};
         if constexpr(concepts::is_string_type<Tp>::value)
         {
@@ -188,9 +190,9 @@ template <typename... Tp>
 void
 push(type_list<Tp...>)
 {
-    ((settings::push_serialize_map_callback<Tp, custom_setting_serializer>()), ...);
-    ((settings::push_serialize_data_callback<Tp, custom_setting_serializer>(
-         type_list<std::string>{})),
+    (settings::push_serialize_map_callback<Tp, custom_setting_serializer>(), ...);
+    (settings::push_serialize_data_callback<Tp, custom_setting_serializer>(
+         type_list<std::string>{}),
      ...);
 }
 
@@ -198,9 +200,9 @@ template <typename... Tp>
 void
 pop(type_list<Tp...>)
 {
-    ((settings::pop_serialize_map_callback<Tp, custom_setting_serializer>()), ...);
-    ((settings::pop_serialize_data_callback<Tp, custom_setting_serializer>(
-         type_list<std::string>{})),
+    (settings::pop_serialize_map_callback<Tp, custom_setting_serializer>(), ...);
+    (settings::pop_serialize_data_callback<Tp, custom_setting_serializer>(
+         type_list<std::string>{}),
      ...);
 }
 
@@ -214,7 +216,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     custom_setting_serializer::options = _options;
     custom_setting_serializer::fmt     = &fmt_opts;
 
-    auto _settings = tim::settings::shared_instance();
+    auto const _settings = tim::settings::shared_instance();
     tim::settings::push();
     _settings->find("suppress_config")->second->reset();
     _settings->find("suppress_parsing")->second->reset();
@@ -226,9 +228,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _dirs.pop_back();
 
     std::string _output_dir = ".";
-    if(!_dirs.empty() && !(_dirs.size() == 1 && _dirs.at(0) == "."))
+
+    if(!_dirs.empty() && (_dirs.size() != 1 || !(_dirs.at(0) == ".")))
     {
-        _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
+        _output_dir = std::string{ _absolute ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());
         for(const auto& dir : _dirs)
         {
@@ -278,7 +281,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     static std::time_t _time{ std::time(nullptr) };
 
-    auto _serialize = [_settings](auto&& _ar) {
+    auto const _serialize = [_settings](auto&& _ar) {
         _ar->setNextName(TIMEMORY_PROJECT_NAME);
         _ar->startNode();
         (*_ar)(cereal::make_nvp("version", std::string{ ROCPROFSYS_VERSION_STRING }));
@@ -287,9 +290,9 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _ar->finishNode();
     };
 
-    auto _nout = 0;
-    auto _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
-                                     const std::string& _type) -> std::ofstream& {
+    auto       _nout = 0;
+    auto const _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
+                                           const std::string& _type) -> std::ofstream& {
         ++_nout;
         if(rocprofsys::path::is_regular_file(_fname))
         {
@@ -330,7 +333,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         return _ofs;
     };
 
-    if(_fmts.count("json") > 0)
+    if(_fmts.contains("json"))
     {
         // JSON schema output includes all ROCPROFSYS_* settings regardless of
         // --filter, --categories, or --advanced flags. This is intentional: the
@@ -375,24 +378,24 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             preset_json["metadata"]["description"] = fmt_opts.preset_description;
         }
 
-        auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
-                                                        true, _output_dir);
+        auto const _fname = settings::compose_output_filename(
+            _config_file, ".json", false, -1, true, _output_dir);
         std::ofstream ofs{};
         _open(ofs, _fname, "JSON") << preset_json.dump(4) << "\n";
     }
 
-    if(_fmts.count("xml") > 0)
+    if(_fmts.contains("xml"))
     {
         std::stringstream _ss{};
         output_archive<cereal::XMLOutputArchive>::indent() = true;
         _serialize(output_archive<cereal::XMLOutputArchive>::get(_ss));
-        auto _fname = settings::compose_output_filename(_config_file, ".xml", false, -1,
-                                                        true, _output_dir);
+        auto const _fname = settings::compose_output_filename(_config_file, ".xml", false,
+                                                              -1, true, _output_dir);
         std::ofstream ofs{};
         _open(ofs, _fname, "XML") << _ss.str() << "\n";
     }
 
-    if(_fmts.count("txt") > 0 || _fmts.count("cfg") > 0 || _nout == 0)
+    if(_fmts.contains("txt") || _fmts.contains("cfg") || _nout == 0)
     {
         std::stringstream _ss{};
         size_t            _w = fmt_opts.min_width;
@@ -428,8 +431,8 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         {
             _settings->ordering();
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
-                auto _lomni = _lhs->get_categories().count("rocprofsys") > 0;
-                auto _romni = _rhs->get_categories().count("rocprofsys") > 0;
+                auto const _lomni = _lhs->get_categories().count("rocprofsys") > 0;
+                auto const _romni = _rhs->get_categories().count("rocprofsys") > 0;
                 if(_lomni && !_romni)
                 {
                     return true;
@@ -487,8 +490,8 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 continue;
             }
 
-            auto _has_info = (fmt_opts.all_info || _options[DESC] || _options[CATEGORY] ||
-                              _options[VAL]);
+            auto const _has_info = (fmt_opts.all_info || _options[DESC] ||
+                                    _options[CATEGORY] || _options[VAL]);
 
             if(_has_info)
             {
@@ -498,10 +501,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(_options[DESC] || fmt_opts.all_info)
             {
                 _ss << "# description:\n";
-                auto _desc = rocprofsys::delimit(itr->get_description(), " \n");
+                auto const _desc = rocprofsys::delimit(itr->get_description(), " \n");
                 std::stringstream _line{};
                 _line << "#   ";
-                auto _write = [&_line, &_ss, _w](std::string_view _str) {
+                auto const _write = [&_line, &_ss, _w](std::string_view _str) {
                     if(_line.str().length() + _str.length() + 1 >= _w)
                     {
                         _ss << _line.str() << "\n";
@@ -510,7 +513,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     }
                     _line << " " << _str;
                 };
-                for(auto& iitr : _desc)
+                for(auto const& iitr : _desc)
                 {
                     _write(iitr);
                 }
@@ -556,8 +559,8 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
             _ss << _v << "\n";
         }
-        auto _fname = settings::compose_output_filename(_config_file, _txt_ext, false, -1,
-                                                        true, _output_dir);
+        auto const _fname = settings::compose_output_filename(
+            _config_file, _txt_ext, false, -1, true, _output_dir);
         std::ofstream ofs{};
         _open(ofs, _fname, "text")
             << "# auto-generated by rocprof-sys-avail (version "

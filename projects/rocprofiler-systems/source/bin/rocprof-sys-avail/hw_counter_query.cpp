@@ -28,9 +28,9 @@ namespace
 // Local counter info struct - avoids depending on library/rocprofiler-sdk/fwd.hpp
 struct counter_info
 {
-    rocprofiler_agent_id_t                           agent_id       = {};
-    rocprofiler_counter_info_v0_t                    info           = {};
-    std::vector<rocprofiler_record_dimension_info_t> dimension_info = {};
+    rocprofiler_agent_id_t                           agent_id = {};
+    rocprofiler_counter_info_v0_t                    info     = {};
+    std::vector<rocprofiler_record_dimension_info_t> dimension_info;
 };
 
 using counter_info_map_t =
@@ -52,6 +52,8 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
 }
 
 rocprofiler_status_t
+// NOLINTNEXTLINE(misc-const-correctness) - signature must match
+// rocprofiler_available_counters_cb_t exactly
 counters_supported_callback(rocprofiler_agent_id_t    agent_id,
                             rocprofiler_counter_id_t* counters, size_t num_counters,
                             void* user_data)
@@ -61,9 +63,9 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
 
     for(size_t i = 0; i < num_counters; ++i)
     {
-        auto ci     = counter_info{};
-        ci.agent_id = agent_id;
-        auto status = rocprofiler_query_counter_info(
+        auto ci           = counter_info{};
+        ci.agent_id       = agent_id;
+        auto const status = rocprofiler_query_counter_info(
             counters[i], ROCPROFILER_COUNTER_INFO_VERSION_0, &ci.info);
         if(status != ROCPROFILER_STATUS_SUCCESS)
         {
@@ -88,8 +90,8 @@ get_agent_counter_info(const std::vector<std::pair<size_t, const agent*>>& gpu_a
 
     for(const auto& [dev_idx, agnt] : gpu_agents)
     {
-        auto aid    = rocprofiler_agent_id_t{ agnt->handle };
-        auto status = rocprofiler_iterate_agent_supported_counters(
+        auto const aid    = rocprofiler_agent_id_t{ agnt->handle };
+        auto const status = rocprofiler_iterate_agent_supported_counters(
             aid, counters_supported_callback, &data);
 
         if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -102,7 +104,7 @@ get_agent_counter_info(const std::vector<std::pair<size_t, const agent*>>& gpu_a
             continue;
         }
 
-        auto it = data.find(aid);
+        auto const it = data.find(aid);
         if(it != data.end())
         {
             std::sort(it->second.begin(), it->second.end(),
@@ -131,8 +133,8 @@ query_gpu_hw_counters()
 
     auto result = std::vector<hardware_counter_info>{};
 
-    auto& agent_mngr   = get_agent_manager_instance();
-    auto  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::gpu);
+    auto const& agent_mngr   = get_agent_manager_instance();
+    auto const  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::gpu);
     if(gpu_agents_v.empty())
     {
         return result;
@@ -150,13 +152,13 @@ query_gpu_hw_counters()
 
     for(const auto& [dev_idx, agnt] : gpu_agent_pairs)
     {
-        auto aid                  = rocprofiler_agent_id_t{ agnt->handle };
-        auto device_qualifier_sym = fmt::format(":device={}", dev_idx);
-        auto device_qualifier =
+        auto const aid                  = rocprofiler_agent_id_t{ agnt->handle };
+        auto const device_qualifier_sym = fmt::format(":device={}", dev_idx);
+        auto const device_qualifier =
             qualifier_t{ true, static_cast<int>(dev_idx), device_qualifier_sym,
                          fmt::format("Device {}", dev_idx) };
 
-        auto it = agent_counters.find(aid);
+        auto const it = agent_counters.find(aid);
         if(it == agent_counters.end())
         {
             continue;
@@ -169,11 +171,11 @@ query_gpu_hw_counters()
                       {
                           return lhs.info.id < rhs.info.id;
                       }
-                      else if(lhs.info.is_constant)
+                      if(lhs.info.is_constant)
                       {
                           return true;
                       }
-                      else if(rhs.info.is_constant)
+                      if(rhs.info.is_constant)
                       {
                           return false;
                       }
@@ -182,11 +184,11 @@ query_gpu_hw_counters()
                       {
                           return lhs.info.id < rhs.info.id;
                       }
-                      else if(!lhs.info.is_derived)
+                      if(!lhs.info.is_derived)
                       {
                           return true;
                       }
-                      else if(!rhs.info.is_derived)
+                      if(!rhs.info.is_derived)
                       {
                           return false;
                       }
@@ -196,18 +198,19 @@ query_gpu_hw_counters()
 
         for(const auto& ci : counters)
         {
-            auto long_desc = std::string{ ci.info.description };
-            auto units     = std::string{};
-            auto pysym     = std::string{};
+            auto const long_desc = std::string{ ci.info.description };
+            auto const units     = std::string{};
+            auto const pysym     = std::string{};
 
             if(ci.info.is_constant)
             {
                 continue;
             }
-            else if(ci.info.is_derived)
+            if(ci.info.is_derived)
             {
-                auto sym        = fmt::format("{}:device={}", ci.info.name, dev_idx);
-                auto short_desc = fmt::format("Derived counter: {}", ci.info.expression);
+                auto const sym = fmt::format("{}:device={}", ci.info.name, dev_idx);
+                auto const short_desc =
+                    fmt::format("Derived counter: {}", ci.info.expression);
                 result.emplace_back(hardware_counter_info(
                     true, tim::hardware_counters::api::rocm, result.size(), 0, sym, pysym,
                     short_desc, long_desc, units, qualifier_vec_t{ device_qualifier }));
@@ -224,7 +227,7 @@ query_gpu_hw_counters()
                     }
                 }
 
-                auto sym        = fmt::format("{}:device={}", ci.info.name, dev_idx);
+                auto const sym  = fmt::format("{}:device={}", ci.info.name, dev_idx);
                 auto short_desc = fmt::format("{} on device {}", ci.info.name, dev_idx);
                 if(!dim_info_strs.empty())
                 {

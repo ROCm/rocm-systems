@@ -63,7 +63,7 @@ std::vector<callchain::ts_entry_vec_t>
 callchain::get() const
 {
     std::vector<ts_entry_vec_t> _v = {};
-    if(size() == 0)
+    if(empty())
     {
         return _v;
     }
@@ -74,7 +74,7 @@ callchain::get() const
     for(const auto& itr : _data)
     {
         auto _v2 = ts_entry_vec_t{ itr.timestamp, {} };
-        for(auto iitr : itr.data)
+        for(auto const iitr : itr.data)
         {
             auto _entry = binary::lookup_ipaddr_entry<true>(iitr);
             if(_entry)
@@ -96,8 +96,7 @@ callchain::get() const
     // remove some known functions which are by-products of interrupts
     for(auto& itr : _v)
     {
-        while(!itr.second.empty() &&
-              _known_excludes.find(itr.second.back().name) != _known_excludes.end())
+        while(!itr.second.empty() && _known_excludes.contains(itr.second.back().name))
         {
             itr.second.pop_back();
         }
@@ -167,7 +166,7 @@ callchain::sample(int signo)
     }
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -180,7 +179,7 @@ callchain::sample(int signo)
 
     _perf_event->stop();
 
-    for(auto itr : *_perf_event)
+    for(auto const itr : *_perf_event)
     {
         if(itr.is_sample())
         {
@@ -189,7 +188,7 @@ callchain::sample(int signo)
             _data.timestamp = itr.get_time();
             _data.data.emplace_back(_ip);
             bool _skip_ip = true;
-            for(auto ditr : itr.get_callchain())
+            for(auto const ditr : itr.get_callchain())
             {
                 // skip the first instance of current IP but allow after that since this
                 // might be a recursive call

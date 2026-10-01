@@ -102,13 +102,13 @@ process_buffered_storage(
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _config->_pid);
 
-    auto _coordinator = std::make_shared<sample_processor_t>();
+    auto const _coordinator = std::make_shared<sample_processor_t>();
     // RAII lifetime guard: configure_processors registers raw references to the
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto _storage = configure_processors(_coordinator, _config, _formats,
-                                                          _registry, _engine, _tracks);
-    storage_parser_t      _parser(_storage_filename);
+    [[maybe_unused]] auto const _storage = configure_processors(
+        _coordinator, _config, _formats, _registry, _engine, _tracks);
+    storage_parser_t _parser(_storage_filename);
 
     // perfetto_processor_t::prepare_for_processing primes two thread_local
     // values on this parser thread (active track_registry + emitting pid).
@@ -180,7 +180,7 @@ post_processor::run_sequential(
         LOG_TRACE("Processing config for pid={}", cfg->_pid);
         const auto _filename =
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-        auto _progress_cb = m_tracker.begin(
+        auto const _progress_cb = m_tracker.begin(
             fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
         process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
@@ -206,16 +206,17 @@ post_processor::run_multithreaded(
     const auto hw         = std::thread::hardware_concurrency();
     const auto max_active = (hw > 0) ? static_cast<std::size_t>(hw) : std::size_t{ 1 };
 
-    auto spawn_for_config = [this, &formats, &_progress_cb](
-                                const std::shared_ptr<data::processor_config_t>& cfg) {
-        LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
-        return std::thread{ [this, cfg, &formats, _progress_cb] {
-            const auto _filename =
-                utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
-                                     m_engine, m_tracks);
-        } };
-    };
+    auto const spawn_for_config =
+        [this, &formats,
+         &_progress_cb](const std::shared_ptr<data::processor_config_t>& cfg) {
+            LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
+            return std::thread{ [this, cfg, &formats, _progress_cb] {
+                const auto _filename =
+                    utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
+                process_buffered_storage(cfg, _filename, formats, m_registry,
+                                         _progress_cb, m_engine, m_tracks);
+            } };
+        };
 
     for(std::size_t batch_start = 0; batch_start < configs.size();
         batch_start += max_active)
@@ -252,10 +253,10 @@ post_processor::make_configs(const data::mapped_cache_files_t& cache_files,
         }
 
         std::vector<std::shared_ptr<agent>> _agents;
-        auto _metadata = std::make_shared<metadata_registry>();
+        auto const _metadata = std::make_shared<metadata_registry>();
         _metadata->load_from_file(files.metadata, _agents);
 
-        auto _agent_manager = std::make_shared<agent_manager>(_agents);
+        auto const _agent_manager = std::make_shared<agent_manager>(_agents);
 
         configs.push_back(std::make_shared<data::processor_config_t>(
             pid, root_pid, _metadata, _agent_manager));

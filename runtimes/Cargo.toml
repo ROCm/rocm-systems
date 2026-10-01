@@ -1,0 +1,41 @@
+[workspace]
+members = ["ddi/rocddi", "ddi/libamdf", "hsa/libhsa"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/ROCm/rocm-systems"
+
+[workspace.dependencies]
+rocddi = { path = "ddi/rocddi" }
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+expect_used = "deny"
+panic = "deny"
+pedantic = { level = "warn", priority = -1 }
+unreachable = "deny"
+unwrap_used = "deny"
+
+# GNU symbol versions are attached to the HSA C entry points in one codegen
+# unit. The assembler requires aliases and definitions in the same object.
+[profile.dev.package.libhsa]
+codegen-units = 1
+
+[profile.release.package.libhsa]
+codegen-units = 1
+
+[profile.relwithdebinfo]
+inherits = "release"
+debug = 2
+
+[profile.minsizerel]
+inherits = "release"
+opt-level = "s"

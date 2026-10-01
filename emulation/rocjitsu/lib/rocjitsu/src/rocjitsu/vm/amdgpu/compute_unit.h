@@ -369,6 +369,8 @@ public:
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
+    instruction_vm_access_.reset();
+    inst_cache_.invalidate_all();
     gpu_vm_ = gpu_vm;
     l1_vector_.set_gpu_vm(gpu_vm);
     l1_scalar_.set_gpu_vm(gpu_vm);
@@ -441,10 +443,18 @@ public:
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    observes_before_execute_instruction_ = plugin_group_->observes_before_execute_instruction();
+    observes_after_execute_instruction_ = plugin_group_->observes_after_execute_instruction();
+    observes_async_instruction_issued_ = plugin_group_->observes_async_instruction_issued();
+    observes_memory_instruction_routing_ = plugin_group_->observes_memory_instruction_routing();
+    observes_vgpr_reads_ = plugin_group_->observes_vgpr_reads();
+    observes_vgpr_writes_ = plugin_group_->observes_vgpr_writes();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_scalar_register_writes_ = plugin_group_->observes_scalar_register_writes();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
-    observes_register_access_ =
-        config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off || !plugin_group_->empty();
+    observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off ||
+                                observes_vgpr_reads_ || observes_vgpr_writes_ ||
+                                observes_sgpr_reads_ || observes_scalar_register_writes_;
   }
 
   /// Whether register notifications have a diagnostic or plugin consumer.
@@ -797,7 +807,7 @@ private:
       return;
     if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg, true))
       check_active_memory_wait(reg, ~uint64_t{0}, 0xf, true);
-    if (!plugin_group_->empty())
+    if (observes_scalar_register_writes_)
       observe_scalar_register_write(wf, reg);
   }
 
@@ -860,7 +870,7 @@ public:
         check_active_memory_wait(
             {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
             byte_mask, false);
-      if (!plugin_group_->empty())
+      if (observes_vgpr_reads_)
         observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
     }
   }
@@ -880,7 +890,7 @@ public:
         check_active_memory_wait(
             {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
             byte_mask, true);
-      if (!plugin_group_->empty())
+      if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
   }
@@ -899,7 +909,7 @@ public:
         check_active_memory_wait(
             {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
             byte_mask, true);
-      if (!plugin_group_->empty())
+      if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
   }
@@ -1224,6 +1234,12 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
+      if (outermost && std::exchange(cu_.instruction_access_cleanup_pending_, false) &&
+          !cu_.has_active_wfs()) {
+        // Instruction issue has returned. Empty the cache before releasing owners
+        // whose destructors can reenter the CU.
+        auto retired = std::exchange(cu_.instruction_vm_access_, std::nullopt);
+      }
       std::function<void()> notification_flush_hook;
       if (outermost)
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
@@ -1261,6 +1277,8 @@ protected:
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
+  // The final wave retired inside a guard; keep its snapshot until issue returns.
+  bool instruction_access_cleanup_pending_ = false;
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
@@ -1315,6 +1333,10 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
+  // Keep the fetch snapshot across instructions, including ones that release their wavefront.
+  std::optional<GpuVmAccess> instruction_vm_access_;
+  AddressSpaceHandle instruction_address_space_;
+  uint32_t instruction_vmid_ = 0;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
@@ -1338,7 +1360,14 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  bool observes_before_execute_instruction_ = false;
+  bool observes_after_execute_instruction_ = false;
+  bool observes_async_instruction_issued_ = false;
+  bool observes_memory_instruction_routing_ = false;
+  bool observes_vgpr_reads_ = false;
+  bool observes_vgpr_writes_ = false;
   bool observes_sgpr_reads_ = false;
+  bool observes_scalar_register_writes_ = false;
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
   bool observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off;
@@ -1392,6 +1421,10 @@ inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline bool InstructionComputeUnitView::observes_register_access() const {
+  return raw_cu().observes_register_access();
+}
+inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;
@@ -1427,12 +1460,12 @@ inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
 }
 inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() const {
-  return raw_cu().plugin_group().observes_tensor_dma_memory_access();
+  return raw_cu().plugin_group().observes_tensor_dma_memory_access(raw_wavefront());
 }
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
   SuspendedMemoryWaitCheck observer_scope;
-  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
+  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -1616,6 +1649,8 @@ public:
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
+    if (!this->observes_vgpr_reads_)
+      return;
     if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
@@ -1623,6 +1658,8 @@ public:
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
+    if (!this->observes_vgpr_writes_)
+      return;
     if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
