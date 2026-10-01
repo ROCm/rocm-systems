@@ -224,19 +224,19 @@ static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
 
-// In-memory set of blob hex keys already written to disk.
-// Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
-// Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
-// "co:" prefix for code objects matches the playback-side load_code_object key convention.
-static std::mutex                      g_blob_mu;
-static std::unordered_set<std::string> g_written_blobs;
-
 // Set in a forked child. POSIX allows the child of a multithreaded process only
 // async-signal-safe calls until it execs, and open() is far from that, so the
 // child's archive is opened by its first record, blob or code object rather
 // than in atfork_child. A child that only execs or exits opens none.
 static std::atomic<bool> g_reopen_after_fork{false};
 static std::mutex        g_reopen_mu;
+
+// In-memory set of blob hex keys already written to disk.
+// Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
+// Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
+// "co:" prefix for code objects matches the playback-side load_code_object key convention.
+static std::mutex                      g_blob_mu;
+static std::unordered_set<std::string> g_written_blobs;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
