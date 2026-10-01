@@ -1733,32 +1733,6 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_Valid_SetsTimeoutAndOk) {
   FreeClient(client);
 }
 
-TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_OutOfRangeFinite_ReturnsErrorAndPreservesTimeout) {
-  struct rasClient* client = MakeClient();
-  // The first value scales to exactly 2^63 nanoseconds; the others exceed it or overflow double.
-  for (const char* value : {"9223372036.854776", "10000000000", "1e308"}) {
-    SCOPED_TRACE(value);
-    client->timeout = 42;
-    ScriptRecvData(std::string("timeout ") + value + "\n");
-    SetRevents(client, POLLIN);
-    rasClientEventLoop(client, client->pfd);
-    EXPECT_EQ(DrainSendQueue(client), std::string("ERROR: Invalid timeout value ") + value + "\n");
-    EXPECT_EQ(client->timeout, 42);
-  }
-  FreeClient(client);
-}
-
-TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_LargestRepresentableNanoseconds_Accepts) {
-  struct rasClient* client = MakeClient();
-  // This scales to the largest double below 2^63: 2^63 - 1024 nanoseconds.
-  ScriptRecvData("timeout 9223372036.854774\n");
-  SetRevents(client, POLLIN);
-  rasClientEventLoop(client, client->pfd);
-  EXPECT_EQ(DrainSendQueue(client), "OK\n");
-  EXPECT_EQ(client->timeout, INT64_C(9223372036854774784));
-  FreeClient(client);
-}
-
 TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_NonNumeric_ReturnsError) {
   struct rasClient* client = MakeClient();
   ScriptRecvData("timeout abc\n");

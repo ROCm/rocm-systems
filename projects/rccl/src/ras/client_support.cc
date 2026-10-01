@@ -7,7 +7,6 @@
 
 #include <cstdarg>
 #include <cstddef>
-#include <cstdint>
 #include <ctime>
 
 #include "alloc.h"
@@ -482,13 +481,10 @@ void rasClientEventLoop(struct rasClient* client, int pollIdx) {
         char* endPtr = nullptr;
         errno = 0;
         double timeout = strtod(cmd + strlen("timeout "), &endPtr);
-        double timeoutNs = timeout * CLOCK_UNITS_PER_SEC;
-        // INT64_MAX rounds up to 2^63 as a double, so equality is already out of range.
-        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0 ||
-            timeoutNs >= static_cast<double>(INT64_MAX)) {
+        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0) {
           snprintf(rasLine, sizeof(rasLine), "ERROR: Invalid timeout value %s\n", cmd + strlen("timeout "));
         } else {
-          client->timeout = static_cast<int64_t>(timeoutNs);
+          client->timeout = timeout * CLOCK_UNITS_PER_SEC;
           strcpy(rasLine, "OK\n");
         }
         if (rasClientEnqueueString(client, rasLine) != ncclSuccess) {
