@@ -124,6 +124,11 @@ struct FakeGin {
   bool needsProxyProgress = true;
   std::atomic<int> totalProgressCalls{0};
   std::atomic<int> destroyCalls{0};
+  // Nonzero: ginProgress spins until cleared. Lets a test hold a worker inside
+  // the call so HostFinalize's join is observable (the post-join memset of
+  // ginState would otherwise stop progress even if the join were deleted).
+  std::atomic<int> holdProgress{0};
+  std::atomic<int> progressHolders{0};
   std::vector<std::unique_ptr<FakeSlot>> slots;
   std::vector<void*> destroyed;
 
@@ -179,6 +184,13 @@ struct FakeGin {
 
   static ncclResult_t Progress(void* ginCtx) {
     FakeGin& self = current();
+    if (self.holdProgress.load(std::memory_order_acquire) != 0) {
+      self.progressHolders.fetch_add(1, std::memory_order_release);
+      while (self.holdProgress.load(std::memory_order_acquire) != 0) {
+        std::this_thread::yield();
+      }
+      self.progressHolders.fetch_sub(1, std::memory_order_release);
+    }
     FakeSlot* slot = self.slotFor(ginCtx);
     slot->progressCalls.fetch_add(1);
     self.totalProgressCalls.fetch_add(1);
@@ -226,6 +238,8 @@ class GinHostTest : public ::testing::Test {
     g_peerGinCommCount = -1;
     g_paramGinType = -1;
     g_progressEntries.store(0);
+    fake_.holdProgress.store(0);
+    fake_.progressHolders.store(0);
     nthreadsParam_ = 1;
     nconnParam_ = -2;
 
@@ -269,6 +283,7 @@ class GinHostTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    fake_.holdProgress.store(0, std::memory_order_release);
     joinProgressThreads();
     FakeGin::setCurrent(nullptr);
     g_loadParam = [](const char*, int64_t deft) { return deft; };
@@ -534,14 +549,22 @@ TEST_F(GinHostTest, FreeUnlinksAndStopsProgressingDestroyedCtx) {
   EXPECT_GE(fake_.destroyCalls.load(), 1);
 
   const int afterFree = dropSlot->progressCalls.load();
-  ASSERT_TRUE(waitUntil([&] { return fake_.slots.front()->progressCalls.load() > 0; }));
+  // The worker walks keep before drop, so front()->progressCalls > 0 is already
+  // true here. Wait for a new call so the freeze window below has a live worker.
+  const int keepBefore = fake_.slots.front()->progressCalls.load();
+  ASSERT_TRUE(waitUntil([&] { return fake_.slots.front()->progressCalls.load() > keepBefore; }))
+      << "kept ctx stopped progressing after the sibling was freed";
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   EXPECT_EQ(afterFree, dropSlot->progressCalls.load()) << "freed ctx kept receiving ginProgress";
 
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &keep));
 }
 
-// HostFinalize joins every progress thread and returns ncclSuccess.
+// HostFinalize joins every progress thread before it returns. A worker held
+// inside ginProgress makes that join visible: deleting the join would let
+// finalize return while the worker is still in the call. The post-join memset
+// of ginState cannot be used instead, because it stops progress even if the
+// threads were never joined.
 TEST_F(GinHostTest, FinalizeJoinsAllProgressThreads) {
   nthreadsParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
@@ -552,20 +575,39 @@ TEST_F(GinHostTest, FinalizeJoinsAllProgressThreads) {
   ASSERT_TRUE(gin()->thread[0].joinable());
   ASSERT_TRUE(gin()->thread[1].joinable());
 
-  // Leave the DevComm linked so a missed join keeps ginProgress running.
-  ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > 0; }));
-  const int moving = fake_.totalProgressCalls.load();
-  ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > moving; }));
   struct ncclGinStateDevComm* dc = gin()->devComms;
   gin()->connected = true;
-  ASSERT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
-  const int afterJoin = fake_.totalProgressCalls.load();
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
-  EXPECT_EQ(afterJoin, fake_.totalProgressCalls.load())
-      << "progress continued after HostFinalize joined the workers";
-  // HostFinalize memsets ginState (production). Restore C++ lifetime before TearDown.
-  new (gin()) ncclGinState{};
-  std::free(dc);
+  fake_.holdProgress.store(1, std::memory_order_release);
+  ASSERT_TRUE(waitUntil([&] { return fake_.progressHolders.load(std::memory_order_acquire) > 0; }))
+      << "no progress thread entered ginProgress";
+
+  std::atomic<bool> finalizeDone{false};
+  ncclResult_t finalizeSt = ncclInternalError;
+  std::thread fin([&] {
+    finalizeSt = ncclGinHostFinalize(comm());
+    finalizeDone.store(true, std::memory_order_release);
+  });
+  // Release the held worker and join finalize on every exit, including a fatal
+  // ASSERT. HostFinalize memsets ginState, so restore C++ lifetime afterwards.
+  auto restoreAfterFinalize = [&]() {
+    fake_.holdProgress.store(0, std::memory_order_release);
+    if (fin.joinable()) fin.join();
+    new (gin()) ncclGinState{};
+    std::free(dc);
+  };
+  struct FinalizeGuard {
+    decltype(restoreAfterFinalize)* restore;
+    ~FinalizeGuard() { (*restore)(); }
+  } finalizeGuard{&restoreAfterFinalize};
+
+  ASSERT_TRUE(waitUntil([&] { return gin()->proxyThreadStopSignal.load(); }))
+      << "HostFinalize did not reach the progress-thread join";
+  EXPECT_FALSE(finalizeDone.load(std::memory_order_acquire))
+      << "HostFinalize returned while a worker was still inside ginProgress";
+  fake_.holdProgress.store(0, std::memory_order_release);
+  ASSERT_TRUE(waitUntil([&] { return finalizeDone.load(std::memory_order_acquire); }))
+      << "HostFinalize did not return after the worker left ginProgress";
+  EXPECT_EQ(ncclSuccess, finalizeSt);
 }
 
 // nthreads=4 but AllGather ginCommCount=2: threads 2 and 3 never call ginProgress.

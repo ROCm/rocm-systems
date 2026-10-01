@@ -446,6 +446,12 @@ class GinMPIDeviceTests : public MPITestBase {
     auto devCommCleanup = makeScopeGuard([&]() {
       (void)ncclDevCommDestroy(comm, &devComm);
     });
+    // proxyNthreads is written only by ncclGinConnectOnce, which this create
+    // reaches. Reading it before a GIN DevComm exists observes the calloc zero
+    // whenever the internal sym-kernel DevComm did not already connect.
+    if (checkProxyNthreads_) {
+      ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
+    }
 
     // Stage a deterministic byte pattern in the source buffer; dst stays zero.
     std::vector<uint8_t> hostSrc(kBufBytes, 0);
@@ -505,6 +511,11 @@ class GinMPIDeviceTests : public MPITestBase {
   void runWaitCounterAndSignal(int nContexts);
   void runVASignalPut(int nContexts);
   void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence);
+
+  // Set by the GIN_PROXY_NTHREADS tests. runPutWaitRoundTrip asserts the
+  // connected value after its own ncclDevCommCreate, which is the call that
+  // writes proxyNthreads when nothing earlier has.
+  bool checkProxyNthreads_ = false;
 
   // Same clamp as ncclGinConnectOnce: default 1, values <= 1 stay 1, cap at
   // NCCL_GIN_MAX_CONNECTIONS.
@@ -6224,7 +6235,7 @@ TEST_F(GinMPIDeviceTests, Recycle_NonGinThenProxyPut) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
-  ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
+  checkProxyNthreads_ = true;
 
   ncclDevCommRequirements none = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   none.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
@@ -6250,7 +6261,7 @@ TEST_F(GinMPIDeviceTests, Recycle_DestroyThenProxyPut) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
-  ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
+  checkProxyNthreads_ = true;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -6306,14 +6317,18 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t parent = getActiveCommunicator();
-  ASSERT_MPI_EQ(expectedProxyNthreads(), parent->sharedRes->ginState.proxyNthreads);
+  checkProxyNthreads_ = true;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount = 1;
   ncclDevComm parentDev{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(parent, &reqs, &parentDev));
-  auto parentDevCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(parent, &parentDev); });
+  ncclResult_t parentDevSt = ncclDevCommCreate(parent, &reqs, &parentDev);
+  bool parentDevLive = (parentDevSt == ncclSuccess);
+  auto parentDevCleanup = makeScopeGuard([&]() {
+    if (parentDevLive) (void)ncclDevCommDestroy(parent, &parentDev);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, parentDevSt);
 
   ncclComm_t child = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(parent, 0, getTestMpiRank(), &child, nullptr));
