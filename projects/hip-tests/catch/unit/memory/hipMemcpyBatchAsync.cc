@@ -1734,7 +1734,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback) {
  * Test Description
  * ------------------------
  * - Verifies hipExtMemcpyBatchAsync validates hipExtMemcpyAttributes:
- *   1. Unknown flag bits in std.flags return hipErrorInvalidValue.
+ *   1. Unknown flag bits in flags return hipErrorInvalidValue.
  *   2. Swap combined with an indirect flag returns hipErrorInvalidValue.
  *   3. A non-zero reserved field returns hipErrorInvalidValue.
  * Test source
