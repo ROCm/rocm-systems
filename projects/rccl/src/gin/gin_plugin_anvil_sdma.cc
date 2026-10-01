@@ -29,6 +29,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 static std::map<void*, int> bufferRegRefcount;
 static std::map<uintptr_t, int> g_signalSpanRefcount;
@@ -787,14 +788,22 @@ static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* span
   // Probe the span base once. Every logical context's slot is a constant offset
   // from it, so running this per context would cost one bootstrap round trip per
   // context inside ncclDevCommCreate.
-  uintptr_t* gatheredLocalBases = (uintptr_t*)calloc((size_t)nRanks, sizeof(uintptr_t));
+  //
+  // bootstrapAllGather writes one slot per world rank, so the buffer is sized and
+  // indexed in world space. nRanks/ginRank are the GIN team, which is smaller
+  // under NCCL_GIN_CONNECTION_RAIL.
+  const int worldRanks = comm->nRanks;
+  uintptr_t* gatheredLocalBases =
+    (worldRanks > 0 && comm->rank >= 0 && comm->rank < worldRanks)
+      ? (uintptr_t*)calloc((size_t)worldRanks, sizeof(uintptr_t))
+      : nullptr;
   if (gatheredLocalBases) {
-    gatheredLocalBases[ginRank] = (uintptr_t)spanLsaSelf;
+    gatheredLocalBases[comm->rank] = (uintptr_t)spanLsaSelf;
     if (ginAnvilBootstrapAllgather(comm->bootstrap, gatheredLocalBases, sizeof(uintptr_t)) != 0) {
       WARN("GIN anvil-sdma: signal local-base allgather failed");
-    } else if (gatheredLocalBases[ginRank] != (uintptr_t)spanLsaSelf) {
-      WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", ginRank,
-           (unsigned long)gatheredLocalBases[ginRank], (unsigned long)spanLsaSelf);
+    } else if (gatheredLocalBases[comm->rank] != (uintptr_t)spanLsaSelf) {
+      WARN("GIN anvil-sdma: signal local-base allgather mismatch rank=%d got=%#lx expect=%#lx", comm->rank,
+           (unsigned long)gatheredLocalBases[comm->rank], (unsigned long)spanLsaSelf);
     }
     free(gatheredLocalBases);
   }
@@ -877,13 +886,28 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
     return ncclSystemError;
   }
 
+  // Snapshot the pending list under pluginMutex. ginAnvilPendingAdd / Remove /
+  // Clear all take that lock and it is not recursive, so the walks below cannot
+  // hold it across ginAnvilRegisterSignalSpan or ginAnvilPendingClear. find()
+  // also avoids default-inserting an empty list for a comm with nothing pending.
+  std::vector<ginAnvilGinCtx*> pending;
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto it = g_pendingByComm.find(comm);
+    if (it != g_pendingByComm.end()) {
+      for (GinAnvilPendingEntry* e = it->second; e != nullptr; e = e->next) {
+        if (e->ctx) pending.push_back(e->ctx);
+      }
+    }
+  }
+
   const size_t spanBytes = (size_t)nSignalSlots * (size_t)nSignalsPerContext * sizeof(uint64_t);
   int spanRanks = 0;
   int spanGinRank = 0;
-  for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
-    if (e->ctx->nSignals > 0) {
-      spanRanks = e->ctx->nRanks;
-      spanGinRank = e->ctx->rank;
+  for (ginAnvilGinCtx* ctx : pending) {
+    if (ctx->nSignals > 0) {
+      spanRanks = ctx->nRanks;
+      spanGinRank = ctx->rank;
       break;
     }
   }
@@ -900,8 +924,7 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
   ginAnvilGinCtx* connCheckCtx = nullptr;
   void* connCheckLsaSelf = nullptr;
   NCCLCHECKGOTO(ginAnvilRegisterSignalSpan(comm, spanLsaSelf, spanBytes, spanRanks, spanGinRank), ret, fail);
-  for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
-    ginAnvilGinCtx* ctx = e->ctx;
+  for (ginAnvilGinCtx* ctx : pending) {
     if (ctx->nSignals <= 0) continue;
     ctx->signalSpanLsaSelf = spanLsaSelf;
     ginAnvilSignalSpanRefInc(spanLsaSelf);
@@ -952,10 +975,10 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
 
 fail:
   if (ret != ncclSuccess) {
-    for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
-      if (e->ctx->signalSpanLsaSelf == spanLsaSelf) {
+    for (ginAnvilGinCtx* ctx : pending) {
+      if (ctx->signalSpanLsaSelf == spanLsaSelf) {
         ginAnvilSignalSpanRefDec(spanLsaSelf);
-        e->ctx->signalSpanLsaSelf = nullptr;
+        ctx->signalSpanLsaSelf = nullptr;
       }
     }
   }
