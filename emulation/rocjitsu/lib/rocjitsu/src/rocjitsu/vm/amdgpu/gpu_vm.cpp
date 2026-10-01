@@ -202,6 +202,10 @@ VmTranslationResult IdentityAddressSpaceTranslator::translate(uint64_t address, 
                           .permissions = {.readable = true, .writable = true, .executable = true}}};
 }
 
+bool GpuVmAccess::is_current() const {
+  return access_state_ != nullptr && access_state_->valid.load(std::memory_order_acquire);
+}
+
 VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
                                            VmAccessKind access) const {
   if (access_state_ == nullptr)
@@ -215,6 +219,32 @@ VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
                                        : translator_->translate(address, size, access);
   report_terminal_fault(address, access, translated.outcome);
   return translated;
+}
+
+bool GpuVmAccess::try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !translator_ || !physical_memory_)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation = translator_->translate(address, bytes.size(), VmAccessKind::Read);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         physical_memory_->try_read_contiguous(translation.translation.domain,
+                                               translation.translation.address, bytes);
+}
+
+bool GpuVmAccess::try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !translator_ || !physical_memory_)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation = translator_->translate(address, bytes.size(), VmAccessKind::Write);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         physical_memory_->try_write_contiguous(translation.translation.domain,
+                                                translation.translation.address, bytes);
 }
 
 std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address) const {

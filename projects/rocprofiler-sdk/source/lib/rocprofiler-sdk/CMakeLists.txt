@@ -4,10 +4,18 @@
 rocprofiler_activate_clang_tidy()
 
 set(ROCPROFILER_LIB_HEADERS
-    agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
-    internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
+    agent.hpp
+    agent_mapping.hpp
+    buffer.hpp
+    external_correlation.hpp
+    intercept_table.hpp
+    internal_threading.hpp
+    ompt.hpp
+    registration.hpp
+    runtime_initialization.hpp)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
+    agent_mapping.cpp
     attach.cpp
     buffer.cpp
     buffer_tracing.cpp

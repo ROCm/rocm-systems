@@ -11,27 +11,33 @@ to the largest reachable DPM level, never exceeding the request) and the safe
 """
 
 import collections
-import importlib.util
 import os
-import sys
 import types
 import unittest
 
 # ``common.common`` bootstraps the real amdsmi package at import time (sys.path
 # insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
-# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself and
-# only needs ``amdsmi_path`` to locate the *installed* CLI fallback, so degrade
-# gracefully: if the shared harness cannot load, drop to ``None`` and rely on
-# the in-tree source checkout (resolved first below). Keeps this file runnable
-# from a plain checkout even when no matching amdsmi is installed.
+# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself, so
+# degrade gracefully rather than erroring at import; without the harness there is
+# no resolver, and the suite skips with the reason below.
 try:
-    from common.common import amdsmi_path, resolve_cli_dir
+    from common.common import (
+        amdsmi_path,
+        cli_search_order,
+        find_cli_dir,
+        load_cli_module,
+        stub_modules,
+    )
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
-    resolve_cli_dir = None
+    cli_search_order = None
+    find_cli_dir = None
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_CLI_DIR = resolve_cli_dir(_THIS_DIR, amdsmi_path) if resolve_cli_dir else None
+_CLI_DIR = (
+    find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+    if find_cli_dir and cli_search_order
+    else None
+)
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
 
 # AMDSMI_STATUS_NOT_SUPPORTED sentinel used by the stubbed library-error path.
@@ -57,11 +63,11 @@ class _FakeLibraryException(Exception):
         return self._message
 
 
-def _install_fake_amdsmi():
-    """Register a stub ``amdsmi`` package so ``set_value.py`` imports cleanly.
+def _build_fake_amdsmi():
+    """Build a stub ``amdsmi`` package so ``set_value.py`` imports cleanly.
 
-    Returns the fake ``amdsmi_interface`` module so individual tests can swap in
-    per-case ``amdsmi_get_clk_freq`` return values or side effects.
+    Returns the name -> module mapping for ``common.stub_modules``; tests reach the
+    fake ``amdsmi_interface`` through it to swap per-case return values.
     """
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
@@ -81,22 +87,18 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
+    }
 
 
 def _load_set_value_module():
     # set_value.py imports the sibling ``amdsmi_cli_exceptions`` module by bare
     # name, so the CLI dir must be importable before the module is executed.
-    if _CLI_DIR and _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
-    spec = importlib.util.spec_from_file_location("set_value_under_test", SET_VALUE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("set_value_under_test", SET_VALUE_PATH, sys_path_dir=_CLI_DIR)
 
 
 class TestSnapClkLimitToDpm(unittest.TestCase):
@@ -106,30 +108,16 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
     # entry to prove the helper sorts the levels and filters out f <= 0.
     FCLK_DPM_HZ = [1600_000_000, 0, 1200_000_000, 2000_000_000, 1900_000_000]
 
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-    )
-
     @classmethod
     def setUpClass(cls):
-        if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        # Snapshot any real amdsmi already loaded so the stub does not leak into
-        # sibling suites sharing the interpreter; restored in tearDownClass.
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _snap(self, requested_mhz, frequency, min_mhz=None):
         # Shared harness: point the stubbed C entry point at a fixed DPM table
@@ -249,6 +237,9 @@ class _RecordingLogger:
 class _StubHelpers:
     """Minimal ``self.helpers`` stub for the GPU ``set`` path."""
 
+    def __init__(self):
+        self.recorded_errors = []
+
     def check_required_groups(self):
         pass
 
@@ -264,6 +255,12 @@ class _StubHelpers:
     def get_gpu_id_from_device_handle(self, handle):
         return 0
 
+    def store_device_error(self, logger, device, key, message, exception=None, code=None):
+        # Mirrors AMDSMIHelpers.store_device_error: show the error and note it so
+        # the run resolves to a non-zero exit code.
+        self.recorded_errors.append(exception if exception is not None else code)
+        logger.store_output(device, key, message)
+
 
 _ClkLimit = collections.namedtuple("_ClkLimit", ["clk_type", "lim_type", "val"])
 
@@ -277,14 +274,15 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
     ``N/A`` opposing-bound skip that keeps the requested limit settable.
     """
 
-    _SAVED_MODULE_NAMES = TestSnapClkLimitToDpm._SAVED_MODULE_NAMES
-
     @classmethod
     def setUpClass(cls):
-        if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         # Extra surface the set_gpu clk-limit branch touches beyond the snap
         # helper: the clock-info entry point, the set entry point, the clk-type
         # enum, and the BDF lookup used only to build error strings.
@@ -292,14 +290,6 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM = 4
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_clk_limit(
         self, clk_type, lim_type, val, min_clk, max_clk, dpm_hz=(), freq_raises=False
@@ -477,7 +467,3 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         set_calls, message = self._run_clk_limit("fclk", "min", 2500, min_clk=1000, max_clk=2000)
         self.assertEqual(set_calls, [])
         self.assertIn("greater than max", message)
-
-
-if __name__ == "__main__":
-    unittest.main()

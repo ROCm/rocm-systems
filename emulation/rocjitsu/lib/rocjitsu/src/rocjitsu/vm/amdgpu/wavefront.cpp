@@ -6,9 +6,20 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 
 namespace rocjitsu {
 namespace amdgpu {
+
+Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size,
+                     uint32_t max_wf_size, uint32_t max_sgprs, uint32_t max_vgprs,
+                     bool mode_has_gpr_idx_en)
+    : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
+      default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
+      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
+      memory_wait_checks_enabled_(cu.config().memory_wait_diagnostics !=
+                                  MemoryWaitDiagnostics::Off) {}
 
 Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
@@ -19,6 +30,13 @@ bool Wavefront::uses_separate_trap_ctrl() const {
 }
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
+
+uint64_t Wavefront::realtime_timestamp() const {
+  if (use_system_clock_)
+    return hsa_system_timestamp();
+  auto *engine = cu_.engine();
+  return engine ? engine->global_time() : 0;
+}
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   GpuVm *gpu_vm = cu_.gpu_vm();
@@ -71,7 +89,16 @@ void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barri
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
+bool Wavefront::fail_pm4_submission() {
+  if (!pm4_failure_)
+    return false;
+  pm4_failure_->fail();
+  return true;
+}
+
 void Wavefront::halt(CpCompletionNotice notice) {
+  // Observer snapshots are not instruction-side register consumers.
+  SuspendedMemoryWaitCheck disable_wait_check;
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot

@@ -38,7 +38,9 @@ TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
 
 TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
 {
-    const sample original{ 2, 5000, { counter_value{ 10, 42.0 } } };
+    const sample original{ 2,
+                           5000,
+                           { counter_value{ .counter_id = 10, .value = 42.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -56,8 +58,9 @@ TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
 {
     const sample original{ 1,
                            99000,
-                           { counter_value{ 100, 10.0 }, counter_value{ 101, 20.0 },
-                             counter_value{ 102, 30.0 } } };
+                           { counter_value{ .counter_id = 100, .value = 10.0 },
+                             counter_value{ .counter_id = 101, .value = 20.0 },
+                             counter_value{ .counter_id = 102, .value = 30.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -90,7 +93,7 @@ TEST_F(SdkPmcSampleTest, GetSizeEmpty)
 
 TEST_F(SdkPmcSampleTest, GetSizeSingleEntry)
 {
-    const sample test_sample{ 0, 0, { counter_value{ 10, 1.0 } } };
+    const sample test_sample{ 0, 0, { counter_value{ .counter_id = 10, .value = 1.0 } } };
 
     // header: 4 + 8 + 4 = 16
     // entry: counter_id(8) + double(8) = 16
@@ -102,7 +105,8 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
 {
     const sample original{ 3,
                            42000,
-                           { counter_value{ 1, 1.0 }, counter_value{ 2, 99.5 } } };
+                           { counter_value{ .counter_id = 1, .value = 1.0 },
+                             counter_value{ .counter_id = 2, .value = 99.5 } } };
 
     const size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
@@ -116,8 +120,11 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
 
 TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
 {
-    const sample first{ 0, 1000, { counter_value{ 1, 1.0 } } };
-    const sample second{ 1, 2000, { counter_value{ 2, 2.0 }, counter_value{ 3, 3.0 } } };
+    const sample first{ 0, 1000, { counter_value{ .counter_id = 1, .value = 1.0 } } };
+    const sample second{ 1,
+                         2000,
+                         { counter_value{ .counter_id = 2, .value = 2.0 },
+                           counter_value{ .counter_id = 3, .value = 3.0 } } };
 
     const size_t first_size = get_size(first);
     serialize(buffer.data(), first);

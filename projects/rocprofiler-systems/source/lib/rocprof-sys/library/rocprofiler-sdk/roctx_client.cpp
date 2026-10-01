@@ -29,9 +29,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 namespace
@@ -51,9 +49,11 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
     {
-        args->emplace_back(argument_info{ arg_number,
-                                          rocprofsys::utility::demangle(arg_type),
-                                          arg_name, arg_value_str });
+        args->emplace_back(
+            argument_info{ .arg_number = arg_number,
+                           .arg_type   = rocprofsys::utility::demangle(arg_type),
+                           .arg_name   = arg_name,
+                           .arg_value  = arg_value_str });
     }
     return 0;
 }
@@ -337,5 +337,4 @@ roctx_client<MarkerWriterPolicy>::marker_control_callback(
 
 template class roctx_client<default_marker_policy>;
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

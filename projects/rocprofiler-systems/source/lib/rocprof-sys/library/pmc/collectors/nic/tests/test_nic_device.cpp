@@ -35,7 +35,8 @@ protected:
     {
         EXPECT_CALL(*mock_backend, get_nic_asic_info())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+            .WillRepeatedly(Return(
+                asic_info{ .product_name = "AMD AINIC Test", .vendor_name = "AMD" }));
 
         EXPECT_CALL(*mock_backend, get_nic_port_info())
             .Times(AtLeast(1))
@@ -53,16 +54,16 @@ protected:
         EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))
             .WillRepeatedly(Return(std::vector<stat_entry>{
-                { "rx_rdma_ucast_bytes", 0 },
-                { "tx_rdma_ucast_bytes", 0 },
-                { "rx_rdma_ucast_pkts", 0 },
-                { "tx_rdma_ucast_pkts", 0 },
-                { "rx_rdma_cnp_pkts", 0 },
-                { "tx_rdma_cnp_pkts", 0 },
-                { "tx_rdma_ack_timeout", 0 },
-                { "resp_tx_pkt_seq_err", 0 },
-                { "req_rx_pkt_seq_err", 0 },
-                { "req_rx_impl_nak_seq_err", 0 },
+                { .name = "rx_rdma_ucast_bytes", .value = 0 },
+                { .name = "tx_rdma_ucast_bytes", .value = 0 },
+                { .name = "rx_rdma_ucast_pkts", .value = 0 },
+                { .name = "tx_rdma_ucast_pkts", .value = 0 },
+                { .name = "rx_rdma_cnp_pkts", .value = 0 },
+                { .name = "tx_rdma_cnp_pkts", .value = 0 },
+                { .name = "tx_rdma_ack_timeout", .value = 0 },
+                { .name = "resp_tx_pkt_seq_err", .value = 0 },
+                { .name = "req_rx_pkt_seq_err", .value = 0 },
+                { .name = "req_rx_impl_nak_seq_err", .value = 0 },
             }));
     }
 
@@ -73,16 +74,16 @@ protected:
         EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))
             .WillRepeatedly(Return(std::vector<stat_entry>{
-                { "rx_rdma_ucast_bytes", 1000000 },
-                { "tx_rdma_ucast_bytes", 2000000 },
-                { "rx_rdma_ucast_pkts", 5000 },
-                { "tx_rdma_ucast_pkts", 6000 },
-                { "rx_rdma_cnp_pkts", 100 },
-                { "tx_rdma_cnp_pkts", 200 },
-                { "tx_rdma_ack_timeout", 50 },
-                { "resp_tx_pkt_seq_err", 150 },
-                { "req_rx_pkt_seq_err", 250 },
-                { "req_rx_impl_nak_seq_err", 350 },
+                { .name = "rx_rdma_ucast_bytes", .value = 1000000 },
+                { .name = "tx_rdma_ucast_bytes", .value = 2000000 },
+                { .name = "rx_rdma_ucast_pkts", .value = 5000 },
+                { .name = "tx_rdma_ucast_pkts", .value = 6000 },
+                { .name = "rx_rdma_cnp_pkts", .value = 100 },
+                { .name = "tx_rdma_cnp_pkts", .value = 200 },
+                { .name = "tx_rdma_ack_timeout", .value = 50 },
+                { .name = "resp_tx_pkt_seq_err", .value = 150 },
+                { .name = "req_rx_pkt_seq_err", .value = 250 },
+                { .name = "req_rx_impl_nak_seq_err", .value = 350 },
             }));
     }
 
@@ -93,7 +94,8 @@ protected:
     {
         EXPECT_CALL(*mock_backend, get_nic_asic_info())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(asic_info{ "Generic NIC", "Unknown" }));
+            .WillRepeatedly(Return(
+                asic_info{ .product_name = "Generic NIC", .vendor_name = "Unknown" }));
 
         EXPECT_CALL(*mock_backend, get_nic_port_info())
             .Times(AtLeast(1))
@@ -169,7 +171,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
 {
     EXPECT_CALL(*mock_backend, get_nic_asic_info())
         .Times(AtLeast(1))
-        .WillRepeatedly(Return(asic_info{ "Test NIC", "Test Vendor" }));
+        .WillRepeatedly(Return(
+            asic_info{ .product_name = "Test NIC", .vendor_name = "Test Vendor" }));
 
     EXPECT_CALL(*mock_backend, get_nic_port_info())
         .Times(AtLeast(1))
@@ -191,7 +194,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
 {
     EXPECT_CALL(*mock_backend, get_nic_asic_info())
-        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+        .WillOnce(
+            Return(asic_info{ .product_name = "AMD AINIC Test", .vendor_name = "AMD" }));
 
     EXPECT_CALL(*mock_backend, get_nic_port_info())
         .WillOnce(Return(port_info{ "enp226s0" }));
@@ -200,16 +204,16 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
 
     EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
         .WillOnce(Return(std::vector<stat_entry>{
-            { "rx_rdma_ucast_bytes", 0 },
-            { "tx_rdma_ucast_bytes", 0 },
-            { "rx_rdma_ucast_pkts", 0 },
-            { "tx_rdma_ucast_pkts", 0 },
-            { "rx_rdma_cnp_pkts", 0 },
-            { "tx_rdma_cnp_pkts", 0 },
-            { "tx_rdma_ack_timeout", 0 },
-            { "resp_tx_pkt_seq_err", 0 },
-            { "req_rx_pkt_seq_err", 0 },
-            { "req_rx_impl_nak_seq_err", 0 },
+            { .name = "rx_rdma_ucast_bytes", .value = 0 },
+            { .name = "tx_rdma_ucast_bytes", .value = 0 },
+            { .name = "rx_rdma_ucast_pkts", .value = 0 },
+            { .name = "tx_rdma_ucast_pkts", .value = 0 },
+            { .name = "rx_rdma_cnp_pkts", .value = 0 },
+            { .name = "tx_rdma_cnp_pkts", .value = 0 },
+            { .name = "tx_rdma_ack_timeout", .value = 0 },
+            { .name = "resp_tx_pkt_seq_err", .value = 0 },
+            { .name = "req_rx_pkt_seq_err", .value = 0 },
+            { .name = "req_rx_impl_nak_seq_err", .value = 0 },
         }))
         .WillOnce(Throw(std::runtime_error("stats query failed")));
 
@@ -236,10 +240,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
     EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
         .Times(AtLeast(1))
         .WillRepeatedly(Return(std::vector<stat_entry>{
-            { "rx_rdma_ucast_bytes", 1000 },
-            { "unknown_stat_1", 9999 },
-            { "tx_rdma_ucast_bytes", 2000 },
-            { "some_other_counter", 8888 },
+            { .name = "rx_rdma_ucast_bytes", .value = 1000 },
+            { .name = "unknown_stat_1", .value = 9999 },
+            { .name = "tx_rdma_ucast_bytes", .value = 2000 },
+            { .name = "some_other_counter", .value = 8888 },
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);
@@ -264,8 +268,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
     EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
         .Times(AtLeast(1))
         .WillRepeatedly(Return(std::vector<stat_entry>{
-            { "rx_rdma_ucast_bytes", 500 },
-            { "tx_rdma_cnp_pkts", 10 },
+            { .name = "rx_rdma_ucast_bytes", .value = 500 },
+            { .name = "tx_rdma_cnp_pkts", .value = 10 },
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);
@@ -295,7 +299,7 @@ TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
 
     EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
         .WillOnce(Return(std::vector<stat_entry>{
-            { "rx_rdma_ucast_bytes", 0 },
+            { .name = "rx_rdma_ucast_bytes", .value = 0 },
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);
@@ -309,7 +313,8 @@ TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
 TEST_F(NicDeviceTest, DeviceInitializes_WhenPortInfoThrows)
 {
     EXPECT_CALL(*mock_backend, get_nic_asic_info())
-        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+        .WillOnce(
+            Return(asic_info{ .product_name = "AMD AINIC Test", .vendor_name = "AMD" }));
 
     EXPECT_CALL(*mock_backend, get_nic_port_info())
         .WillOnce(Throw(std::runtime_error("get_nic_port_info failed")));
@@ -318,7 +323,7 @@ TEST_F(NicDeviceTest, DeviceInitializes_WhenPortInfoThrows)
 
     EXPECT_CALL(*mock_backend, get_nic_rdma_port_statistics(0))
         .WillOnce(Return(std::vector<stat_entry>{
-            { "rx_rdma_ucast_bytes", 0 },
+            { .name = "rx_rdma_ucast_bytes", .value = 0 },
         }));
 
     const device<MockBackend> dev(mock_backend, test_index);

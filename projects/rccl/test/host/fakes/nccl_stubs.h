@@ -35,6 +35,9 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
+
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 
@@ -75,6 +78,10 @@ extern std::function<bool()> g_profilerPluginLoaded;
 
 // Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
+
+// src/misc/cudawrap.cc. ResetNcclStubs() restores this, so a raised version gate cannot leak forward.
+constexpr int kDefaultCudaDriverVersion = 12000;
+extern int ncclCudaDriverVersionCache;
 
 void ResetNcclStubs();
 

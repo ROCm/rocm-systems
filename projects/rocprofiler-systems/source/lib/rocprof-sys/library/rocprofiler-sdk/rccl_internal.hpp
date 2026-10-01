@@ -22,9 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 /**
@@ -188,11 +186,10 @@ public:
 
 private:
     std::shared_ptr<PmcRegistrar>                    m_pmc_registrar;
-    mutable std::mutex                               m_registered_gpus_mutex{};
-    std::unordered_set<std::uint32_t>                m_registered_gpus{};
-    mutable std::mutex                               m_cumulative_mutex{};
-    std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device{};
+    mutable std::mutex                               m_registered_gpus_mutex;
+    std::unordered_set<std::uint32_t>                m_registered_gpus;
+    mutable std::mutex                               m_cumulative_mutex;
+    std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device;
 };
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

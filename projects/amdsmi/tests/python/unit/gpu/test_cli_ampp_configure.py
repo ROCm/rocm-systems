@@ -32,18 +32,20 @@ import unittest
 
 # ``common.common`` bootstraps the real amdsmi package at import time (sys.path
 # insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
-# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself and
-# only needs ``amdsmi_path`` to locate the *installed* CLI fallback, so degrade
-# gracefully: if the shared harness cannot load, drop to ``None`` and rely on
-# the in-tree source checkout (resolved first below).
+# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself, so
+# degrade gracefully rather than erroring at import; without the harness there is
+# no resolver, and the suite skips with the reason below.
 try:
-    from common.common import amdsmi_path, resolve_cli_dir
+    from common.common import cli_search_order, find_cli_dir
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
-    resolve_cli_dir = None
+    cli_search_order = None
+    find_cli_dir = None
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_CLI_DIR = resolve_cli_dir(_THIS_DIR, amdsmi_path) if resolve_cli_dir else None
+_CLI_DIR = (
+    find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+    if find_cli_dir and cli_search_order
+    else None
+)
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else ""
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
 HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py") if _CLI_DIR else ""

@@ -257,13 +257,31 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
     av_pkt->pts = pPicParams->pts;
 
     if (!b_multithreading_) {
-        // flush and reconfigure the decoder when we reached eos
-        DecodeAvFrame(av_pkt, dec_frames_[av_frame_cnt_]);
-        NotifyPictureDisplay();
+        // flush and reconfigure the decoder when we reached eos.
+        // Fail fast on a genuine decode/callback error, mirroring the GPU path
+        // (CHECK_VAAPI/CHECK_HIP): otherwise a failed decode is reported as
+        // ROCDEC_SUCCESS. DecodeAvFrame returns < 0 only for real errors; benign
+        // EAGAIN/EOF/EINVAL flow control is normalized to 0 inside it.
+        if (DecodeAvFrame(av_pkt, dec_frames_[av_frame_cnt_]) < 0) {
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+        rocDecStatus disp_status = NotifyPictureDisplay();
+        if (disp_status != ROCDEC_SUCCESS) {
+            FunctionExitLog(g_rocdec_logger);
+            return disp_status;
+        }
         if ((!pPicParams->bitstream_data_len || pPicParams->flags == ROCDEC_PKT_ENDOFPICTURE) && !end_of_stream_) {
             AVPacket pkt = {0};
-            DecodeAvFrame(&pkt, dec_frames_[av_frame_cnt_]);
-            NotifyPictureDisplay();
+            if (DecodeAvFrame(&pkt, dec_frames_[av_frame_cnt_]) < 0) {
+                FunctionExitLog(g_rocdec_logger);
+                return ROCDEC_RUNTIME_ERROR;
+            }
+            disp_status = NotifyPictureDisplay();
+            if (disp_status != ROCDEC_SUCCESS) {
+                FunctionExitLog(g_rocdec_logger);
+                return disp_status;
+            }
         }
     } else {
         //push packet into packet q for decoding
@@ -283,7 +301,11 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
     }
     if (pPicParams->flags & ROCDEC_PKT_ENDOFSTREAM) {
          // flush last packet and let FFMpeg decode last frames
-         NotifyPictureDisplay();
+         rocDecStatus disp_status = NotifyPictureDisplay();
+         if (disp_status != ROCDEC_SUCCESS) {
+             FunctionExitLog(g_rocdec_logger);
+             return disp_status;
+         }
     }
 
     FunctionExitLog(g_rocdec_logger);
@@ -350,6 +372,8 @@ void AvcodecVideoDecoder::DecodeThread() {
     AVPacket *pkt;
     do {
         pkt = PopPacket();
+        // TODO: propagate DecodeAvFrame errors if multithreading is re-enabled
+        // (currently unreachable: b_multithreading_ is hard-forced false).
         DecodeAvFrame(pkt, dec_frames_[av_frame_cnt_]);
     } while (!end_of_stream_);
     FunctionExitLog(g_rocdec_logger);
@@ -360,7 +384,15 @@ int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
     int status;
     //send packet to av_codec
     status = avcodec_send_packet(dec_context_, av_pkt);
-    if (status < 0) {
+    if (status == AVERROR(EAGAIN) || status == AVERROR_EOF || status == AVERROR(EINVAL)) {
+        // Benign flow control in avcodec's send/receive/flush model, not a decode error:
+        // EAGAIN = decoder is full and must be drained first; EOF = already flushed;
+        // EINVAL = a flush is required before the next packet (drain-state transition).
+        // The authoritative decode-failure signal is avcodec_receive_frame() below.
+        FunctionExitLog(g_rocdec_logger);
+        return 0;
+    }
+    else if (status < 0) {
         if (av_pkt->data && av_pkt->size)
             ErrorLog(g_rocdec_logger, "Error sending av packet for decoding: status:");
         FunctionExitLog(g_rocdec_logger);
@@ -375,16 +407,22 @@ int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
             return 0;
         }
         else if (status < 0) {
+            // Genuine decode failure -- propagate it (was previously swallowed as 0,
+            // making a failed decode report ROCDEC_SUCCESS to the caller).
             ErrorLog(g_rocdec_logger, "Error during decoding");
             FunctionExitLog(g_rocdec_logger);
-            return 0;
+            return status;
         }
         // for the first frame, initialize OutputsurfaceInfo
         if (p_frame->width != coded_width_ || p_frame->height != coded_height_ || p_frame->format != av_sample_format) {
             coded_width_ = p_frame->width;
             coded_height_ = p_frame->height;
             av_sample_format = p_frame->format;
-            NotifyNewSequence(p_frame);
+            if (NotifyNewSequence(p_frame) != ROCDEC_SUCCESS) {
+                ErrorLog(g_rocdec_logger, "NotifyNewSequence failed");
+                FunctionExitLog(g_rocdec_logger);
+                return AVERROR_EXTERNAL;
+            }
         }
         // push frame into q
         DecFrameBufferFFMpeg dec_frame = { 0 };
