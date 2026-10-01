@@ -590,12 +590,29 @@ def test_framing_without_events_is_not_a_recording_either(tmp_path):
     """
     pid_dir = make_process(tmp_path, 74, write_manifest=False)
     header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, 5, 0)
-    trailer = struct.pack("<H", inspect_archive.EOF_MARKER) + b"\0" * 42
+    trailer = struct.pack(
+        "<HQQQI2xQI", inspect_archive.EOF_MARKER, 0, 0, 0,
+        inspect_archive.EOF_RECORD_BYTES, 0, inspect_archive.EOF_MAGIC,
+    )
     (pid_dir / "events.bin").write_bytes(header + trailer)
 
     report = inspect_archive.inspect(tmp_path, use_playback=False)
 
     assert report.recorded_processes == []
+
+
+def test_the_trailer_sentinel_alone_does_not_end_the_recording(tmp_path):
+    """hrr_reader.cpp keeps a 0xFFFF record that is not a whole trailer with
+    its magic as an unknown event, so the inspector counts it as one too.
+    """
+    pid_dir = make_process(tmp_path, 78, write_manifest=False)
+    header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, 5, 0)
+    unknown = struct.pack("<HQQQI2x", inspect_archive.EOF_MARKER, 0, 0, 0, 32)
+    (pid_dir / "events.bin").write_bytes(header + unknown)
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    assert len(report.recorded_processes) == 1
 
 
 def test_the_reader_version_banner_is_parsed_not_compared_as_a_string(tmp_path, monkeypatch):

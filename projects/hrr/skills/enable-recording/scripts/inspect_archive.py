@@ -60,6 +60,12 @@ HEADER_MAGIC = 0x52524845  # "HRRE"
 # whose very first record is the trailer recorded nothing, however many bytes
 # it holds: header plus trailer is 52 bytes of no events at all.
 EOF_MARKER = 0xFFFF
+# `hrr_eof_record`: the event header, uint64 total_events, uint32 eof_magic.
+# The sentinel alone is not the trailer: the reader takes 0xFFFF with any other
+# length or magic as an unknown event and keeps it.
+EOF_RECORD_BYTES = 44
+EOF_MAGIC = 0x464F4548  # "HEOF"
+EOF_MAGIC_OFFSET = 40
 # `hrr_event_header`: uint16 event_type, uint64 sequence_id, uint64 timestamp_ns,
 # uint64 thread_id, uint32 payload_length, 2 bytes of padding. Packed, 32 bytes.
 EVENT_HEADER_BYTES = 32
@@ -175,19 +181,24 @@ def _holds_an_event(events: Path) -> bool:
     has to come off the file. Bytes are not the answer: a clean trailer with no
     events leaves 52 of them, and a process killed mid-write can leave a header
     torn in half. So the first record has to be a whole event header, not the
-    trailer sentinel, and its declared length has to make sense against the
+    clean-shutdown trailer, and its declared length has to make sense against the
     file: a plausible record, rather than any two bytes that are not 0xFFFF.
     """
     try:
         size = events.stat().st_size
         with events.open("rb") as handle:
-            head = handle.read(HEADER_BYTES + EVENT_HEADER_BYTES)
+            head = handle.read(HEADER_BYTES + EOF_RECORD_BYTES)
     except OSError:
         return False
     if len(head) < HEADER_BYTES + EVENT_HEADER_BYTES:
         return False
     event_type, payload_length = struct.unpack_from("<H24xI", head, HEADER_BYTES)
-    if event_type == EOF_MARKER:
+    if (
+        event_type == EOF_MARKER
+        and payload_length == EOF_RECORD_BYTES
+        and len(head) == HEADER_BYTES + EOF_RECORD_BYTES
+        and struct.unpack_from("<I", head, HEADER_BYTES + EOF_MAGIC_OFFSET)[0] == EOF_MAGIC
+    ):
         return False
     # payload_length counts the header too, and a record cannot claim more than
     # the file holds.
