@@ -1473,8 +1473,7 @@
       "timeout": 0,
       "env_variables": {
         "NCCL_DEBUG": "",
-        "UT_MIN_GPUS": "4",
-        "NCCL_CUMEM_ENABLE": "0"
+        "UT_MIN_GPUS": "4"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
@@ -2151,8 +2150,7 @@
       "timeout": 0,
       "env_variables": {
         "NCCL_DEBUG": "VERSION",
-        "NCCL_DEBUG_SUBSYS": "ALL",
-        "NCCL_CUMEM_ENABLE": "0"
+        "NCCL_DEBUG_SUBSYS": "ALL"
       },
       "tests": [
         {
