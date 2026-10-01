@@ -740,7 +740,8 @@ reconcile:
       haveRecv = (int*)ncclRmaCompactConsensusRecv(registrations, registrationsStack, sizeof(registrationsStack),
                                                    cComm->nranks, sizeof(int));
       if (haveRecv == NULL) {
-        if (ncclCalloc(&haveRecv, cComm->nranks) != ncclSuccess) {
+        ret = ncclCalloc(&haveRecv, cComm->nranks);
+        if (ret != ncclSuccess) {
           WARN("NET/IB/RMA: failed to allocate registration consensus buffer");
           goto fail;
         }
