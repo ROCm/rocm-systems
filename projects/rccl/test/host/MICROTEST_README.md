@@ -215,6 +215,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `libmlx5.so`. Each test runs in its own process because the builders open the
     fakes with `RTLD_NODELETE`. The fakes are built and installed beside the test
     binary; the tests skip if they are missing.
+  - `graph/rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from
+    `rccl-graph-gen-test.cc`); suites `GraphGen*Test.*`. Covers ring
+    construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
+    tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
+    selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
+    driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
