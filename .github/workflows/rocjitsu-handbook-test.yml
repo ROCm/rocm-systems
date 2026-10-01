@@ -3,9 +3,8 @@ name: "rocjitsu-handbook"
 on:
   pull_request:
     paths:
-      - "emulation/rocjitsu/website/handbook/**"
-      - "emulation/rocjitsu/docs/**"
-      - "emulation/rocjitsu/README.md"
+      # Source links can target any file within Rocjitsu.
+      - "emulation/rocjitsu/**"
       - "!emulation/rocjitsu/docs/sphinx/**"
       - ".github/workflows/rocjitsu-handbook-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
@@ -13,9 +12,7 @@ on:
     branches:
       - develop
     paths:
-      - "emulation/rocjitsu/website/handbook/**"
-      - "emulation/rocjitsu/docs/**"
-      - "emulation/rocjitsu/README.md"
+      - "emulation/rocjitsu/**"
       - "!emulation/rocjitsu/docs/sphinx/**"
       - ".github/workflows/rocjitsu-handbook-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"

@@ -7,6 +7,8 @@ docs_dir: ../../docs
 exclude_docs: |
   /sphinx/
 validation:
+  nav:
+    omitted_files: warn
   links:
     anchors: warn
 site_dir: site
@@ -76,14 +78,28 @@ nav:
       - Race detection: race-detector.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
+      - QEMU VFIO-user compute: qemu-vfio.md
+      - Vulkan compute: vulkan-compute.md
+      - Memory wait diagnostics: memory-wait-diagnostics.md
   - Developer guide:
       - Architecture: architecture.md
       - Code style: style.md
       - Simulation engine: simdojo.md
       - GPU hardware model: vm-design.md
       - Binary translation: dbt-design.md
+      - Translation tool: rj_dbt_translate.md
+      - DBT guest mode: rocjitsu_dbt_guest.md
       - Binary instrumentation: dbi-design.md
+      - Instrumentation overview: dbi-overview.md
       - Execution plugins: plugins.md
+      - ISA code generation: codegen.md
+      - ISA target providers: isa-target-providers.md
+      - ISA gap audit: isa-gap-audit.md
+      - Adding a GPU: npi.md
+      - Asynchronous MMA execution: async-instructions.md
+      - MMA lookahead admission: mma-admission.md
+      - Concurrent dispatch: concurrent-dispatch.md
+      - Memory wait coverage: memory-wait-counter-coverage.md
   - Project:
       - Blog: blog/index.md
       - Performance dashboard: performance-dashboard.md

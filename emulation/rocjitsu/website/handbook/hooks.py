@@ -69,11 +69,14 @@ class SourceLinksProcessor(Treeprocessor):
     def __init__(self, md, extension):
         super().__init__(md)
         self.extension = extension
+        # Material retains excerpt renderers until after other pages render.
+        self.source_path = extension.source_path
+        self.page_uri = extension.page_uri
 
     def run(self, root):
         extension = self.extension
         # The README keeps its CI badge on GitHub, but the handbook omits it.
-        if extension.source_path == extension.docs_dir.parent / 'README.md':
+        if self.source_path == extension.docs_dir.parent / 'README.md':
             for paragraph in list(root):
                 if paragraph.tag != 'p' or len(paragraph) != 1 or paragraph.text:
                     continue
@@ -94,11 +97,11 @@ class SourceLinksProcessor(Treeprocessor):
             url = urlsplit(link.get('href', ''))
             if url.scheme or url.netloc or not url.path or url.path.startswith('/'):
                 continue
-            target = (extension.source_path.parent / unquote(url.path)).resolve()
+            target = (self.source_path.parent / unquote(url.path)).resolve()
             if target in extension.published_sources:
                 destination = posixpath.relpath(
                     extension.published_sources[target],
-                    posixpath.dirname(extension.page_uri) or '.',
+                    posixpath.dirname(self.page_uri) or '.',
                 )
                 link.set('href', urlunsplit(url._replace(path=destination)))
                 continue
@@ -132,8 +135,9 @@ class SourceLinksExtension(Extension):
         self.published_sources = {}
 
     def extendMarkdown(self, md):
-        # MkDocs resolves and validates local links at priority 0.
-        md.treeprocessors.register(SourceLinksProcessor(md, self), 'source_links', 1)
+        # Run before MkDocs (priority 0) and Material excerpts (priority 1)
+        # resolve local links into output URLs.
+        md.treeprocessors.register(SourceLinksProcessor(md, self), 'source_links', 2)
 
 
 def on_config(config):
