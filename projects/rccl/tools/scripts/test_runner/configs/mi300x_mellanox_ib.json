@@ -200,6 +200,11 @@
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
         },
         {
+          "name": "UBR_MultiSegment_NetSegmentCountOddSizedHipMalloc",
+          "description": "NET segment count of an odd-sized hipMalloc registration must not walk past the allocation into the page-rounded tail",
+          "test_filter": "UBR_MultiSegment.NetSegmentCountOddSizedHipMalloc"
+        },
+        {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
           "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
