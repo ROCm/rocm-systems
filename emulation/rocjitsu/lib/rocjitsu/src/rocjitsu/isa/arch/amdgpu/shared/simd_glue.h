@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1414,9 +1415,9 @@ template <typename T, typename Inst>
 /// 64-bit-lane VOP2 binary SIMD fast path (v_add_f64 / v_mul_f64 /
 /// v_max_num_f64 / v_min_num_f64). VOP2 has no abs/neg/omod/clamp fields and
 /// reads its second source as `vsrc1` (not `src1`); otherwise identical to the
-/// f64 FMA vop2 path minus the dst-accumulate operand. add/mul are bit-exact;
-/// fmax/fmin carry the accepted NaN-payload / signed-zero-tie carve-out (same as
-/// the f64 vop3 binary path and every other min/max).
+/// f64 FMA vop2 path minus the dst-accumulate operand. Min/max callers use
+/// minmax::evaluate, sharing the scalar path's input flushing, NaN handling,
+/// and signed-zero ordering.
 template <typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &inst, Wavefront &wf,
@@ -1823,8 +1824,8 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_b16_vop3_simd(In
 /// comparison::evaluate on the raw encodings with the captured MODE
 /// input-denormal policy, the same evaluation the scalar body uses, so host
 /// DAZ cannot alter a lane and the compares are bit-exact for every input
-/// including NaN/Inf/±0/subnormals (no accepted-divergence carve-out, unlike
-/// fma / min-max).
+/// including NaN/Inf/±0/subnormals. Accepted divergences in legacy host
+/// fmin/fmax paths do not apply to these compares or to minmax::evaluate.
 template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,

@@ -2208,7 +2208,7 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMaxF32', 'VopdMaxNumF32'),
+                    ('VopdMaxF32',),
                     '''
                     {
                       float result = std::fmax(std::bit_cast<float>(src0),
@@ -2218,12 +2218,30 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMinF32', 'VopdMinNumF32'),
+                    ('VopdMaxNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>(
+                          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinF32',),
                     '''
                     {
                       float result = std::fmin(std::bit_cast<float>(src0),
                                                std::bit_cast<float>(src1));
                       return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinNum>(
+                          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
