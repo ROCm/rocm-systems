@@ -17,7 +17,17 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
-# SPM JSON execute with the MI450 reference clock
+# Reference-clock sampling is enabled for gfx1200, gfx1201, and gfx1250.
+# IS_DISABLED and SANITIZER keep this off with the rest of the SPM suite.
+set(IS_REFCLK_DISABLED True)
+if(NOT IS_DISABLED AND NOT SANITIZER AND rocprofiler-sdk-tests-gfx-info)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 spm-refclk-gpu-0-gfx-info)
+    if("${spm-refclk-gpu-0-gfx-info}" MATCHES "^(gfx1200|gfx1201|gfx1250)(-strict)?$")
+        set(IS_REFCLK_DISABLED False)
+    endif()
+endif()
+
+# SPM JSON execute with the reference clock
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-refclk-json-execute
     COMMAND
@@ -31,7 +41,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;spm"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_REFCLK_DISABLED})
 
 # PMC compare execute
 rocprofiler_add_integration_execute_test(
@@ -75,7 +85,7 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED
         "rocprofv3-test-spm-refclk-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_REFCLK_DISABLED})
 
 # Multi-gpu JSON execute
 rocprofiler_add_integration_execute_test(
