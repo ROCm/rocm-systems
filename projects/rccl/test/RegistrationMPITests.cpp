@@ -1320,9 +1320,9 @@ TEST_F(UBR_MultiSegment, Generic)
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
     // ncclCommRegister must publish a cache entry for the multi-segment buffer.
     ASSERT_MPI_NE(reg, nullptr);
-    // NET_REG_COMPLETE is set on the first peer. ALL_PEERS is the all-peers
-    // success, so a missing netNSegments write fails instead of skipping.
-    const bool netPeersDone = (reg->state & NET_REG_ALL_PEERS) != 0;
+    // NET_REG_COMPLETE is set on the first peer. allPeers is the all-peers
+    // success, so a wrong cached count fails instead of skipping.
+    const bool netPeersDone = reg->rcclNet.allPeers;
     {
         const std::string why = mpiCoordinatedSkipReason(
             !MPIHelpers::anyRankTrue(netPeersDone),
@@ -1330,7 +1330,7 @@ TEST_F(UBR_MultiSegment, Generic)
         if (!why.empty()) GTEST_SKIP() << why;
     }
     if (netPeersDone) {
-        ASSERT_EQ(reg->netNSegments, kNumSegments)
+        ASSERT_EQ(reg->rcclNet.nSegments, kNumSegments)
             << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
     }
 }
