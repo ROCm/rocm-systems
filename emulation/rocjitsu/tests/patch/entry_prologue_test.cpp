@@ -175,16 +175,40 @@ TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
   EXPECT_EQ(storage->entry_temp_base, 28u);
 }
 
-// The floor is 25, so the run could start at 26 and the link pair sits above it
-// untouched. Treating s[30:31] as a floor instead would push the run to 32 and
-// need eight more SGPRs than the kernel has reason to allocate.
-TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheReservedLinkPair) {
+// A CDNA allocation's top six SGPRs hold FLAT_SCRATCH, XNACK_MASK and VCC, so
+// a 32-SGPR kernel leaves ordinary storage only below s26. A floor of 25 used
+// to place the run at s[26:27], which flat scratch aliases.
+TEST(PlanDbiEntryStorage, RunInTheCdnaSpecialRegisterTailFailsClosed) {
   const Kernel kernel(kernel_naming_sgpr(24));
+  std::string error;
+  const auto storage =
+      plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
+                             /*kernel_sgpr_count=*/32, link_pair(), &error);
+  EXPECT_FALSE(storage.has_value());
+  EXPECT_NE(error.find("special registers"), std::string::npos) << error;
+}
+
+// The same kernel with room below the tail places the run under the reserved
+// link pair rather than treating s[30:31] as a floor.
+TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheCdnaSpecialRegisterTail) {
+  const Kernel kernel(kernel_naming_sgpr(18));
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/32, link_pair());
   ASSERT_TRUE(storage.has_value());
+  EXPECT_EQ(storage->persistent_base, 20u);
+  EXPECT_EQ(storage->entry_temp_base, 22u);
+}
+
+// RDNA's special registers sit outside the per-wave pool, so the same request
+// that fails on CDNA places the run at s[26:27]. Only the tail depends on the
+// arch here; the blocks are decoded as CDNA4.
+TEST(PlanDbiEntryStorage, RdnaHasNoSpecialRegisterTail) {
+  const Kernel kernel(kernel_naming_sgpr(24));
+  const auto storage =
+      plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
+                             ROCJITSU_CODE_ARCH_RDNA4, /*kernel_sgpr_count=*/32, link_pair());
+  ASSERT_TRUE(storage.has_value());
   EXPECT_EQ(storage->persistent_base, 26u);
-  EXPECT_EQ(storage->entry_temp_base, 28u);
 }
 
 // A floor of 29 aligns to 30, where the run would cover the link pair. The
@@ -192,7 +216,7 @@ TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheReservedLinkPair) {
 TEST(PlanDbiEntryStorage, StepsPastAReservedPairTheRunWouldCover) {
   const Kernel kernel(kernel_naming_sgpr(28));
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
-                                              kArch, /*kernel_sgpr_count=*/40, link_pair());
+                                              kArch, /*kernel_sgpr_count=*/48, link_pair());
   ASSERT_TRUE(storage.has_value());
   EXPECT_EQ(storage->persistent_base, 32u);
   EXPECT_EQ(storage->entry_temp_base, 34u);
