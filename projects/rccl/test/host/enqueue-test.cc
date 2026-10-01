@@ -1995,40 +1995,55 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 // ===========================================================================
 
 namespace {
-// cudaArch is 100 * major + 10 * minor (init.cc), so gfx942 is 940.
+// archName is the full gcnArchName and cudaArch is 100 * major + 10 * minor
+// (init.cc). Both are set: cudaArch is 940 for every gfx94x, so a check on it
+// would also cap gfx940/gfx941.
 struct PartsComm {
   std::unique_ptr<ncclComm> comm{new ncclComm{}};
-  PartsComm(int cudaArch, int nNodes, int perPeer) {
+  std::string arch;
+  PartsComm(const char* gcnArchName, int cudaArch, int nNodes, int perPeer) : arch(gcnArchName) {
+    comm->archName = &arch[0];
     comm->cudaArch = cudaArch;
     comm->nNodes = nNodes;
     comm->p2pnChannelsPerPeer = perPeer;
   }
   ncclComm* get() { return comm.get(); }
 };
+constexpr const char* kGfx942 = "gfx942:sramecc+:xnack-";
 void SetDirectAgCap(int64_t v) { SetParam("RCCL_DIRECT_ALLGATHER_P2P_NCHANNELS", v); }
 }  // namespace
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_Gfx942MultiNode_CapsDirectAllGatherToTwo) {
-  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  PartsComm pc(kGfx942, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
   EXPECT_EQ(2, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_Gfx942SingleNode_KeepsFullCount) {
   // Differential with the test above: same arch, one node.
-  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/1, /*perPeer=*/8);
+  PartsComm pc(kGfx942, /*cudaArch=*/940, /*nNodes=*/1, /*perPeer=*/8);
   EXPECT_EQ(8, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_OtherArchMultiNode_KeepsFullCount) {
-  for (int arch : {900, 950, 1100}) {
-    PartsComm pc(arch, /*nNodes=*/2, /*perPeer=*/4);
-    EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather)) << "cudaArch=" << arch;
+  const std::pair<const char*, int> archs[] = {
+    {"gfx90a:sramecc+:xnack-", 900}, {"gfx950:sramecc+:xnack-", 950}, {"gfx1100", 1100}};
+  for (const auto& [name, cudaArch] : archs) {
+    PartsComm pc(name, cudaArch, /*nNodes=*/2, /*perPeer=*/4);
+    EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather)) << name;
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_OtherGfx94xMultiNode_KeepsFullCount) {
+  // Same cudaArch as gfx942: the default must key on the arch name.
+  for (const char* name : {"gfx940:sramecc+:xnack-", "gfx941:sramecc+:xnack-"}) {
+    PartsComm pc(name, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+    EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather)) << name;
   }
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_OtherP2pTraffic_NeverCapped) {
   // Where the default caps Direct AllGather, and under an explicit cap too.
-  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  PartsComm pc(kGfx942, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
   for (int64_t cap : {int64_t(-1), int64_t(1)}) {
     SetDirectAgCap(cap);
     for (ncclFunc_t f : {ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather, ncclFuncScatter}) {
@@ -2038,24 +2053,24 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_OtherP2pTraffic_NeverCapped) {
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_ZeroOverride_DisablesDefaultCap) {
-  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  PartsComm pc(kGfx942, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
   SetDirectAgCap(0);
   EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_Override_AppliesOnAnyArchAndNodeCount) {
-  PartsComm single(/*cudaArch=*/950, /*nNodes=*/1, /*perPeer=*/8);
+  PartsComm single("gfx950:sramecc+:xnack-", /*cudaArch=*/950, /*nNodes=*/1, /*perPeer=*/8);
   SetDirectAgCap(1);
   EXPECT_EQ(1, rcclP2pTaskParts(single.get(), ncclFuncAllGather));
-  PartsComm multi(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  PartsComm multi(kGfx942, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
   SetDirectAgCap(3);
   EXPECT_EQ(3, rcclP2pTaskParts(multi.get(), ncclFuncAllGather));
 }
 
 TEST_F(EnqueueMicrotest, P2pTaskParts_CapAboveFullCount_KeepsFullCount) {
-  PartsComm fewer(/*cudaArch=*/940, /*nNodes=*/4, /*perPeer=*/1);
+  PartsComm fewer(kGfx942, /*cudaArch=*/940, /*nNodes=*/4, /*perPeer=*/1);
   EXPECT_EQ(1, rcclP2pTaskParts(fewer.get(), ncclFuncAllGather)) << "default cap 2 must not raise 1";
-  PartsComm pc(/*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
+  PartsComm pc(kGfx942, /*cudaArch=*/940, /*nNodes=*/2, /*perPeer=*/4);
   SetDirectAgCap(16);
   EXPECT_EQ(4, rcclP2pTaskParts(pc.get(), ncclFuncAllGather));
 }

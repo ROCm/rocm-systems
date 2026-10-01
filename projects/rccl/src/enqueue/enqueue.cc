@@ -1332,7 +1332,7 @@ static int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
   int full = comm->p2pnChannelsPerPeer;
   if (collAPI != ncclFuncAllGather) return full;
   int64_t cap = rcclParamDirectAllGatherP2pNChannels();
-  if (cap < 0) cap = (comm->cudaArch == 940 && comm->nNodes > 1) ? 2 : 0;
+  if (cap < 0) cap = (IsArchMatch(comm->archName, "gfx942") && comm->nNodes > 1) ? 2 : 0;
   return cap > 0 ? (int)std::min<int64_t>(full, cap) : full;
 }
 
