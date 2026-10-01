@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -1056,7 +1057,7 @@ public:
   void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
     assert(decoder != nullptr);
     assert(!has_active_wfs());
-    decoder->enable_pool();
+    decoded_inst_cache_.clear();
     decoder_ = std::move(decoder);
   }
 
@@ -1291,6 +1292,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  DecodedInstructionCache decoded_inst_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
