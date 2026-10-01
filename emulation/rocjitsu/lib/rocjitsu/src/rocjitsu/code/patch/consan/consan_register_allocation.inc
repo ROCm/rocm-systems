@@ -2758,7 +2758,8 @@ configure_automatic_dispatch_id_sgprs(const OperatingPoint &base, const Resource
 [[nodiscard]] OperatingPointAttempt
 plan_dispatch_id_fallback(const Request &request, const BoundRuntimeResources &resources,
                           const OperatingPoint &base, const ResourceProblem &problem,
-                          std::span<const CandidateResourcePlan> site_plans) {
+                          std::span<const CandidateResourcePlan> site_plans,
+                          const ResourcePlanningState &planning_state) {
   OperatingPoint point = base;
   OperatingPointAttempt attempt{
       .attempted_operating_point = base,
@@ -2777,7 +2778,9 @@ plan_dispatch_id_fallback(const Request &request, const BoundRuntimeResources &r
   std::vector<TransientSgprAssignment> &owner_transient_sgprs = point.owner_transient_sgprs;
   owner_transient_sgprs.clear();
   point.automatic_partial_exec_save_sgprs = true;
-  ResourcePlanningState planning_state(problem, point, site_plans);
+  // The fallback changes only dispatch representation. Reuse the caller's
+  // immutable CFG, owner summaries and liveness for the same resource problem;
+  // speculative scalar assignments remain local to point.
   std::vector<std::string> diagnostics;
   if (!configure_automatic_transient_sgpr_assignments(point, problem, site_plans, diagnostics,
                                                       planning_state, /*dispatch_only=*/true)) {

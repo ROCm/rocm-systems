@@ -198,9 +198,9 @@ TransformArtifacts try_patch(TransformArtifacts result, const Options &options,
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
   result.operating_point = effective_point;
-  OperatingPointAttempt dispatch_fallback =
-      detail::plan_dispatch_id_fallback(effective_options, effective_options, effective_point,
-                                        resource_problem, result.resource_plans);
+  OperatingPointAttempt dispatch_fallback = detail::plan_dispatch_id_fallback(
+      effective_options, effective_options, effective_point, resource_problem,
+      result.resource_plans, resource_planning_state);
   if (dispatch_fallback.accepted()) {
     effective_point = std::move(dispatch_fallback.attempted_operating_point);
     result.warnings.insert(result.warnings.end(),

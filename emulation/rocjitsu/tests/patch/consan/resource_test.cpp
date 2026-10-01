@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
+#include "rocjitsu/code/patch/consan/consan_register_allocation.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <array>
@@ -10,6 +11,77 @@
 
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSanResourcePlan, DispatchFallbackReusesAnalysisAcrossScalarAssignmentChanges) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store = build_cdna4_ds_store_b32(0u, 1u, 0u, arch);
+  ASSERT_TRUE(store);
+  std::vector<uint32_t> words(800u, build_s_nop(0, arch));
+  std::copy(store->begin(), store->end(), words.begin());
+  words[store->size()] = build_s_mov_b32(0u, 40u, arch);
+  words.back() = build_s_endpgm(arch);
+  const auto bytes = make_cdna4_lds_code_object(words, "reuse_dispatch_analysis");
+  TestOptions options = test_options();
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(16u);
+  options.track_barriers = false;
+  options.track_atomics = false;
+  const auto lowered = test_lower_consan(bytes, options);
+  ASSERT_TRUE(patch_succeeded(lowered)) << testing::PrintToString(lowered.errors);
+  ASSERT_FALSE(lowered.resource_plans.empty());
+  ASSERT_EQ(lowered.program_inventory.kernels().size(), 1u);
+  const auto &kernel = lowered.program_inventory.kernels().front();
+  const ResourceProblem problem(bytes, arch, options, options, lowered.program_inventory,
+                                lowered.observation_plan(), {});
+  TransientSgprAssignment owner;
+  owner.descriptor_file_offset = kernel.descriptor_file_offset;
+  owner.exec_save_sgpr = 56u;
+  owner.dispatch_id_sgpr = 64u;
+  // Empty initial assignments select sparse liveness snapshots; an existing
+  // assignment selects complete snapshots. Both must support later fallback
+  // without coupling the proof to the operating point used to build the CFG.
+  for (bool complete_snapshots : {false, true}) {
+    SCOPED_TRACE(complete_snapshots);
+    OperatingPoint initial = options.resolved_operating_point();
+    initial.exec_save_sgpr = 48u;
+    initial.dispatch_sgpr.set(64u, true);
+    if (complete_snapshots)
+      initial.owner_transient_sgprs = {owner};
+    // Production builds this workspace before the first site plans exist.
+    // Their anchors must already be covered by the immutable observation plan.
+    const auto reused = detail::make_resource_planning_state(problem, initial);
+    ASSERT_TRUE(reused);
+    for (uint16_t dispatch : {30u, 64u}) {
+      SCOPED_TRACE(dispatch);
+      OperatingPoint base = initial;
+      base.dispatch_sgpr.set(dispatch, true);
+      base.owner_transient_sgprs = {owner};
+      base.automatic_partial_exec_save_sgprs = true;
+      const OperatingPoint saved = base;
+      // Reconstruct the old fallback's independent workspace as an oracle.
+      OperatingPoint fresh_point = base;
+      fresh_point.owner_transient_sgprs.clear();
+      fresh_point.automatic_partial_exec_save_sgprs = true;
+      const auto fresh =
+          detail::make_resource_planning_state(problem, fresh_point, lowered.resource_plans);
+      const auto expected = detail::plan_dispatch_id_fallback(options, options, base, problem,
+                                                              lowered.resource_plans, *fresh);
+      const auto actual = detail::plan_dispatch_id_fallback(options, options, base, problem,
+                                                            lowered.resource_plans, *reused);
+      EXPECT_EQ(actual.attempted_operating_point, expected.attempted_operating_point);
+      EXPECT_EQ(actual.accepted_fallback, expected.accepted_fallback);
+      EXPECT_EQ(actual.diagnostics, expected.diagnostics);
+      EXPECT_EQ(base, saved);
+      EXPECT_EQ(actual.accepted(), dispatch == 30u);
+      if (actual.accepted()) {
+        ASSERT_EQ(actual.attempted_operating_point.owner_transient_sgprs.size(), 1u);
+        const auto &assignment = actual.attempted_operating_point.owner_transient_sgprs.front();
+        EXPECT_EQ(assignment.exec_save_sgpr, owner.exec_save_sgpr);
+        EXPECT_FALSE(assignment.dispatch_id_sgpr);
+      }
+    }
+  }
+}
 
 TEST(ConSanPlacement, RegisterMaximaPreservePriorValuesAndMatchMembership) {
   std::mt19937 rng(12584);

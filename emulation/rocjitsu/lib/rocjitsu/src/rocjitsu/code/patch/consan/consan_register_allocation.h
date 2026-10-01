@@ -241,7 +241,8 @@ configure_automatic_dispatch_id_sgprs(const OperatingPoint &base, const Resource
 [[nodiscard]] OperatingPointAttempt
 plan_dispatch_id_fallback(const Request &request, const BoundRuntimeResources &resources,
                           const OperatingPoint &base, const ResourceProblem &problem,
-                          std::span<const CandidateResourcePlan> site_plans);
+                          std::span<const CandidateResourcePlan> site_plans,
+                          const ResourcePlanningState &planning_state);
 
 [[nodiscard]] std::optional<std::string>
 validate_scalar_state(const Request &request, const BoundRuntimeResources &resources,
