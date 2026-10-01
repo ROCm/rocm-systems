@@ -26,9 +26,9 @@ on_kfd_page_migrate_configure()
 {
     Externals::add_string(Externals::k_kfd_page_migrate_category_name);
 
-    auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
-    auto  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
+    auto const& agent_mgr  = Externals::get_agent_manager();
+    auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
+    auto const  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
     if(gpu_agents.empty() && cpu_agents.empty())
     {
         LOG_DEBUG("no GPU or CPU agents found; no PMC info will be "
@@ -155,7 +155,7 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
-    auto agent_label = [](const auto* agent_ptr) {
+    auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
         {
             return std::string{ "?" };
@@ -167,11 +167,11 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
 
     constexpr auto k_empty_event_metadata = "{}";
 
-    auto track_name = fmt::format("KFD Page Migrate [{}->{}]", agent_label(src_agent),
-                                  agent_label(dst_agent));
+    auto const track_name = fmt::format("KFD Page Migrate [{}->{}]",
+                                        agent_label(src_agent), agent_label(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
-    auto agent_node_id = [](const auto* agent_ptr) {
+    auto const agent_node_id = [](const auto* agent_ptr) {
         return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };
     };
     const auto args_str = get_args_string(function_args_t{

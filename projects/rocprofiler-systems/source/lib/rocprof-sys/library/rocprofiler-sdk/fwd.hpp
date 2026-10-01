@@ -69,8 +69,8 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
     rocprofiler_tool_counter_info_t& operator=(
         rocprofiler_tool_counter_info_t&&) noexcept = default;
 
-    rocprofiler_agent_id_t                           agent_id       = {};
-    std::vector<rocprofiler_record_dimension_info_t> dimension_info = {};
+    rocprofiler_agent_id_t                           agent_id = {};
+    std::vector<rocprofiler_record_dimension_info_t> dimension_info;
 };
 
 struct tool_agent
@@ -126,17 +126,17 @@ struct client_data
     rocprofiler_buffer_id_t            memory_copy_buffer        = { 0 };
     rocprofiler_buffer_id_t            memory_alloc_buffer       = { 0 };
     rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
-    std::vector<tool_agent>            cpu_agents                = {};
-    std::vector<tool_agent>            gpu_agents                = {};
-    std::vector<hardware_counter_info> events_info               = {};
-    agent_counter_id_map_t             agent_events              = {};
-    agent_counter_info_map_t           agent_counter_info        = {};
-    agent_counter_profile_map_t        agent_counter_profiles    = {};
-    common::synchronized<code_object_vec_t, state::thread>   code_object_records   = {};
-    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records = {};
+    std::vector<tool_agent>            cpu_agents;
+    std::vector<tool_agent>            gpu_agents;
+    std::vector<hardware_counter_info> events_info;
+    agent_counter_id_map_t             agent_events;
+    agent_counter_info_map_t           agent_counter_info;
+    agent_counter_profile_map_t        agent_counter_profiles;
+    common::synchronized<code_object_vec_t, state::thread>   code_object_records;
+    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records;
     buffer_name_info_t                                       buffered_tracing_info = {};
     callback_name_info_t                                     callback_tracing_info = {};
-    backtrace_operation_map_t                                backtrace_operations  = {};
+    backtrace_operation_map_t                                backtrace_operations;
 
     void                        initialize();
     void                        initialize_event_info();
