@@ -100,9 +100,9 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   auto& driver = static_cast<XdnaDriver&>(agent->driver());
   // The queue starts with a context spanning every column; its first batch resizes it to what
   // the batch's kernels declare.
-  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, agent->num_cols(),
-                                                  agent->num_core_rows(),
-                                                  agent->properties().DeviceId, &kmq_metadata_);
+  hsa_status_t err =
+      driver.CreateKernelModeQueue(req_size_pkts, agent->num_cols(), agent->num_core_rows(),
+                                   agent->properties().DeviceId, &kmq_metadata_);
   if (err != HSA_STATUS_SUCCESS) {
     throw hsa_exception(err, "Failed to create KMQ metadata for the AIE queue.");
   }

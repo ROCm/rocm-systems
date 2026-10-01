@@ -2948,7 +2948,7 @@ std::vector<std::uint8_t> WithNumCols(std::vector<std::uint8_t> hsaco, std::uint
   std::memcpy(&hdr, hsaco.data() + section_offset, sizeof(hdr));
   for (std::uint32_t i = 0; i < hdr.kernel_count; ++i) {
     const std::size_t offset = section_offset + hdr.header_size + i * hdr.kernel_entry_size +
-                               offsetof(rocr::AMD::aie_kernel_entry, num_cols);
+        offsetof(rocr::AMD::aie_kernel_entry, num_cols);
     if (offset + sizeof(num_cols) > hsaco.size()) return {};
     std::memcpy(hsaco.data() + offset, &num_cols, sizeof(num_cols));
   }
