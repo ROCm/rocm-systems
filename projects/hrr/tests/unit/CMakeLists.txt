@@ -33,6 +33,7 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   Threads::Threads
   Catch2::Catch2WithMain)

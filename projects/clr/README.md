@@ -122,7 +122,7 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `CLR_ENABLE_WERROR` | `ON` (Linux), `OFF` (other platforms) | Build the first-party CLR targets (`rocclr`, `amdhip64`, `hiprtc`, and the HRR playback tools) with `-Wall -Werror`. Pass `-DCLR_ENABLE_WERROR=OFF` to downgrade warnings so they no longer fail the build. Has no effect on non-Linux builds. |
+| `CLR_ENABLE_WERROR` | `OFF` | Build the CLR targets (`rocclr`, `amdhip64`, and `hiprtc`) with `-Wall -Werror` |
 
 ## Tests
 
