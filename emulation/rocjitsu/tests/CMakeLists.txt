@@ -49,6 +49,15 @@ if(BUILD_TESTING AND TARGET rocjitsu_shared AND TARGET rocjitsu_x86_v4)
                 "RJ_CDNA5_WMMA_BACKEND=v4;RJ_MATH_BACKEND=auto;RJ_FORCE_SCALAR=0"
             SKIP_RETURN_CODE 77
     )
+    set_tests_properties(
+        Cdna5WmmaProviderProbe
+        Cdna5WmmaProviderV3
+        Cdna5WmmaProviderScalar
+        Cdna5WmmaProviderV4
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+    )
 
     # Unlike the object-composed FP unit tests, this driver exercises decoded
     # instructions and selected wave callbacks in the actual shared image.
@@ -81,6 +90,8 @@ if(BUILD_TESTING AND TARGET rocjitsu_shared AND TARGET rocjitsu_x86_v4)
             PROPERTIES
                 ENVIRONMENT
                     "RJ_MATH_BACKEND=${_backend};RJ_FORCE_SCALAR=${_force_scalar};RJ_CDNA5_WMMA_BACKEND=v3"
+                ENVIRONMENT_MODIFICATION
+                    "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
                 SKIP_RETURN_CODE 77
                 TIMEOUT 60
         )
@@ -123,6 +134,8 @@ if(BUILD_TESTING AND TARGET rocjitsu_shared AND TARGET rocjitsu_x86_v4)
                 PROPERTIES
                     ENVIRONMENT
                         "RJ_MATH_BACKEND=auto;RJ_FORCE_SCALAR=0;RJ_CDNA5_WMMA_BACKEND=v3"
+                    ENVIRONMENT_MODIFICATION
+                        "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
                     SKIP_RETURN_CODE 77
                     TIMEOUT 60
             )
@@ -574,7 +587,11 @@ if(TARGET cdna5_wmma_provider_probe)
     )
     set_tests_properties(
         Cdna5WmmaProviderScalarOracle
-        PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+            SKIP_RETURN_CODE 77
+            TIMEOUT 60
     )
 endif()
 add_test(
@@ -1251,6 +1268,28 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
 
+    # Each fixture owns a private final image; only its C observations cross DSOs.
+    set(_rj_registry_fixture_exports
+        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/isa_registry_fixture.exports"
+    )
+    foreach(
+        _fixture
+        IN
+        ITEMS
+            rocjitsu_downstream_isa_registry_fixture
+            rocjitsu_narrow_isa_registry_fixture
+    )
+        set_property(
+            TARGET ${_fixture}
+            APPEND
+            PROPERTY LINK_DEPENDS "${_rj_registry_fixture_exports}"
+        )
+        target_link_options(
+            ${_fixture}
+            PRIVATE "LINKER:--version-script=${_rj_registry_fixture_exports}"
+        )
+    endforeach()
+
     add_executable(
         isa_registry_composition_test
         isa_registry_composition_test.cpp
@@ -1274,6 +1313,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
+    )
+    add_test(
+        NAME IsaRegistryCompositionTest.FixtureExports
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
+            -DDOWNSTREAM_LIBRARY=$<TARGET_FILE:rocjitsu_downstream_isa_registry_fixture>
+            -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_isa_registry_fixture_exports.cmake
     )
 endif()
 

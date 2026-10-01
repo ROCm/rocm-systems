@@ -193,9 +193,10 @@ void check_decoded(Operation operation, unsigned wave_size, unsigned source, uns
       EXPECT_EQ(automatic, legacy.run(*instruction, destination));
     }
     for (unsigned lane = 0; lane < wave_size; ++lane) {
-      if (!(exec & (uint64_t{1} << lane)))
+      if (!(exec & (uint64_t{1} << lane))) {
         EXPECT_EQ(automatic[lane], source == destination ? input[lane] : kSentinel)
             << "inactive lane=" << lane;
+      }
     }
     return;
   }
@@ -220,8 +221,9 @@ void check_decoded(Operation operation, unsigned wave_size, unsigned source, uns
                               : source == destination        ? input[lane]
                                                              : kSentinel;
     EXPECT_EQ(automatic[lane], expected) << "lane=" << lane;
-    if (lane < std::size(kExpWitnesses) && (exec & (uint64_t{1} << lane)))
+    if (lane < std::size(kExpWitnesses) && (exec & (uint64_t{1} << lane))) {
       EXPECT_EQ(automatic[lane], witnesses[lane].result) << "physical witness lane=" << lane;
+    }
   }
 }
 
