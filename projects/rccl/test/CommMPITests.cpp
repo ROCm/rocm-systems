@@ -754,6 +754,12 @@ constexpr int kInfiniBandGrhTrafficClass = 0;
 // getEnvParam() fallback: no valid service level or traffic class is negative.
 constexpr int kEnvParamUnset = -1;
 
+// qpsMatch() sentinel for QP sets whose service levels legitimately differ.
+constexpr int kAnyServiceLevel = -1;
+
+constexpr const char* kNoQpTraceSkipReason =
+    "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+
 // One rank on each of exactly two nodes. The QP oracle reads the leading GIN
 // queue pairs of a single cross-node connection, so extra ranks would add
 // connections whose attributes it does not expect.
@@ -765,7 +771,7 @@ struct GinQpTrafficClass
     int  link_layer;
     int  service_level;
     int  traffic_class;
-    long tid;  // thread that programmed the QP
+    long tid;  // thread that programmed the QP, -1 when the log line has no prefix
 };
 
 struct GinTrafficClassCapture
@@ -776,6 +782,15 @@ struct GinTrafficClassCapture
     int           connection_count{0};
     bool          saw_create_marker{false};
     std::vector<GinQpTrafficClass> qps;
+};
+
+// QPs programmed from communicator init through the host RMA proxy connect.
+struct InitQpCapture
+{
+    bool thread_ids_parsed{false};
+    bool rma_proxy_connected{false};
+    std::vector<GinQpTrafficClass> transport;  // proxy thread: collective network transport
+    std::vector<GinQpTrafficClass> gin_rma;    // calling thread: GIN and the host RMA proxy
 };
 
 class GinTrafficClassMPITest : public TrafficClassMPITest
@@ -810,19 +825,20 @@ protected:
         return after.size() >= before.size() ? after.substr(before.size()) : after;
     }
 
-    // Both IB network plugins print the same QP RTR TRACE line, prefixed with
-    // host:pid:tid; IB-CAST prints it from IbCastQpRtr.
+    // Both IB network plugins print the same QP RTR TRACE line; IB-CAST prints it
+    // from IbCastQpRtr. The host:pid:tid prefix is optional so that a change to
+    // it only loses the thread id, which only the init-window split uses.
     static std::vector<GinQpTrafficClass> parseQpRtrTrace(const std::string& log)
     {
-        const std::regex qp_pattern(
-            R"(:[0-9]+:([0-9]+) \[[0-9]+\] .*(?:ncclIbQpRtr|IbCastQpRtr):.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
+        const std::regex qp_pattern(R"((?::[0-9]+:([0-9]+) \[[0-9]+\] .*)?)"
+                                    R"((?:ncclIbQpRtr|IbCastQpRtr):.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
         std::vector<GinQpTrafficClass> qps;
         for(std::sregex_iterator it(log.begin(), log.end(), qp_pattern), end; it != end; ++it)
         {
             qps.push_back({std::stoi((*it)[2].str()),
                            std::stoi((*it)[3].str()),
                            std::stoi((*it)[4].str()),
-                           std::stol((*it)[1].str())});
+                           (*it)[1].matched ? std::stol((*it)[1].str()) : -1L});
         }
         return qps;
     }
@@ -830,14 +846,19 @@ protected:
     // The proxy thread connects the collective network transport. GIN and the
     // host RMA proxy connect on the calling thread, including the GIN contexts
     // that communicator init creates for its own device communicator.
-    static std::vector<GinQpTrafficClass> proxyThreadQps(
-        const std::vector<GinQpTrafficClass>& qps)
+    static InitQpCapture splitInitQps(const std::string& init_log)
     {
+        InitQpCapture capture;
         const long caller = static_cast<long>(syscall(SYS_gettid));
-        std::vector<GinQpTrafficClass> transport;
+        const std::vector<GinQpTrafficClass> qps = parseQpRtrTrace(init_log);
+        capture.thread_ids_parsed = !qps.empty();
         for(const auto& qp : qps)
-            if(qp.tid != caller) transport.push_back(qp);
-        return transport;
+        {
+            if(qp.tid < 0) capture.thread_ids_parsed = false;
+            (qp.tid == caller ? capture.gin_rma : capture.transport).push_back(qp);
+        }
+        capture.rma_proxy_connected = init_log.find("ncclRmaProxyConnectOnce:") != std::string::npos;
+        return capture;
     }
 
     // RCCL connects the collective network transport during communicator init
@@ -908,7 +929,7 @@ protected:
     {
         for(const auto& qp : qps)
         {
-            if(qp.service_level != expected_service_level)
+            if(expected_service_level != kAnyServiceLevel && qp.service_level != expected_service_level)
             {
                 fprintf(stderr,
                         "Unexpected %s QP traffic class: ll=%d sl=%d tc=%d; "
@@ -1015,7 +1036,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
         device.saw_create_marker && device.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1086,7 +1107,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
         capture.saw_create_marker && capture.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1098,9 +1119,9 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 }
 
 // Run in a separate process with NCCL_IB_SL=5, NCCL_IB_TC=96 and
-// NCCL_GIN_IB_TC=104. NCCL_GIN_IB_TC must win on the GIN queue pairs while the
-// collective network-transport queue pairs keep NCCL_IB_TC, and neither may
-// disturb the NCCL_IB_SL service level.
+// NCCL_GIN_IB_TC=104. NCCL_GIN_IB_TC must win on the GIN and host RMA queue pairs
+// while the collective network-transport queue pairs keep NCCL_IB_TC, and neither
+// may disturb the NCCL_IB_SL service level.
 TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
@@ -1142,8 +1163,10 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
     runConnectingAllReduce();
     if(HasFatalFailure() || IsSkipped())
         return;
-    const std::vector<GinQpTrafficClass> transport_qps =
-        proxyThreadQps(parseQpRtrTrace(appendedLog(before_init, log_ctx.readNcclDebugLog())));
+    const bool rma_proxy_enabled = ncclRmaProxyEnabled(getActiveCommunicator());
+    if(rma_proxy_enabled)
+        ASSERT_MPI_EQ(ncclSuccess, ncclRmaProxyConnectOnce(getActiveCommunicator()));
+    const InitQpCapture init = splitInitQps(appendedLog(before_init, log_ctx.readNcclDebugLog()));
 
     GinTrafficClassCapture capture =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
@@ -1155,7 +1178,7 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
         capture.saw_create_marker && capture.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1164,8 +1187,15 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
     ASSERT_MPI_TRUE(qpsMatch(gin_qps,
                              /*expected_service_level=*/kEnvServiceLevel,
                              /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
-    ASSERT_MPI_TRUE(containsEthernetQp(transport_qps));
-    ASSERT_MPI_TRUE(qpsMatch(transport_qps,
+    ASSERT_MPI_TRUE(init.thread_ids_parsed);
+    ASSERT_MPI_TRUE(init.rma_proxy_connected || !rma_proxy_enabled);
+    ASSERT_MPI_TRUE(containsEthernetQp(init.gin_rma));
+    ASSERT_MPI_TRUE(qpsMatch(init.gin_rma,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass,
+                             "GIN/RMA"));
+    ASSERT_MPI_TRUE(containsEthernetQp(init.transport));
+    ASSERT_MPI_TRUE(qpsMatch(init.transport,
                              /*expected_service_level=*/kEnvServiceLevel,
                              /*expected_roce_traffic_class=*/kEnvTrafficClass,
                              "transport"));
@@ -1173,8 +1203,8 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesIbTc)
 
 // Run in a separate process with NCCL_IB_SL and NCCL_IB_TC unset and
 // NCCL_GIN_IB_TC=104. The GIN traffic class then overrides both the
-// device-communicator and host values on the GIN queue pairs, the service level
-// still follows that device/host precedence, and the collective
+// device-communicator and host values on the GIN and host RMA queue pairs, the
+// service level still follows that device/host precedence, and the collective
 // network-transport queue pairs keep the host value.
 TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
 {
@@ -1215,8 +1245,10 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
     runConnectingAllReduce();
     if(HasFatalFailure() || IsSkipped())
         return;
-    const std::vector<GinQpTrafficClass> transport_qps =
-        proxyThreadQps(parseQpRtrTrace(appendedLog(before_init, log_ctx.readNcclDebugLog())));
+    const bool rma_proxy_enabled = ncclRmaProxyEnabled(getActiveCommunicator());
+    if(rma_proxy_enabled)
+        ASSERT_MPI_EQ(ncclSuccess, ncclRmaProxyConnectOnce(getActiveCommunicator()));
+    const InitQpCapture init = splitInitQps(appendedLog(before_init, log_ctx.readNcclDebugLog()));
 
     GinTrafficClassCapture device =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
@@ -1228,7 +1260,7 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
         device.saw_create_marker && device.qps.empty();
     const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
     if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
-        GTEST_SKIP() << "No QP RTR traces parsed: RCCL built without TRACE=ON, or the trace format changed";
+        GTEST_SKIP() << kNoQpTraceSkipReason;
     const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
     const auto trace_ready = collectiveBoolSummary(local_trace_ready);
     ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
@@ -1251,8 +1283,17 @@ TEST_F(GinTrafficClassMPITest, GinIbTcOverridesDeviceAndHost)
                              /*expected_service_level=*/kHostCommTrafficClass,
                              /*expected_roce_traffic_class=*/kEnvGinTrafficClass));
 
-    ASSERT_MPI_TRUE(containsEthernetQp(transport_qps));
-    ASSERT_MPI_TRUE(qpsMatch(transport_qps,
+    ASSERT_MPI_TRUE(init.thread_ids_parsed);
+    ASSERT_MPI_TRUE(init.rma_proxy_connected || !rma_proxy_enabled);
+    ASSERT_MPI_TRUE(containsEthernetQp(init.gin_rma));
+    // The GIN bootstrap ring connects before any traffic class is configured, so
+    // its sl differs from the contexts'; only the traffic class is shared.
+    ASSERT_MPI_TRUE(qpsMatch(init.gin_rma,
+                             /*expected_service_level=*/kAnyServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvGinTrafficClass,
+                             "GIN/RMA"));
+    ASSERT_MPI_TRUE(containsEthernetQp(init.transport));
+    ASSERT_MPI_TRUE(qpsMatch(init.transport,
                              /*expected_service_level=*/kHostCommTrafficClass,
                              /*expected_roce_traffic_class=*/kHostCommTrafficClass,
                              "transport"));
