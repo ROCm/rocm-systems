@@ -24,9 +24,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -432,6 +434,14 @@ public:
             shutdown(fds_[0], SHUT_RDWR);
         }
         JoinProxy();
+        // Mirrors proxy.cc's static expectedProxyResponseFree, so entries a failed call left queued do not leak.
+        while(proxyState_ != nullptr && proxyState_->expectedResponses != nullptr)
+        {
+            ncclExpectedProxyResponse* elem = proxyState_->expectedResponses;
+            proxyState_->expectedResponses  = elem->next;
+            free(elem->respBuff);
+            free(elem);
+        }
         for(int fd : fds_)
         {
             if(fd >= 0)
@@ -554,6 +564,19 @@ private:
     bool                            writeOk_ = false;
     std::thread                     proxy_;
 };
+
+// Returns the expected-response entry stored under opId, or nullptr; compares pointer values, never dereferences opId.
+const ncclExpectedProxyResponse* FindExpectedResponse(const ncclProxyState* state, const void* opId)
+{
+    for(const ncclExpectedProxyResponse* elem = state->expectedResponses; elem != nullptr; elem = elem->next)
+    {
+        if(elem->opId == opId)
+        {
+            return elem;
+        }
+    }
+    return nullptr;
+}
 } // namespace
 
 // Delayed reply forces InProgress polls; the call must keep polling and return the proxy's payload.
@@ -661,6 +684,87 @@ TEST(ProxyTests, ProxyCallBlockingReturnsSendErrorWithoutPolling)
                 EXPECT_EQ(pendingLen, static_cast<ssize_t>(sizeof(pending)));
                 EXPECT_EQ(pending.opId, sentinel.opId);
                 ExpectNoPendingBytes(harness.peerFd());
+            })
+            .withTimeout(kProxyCallTimeout));
+}
+
+// Known defect: a matching reply larger than respSize overruns respBuff; real guard bytes past respSize absorb it.
+TEST(ProxyTests, ProxyCallBlockingOversizedReplyOverrunsRespBuff_PinsKnownDefect)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingOversizedReplyOverrunsRespBuff_PinsKnownDefect",
+            []() {
+                constexpr size_t        kRespSize   = 8;
+                constexpr size_t        kGuardBytes = 16;
+                constexpr size_t        kOverrun    = 8;
+                constexpr unsigned char kGuard      = 0xEE;
+                constexpr unsigned char kReplyByte  = 0x5A;
+                static_assert(kOverrun < kGuardBytes, "the overrun must stay inside the guard, short of its end");
+                ProxyCallHarness harness;
+                ASSERT_TRUE(harness.Init());
+                harness.StartReplyingProxy(ncclSuccess, std::vector<char>(kRespSize + kOverrun, kReplyByte),
+                                           kNoReplyDelay);
+
+                std::vector<unsigned char> respBuff(kRespSize + kGuardBytes, kGuard);
+                ncclResult_t               res
+                    = harness.Call(ncclProxyMsgSetup, nullptr, 0, respBuff.data(), static_cast<int>(kRespSize));
+                harness.JoinProxy();
+
+                ASSERT_TRUE(harness.readOk());
+                EXPECT_TRUE(harness.writeOk());
+                ExpectProxyRpcHeader(harness.seen(), 0, static_cast<int>(kRespSize));
+                // Pin: reply bytes past respSize land in the guard. res is only logged: a fix may reject or truncate.
+                std::vector<unsigned char> overrun(kRespSize + kGuardBytes, kGuard);
+                std::fill_n(overrun.begin(), kRespSize + kOverrun, kReplyByte);
+                EXPECT_EQ(respBuff, overrun) << "res " << res
+                                             << ": respBuff guard intact, the overrun was fixed, so delete this pin"
+                                             << " and uncomment the check below";
+                // When this test starts failing because the bug was fixed, delete the pin above and uncomment this.
+                // const std::vector<unsigned char> guard(respBuff.begin() + kRespSize, respBuff.end());
+                // EXPECT_EQ(guard, std::vector<unsigned char>(kGuardBytes, kGuard)) << "res " << res;
+            })
+            .withTimeout(kProxyCallTimeout));
+}
+
+// Known defect: ncclPollProxyResponse local error returns leave an entry keyed by the opId ncclProxyCallBlocking frees.
+TEST(ProxyTests, ProxyCallBlockingErrorExitLeavesStaleExpectedResponse_PinsKnownDefect)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingErrorExitLeavesStaleExpectedResponse_PinsKnownDefect",
+            []() {
+                ProxyCallHarness aborted;
+                ASSERT_TRUE(aborted.Init());
+                aborted.StartAbortingProxy();
+                EXPECT_EQ(aborted.Call(ncclProxyMsgSetup, nullptr, 0, nullptr, 0), ncclInternalError);
+                aborted.JoinProxy();
+                ASSERT_TRUE(aborted.readOk());
+                ExpectProxyRpcHeader(aborted.seen(), 0, 0);
+
+                // A correctly sized matching reply with no respBuff hits the NULL respBuff return, not the overrun.
+                constexpr int    kNullRespSize = static_cast<int>(sizeof(uint64_t));
+                ProxyCallHarness nullResp;
+                ASSERT_TRUE(nullResp.Init());
+                nullResp.StartReplyingProxy(ncclSuccess, std::vector<char>(kNullRespSize), kNoReplyDelay);
+                EXPECT_EQ(nullResp.Call(ncclProxyMsgSetup, nullptr, 0, nullptr, kNullRespSize), ncclInternalError);
+                nullResp.JoinProxy();
+                ASSERT_TRUE(nullResp.readOk());
+                ExpectProxyRpcHeader(nullResp.seen(), 0, kNullRespSize);
+
+                // seen().opId is the value ncclProxyCallBlocking sent and then freed before returning.
+                const ncclProxyState* abortedState  = aborted.proxyState();
+                const ncclProxyState* nullRespState = nullResp.proxyState();
+                // Pin: each error exit left the entry for its freed opId queued.
+                EXPECT_NE(FindExpectedResponse(abortedState, aborted.seen().opId), nullptr)
+                    << "abort exit no longer leaks: delete this pin and uncomment the check below";
+                EXPECT_NE(FindExpectedResponse(nullRespState, nullResp.seen().opId), nullptr)
+                    << "NULL respBuff exit no longer leaks: delete this pin and uncomment the check below";
+                // When this test starts failing because the bug was fixed, delete the pin above and uncomment this.
+                // EXPECT_EQ(FindExpectedResponse(abortedState, aborted.seen().opId), nullptr);
+                // EXPECT_EQ(FindExpectedResponse(nullRespState, nullResp.seen().opId), nullptr);
+                // EXPECT_EQ(abortedState->expectedResponses, nullptr);
+                // EXPECT_EQ(nullRespState->expectedResponses, nullptr);
             })
             .withTimeout(kProxyCallTimeout));
 }
