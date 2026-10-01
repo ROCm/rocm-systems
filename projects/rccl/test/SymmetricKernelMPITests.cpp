@@ -34,6 +34,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -578,12 +579,15 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
                           [rank, &value](size_t i) { return value(rank, i); }));
         ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(recvSym.ptr, recvCount));
 
-        // Tuning is comm-wide, so every rank sees ncclInvalidUsage together; only the first count may skip on it.
+        // Only the first count may skip on ncclInvalidUsage; agree on it collectively so diverging verdicts cannot hang.
         ncclResult_t res = ncclReduceScatter(sendSym.ptr, recvSym.ptr, recvCount, ncclFloat, ncclSum,
                                              getActiveCommunicator(), getActiveStream());
-        if(res == ncclInvalidUsage && recvCount == counts.front())
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && recvCount == counts.front(),
+                                       "ReduceScatter_LL symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
         {
-            GTEST_SKIP() << "ReduceScatter_LL symmetric kernel not eligible on this topology";
+            GTEST_SKIP() << ineligible;
         }
         ASSERT_MPI_EQ(ncclSuccess, res);
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
