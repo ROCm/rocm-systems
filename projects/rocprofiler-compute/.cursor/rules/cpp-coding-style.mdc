@@ -1,0 +1,7 @@
+---
+description: C++ coding style rules for rocprofiler-compute. Apply when generating or modifying C++ or CMake files.
+globs: ["**/*.cpp", "**/*.h", "**/*.hpp", "**/CMakeLists.txt", "**/*.cmake"]
+alwaysApply: true
+---
+
+Follow **[`AGENTS.md`](../../AGENTS.md)** and the full redirect chain it references.

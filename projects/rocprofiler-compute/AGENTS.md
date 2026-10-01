@@ -14,6 +14,13 @@ Read and follow **[`.ai/rules/python-style.md`](.ai/rules/python-style.md)** bef
 generating or modifying any Python code. These rules cover function design, naming,
 nesting, code organization, and testing conventions.
 
+## C++ Code Style
+
+Read and follow **[`CPP_CODING_STYLE.md`](CPP_CODING_STYLE.md)** before generating
+or modifying any C++ or CMake code. It indexes one file per topic under
+`.ai/rules/cpp/`, covering the language version, performance, testability,
+callback boundaries, naming, comments, STL usage, and CMake.
+
 ## Ruff
 
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**
