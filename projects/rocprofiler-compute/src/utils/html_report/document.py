@@ -51,13 +51,7 @@ def json_safe(value: object) -> object:
 
 def _embed_json(payload: object) -> str:
     """Serialize a model safely inside an HTML script element."""
-    serialized = json.dumps(json_safe(payload), allow_nan=False)
-    return (
-        serialized
-        .replace("<", "\\u003c")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
-    )
+    return json.dumps(json_safe(payload), allow_nan=False).replace("</", "<\\/")
 
 
 def build_document(
