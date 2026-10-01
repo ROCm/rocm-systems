@@ -6,6 +6,7 @@
 
 #include "CollectiveArgs.hpp"
 #include "PrepDataFuncs.hpp"
+#include "ResourceGuards.hpp"
 #include "VerifiableData.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -15,35 +16,6 @@
 namespace RcclUnitTesting
 {
 
-  class ScopedDevice {
-  public:
-    explicit ScopedDevice(int targetDeviceId) {
-      // Save the caller's current device
-      if (hipGetDevice(&savedDeviceId_) != hipSuccess) {
-        savedDeviceId_ = 0;
-      }
-      // Only switch context if target is different from current
-      switched_ = (savedDeviceId_ != targetDeviceId);
-      if (switched_) {
-        (void)hipSetDevice(targetDeviceId);
-      }
-    }
-
-    ~ScopedDevice() {
-      // Restore the caller's original device on scope exit, only if we switched away from it
-      if (switched_) {
-        (void)hipSetDevice(savedDeviceId_);
-      }
-    }
-
-    // Prevent copying/moving
-    ScopedDevice(const ScopedDevice&) = delete;
-    ScopedDevice& operator=(const ScopedDevice&) = delete;
-
-  private:
-    int savedDeviceId_ = 0;
-    bool switched_ = false;
-  };
   // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
   static constexpr int kDeviceDataFaultByte = 0xFF;
 
@@ -71,7 +43,12 @@ namespace RcclUnitTesting
 
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
-    ScopedDevice dev(collArgs.deviceId);
+    // Run on the collective's device, then restore the caller's device.
+    int callerDeviceId = 0;
+    (void)hipGetDevice(&callerDeviceId);
+    bool const switchDevice = (callerDeviceId != collArgs.deviceId);
+    if (switchDevice) (void)hipSetDevice(collArgs.deviceId);
+    SCOPE_EXIT(if (switchDevice) (void)hipSetDevice(callerDeviceId));
     if (UseVerifiableData(collArgs))
     {
       CHECK_CALL(CheckAllocation(collArgs));
