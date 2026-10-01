@@ -1788,7 +1788,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           coord_dsts.push_back(dst_list[d]);
           coord_srcs.push_back(src_list[d]);
           coord_sizes_a.push_back(size_list[d]);
-          // B side for asymmetric swap; defaults to the A side when not provided.
+          // Dst side for asymmetric swap; defaults to the src side when not provided.
           coord_sizes_b.push_back(dst_size_list ? dst_size_list[d] : size_list[d]);
         }
       }

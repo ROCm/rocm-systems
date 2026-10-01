@@ -2002,6 +2002,44 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
 /**
  * Test Description
  * ------------------------
+ * - Stream capture is not supported: calling on a capturing stream returns
+ *   hipErrorStreamCaptureUnsupported and invalidates the capture.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative) {
+  constexpr size_t kBytes = 1024;
+
+  void* d_a = nullptr;
+  void* d_b = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kBytes));
+  HIP_CHECK(hipMalloc(&d_b, kBytes));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_a};
+  void* srcs[] = {d_b};
+  size_t sizes[] = {kBytes};
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
+  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                         nullptr, nullptr, 0, stream),
+                  hipErrorStreamCaptureUnsupported);
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - For a swap entry, sizesDst[i] must be non-zero and <= sizes[i]. Both a zero
  *   and an over-large sizesDst return hipErrorInvalidValue. Skipped where swap
  *   is unsupported.

@@ -1270,7 +1270,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     } else if (is_swap) {
       BuildWaitSignalSwapCommand(command_addr, chunks[i],
           dsts[i], const_cast<void*>(srcs[i]),
-          sizes_a[i], sizes_b[i],
+          sizes_b[i], sizes_a[i],  // addr_a is dst: pair it with the dst size
           wait_signal, signal_signal);
     } else {
       BuildWaitSignalCopyCommand(command_addr, chunks[i],
@@ -1366,7 +1366,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   const bool is_swap = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
   const bool is_indirect = (indirect_src || indirect_dst);
 
-  // B-side size for an entry (asymmetric swap). Defaults to the A side, i.e.
+  // Dst-side size for an entry (asymmetric swap). Defaults to the src side, i.e.
   // size_list[d], which keeps symmetric swaps and non-swap ops unchanged.
   auto b_size = [&](uint32_t d) -> size_t {
     return (is_swap && dst_size_list != nullptr) ? dst_size_list[d] : size_list[d];
@@ -1394,7 +1394,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     for (size_t i = 0; i < num_entries; ++i) {
       const uint32_t d = indices[i];
       // For an asymmetric swap the chunk count is driven by the larger side;
-      // size_list is the A side, dst_size_list is the B side.
+      // size_list is the src side, dst_size_list is the dst side.
       const size_t entry_size = is_swap ? std::max(size_list[d], b_size(d)) : size_list[d];
       if (is_indirect && entry_size > max_copy_size)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1456,7 +1456,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
       } else if (is_swap) {
         BuildWaitSignalSwapCommand(command_addr, chunks[i],
             dst_list[d], const_cast<void*>(src_list[d]),
-            size_list[d], b_size(d),
+            b_size(d), size_list[d],  // addr_a is dst: pair it with the dst size
             wait_signal, signal_signal);
       } else {
         BuildWaitSignalCopyCommand(command_addr, chunks[i],

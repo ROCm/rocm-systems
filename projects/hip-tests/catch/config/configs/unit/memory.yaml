@@ -930,6 +930,7 @@ memory:
   Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback: *level_2
   Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_PreferComputeEngine_D2D: *level_2
   Unit_hipExtMemcpyBatchAsync_PreferLinearBroadcast_D2D: *level_2
