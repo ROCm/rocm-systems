@@ -243,17 +243,18 @@ concept externals =
     // implicit int conversion), which this Externals-only concept has no way to name
     // generically. They stay duck-typed, exactly as on_tracing_api_enter/exit already
     // uses them.
-    && requires(std::string_view text, Externals::thread_info_t thread_info,
-                Externals::region_sample         sample,
-                Externals::rocm_hip_api_category hip_category) {
-           { Externals::is_active() } -> std::convertible_to<bool>;
-           { Externals::get_use_timemory() } -> std::convertible_to<bool>;
-           { Externals::tracing_push_timemory(hip_category, text) };
-           { Externals::tracing_pop_timemory(hip_category, text) };
-           { Externals::get_metadata_registry().add_string(text) };
-           { Externals::get_metadata_registry().add_thread_info(thread_info) };
-           { Externals::get_buffer_storage().store(std::move(sample)) };
-       }
+    &&
+    requires(std::string_view text, Externals::thread_info_t thread_info,
+             Externals::region_sample         sample,
+             Externals::rocm_hip_api_category hip_category) {
+        { Externals::is_active() } -> std::convertible_to<bool>;
+        { Externals::get_use_timemory() } -> std::convertible_to<bool>;
+        { Externals::tracing_push_timemory(hip_category, text) };
+        { Externals::tracing_pop_timemory(hip_category, text) };
+        { Externals::get_metadata_registry().add_string(text) };
+        { Externals::get_metadata_registry().add_thread_info(thread_info) };
+        { Externals::get_buffer_storage().store(std::move(sample)) };
+    }
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
     && requires(const char* symbol_name, Externals::pmc_event_with_sample rccl_sample) {
            {
