@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
+#include <condition_variable>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -218,6 +219,13 @@ static std::atomic<uint64_t> g_blob_count{0};
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
+
+// Blob and code object writes claimed under g_blob_mu and not finished yet.
+// flush() waits for them before it decides on the trailer, since one that fails
+// leaves events naming a file that does not exist. flush() waits holding
+// g_file_mu, so a claimed write must finish without taking it.
+static uint64_t                g_blob_writes_in_flight = 0;  // under g_blob_mu
+static std::condition_variable g_blob_writes_done;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
@@ -758,31 +766,35 @@ void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
   // the base HIP_HRR_CAPTURE_OUTPUT path.
-  const bool incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
+  bool incomplete;
   std::string out_dir;
   {
     BufWriteGuard lk;
     out_dir = g_output_dir;
-    // Skip the clean-shutdown trailer when the capture is known incomplete: its
-    // absence is exactly how the reader detects a non-faithful archive.
-    if (g_events_fd >= 0 && !g_trailer_written && !incomplete) {
-      hrr_eof_record rec = hrr_make_eof_record(
-          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-      rec.hdr.timestamp_ns = amd::Os::timeNanos();
-      rec.hdr.thread_id    = current_thread_id();
-      buffer_append_locked(&rec, sizeof(rec));
-      flush_buffer_locked();
-      HRR_FSYNC(g_events_fd);
-      // Blob and code object writers count a file under g_blob_mu, before they write
-      // it and only while this flag is clear, so the manifest below counts every file
-      // they go on to write, including one still being written.
-      std::lock_guard<std::mutex> blk(g_blob_mu);
-      g_trailer_written = true;
-    } else if (g_events_fd >= 0 && incomplete) {
-      // Still flush buffered events so nothing is lost, just no trailer.
+    if (g_events_fd >= 0 && !g_trailer_written) {
+      {
+        // Stop new blob and code object claims, then wait for the claimed writes
+        // to end: a failed one marks the capture incomplete, which decides the
+        // trailer and the manifest below. Holding g_file_mu keeps events out
+        // meanwhile, so none is recorded without its blob.
+        std::unique_lock<std::mutex> blk(g_blob_mu);
+        g_trailer_written = true;
+        g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
+      }
+      incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
+      // Skip the clean-shutdown trailer when the capture is known incomplete: its
+      // absence is exactly how the reader detects a non-faithful archive.
+      if (!incomplete) {
+        hrr_eof_record rec = hrr_make_eof_record(
+            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+        rec.hdr.timestamp_ns = amd::Os::timeNanos();
+        rec.hdr.thread_id    = current_thread_id();
+        buffer_append_locked(&rec, sizeof(rec));
+      }
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
     }
+    incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
   }
 
   if (out_dir.empty()) return;
@@ -956,6 +968,20 @@ static bool atomic_write_file(const std::string& path,
   return ok;
 }
 
+// Ends a write claimed in write_blob() or write_code_object(). A failed one is
+// unclaimed so a later call can retry, and marks the capture incomplete: the
+// caller, and any caller that found the key claimed meanwhile, already holds the
+// hash of a file that is not there.
+static void finish_claimed_write(const std::string& key, bool ok) {
+  std::lock_guard<std::mutex> lk(g_blob_mu);
+  if (!ok) {
+    g_written_blobs.erase(key);
+    g_blob_count.fetch_sub(1, std::memory_order_relaxed);
+    mark_incomplete("a blob or code object could not be written");
+  }
+  if (--g_blob_writes_in_flight == 0) g_blob_writes_done.notify_all();
+}
+
 // ---------------------------------------------------------------------------
 // write_blob
 // ---------------------------------------------------------------------------
@@ -978,6 +1004,7 @@ Hash128 write_blob(const void* data, size_t len) {
     if (g_trailer_written) return {};
     if (!g_written_blobs.insert(key).second) return h;  // already written
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
+    ++g_blob_writes_in_flight;
   }
 
   // blobs/<2-char-prefix>/<fullhash>.blob
@@ -985,13 +1012,9 @@ Hash128 write_blob(const void* data, size_t len) {
   ensure_dir(subdir);
   std::string path = subdir + "/" + key + ".blob";
 
-  if (!atomic_write_file(path, data, len)) {
-    // Write failed — remove from set so a later call can retry.
-    LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
-    std::lock_guard<std::mutex> lk(g_blob_mu);
-    g_written_blobs.erase(key);
-    g_blob_count.fetch_sub(1, std::memory_order_relaxed);
-  }
+  const bool ok = atomic_write_file(path, data, len);
+  if (!ok) LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
+  finish_claimed_write(key, ok);
   return h;
 }
 
@@ -1015,15 +1038,13 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     if (g_trailer_written) return {};  // as in write_blob()
     if (!g_written_blobs.insert(key).second) return h;  // already written
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
+    ++g_blob_writes_in_flight;
   }
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
-  if (!atomic_write_file(path, image, image_size)) {
-    LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
-    std::lock_guard<std::mutex> lk(g_blob_mu);
-    g_written_blobs.erase(key);
-    g_blob_count.fetch_sub(1, std::memory_order_relaxed);
-  }
+  const bool ok = atomic_write_file(path, image, image_size);
+  if (!ok) LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
+  finish_claimed_write(key, ok);
   return h;
 }
 
