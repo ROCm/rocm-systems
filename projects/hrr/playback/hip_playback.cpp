@@ -3721,10 +3721,16 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
                          expected + dst.first, n);
         return hipSuccess;
     }
+    // Like the scratch buffer, one that cannot be had is a skipped check.
+    std::unique_ptr<uint8_t[]> want(new (std::nothrow) uint8_t[n]);
+    if (!want) {
+        fprintf(stderr, "[HRR] %s D2H: no %zu-byte buffer for the expected rows, skipped\n",
+                api, n);
+        return hipSuccess;
+    }
     hrr_host_rect_pack(dst, host.get(), host.get());
-    std::vector<uint8_t> want(n);
-    hrr_host_rect_pack(dst, expected, want.data());
-    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.get(), want.data(), n);
+    hrr_host_rect_pack(dst, expected, want.get());
+    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.get(), want.get(), n);
     return hipSuccess;
 }
 
@@ -3781,16 +3787,20 @@ static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t has
     return true;
 }
 
-hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
+// hipMemcpy3D runs on the legacy default stream and hipMemcpy3D_spt on this
+// thread's, so an _spt event is reissued as _spt or it can be reordered against
+// work replayed on the per-thread stream.
+static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool spt) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3D*>(pl);
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
+    hipError_t (*const copy)(const hipMemcpy3DParms*) = spt ? hipMemcpy3D_spt : hipMemcpy3D;
 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
             return hipSuccess;
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-        hipError_t r = hipMemcpy3D(&parms);
+        hipError_t r = copy(&parms);
         if (r == hipSuccess)
             r = hrr_sync_after_replayed_h2d(ctx, "replayed 3D H2D memcpy");
         return r;
@@ -3806,15 +3816,19 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         parms.srcPtr.ptr = src_live;
         return replay_pitched_d2h(ctx, "hipMemcpy3D", memcpy3d_host_dst(parms), a->ret,
                                   a->d2h_hash_lo, a->d2h_hash_hi, nullptr, false,
-                                  [&parms](void* host) {
+                                  [&parms, copy](void* host) {
                                       parms.dstPtr.ptr = host;
-                                      return hipMemcpy3D(&parms);
+                                      return copy(&parms);
                                   });
     }
     // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
-    return hipMemcpy3D(&parms);
+    return copy(&parms);
+}
+
+hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
+    return replay_memcpy3d(ctx, pl, /*spt=*/false);
 }
 
 // hipStreamPerThread is a token rather than a stream capture saw created, so
@@ -4239,7 +4253,9 @@ hipError_t playback_hipMemcpy2DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* pl) {
-    return playback_hipMemcpy3D(ctx, pl);
+    static_assert(sizeof(hrr_args_hipMemcpy3D_spt) == sizeof(hrr_args_hipMemcpy3D),
+                  "the _spt payload is replayed as the plain one");
+    return replay_memcpy3d(ctx, pl, /*spt=*/true);
 }
 
 hipError_t playback_hipMemcpy3DAsync_spt(PlaybackContext& ctx, const uint8_t* pl) {
