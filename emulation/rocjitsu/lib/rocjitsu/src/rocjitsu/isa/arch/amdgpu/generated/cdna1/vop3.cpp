@@ -28,6 +28,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -57,6 +58,7 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -85,6 +87,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -141,7 +144,7 @@ DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
-      vdst(32, OperandType::OPR_SREG_NOVCC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -5667,6 +5670,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5696,6 +5700,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5725,6 +5730,7 @@ VInterpP2LegacyF16Vop3::VInterpP2LegacyF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5760,6 +5766,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -6016,7 +6023,7 @@ DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadlaneB32Vop3)),
-      vdst(32, OperandType::OPR_SREG_NOVCC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;

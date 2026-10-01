@@ -195,10 +195,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     groupMemCarveout_ = true;
   }
 
-  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
-  // packet that dereferences a pointer-to-pointer slot before issuing the
-  // copy.
-  if (gfxipMajor == 12 && gfxipMinor == 5) {
+  // SDMA indirect copies dereference pointer slots before copying.
+  if (gfxipMajor == 12 && gfxipMinor >= 5) {
     sdma_indirect_supported_ = true;
   }
 

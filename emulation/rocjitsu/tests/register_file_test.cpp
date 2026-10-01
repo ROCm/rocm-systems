@@ -36,6 +36,39 @@ concept HasContiguousData = requires(File &file) { file.data(); };
 using SoftwareLazyUint32File = SoftwareLazyTestFile<uint32_t>;
 static_assert(!HasContiguousData<SoftwareLazyUint32File>);
 
+template <typename File> class RegisterBlockCountTest : public ::testing::Test {};
+using RegisterBlockCountTypes =
+    ::testing::Types<RegisterFile<uint32_t>, SoftwareLazyUint32File,
+                     RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>>;
+TYPED_TEST_SUITE(RegisterBlockCountTest, RegisterBlockCountTypes);
+
+TYPED_TEST(RegisterBlockCountTest, CountsAvailableBlocksAcrossExhaustionAndReuse) {
+  TypeParam file("registers");
+  EXPECT_EQ(file.free_block_count(), 0u);
+  file.init(/*total_regs=*/35, /*regs_per_block=*/8);
+  EXPECT_EQ(file.free_block_count(), 4u);
+  EXPECT_EQ(file.allocate(0), -1);
+  EXPECT_EQ(file.free_block_count(), 4u);
+  for (uint32_t block = 0; block < 4; ++block) {
+    ASSERT_EQ(file.allocate(8), static_cast<int32_t>(block * 8));
+    EXPECT_EQ(file.free_block_count(), 3 - block);
+  }
+  EXPECT_EQ(file.allocate(1), -1);
+  file.free(3); // Misaligned and out-of-range frees leave allocation unchanged.
+  file.free(40);
+  EXPECT_EQ(file.free_block_count(), 0u);
+  file.free(8);
+  file.free(24);
+  EXPECT_EQ(file.free_block_count(), 2u);
+  EXPECT_EQ(file.allocate(1), 8);
+  EXPECT_EQ(file.free_block_count(), 1u);
+  EXPECT_EQ(file.allocate(8), 24);
+  EXPECT_EQ(file.free_block_count(), 0u);
+  for (uint32_t block = 0; block < 4; ++block)
+    file.free(block * 8);
+  EXPECT_EQ(file.free_block_count(), 4u);
+}
+
 TEST(RegisterFileTest, ContiguousStorageClearsReusedBlock) {
   RegisterFile<uint32_t> file("contiguous");
   file.init(/*total_regs=*/16, /*regs_per_block=*/8);
@@ -80,6 +113,41 @@ TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
   EXPECT_EQ(storage.materialized_chunk_count(), 0u);
   EXPECT_EQ(const_storage[0][0], 0u);
   EXPECT_EQ(const_storage[regs_per_chunk][0], 0u);
+}
+
+TEST(RegisterFileTest, SoftwareLazyRecycledChunksAreZeroBeforeEveryMaterializationPath) {
+  using Storage = SoftwareLazyTestStorage<uint32_t>;
+  constexpr uint32_t count = Storage::registers_per_chunk();
+  Storage storage;
+  storage.init(count);
+  const auto &read_only = storage;
+  for (unsigned path = 0; path < 4; ++path) {
+    SCOPED_TRACE(path);
+    storage.for_each(0, count, [](uint32_t &value) { value = 0xfeed1234; });
+    storage.reset(0, count);
+    EXPECT_EQ(storage.materialized_chunk_count(), 0u);
+    EXPECT_EQ(read_only[0], 0u);
+    EXPECT_EQ(read_only[count - 1], 0u);
+    constexpr uint32_t value = 42;
+    const auto bytes = std::as_bytes(std::span(&value, 1));
+    switch (path) {
+    case 0:
+      storage[0] = value;
+      break;
+    case 1:
+      storage.for_each(0, 1, [](uint32_t &reg) { reg = value; });
+      break;
+    case 2:
+      storage.copy_from(0, bytes);
+      break;
+    case 3:
+      storage.copy_nonzero_from(0, bytes);
+      break;
+    }
+    EXPECT_EQ(read_only[0], value);
+    for (uint32_t index = 1; index < count; ++index)
+      EXPECT_EQ(read_only[index], 0u) << index;
+  }
 }
 
 TEST(RegisterFileTest, SoftwareLazyStorageSupportsFixedCapacityBoundary) {

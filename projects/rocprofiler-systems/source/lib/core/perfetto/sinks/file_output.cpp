@@ -78,7 +78,10 @@ append_with_file_lock(const std::string& filename, const char* data, std::size_t
     }
 
     const int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if(fd < 0) return locked_append_status::open_failed;
+    if(fd < 0)
+    {
+        return locked_append_status::open_failed;
+    }
 
     if(::flock(fd, LOCK_EX) != 0)
     {
@@ -98,7 +101,10 @@ append_with_file_lock(const std::string& filename, const char* data, std::size_t
         if(n < 0)
         {
             const int err = errno;
-            if(err == EINTR) continue;
+            if(err == EINTR)
+            {
+                continue;
+            }
             LOG_ERROR("append_with_file_lock: write to '{}' failed: {}", filename,
                       std::strerror(err));
             status = locked_append_status::write_failed;

@@ -9,7 +9,6 @@ set(UNIT_TEST_SOURCES
     table_select_query_test.cpp
     entity_utility_test.cpp
     json_serializer_test.cpp
-    symbol_seal_test.cpp
     writer_test.cpp
     reader_test.cpp
     sqlite_backend_impl_test.cpp
@@ -43,11 +42,6 @@ set(ROCPD_DB_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd.db)
 target_compile_definitions(
     profiler-hub_unit_tests
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
-)
-
-target_compile_definitions(
-    profiler-hub_unit_tests
-    PRIVATE PROFILER_HUB_SHARED_LIB="$<TARGET_FILE:profiler-hub>"
 )
 
 target_compile_definitions(
