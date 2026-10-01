@@ -797,6 +797,200 @@ TEST_F(GinDeviceTest, PostGfd_MultiPeer) {
 }
 
 // ---------------------------------------------------------------------------
+// Flush_PostsOneLocalFlushGfdPerPeer: ncclGinApi_Flush<GIN_PROXY> strides peers by coop.size() and runs
+//   FlushAsync+Wait per peer, so every peer with an unflushed get catches up via a flush GFD on the local queue.
+// ---------------------------------------------------------------------------
+
+// True when every byte of a proxy GFD slot is zero, i.e. nothing was posted to it.
+static bool GinApiFlushSlotIsZero(const ncclGinProxyGfd_t& slot) {
+  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&slot);
+  for (size_t i = 0; i < sizeof(ncclGinProxyGfd_t); i++) {
+    if (bytes[i] != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+__global__ void kernelGinApiFlushBlocking(ncclGinCtx ctx, uint32_t* abortFlag) {
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, ncclCoopCta{}, /*hasDescriptor=*/false,
+                                                    /*descriptor=*/nullptr, cuda::memory_order_acquire, abortFlag);
+}
+
+TEST_F(GinDeviceTest, Flush_PostsOneLocalFlushGfdPerPeer) {
+  constexpr uint32_t kNranks = 5;
+  constexpr uint32_t kQueueSize = 16; // Covers all 5 flush GFDs; postGfd's credit wait has no abort check.
+  constexpr uint32_t kRank = 2;
+  constexpr uint32_t kThreads = 3; // Fewer threads than peers so the coop.size() stride is exercised.
+  constexpr uint32_t kGetBase = 100;
+  constexpr uint32_t kSentinelGet = 999; // Index kNranks is one past the last peer: a loop overrun would flush it.
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kNranks + 1);
+  DeviceBuffer<uint32_t> d_cis(kNranks + 1);
+  DeviceBuffer<uint32_t> d_lastIssuedGet(kNranks + 1);
+  DeviceBuffer<uint32_t> d_lastVisibleGet(kNranks + 1);
+  DeviceBuffer<uint32_t> d_abortFlag(1);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_lastVisibleGet.zero();
+  std::vector<uint32_t> hostIssued(kNranks + 1);
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    hostIssued[pe] = kGetBase + pe;
+  }
+  hostIssued[kNranks] = kSentinelGet;
+  d_lastIssuedGet.copyFrom(hostIssued);
+  // No consumer runs, so a raised abort ends each ci wait; Wait still stores lastVisibleGet after an aborted flush.
+  d_abortFlag.upload(1u);
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize = kQueueSize;
+  hostProxyCtx.queues = d_queues.ptr;
+  hostProxyCtx.pis = d_pis.ptr;
+  hostProxyCtx.cis = d_cis.ptr;
+  hostProxyCtx.lastIssuedGet = d_lastIssuedGet.ptr;
+  hostProxyCtx.lastVisibleGet = d_lastVisibleGet.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.rank = static_cast<int>(kRank);
+  ctx.nRanks = static_cast<int>(kNranks);
+  ctx.handle = d_proxyCtx.ptr;
+  ctx.contextId = 0;
+
+  kernelGinApiFlushBlocking<<<1, kThreads>>>(ctx, d_abortFlag.ptr);
+  syncAndCheck();
+
+  std::vector<uint32_t> pis = d_pis.copyTo();
+  std::vector<uint32_t> cis = d_cis.copyTo();
+  std::vector<uint32_t> visible = d_lastVisibleGet.copyTo();
+  std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
+
+  // Every peer, including those past blockDim.x, had its pending get made visible; the sentinel slot was not visited.
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    EXPECT_EQ(visible[pe], kGetBase + pe) << "lastVisibleGet[" << pe << "] not advanced by Flush";
+    EXPECT_EQ(cis[pe], 0u) << "cis[" << pe << "] is consumer-owned and must be untouched";
+  }
+  EXPECT_EQ(visible[kNranks], 0u) << "Flush visited a peer index past nRanks";
+
+  // Current behavior: one flush GFD per peer, all on the local queue (gin_proxy.h notes that 1 would suffice).
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    const uint32_t expectedPi = (pe == kRank) ? kNranks : 0u;
+    EXPECT_EQ(pis[pe], expectedPi) << "pis[" << pe << "] wrong flush GFD count";
+  }
+
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    for (uint32_t s = 0; s < kQueueSize; s++) {
+      const ncclGinProxyGfd_t& slot = queues[pe * kQueueSize + s];
+      if (pe == kRank && s < kNranks) {
+        EXPECT_EQ(static_cast<uint64_t>(slot.qword[ncclGinProxyGfdHeader].header.flag), 1u)
+          << "local slot " << s << " not written";
+        EXPECT_EQ(static_cast<uint64_t>(slot.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
+                  static_cast<uint64_t>(ncclGinProxyOpFlush))
+          << "local slot " << s << " is not a flush GFD";
+      } else {
+        EXPECT_TRUE(GinApiFlushSlotIsZero(slot)) << "queue " << pe << " slot " << s << " was unexpectedly written";
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FlushTimeout_ReportsLaggingPeer: the timeout overload resolves handle[contextId] and returns ncclTimeout
+//   only from the thread whose strided peer set holds a peer with pi != ci; all other threads return ncclSuccess.
+// ---------------------------------------------------------------------------
+
+__global__ void kernelGinApiFlushTimeout(ncclGinCtx ctx, uint64_t timeoutCycles, ncclResult_t* rets) {
+  rets[threadIdx.x] =
+    ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, ncclCoopCta{}, /*hasDescriptor=*/false,
+                                                      /*descriptor=*/nullptr, cuda::memory_order_acquire,
+                                                      /*abortFlag=*/nullptr, timeoutCycles);
+}
+
+TEST_F(GinDeviceTest, FlushTimeout_ReportsLaggingPeer) {
+  constexpr uint32_t kNranks = 5;
+  constexpr uint32_t kQueueSize = 16;
+  constexpr uint32_t kThreads = 3; // Thread t owns peers t, t+3: thread 1 owns peers 1 and 4.
+  constexpr uint32_t kLaggingPeer = 4;
+  constexpr uint32_t kNumContexts = 2;
+  constexpr uint32_t kContextId = 1; // ctx[0] is a decoy with every peer drained.
+  constexpr uint32_t kIdxSize = kNumContexts * kNranks + 1; // Last index: lagging sentinel one past ctx[1]'s peers.
+  constexpr uint32_t kLagPi = 7; // pi one ahead of ci: one GFD the absent consumer never takes.
+  constexpr uint64_t kTimeoutCycles = 1ULL << 20;
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNumContexts * kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kIdxSize);
+  DeviceBuffer<uint32_t> d_cis(kIdxSize);
+  DeviceBuffer<uint32_t> d_gets(kIdxSize); // Unread by the timeout overload; shared as lastIssuedGet/lastVisibleGet.
+  DeviceBuffer<ncclResult_t> d_rets(kThreads);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(kNumContexts);
+
+  d_queues.zero();
+  d_gets.zero();
+
+  std::vector<ncclGinProxyGpuCtx_t> hostProxyCtx(kNumContexts);
+  for (uint32_t c = 0; c < kNumContexts; c++) {
+    hostProxyCtx[c].nranks = static_cast<int>(kNranks);
+    hostProxyCtx[c].queueSize = kQueueSize;
+    hostProxyCtx[c].queues = d_queues.ptr + c * kNranks * kQueueSize;
+    hostProxyCtx[c].pis = d_pis.ptr + c * kNranks;
+    hostProxyCtx[c].cis = d_cis.ptr + c * kNranks;
+    hostProxyCtx[c].lastIssuedGet = d_gets.ptr + c * kNranks;
+    hostProxyCtx[c].lastVisibleGet = d_gets.ptr + c * kNranks;
+  }
+  d_proxyCtx.copyFrom(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.rank = 0;
+  ctx.nRanks = static_cast<int>(kNranks);
+  ctx.handle = d_proxyCtx.ptr;
+  ctx.contextId = static_cast<int>(kContextId);
+
+  // Case A: every peer of the selected context is drained; only the past-the-end sentinel lags, so all threads succeed.
+  std::vector<uint32_t> hostPis(kIdxSize, 0u);
+  std::vector<uint32_t> hostCis(kIdxSize, 0u);
+  hostPis[kIdxSize - 1] = kLagPi;
+  hostCis[kIdxSize - 1] = kLagPi - 1;
+  d_pis.copyFrom(hostPis);
+  d_cis.copyFrom(hostCis);
+  d_rets.copyFrom(std::vector<ncclResult_t>(kThreads, ncclInternalError));
+  kernelGinApiFlushTimeout<<<1, kThreads>>>(ctx, kTimeoutCycles, d_rets.ptr);
+  syncAndCheck();
+  std::vector<ncclResult_t> retsA = d_rets.copyTo();
+  for (uint32_t t = 0; t < kThreads; t++) {
+    EXPECT_EQ(retsA[t], ncclSuccess) << "drained: thread " << t;
+  }
+
+  // Case B: the selected context's last peer has one unconsumed GFD; only its owning thread times out.
+  hostPis[kContextId * kNranks + kLaggingPeer] = kLagPi;
+  hostCis[kContextId * kNranks + kLaggingPeer] = kLagPi - 1;
+  d_pis.copyFrom(hostPis);
+  d_cis.copyFrom(hostCis);
+  d_rets.copyFrom(std::vector<ncclResult_t>(kThreads, ncclInternalError));
+  kernelGinApiFlushTimeout<<<1, kThreads>>>(ctx, kTimeoutCycles, d_rets.ptr);
+  syncAndCheck();
+  std::vector<ncclResult_t> retsB = d_rets.copyTo();
+  for (uint32_t t = 0; t < kThreads; t++) {
+    const ncclResult_t expected = (t == kLaggingPeer % kThreads) ? ncclTimeout : ncclSuccess;
+    EXPECT_EQ(retsB[t], expected) << "lagging peer " << kLaggingPeer << ": thread " << t;
+  }
+
+  // Current behavior: unlike the blocking overload, the timeout path only waits per peer and posts no flush GFD.
+  EXPECT_EQ(d_pis.copyTo(), hostPis) << "timeout Flush moved a producer index";
+  EXPECT_EQ(d_cis.copyTo(), hostCis) << "timeout Flush moved a consumer index";
+  std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
+  for (size_t s = 0; s < queues.size(); s++) {
+    EXPECT_TRUE(GinApiFlushSlotIsZero(queues[s])) << "timeout Flush posted to queue slot " << s;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PostGfd_Wrap: pre-position pi=ci=queueSize-1 so 4 sequential posts straddle
 //   the queueSize=4 boundary on iter 1 (idx=4 -> slot 0). Tests the
 //   `idx & (queueSize-1)` wrap arithmetic at gin_proxy.h:57 deterministically.
