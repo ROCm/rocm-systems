@@ -49,6 +49,10 @@ expectStreamResources(StrictMock<MHip> &mhip)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(&g_stream_signal_slot_storage));
     EXPECT_CALL(mhip, hipFree).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipEventCreateWithFlags)
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(reinterpret_cast<hipEvent_t>(0xE0E0)));
+    EXPECT_CALL(mhip, hipEventDestroy).Times(::testing::AnyNumber());
     EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(1));
@@ -149,6 +153,42 @@ TEST_F(HipFileStream, next_signal_target_increments_monotonically)
     ASSERT_EQ(stream->nextSignalTarget(), 1u);
     ASSERT_EQ(stream->nextSignalTarget(), 2u);
     ASSERT_EQ(stream->nextSignalTarget(), 3u);
+}
+
+TEST_F(HipFileStream, acquire_event_creates_with_timing_disabled_then_reuses_after_release)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.getStream(nonnull_stream);
+
+    auto fake_event = reinterpret_cast<hipEvent_t>(0xE0E0);
+    EXPECT_CALL(mhip, hipEventCreateWithFlags(hipEventDisableTiming))
+        .Times(1)
+        .WillOnce(::testing::Return(fake_event));
+
+    hipEvent_t event = stream->acquireEvent();
+    ASSERT_EQ(event, fake_event);
+
+    stream->releaseEvent(event);
+    ASSERT_EQ(stream->acquireEvent(), fake_event);
+}
+
+TEST(HipFileStreamEventPool, destructor_destroys_pooled_events)
+{
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    (void)mconfig;
+    expectStreamResources(mhip);
+    auto fake_event = reinterpret_cast<hipEvent_t>(0xE0E0);
+    EXPECT_CALL(mhip, hipEventDestroy(fake_event)).Times(1);
+    {
+        StreamMap stream_map;
+        EXPECT_CALL(mhip, hipStreamGetDevice);
+        stream_map.registerStream(reinterpret_cast<hipStream_t>(1), 0);
+        auto stream = stream_map.getStream(reinterpret_cast<hipStream_t>(1));
+        stream->releaseEvent(stream->acquireEvent());
+    }
 }
 
 TEST_F(HipFileStream, register_with_invalid_flags_throws)

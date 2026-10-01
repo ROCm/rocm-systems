@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 template <typename T> class PassKey;
 
@@ -18,17 +19,19 @@ class IStream {
 public:
     virtual ~IStream() = default;
 
-    virtual hipStream_t                  getHipStream() const          = 0;
-    virtual hipDevice_t                  getHipDevice() const          = 0;
-    virtual bool                         fixedBufferOffset() const     = 0;
-    virtual bool                         fixedFileOffset() const       = 0;
-    virtual bool                         fixedIOSize() const           = 0;
-    virtual bool                         pageAligned() const           = 0;
-    virtual std::unique_lock<std::mutex> getLock()                     = 0;
-    virtual bool                         canUseStreamWaitValue() const = 0;
-    virtual hipStream_t                  copyStream() const            = 0;
-    virtual uint64_t                    *signalSlot() const            = 0;
-    virtual uint64_t                     nextSignalTarget()            = 0;
+    virtual hipStream_t                  getHipStream() const           = 0;
+    virtual hipDevice_t                  getHipDevice() const           = 0;
+    virtual bool                         fixedBufferOffset() const      = 0;
+    virtual bool                         fixedFileOffset() const        = 0;
+    virtual bool                         fixedIOSize() const            = 0;
+    virtual bool                         pageAligned() const            = 0;
+    virtual std::unique_lock<std::mutex> getLock()                      = 0;
+    virtual bool                         canUseStreamWaitValue() const  = 0;
+    virtual hipStream_t                  copyStream() const             = 0;
+    virtual uint64_t                    *signalSlot() const             = 0;
+    virtual uint64_t                     nextSignalTarget()             = 0;
+    virtual hipEvent_t                   acquireEvent()                 = 0;
+    virtual void                         releaseEvent(hipEvent_t event) = 0;
 };
 
 class StreamMap;
@@ -48,6 +51,8 @@ public:
     virtual hipStream_t                  copyStream() const override;
     virtual uint64_t                    *signalSlot() const override;
     virtual uint64_t                     nextSignalTarget() override;
+    virtual hipEvent_t                   acquireEvent() override;
+    virtual void                         releaseEvent(hipEvent_t event) override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -69,6 +74,9 @@ private:
     hipStream_t copy_stream;
     uint64_t   *signal_slot;
     uint64_t    signal_counter;
+
+    std::mutex              event_mutex;
+    std::vector<hipEvent_t> event_pool;
 };
 
 class StreamMap {
