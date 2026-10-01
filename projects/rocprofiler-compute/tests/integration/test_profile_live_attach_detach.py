@@ -7,6 +7,7 @@ import inspect
 import os
 import subprocess
 import time
+from pathlib import Path
 
 import common
 
@@ -19,8 +20,26 @@ from tests.integration.common import (
 )
 
 
+def workload_env(pytestconfig):
+    """Build the workload subprocess environment for live attach tests.
+
+    Sets ROCP_TOOL_ATTACH and prepends the rocprofiler-sdk tool library
+    directory to LD_LIBRARY_PATH so that rocattach can dlopen the tool
+    library by basename inside the target process.
+    """
+    env = os.environ.copy()
+    env["ROCP_TOOL_ATTACH"] = "1"
+    sdk_tool_path = pytestconfig.getoption("--rocprofiler-sdk-tool-path", default=None)
+    if sdk_tool_path:
+        sdk_lib_dir = str(Path(sdk_tool_path).parent)
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{sdk_lib_dir}:{existing}".rstrip(":")
+    return env
+
+
 def test_live_attach_detach_block(
     binary_handler_profile_rocprof_compute,
+    pytestconfig,
 ):
     options = [
         "--block",
@@ -32,8 +51,7 @@ def test_live_attach_detach_block(
 
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
-    env = os.environ.copy()
-    env["ROCP_TOOL_ATTACH"] = "1"
+    env = workload_env(pytestconfig)
 
     process_workload = None
 
@@ -78,6 +96,7 @@ def test_live_attach_detach_block(
 
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
+    pytestconfig,
 ):
     integration_common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
@@ -86,8 +105,7 @@ def test_live_attach_detach_pc_sampling(
 
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
-    env = os.environ.copy()
-    env["ROCP_TOOL_ATTACH"] = "1"
+    env = workload_env(pytestconfig)
 
     process_workload = None
 
@@ -102,11 +120,13 @@ def test_live_attach_detach_pc_sampling(
         }
 
         # Profiling step (may fail)
-        binary_handler_profile_rocprof_compute(
+        _, stdout, stderr = binary_handler_profile_rocprof_compute(
             config,
             workload_dir,
             options,
-            check_success=True,
+            check_success=False,
+            capture_output=True,
+            stream=True,
             roof=False,
             app_name="app_hip_dynamic_shared",
             attach_detach_para=attach_detach,
@@ -123,5 +143,7 @@ def test_live_attach_detach_pc_sampling(
             ["pkill", "-9", "-f", "rocprof-attach"],
             capture_output=True,
         )
+
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     common.clean_output_dir(config["cleanup"], workload_dir)

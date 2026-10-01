@@ -89,10 +89,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.attach_pid:
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
-            # Build attach tool list (only our tools, not user's LD_PRELOAD)
-            attach_tools = [args.rocprofiler_sdk_tool_path]
+            # Use basenames so rocattach skips the /proc/<pid>/root/<path> mount
+            # namespace check and lets the target process resolve them via dlopen.
+            attach_tools = [Path(args.rocprofiler_sdk_tool_path).name]
             if native_tool_path:
-                attach_tools.append(native_tool_path)
+                attach_tools.append(Path(native_tool_path).name)
             options.update({
                 "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(attach_tools),
             })

@@ -350,6 +350,29 @@ def require_pc_sampling_gpu(is_stochastic=False):
     skip_unsupported_pc_sampling_soc(is_stochastic=is_stochastic)
 
 
+def is_pc_sampling_not_supported(output):
+    """Check whether profiling output indicates PC sampling is not supported.
+
+    To be called with the combined stdout + stderr after profiling.
+    """
+    return any(
+        marker in output
+        for marker in (
+            # rocprof-compute's own pre-flight check against the agent configs
+            "is not supported on any of the agents on this system",
+            # rocprofiler-sdk, when it accepts the run and then rejects the config
+            "Given PC sampling configuration is not supported",
+        )
+    )
+
+
+def skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
+    """Skip the test if profiling output indicates PC sampling is not supported."""
+    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
+
+
 def inject_mpirun(command, num_ranks):
     """
     Wrap a command with mpirun for multi-rank execution.
