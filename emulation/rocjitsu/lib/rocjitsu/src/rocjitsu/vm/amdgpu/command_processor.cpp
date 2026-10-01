@@ -4963,6 +4963,26 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
+  const auto release_slot = [&]() {
+    if (!queue.aql_slot_release)
+      return true;
+    const auto &release = *queue.aql_slot_release;
+    const auto outcome =
+        release.access.atomic_store(release.address, sizeof(uint32_t), release.header);
+    if (outcome == VmAccessOutcome::Complete) {
+      queue.aql_slot_release.reset();
+      return true;
+    }
+    if (outcome == VmAccessOutcome::Unavailable)
+      arm_stall_recheck(now);
+    else {
+      queue.publication_faulted = true;
+      queue.faulted = true;
+    }
+    return false;
+  };
+  if (!release_slot())
+    return;
   if (queue.read_pointer_journal.publication_pending()) {
     const VmAccessOutcome outcome = queue.read_pointer_journal.publish();
     if (outcome == VmAccessOutcome::Unavailable) {
@@ -5084,11 +5104,11 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);
     const uint64_t pkt_addr = queue.ring_base_va + slot * kAqlPacketBytes;
 
-    // AQL producers initialize the body first and publish the 16-bit header
+    // AQL producers initialize the body first and publish the first dword
     // last with release ordering. Acquire the header before touching any other
     // byte in the slot so a reserved-but-unpublished packet cannot race its
     // producer and a published packet's body is visible before we copy it.
-    const AtomicLoadResult header_load = access.atomic_load(pkt_addr, sizeof(uint16_t));
+    const AtomicLoadResult header_load = access.atomic_load(pkt_addr, sizeof(uint32_t));
     if (header_load.outcome != VmAccessOutcome::Complete) {
       process_limit = read_idx;
       if (header_load.outcome == VmAccessOutcome::Unavailable)
@@ -5106,7 +5126,9 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     }
 
     hsa_kernel_dispatch_packet_t pkt{};
-    const VmAccessOutcome packet_read = read_gpu_block(access, pkt_addr, &pkt, kAqlPacketBytes);
+    const VmAccessOutcome packet_read = read_gpu_block(
+        access, pkt_addr + sizeof(uint32_t), reinterpret_cast<std::byte *>(&pkt) + sizeof(uint32_t),
+        kAqlPacketBytes - sizeof(uint32_t));
     if (packet_read != VmAccessOutcome::Complete) {
       process_limit = read_idx;
       if (packet_read == VmAccessOutcome::Unavailable)
@@ -5116,6 +5138,7 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
       break;
     }
     pkt.header = published_header;
+    pkt.setup = static_cast<uint16_t>(header_load.value >> 16);
 
     uint8_t pkt_type = pkt.header & 0xFF;
     util::Logger::cp([&](auto &os) {
@@ -5162,7 +5185,14 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
         throw std::logic_error("AQL processor completed without retiring exactly one packet");
       }
       ++read_idx;
-      if (result.blocks_following || queue.scratch_reclaim.active()) {
+      // HSA System Architecture 1.2, section 2.8.3: release the format field
+      // using a 32-bit atomic transaction before exposing the slot for reuse.
+      // Admission is already durable, so retain this store rather than replay it.
+      queue.aql_slot_release.emplace(ComputeQueueRecord::AqlSlotRelease{
+          .access = access,
+          .address = pkt_addr,
+          .header = (static_cast<uint32_t>(header_load.value) & ~0xffu) | HSA_PACKET_TYPE_INVALID});
+      if (!release_slot() || result.blocks_following || queue.scratch_reclaim.active()) {
         process_limit = read_idx;
         break;
       }
@@ -5207,6 +5237,8 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     return;
 
   queue.read_pointer_journal.retire(process_limit, process_limit, std::move(*transaction_access));
+  if (queue.aql_slot_release)
+    return;
   const VmAccessOutcome publication = queue.read_pointer_journal.publish();
 
   if (publication == VmAccessOutcome::Unavailable) {
