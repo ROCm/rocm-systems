@@ -676,6 +676,7 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels

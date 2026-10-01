@@ -734,6 +734,7 @@ struct ncclComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
 #endif
   int localRank;
   int localRanks;

@@ -91,7 +91,7 @@ function display_help()
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"
-    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
+    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy and reduce paths"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -476,7 +476,7 @@ if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
 fi
 
-# Experimental gfx1250 TDM SIMPLE copy path
+# Experimental gfx1250 TDM SIMPLE copy and reduce paths
 if [[ "${enable_tdm_simple}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
 fi
