@@ -28,6 +28,7 @@
 #include "hrr_reader.h"
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -69,8 +70,10 @@ constexpr size_t kExtent3D = kLastRow3D + kWidth;
 constexpr size_t kLastRow2D = (kHeight - 1) * kHostPitch;
 constexpr size_t kExtent2D = kLastRow2D + kWidth;
 
-// One fill byte per host buffer, so every expected blob is distinct and a test
-// can edit one without touching the others.
+// One byte per copy. It fills the copy's host buffer and salts the device
+// window the copy reads, so every expected blob is distinct and a test can edit
+// one without touching the others. The fill alone would not do it: capture
+// leaves every byte around the copied rows zero in the blob.
 constexpr uint8_t kFill[] = {0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37};
 constexpr int kPitchedCopies = static_cast<int>(sizeof(kFill));
 
@@ -78,16 +81,37 @@ constexpr int kPitchedCopies = static_cast<int>(sizeof(kFill));
 // with a row or a slice, so reading the wrong offset or pitch reads other bytes.
 uint8_t dev_byte(size_t offset) { return static_cast<uint8_t>((offset * 2654435761u) >> 24); }
 
-// A host buffer after copying `depth` slices of the window into host slice
-// `dst_z` onwards: `fill` everywhere except the copied rows.
+// A host buffer after copying `depth` slices of the window, salted with
+// `fill`, into host slice `dst_z` onwards: `fill` everywhere except the copied
+// rows.
 std::vector<uint8_t> expected_host(uint8_t fill, size_t depth, size_t dst_z) {
   std::vector<uint8_t> host(kHostBytes, fill);
   for (size_t z = 0; z < depth; ++z)
     for (size_t y = 0; y < kHeight; ++y)
       for (size_t x = 0; x < kWidth; ++x)
         host[(dst_z + z) * kHostSlice + (kDstY + y) * kHostPitch + kDstX + x] =
-            dev_byte((kSrcZ + z) * kDevSlice + (kSrcY + y) * kDevPitch + kSrcX + x);
+            dev_byte((kSrcZ + z) * kDevSlice + (kSrcY + y) * kDevPitch + kSrcX + x) ^ fill;
   return host;
+}
+
+std::vector<uint8_t> read_file(const fs::path& path) {
+  std::ifstream f(path, std::ios::binary);
+  REQUIRE(f.good());
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+}
+
+// True when `blob`, laid out like the host buffer from `first`, holds the
+// copied rows of `host` and zero in every byte around them.
+bool rows_only(const std::vector<uint8_t>& blob, const std::vector<uint8_t>& host, size_t base,
+               size_t first, size_t depth) {
+  std::vector<uint8_t> want(blob.size(), 0);
+  for (size_t z = 0; z < depth; ++z)
+    for (size_t y = 0; y < kHeight; ++y) {
+      const size_t off = first + z * kHostSlice + y * kHostPitch;
+      if (off + kWidth > want.size()) return false;
+      std::memcpy(want.data() + off, host.data() + base + off, kWidth);
+    }
+  return blob == want;
 }
 
 // The expected-output blob of the one `api` event in the archive.
@@ -196,11 +220,14 @@ void check_blob_edits(const fs::path& cap, const fs::path& blob, size_t first, s
 TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
-  std::vector<uint8_t> image(kDevBytes);
-  for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i);
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, kDevBytes));
-  HRR_HIP_CHECK(hipMemcpy(dev, image.data(), kDevBytes, hipMemcpyHostToDevice));
+  // Salts the device buffer with copy k's fill byte; see kFill.
+  std::vector<uint8_t> image(kDevBytes);
+  auto load = [&](int k) {
+    for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i) ^ kFill[k];
+    HRR_HIP_CHECK(hipMemcpy(dev, image.data(), kDevBytes, hipMemcpyHostToDevice));
+  };
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
@@ -222,11 +249,13 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   drv3d.Height = kHeight;
   drv3d.Depth = kDepth;
 
+  load(0);
   std::vector<uint8_t> h0(kHostBytes, kFill[0]);
   drv3d.dstHost = h0.data();
   HRR_HIP_CHECK(hipDrvMemcpy3D(&drv3d));
   REQUIRE(h0 == expected_host(kFill[0], kDepth, kDstZ));
 
+  load(1);
   std::vector<uint8_t> h1(kHostBytes, kFill[1]);
   drv3d.dstHost = h1.data();
   HRR_HIP_CHECK(hipDrvMemcpy3DAsync(&drv3d, s));
@@ -246,6 +275,7 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   drv2d.WidthInBytes = kWidth;
   drv2d.Height = kHeight;
 
+  load(2);
   std::vector<uint8_t> h2(kHostBytes, kFill[2]);
   drv2d.dstHost = h2.data();
   HRR_HIP_CHECK(hipDrvMemcpy2DUnaligned(&drv2d));
@@ -258,11 +288,13 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   p3d.extent = make_hipExtent(kWidth, kHeight, kDepth);
   p3d.kind = hipMemcpyDeviceToHost;
 
+  load(3);
   std::vector<uint8_t> h3(kHostBytes, kFill[3]);
   p3d.dstPtr = make_hipPitchedPtr(h3.data(), kHostPitch, kHostPitch, kHostRows);
   HRR_HIP_CHECK(hipMemcpy3D(&p3d));
   REQUIRE(h3 == expected_host(kFill[3], kDepth, kDstZ));
 
+  load(4);
   std::vector<uint8_t> h4(kHostBytes, kFill[4]);
   p3d.dstPtr = make_hipPitchedPtr(h4.data(), kHostPitch, kHostPitch, kHostRows);
   HRR_HIP_CHECK(hipMemcpy3DAsync(&p3d, s));
@@ -274,11 +306,13 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
       static_cast<const uint8_t*>(dev) + kSrcZ * kDevSlice + kSrcY * kDevPitch + kSrcX;
   const size_t dst2d = kDstY * kHostPitch + kDstX;
 
+  load(5);
   std::vector<uint8_t> h5(kHostBytes, kFill[5]);
   HRR_HIP_CHECK(hipMemcpy2D(h5.data() + dst2d, kHostPitch, src2d, kDevPitch, kWidth, kHeight,
                             hipMemcpyDeviceToHost));
   REQUIRE(h5 == expected_host(kFill[5], 1, 0));
 
+  load(6);
   std::vector<uint8_t> h6(kHostBytes, kFill[6]);
   HRR_HIP_CHECK(hipMemcpy2DAsync(h6.data() + dst2d, kHostPitch, src2d, kDevPitch, kWidth,
                                  kHeight, hipMemcpyDeviceToHost, s));
@@ -293,7 +327,9 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
  * Test Description
  * ----------------
  *   - Capture Unit_HRR_PitchedD2H_Direct and check that each of the seven
- *     pitched copies recorded an expected-output blob.
+ *     pitched copies recorded an expected-output blob, and that the
+ *     hipDrvMemcpy3D and hipMemcpy2D blobs hold the copied rows and zero in
+ *     every byte around them, not the host buffer's fill.
  *   - Replay with HIP_HRR_D2H_EXACT=1: all seven checks must pass. Comparing
  *     the first width*height*depth bytes of each side instead compares device
  *     bytes outside the window with host fill bytes, and fails.
@@ -307,13 +343,20 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HRoundtrip) {
   {
     hrr::Archive arc;
     REQUIRE(hrr::load_archive(cap.path.string(), arc));
-    d2h_blob<hrr_args_hipDrvMemcpy3D>(arc, HRR_API_HIPDRVMEMCPY3D);
+    const std::vector<uint8_t> drv3d =
+        read_file(d2h_blob<hrr_args_hipDrvMemcpy3D>(arc, HRR_API_HIPDRVMEMCPY3D));
     d2h_blob<hrr_args_hipDrvMemcpy3DAsync>(arc, HRR_API_HIPDRVMEMCPY3DASYNC);
     d2h_blob<hrr_args_hipDrvMemcpy2DUnaligned>(arc, HRR_API_HIPDRVMEMCPY2DUNALIGNED);
     d2h_blob<hrr_args_hipMemcpy3D>(arc, HRR_API_HIPMEMCPY3D);
     d2h_blob<hrr_args_hipMemcpy3DAsync>(arc, HRR_API_HIPMEMCPY3DASYNC);
-    d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D);
+    const std::vector<uint8_t> m2d =
+        read_file(d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D));
     d2h_blob<hrr_args_hipMemcpy2DAsync>(arc, HRR_API_HIPMEMCPY2DASYNC);
+    // The host bytes around the copied rows never reach the archive.
+    REQUIRE(drv3d.size() == kExtent3D);
+    CHECK(rows_only(drv3d, expected_host(kFill[0], kDepth, kDstZ), 0, kFirst3D, kDepth));
+    REQUIRE(m2d.size() == kExtent2D);
+    CHECK(rows_only(m2d, expected_host(kFill[5], 1, 0), kDstY * kHostPitch + kDstX, 0, 1));
   }
   require_replay(cap.path, 0, kPitchedCopies, 0);
 }
@@ -452,12 +495,6 @@ fs::path h2d_blob(const hrr::Archive& arc) {
   return blob_path(arc, sync[0]->blob_hash_lo, sync[0]->blob_hash_hi);
 }
 
-std::vector<uint8_t> read_file(const fs::path& path) {
-  std::ifstream f(path, std::ios::binary);
-  REQUIRE(f.good());
-  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
-}
-
 void write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
   std::ofstream f(path, std::ios::binary | std::ios::trunc);
   f.write(reinterpret_cast<const char*>(bytes.data()),
@@ -507,7 +544,8 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
  * Test Description
  * ----------------
  *   - Capture Unit_HRR_PitchedH2D_Direct: the H2D source blob must span the
- *     host rect from srcPtr.ptr through the last copied byte.
+ *     host rect from srcPtr.ptr through the last copied byte, holding the
+ *     copied rows and zero in every byte around them.
  *   - Replay with HIP_HRR_D2H_EXACT=1: both device readbacks must match.
  */
 HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
@@ -519,7 +557,12 @@ HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
   {
     hrr::Archive arc;
     REQUIRE(hrr::load_archive(cap.path.string(), arc));
-    REQUIRE(fs::file_size(h2d_blob(arc)) == kExtent3D);
+    const std::vector<uint8_t> src = read_file(h2d_blob(arc));
+    REQUIRE(src.size() == kExtent3D);
+    // Only the copied rows of the host source reach the archive.
+    std::vector<uint8_t> host(kHostBytes);
+    for (size_t i = 0; i < kHostBytes; ++i) host[i] = host_byte(i);
+    CHECK(rows_only(src, host, 0, kFirst3D, kDepth));
   }
   require_replay(cap.path, 0, 2, 0);
 }
