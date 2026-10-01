@@ -1000,6 +1000,23 @@ static void finish_claimed_write(const std::string& key, bool ok) {
   if (--g_blob_writes_in_flight == 0) g_blob_writes_done.notify_all();
 }
 
+// Finishes a claimed write on every way out of the writer, a throw from
+// ensure_dir() or an allocation included, so no claim stays counted in flight
+// and leaves flush() waiting for it. The write counts as failed unless done()
+// reports otherwise.
+class ClaimedWrite {
+ public:
+  explicit ClaimedWrite(const std::string& key) : key_(key) {}
+  ~ClaimedWrite() { finish_claimed_write(key_, ok_); }
+  ClaimedWrite(const ClaimedWrite&) = delete;
+  ClaimedWrite& operator=(const ClaimedWrite&) = delete;
+  void done(bool ok) { ok_ = ok; }
+
+ private:
+  const std::string& key_;
+  bool ok_ = false;
+};
+
 // ---------------------------------------------------------------------------
 // write_blob
 // ---------------------------------------------------------------------------
@@ -1024,6 +1041,7 @@ Hash128 write_blob(const void* data, size_t len) {
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
     ++g_blob_writes_in_flight;
   }
+  ClaimedWrite claim(key);
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
@@ -1032,7 +1050,7 @@ Hash128 write_blob(const void* data, size_t len) {
 
   const bool ok = atomic_write_file(path, data, len);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
-  finish_claimed_write(key, ok);
+  claim.done(ok);
   return h;
 }
 
@@ -1058,11 +1076,12 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
     ++g_blob_writes_in_flight;
   }
+  ClaimedWrite claim(key);
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
   const bool ok = atomic_write_file(path, image, image_size);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
-  finish_claimed_write(key, ok);
+  claim.done(ok);
   return h;
 }
 
