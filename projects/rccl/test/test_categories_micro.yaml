@@ -83,6 +83,7 @@ test_categories:
       - "GraphGenPermuteTest.*"
       - "GraphGenIsPrimeTest.*"
       - "NodeCounts/GraphGenWaleckiTest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
       - "GraphGenWaleckiGuardTest.*"
       - "Tables/GraphGenFixedRingTableTest.*"
       - "PrimeNodeCounts/GraphGenPrimeRingTest.*"

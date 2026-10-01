@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "nccl.h"
@@ -97,6 +98,58 @@ class RingBuffer {
   int nNodes_;
   std::vector<int> storage_;
 };
+
+using Edge = std::pair<int, int>;
+
+// Directed edges, or undirected when `directed` is false (stored low node first).
+std::set<Edge> RingEdges(const int* ring, int nNodes, bool directed) {
+  std::set<Edge> edges;
+  for (int i = 0; i < nNodes; ++i) {
+    int u = ring[i], v = ring[(i + 1) % nNodes];
+    if (!directed && u > v) std::swap(u, v);
+    edges.insert({u, v});
+  }
+  return edges;
+}
+
+::testing::AssertionResult PairwiseEdgeDisjoint(const RingBuffer& rings, int count, int nNodes, bool directed) {
+  for (int a = 0; a < count; ++a) {
+    const std::set<Edge> ea = RingEdges(rings.channel(a), nNodes, directed);
+    for (int b = a + 1; b < count; ++b) {
+      for (const Edge& e : RingEdges(rings.channel(b), nNodes, directed)) {
+        if (ea.count(e)) {
+          return ::testing::AssertionFailure()
+                 << "channels " << a << " and " << b << " share edge " << e.first << "->" << e.second;
+        }
+      }
+    }
+  }
+  return ::testing::AssertionSuccess();
+}
+
+struct CutLoad {
+  std::vector<int> exits;
+  std::vector<int> entries;
+};
+
+// Range-checks every cut before indexing with it.
+::testing::AssertionResult TallyCuts(const int* rings, int nChannels, int nNodes, const std::vector<int>& cuts,
+                                     CutLoad* load) {
+  load->exits.assign(nNodes, 0);
+  load->entries.assign(nNodes, 0);
+  for (int c = 0; c < nChannels; ++c) {
+    if (cuts[c] < 0 || cuts[c] >= nNodes) {
+      return ::testing::AssertionFailure() << "channel " << c << " cut index " << cuts[c] << " is out of range";
+    }
+    const int* ring = rings + static_cast<size_t>(c) * nNodes;
+    load->exits[ring[cuts[c]]]++;
+    load->entries[ring[(cuts[c] + 1) % nNodes]]++;
+  }
+  return ::testing::AssertionSuccess();
+}
+
+int MaxOf(const std::vector<int>& v) { return *std::max_element(v.begin(), v.end()); }
+int SpreadOf(const std::vector<int>& v) { return MaxOf(v) - *std::min_element(v.begin(), v.end()); }
 
 class GraphGenTest : public ::testing::Test {
  protected:
@@ -226,6 +279,25 @@ INSTANTIATE_TEST_SUITE_P(NodeCounts, GraphGenWaleckiTest, ::testing::Values(3, 4
                            return "N" + std::to_string(info.param);
                          });
 
+// For an even count the first (nNodes - 1) / 2 channels are a Walecki
+// decomposition: no two rings share a link. Odd counts rotate every node and do not.
+class GraphGenWaleckiEvenTest : public GraphGenTest, public ::testing::WithParamInterface<int> {};
+
+TEST_P(GraphGenWaleckiEvenTest, GenerateWalecki_EvenNodeCount_FirstHalfRotationIsEdgeDisjoint) {
+  const int nNodes = GetParam();
+  const int count = WaleckiRotationSize(nNodes) / 2;
+  RingBuffer rings(count, nNodes);
+
+  for (int channel = 0; channel < count; ++channel) generateWalecki(nNodes, channel, rings.channel(channel));
+
+  EXPECT_TRUE(PairwiseEdgeDisjoint(rings, count, nNodes, /*directed=*/false));
+}
+
+INSTANTIATE_TEST_SUITE_P(EvenNodeCounts, GraphGenWaleckiEvenTest, ::testing::Values(6, 8, 10, 12, 16),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "N" + std::to_string(info.param);
+                         });
+
 using GraphGenWaleckiGuardTest = GraphGenTest;
 
 TEST_F(GraphGenWaleckiGuardTest, GenerateWalecki_EvenNodeCount_PinsTheLastSlotToTheHighestNode) {
@@ -333,7 +405,7 @@ class GraphGenPrimeRingTest : public GraphGenTest, public ::testing::WithParamIn
 
 TEST_P(GraphGenPrimeRingTest, GenRingsNPrime_FewerChannelsThanStrides_WritesOneRingPerChannel) {
   const int p = GetParam();
-  const int nChannels = p - 1;
+  const int nChannels = p - 2;
   RingBuffer rings(nChannels, p);
 
   const int written = genRingsN_prime(p, nChannels, rings.data());
@@ -342,13 +414,13 @@ TEST_P(GraphGenPrimeRingTest, GenRingsNPrime_FewerChannelsThanStrides_WritesOneR
   EXPECT_TRUE(rings.AllChannelsAreHamiltonianRings());
 }
 
-TEST_P(GraphGenPrimeRingTest, GenRingsNPrime_AllAvailableStrides_WriteDistinctRings) {
+TEST_P(GraphGenPrimeRingTest, GenRingsNPrime_AllAvailableStrides_UseEveryLinkOnce) {
   const int p = GetParam();
   RingBuffer rings(p - 1, p);
 
   genRingsN_prime(p, p - 1, rings.data());
 
-  EXPECT_EQ(rings.DistinctRingCount(p - 1), static_cast<size_t>(p - 1));
+  EXPECT_TRUE(PairwiseEdgeDisjoint(rings, p - 1, p, /*directed=*/true));
 }
 
 TEST_P(GraphGenPrimeRingTest, GenRingsNPrime_MoreChannelsThanStrides_RepeatsTheStridesFromTheStart) {
@@ -403,7 +475,7 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_MoreChannelsThanWaleckiProvides_WritesA
   constexpr int kChannels = 3 * kGreedyNodes;
   RingBuffer rings(kChannels, kGreedyNodes);
 
-  EXPECT_EQ(greedyRingGen(kGreedyNodes, kChannels, rings.data()), ncclSuccess);
+  ASSERT_EQ(greedyRingGen(kGreedyNodes, kChannels, rings.data()), ncclSuccess);
 
   EXPECT_TRUE(rings.AllChannelsAreHamiltonianRings());
 }
@@ -415,6 +487,7 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_ManyChannels_KeepEveryLinkWithinTwiceIt
   RingBuffer rings(kChannels, kGreedyNodes);
 
   ASSERT_EQ(greedyRingGen(kGreedyNodes, kChannels, rings.data()), ncclSuccess);
+  ASSERT_TRUE(rings.AllChannelsAreHamiltonianRings());
 
   std::vector<int> linkUse(kGreedyNodes * kGreedyNodes, 0);
   for (int c = 0; c < kChannels; ++c) {
@@ -423,7 +496,7 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_ManyChannels_KeepEveryLinkWithinTwiceIt
   }
   constexpr int kDirectedLinks = kGreedyNodes * (kGreedyNodes - 1);
   constexpr int kFairShare = (kChannels * kGreedyNodes + kDirectedLinks - 1) / kDirectedLinks;
-  EXPECT_LE(*std::max_element(linkUse.begin(), linkUse.end()), 2 * kFairShare);
+  EXPECT_LE(MaxOf(linkUse), 2 * kFairShare);
 }
 
 TEST_F(GraphGenGreedyTest, GreedyRingGen_FirstHalfOfChannels_ComeFromTheWaleckiConstruction) {
@@ -464,10 +537,13 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_Success_FreesBothAllocationsExactlyOnce
   void* edgeUsage = nullptr;
   void* visited = nullptr;
   ScopedHook callocHook(g_calloc, [&](size_t nmemb, size_t size) {
+    EXPECT_EQ(nmemb, static_cast<size_t>(kGreedyNodes * kGreedyNodes));
+    EXPECT_EQ(size, sizeof(uint32_t));
     edgeUsage = std::calloc(nmemb, size);
     return edgeUsage;
   });
   ScopedHook mallocHook(g_malloc, [&](size_t size) {
+    EXPECT_EQ(size, kGreedyNodes * sizeof(uint32_t));
     visited = std::malloc(size);
     return visited;
   });
@@ -580,33 +656,52 @@ TEST_F(GraphGenGenerateRingsTest, GenerateRings_GreedyConstructionFailsToAllocat
   EXPECT_EQ(generateRings(kNodes, kChannels, rings.data()), ncclInternalError);
 }
 
-// One case per dispatch arm; what each construction adds beyond the shared
-// contract is pinned by its own suite above.
+// Each row is checked against the construction it must select. Allocation is
+// the only signal that tells WaleckiOnly from greedy, whose prefix is identical.
+void ExpectTable4(int, uint32_t nChannels, int* out) { genRingsN_4(out, static_cast<int>(nChannels)); }
+void ExpectTable6(int, uint32_t nChannels, int* out) { genRingsN_6(out, static_cast<int>(nChannels)); }
+void ExpectTable8(int, uint32_t nChannels, int* out) { genRingsN_8(out, static_cast<int>(nChannels)); }
+void ExpectPrime(int nNodes, uint32_t nChannels, int* out) {
+  genRingsN_prime(nNodes, static_cast<int>(nChannels), out);
+}
+void ExpectWalecki(int nNodes, uint32_t nChannels, int* out) {
+  for (uint32_t c = 0; c < nChannels; ++c) generateWalecki(nNodes, static_cast<int>(c), out + c * nNodes);
+}
+void ExpectGreedy(int nNodes, uint32_t nChannels, int* out) { greedyRingGen(nNodes, nChannels, out); }
+
 struct DispatchCase {
   const char* name;
   int nNodes;
   uint32_t nChannels;
+  void (*expected)(int, uint32_t, int*);
+  bool allocates;
 };
 
 class GraphGenDispatchTest : public GraphGenTest, public ::testing::WithParamInterface<DispatchCase> {};
 
-TEST_P(GraphGenDispatchTest, GenerateRings_AnyNodeCount_WritesAHamiltonianRingPerChannel) {
+TEST_P(GraphGenDispatchTest, GenerateRings_AnyNodeCount_SelectsTheMatchingConstruction) {
   const DispatchCase& c = GetParam();
-  RingBuffer rings(static_cast<int>(c.nChannels), c.nNodes);
+  const int nChannels = static_cast<int>(c.nChannels);
+  RingBuffer expected(nChannels, c.nNodes);
+  c.expected(c.nNodes, c.nChannels, expected.data());
+  RingBuffer rings(nChannels, c.nNodes);
+  ScopedHook callocHook(g_calloc, [](size_t nmemb, size_t size) { return std::calloc(nmemb, size); });
 
   ASSERT_EQ(generateRings(c.nNodes, c.nChannels, rings.data()), ncclSuccess);
 
   EXPECT_TRUE(rings.AllChannelsAreHamiltonianRings());
+  for (int ch = 0; ch < nChannels; ++ch) EXPECT_EQ(rings.RingAt(ch), expected.RingAt(ch)) << "channel " << ch;
+  EXPECT_EQ(callocHook.calls > 0, c.allocates);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Constructions, GraphGenDispatchTest,
-    ::testing::Values(DispatchCase{"FourNodeTable", 4, 9},
-                      DispatchCase{"SixNodeTable", 6, 20},
-                      DispatchCase{"EightNodeTable", 8, 17},
-                      DispatchCase{"PrimeStrides", 11, 16},
-                      DispatchCase{"WaleckiOnly", 10, 5},
-                      DispatchCase{"WaleckiThenGreedy", 10, 18}),
+    ::testing::Values(DispatchCase{"FourNodeTable", 4, 9, ExpectTable4, false},
+                      DispatchCase{"SixNodeTable", 6, 20, ExpectTable6, false},
+                      DispatchCase{"EightNodeTable", 8, 17, ExpectTable8, false},
+                      DispatchCase{"PrimeStrides", 11, 16, ExpectPrime, false},
+                      DispatchCase{"WaleckiOnly", 10, 5, ExpectWalecki, false},
+                      DispatchCase{"WaleckiThenGreedy", 10, 18, ExpectGreedy, true}),
     [](const ::testing::TestParamInfo<DispatchCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
@@ -622,22 +717,19 @@ std::vector<int> RepeatRing(const std::vector<int>& ring, int nChannels) {
   return flattened;
 }
 
+// Cut indices live in a one-row RingBuffer so the output is fenced too.
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_AnyRingSet_ChoosesACutIndexInsideEveryRing) {
   constexpr int kNodes = 7;
   constexpr int kChannels = 5;
   RingBuffer rings(kChannels, kNodes);
   ASSERT_EQ(generateRings(kNodes, kChannels, rings.data()), ncclSuccess);
-  std::vector<int> cutIndices(kChannels + kCanaryCount, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(kChannels, kNodes, rings.data(), cutIndices.data());
+  findRingCutIndices(kChannels, kNodes, rings.data(), cuts.data());
 
-  for (int c = 0; c < kChannels; ++c) {
-    EXPECT_GE(cutIndices[c], 0) << "channel " << c;
-    EXPECT_LT(cutIndices[c], kNodes) << "channel " << c;
-  }
-  for (int i = kChannels; i < kChannels + kCanaryCount; ++i) {
-    EXPECT_EQ(cutIndices[i], kCanary) << "wrote past the end of cutIndices at " << i;
-  }
+  CutLoad load;
+  EXPECT_TRUE(TallyCuts(rings.data(), kChannels, kNodes, cuts.RingAt(0), &load));
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 // Identical rings offer every channel the same choice, so any spread in the
@@ -647,52 +739,35 @@ TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_IdenticalRings_SpreadExitsAndE
 
   for (int passes : {1, 2, 3}) {
     const int nChannels = kNodes * passes;
-    const std::vector<int> ring = {3, 1, 4, 0, 5, 2};
-    const std::vector<int> flattened = RepeatRing(ring, nChannels);
-    std::vector<int> cutIndices(nChannels, kCanary);
+    const std::vector<int> flattened = RepeatRing({3, 1, 4, 0, 5, 2}, nChannels);
+    RingBuffer cuts(1, nChannels);
 
-    findRingCutIndices(nChannels, kNodes, flattened.data(), cutIndices.data());
+    findRingCutIndices(nChannels, kNodes, flattened.data(), cuts.data());
 
-    std::vector<int> exitCounts(kNodes, 0);
-    std::vector<int> entryCounts(kNodes, 0);
-    for (int c = 0; c < nChannels; ++c) {
-      exitCounts[ring[cutIndices[c]]]++;
-      entryCounts[ring[(cutIndices[c] + 1) % kNodes]]++;
-    }
-
-    for (int n = 0; n < kNodes; ++n) {
-      EXPECT_EQ(exitCounts[n], passes) << "passes " << passes << ", exits at node " << n;
-      EXPECT_EQ(entryCounts[n], passes) << "passes " << passes << ", entries at node " << n;
-    }
+    CutLoad load;
+    ASSERT_TRUE(TallyCuts(flattened.data(), nChannels, kNodes, cuts.RingAt(0), &load)) << "passes " << passes;
+    EXPECT_EQ(load.exits, std::vector<int>(kNodes, passes)) << "passes " << passes;
+    EXPECT_EQ(load.entries, std::vector<int>(kNodes, passes)) << "passes " << passes;
+    EXPECT_TRUE(cuts.CanaryIntact()) << "passes " << passes;
   }
 }
 
 // Identical rings couple the two: a cut position fixes both the exit and the
-// entry, so balancing either alone spreads both. A varied ring set -- the shape
-// the production caller passes -- separates them.
+// entry. A varied ring set -- the shape the production caller passes -- separates them.
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_VariedRings_BalanceExitsAndEntriesIndependently) {
   constexpr int kNodes = 4;
-  constexpr uint32_t kChannels = 8;
-  RingBuffer rings(static_cast<int>(kChannels), kNodes);
+  constexpr int kChannels = 8;
+  RingBuffer rings(kChannels, kNodes);
   ASSERT_EQ(generateRings(kNodes, kChannels, rings.data()), ncclSuccess);
-  std::vector<int> cutIndices(kChannels, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(static_cast<int>(kChannels), kNodes, rings.data(), cutIndices.data());
+  findRingCutIndices(kChannels, kNodes, rings.data(), cuts.data());
 
-  std::vector<int> exitCounts(kNodes, 0);
-  std::vector<int> entryCounts(kNodes, 0);
-  for (uint32_t c = 0; c < kChannels; ++c) {
-    const int* ring = rings.channel(static_cast<int>(c));
-    exitCounts[ring[cutIndices[c]]]++;
-    entryCounts[ring[(cutIndices[c] + 1) % kNodes]]++;
-  }
-
-  const auto spread = [](const std::vector<int>& counts) {
-    return *std::max_element(counts.begin(), counts.end()) -
-           *std::min_element(counts.begin(), counts.end());
-  };
-  EXPECT_LE(spread(exitCounts), 1) << "exits are not balanced across the nodes";
-  EXPECT_LE(spread(entryCounts), 1) << "entries are not balanced across the nodes";
+  CutLoad load;
+  ASSERT_TRUE(TallyCuts(rings.data(), kChannels, kNodes, cuts.RingAt(0), &load));
+  EXPECT_LE(SpreadOf(load.exits), 1) << "exits are not balanced across the nodes";
+  EXPECT_LE(SpreadOf(load.entries), 1) << "entries are not balanced across the nodes";
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 // The penalty is quadratic so two nodes at 2 beat one node at 3; a linear
@@ -701,68 +776,69 @@ TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_CompetingLoads_NoNodeExceedsTh
   constexpr int kNodes = 4;
   constexpr int kChannels = 5;
   const std::vector<int> flattened = {0, 3, 2, 1,  3, 0, 1, 2,  1, 3, 2, 0,  3, 2, 0, 1,  3, 1, 0, 2};
-  std::vector<int> cutIndices(kChannels, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(kChannels, kNodes, flattened.data(), cutIndices.data());
+  findRingCutIndices(kChannels, kNodes, flattened.data(), cuts.data());
 
-  std::vector<int> exitCounts(kNodes, 0);
-  std::vector<int> entryCounts(kNodes, 0);
-  for (int c = 0; c < kChannels; ++c) {
-    const int* ring = &flattened[c * kNodes];
-    exitCounts[ring[cutIndices[c]]]++;
-    entryCounts[ring[(cutIndices[c] + 1) % kNodes]]++;
-  }
+  CutLoad load;
+  ASSERT_TRUE(TallyCuts(flattened.data(), kChannels, kNodes, cuts.RingAt(0), &load));
   constexpr int kFairShare = (kChannels + kNodes - 1) / kNodes;
-  EXPECT_LE(*std::max_element(exitCounts.begin(), exitCounts.end()), kFairShare);
-  EXPECT_LE(*std::max_element(entryCounts.begin(), entryCounts.end()), kFairShare);
+  EXPECT_LE(MaxOf(load.exits), kFairShare);
+  EXPECT_LE(MaxOf(load.entries), kFairShare);
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 // Reaching the last position depends on the entry wrapping to the ring head.
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_OneIdenticalRingPerNode_CutsEveryPositionOnce) {
   constexpr int kNodes = 4;
   const std::vector<int> flattened = RepeatRing({2, 0, 3, 1}, kNodes);
-  std::vector<int> cutIndices(kNodes, kCanary);
+  RingBuffer cuts(1, kNodes);
 
-  findRingCutIndices(kNodes, kNodes, flattened.data(), cutIndices.data());
+  findRingCutIndices(kNodes, kNodes, flattened.data(), cuts.data());
 
+  std::vector<int> cutIndices = cuts.RingAt(0);
   std::sort(cutIndices.begin(), cutIndices.end());
   EXPECT_EQ(cutIndices, std::vector<int>({0, 1, 2, 3}));
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_SingleNodeRings_CutAtTheOnlyPosition) {
   constexpr int kChannels = 3;
   const std::vector<int> flattened = {0, 0, 0};
-  std::vector<int> cutIndices(kChannels, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(kChannels, 1, flattened.data(), cutIndices.data());
+  findRingCutIndices(kChannels, 1, flattened.data(), cuts.data());
 
-  EXPECT_EQ(cutIndices, std::vector<int>(kChannels, 0));
+  EXPECT_EQ(cuts.RingAt(0), std::vector<int>(kChannels, 0));
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_NonPositiveCounts_LeaveTheOutputUntouched) {
   constexpr int kNodes = 4;
   constexpr int kChannels = 2;
   const std::vector<int> flattened = RepeatRing({0, 1, 2, 3}, kChannels);
-  std::vector<int> cutIndices(kChannels, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(0, kNodes, flattened.data(), cutIndices.data());
-  findRingCutIndices(-1, kNodes, flattened.data(), cutIndices.data());
-  findRingCutIndices(kChannels, 0, flattened.data(), cutIndices.data());
-  findRingCutIndices(kChannels, -1, flattened.data(), cutIndices.data());
+  findRingCutIndices(0, kNodes, flattened.data(), cuts.data());
+  findRingCutIndices(-1, kNodes, flattened.data(), cuts.data());
+  findRingCutIndices(kChannels, 0, flattened.data(), cuts.data());
+  findRingCutIndices(kChannels, -1, flattened.data(), cuts.data());
 
-  EXPECT_EQ(cutIndices, std::vector<int>(kChannels, kCanary));
+  EXPECT_EQ(cuts.RingAt(0), std::vector<int>(kChannels, kCanary));
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_NullArguments_LeaveTheOutputUntouched) {
   constexpr int kNodes = 4;
   constexpr int kChannels = 2;
   const std::vector<int> flattened = RepeatRing({0, 1, 2, 3}, kChannels);
-  std::vector<int> cutIndices(kChannels, kCanary);
+  RingBuffer cuts(1, kChannels);
 
-  findRingCutIndices(kChannels, kNodes, nullptr, cutIndices.data());
+  findRingCutIndices(kChannels, kNodes, nullptr, cuts.data());
   findRingCutIndices(kChannels, kNodes, flattened.data(), nullptr);
 
-  EXPECT_EQ(cutIndices, std::vector<int>(kChannels, kCanary));
+  EXPECT_EQ(cuts.RingAt(0), std::vector<int>(kChannels, kCanary));
+  EXPECT_TRUE(cuts.CanaryIntact());
 }
 
 }  // namespace
