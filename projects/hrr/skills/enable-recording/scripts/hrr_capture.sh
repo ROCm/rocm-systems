@@ -421,6 +421,9 @@ check_output_path() {
   # check. Otherwise capture creates it inside its parent.
   if [[ -d "$out" ]]; then
     probe="$out"
+  elif [[ -e "$out" || -L "$out" ]]; then
+    # A file, or a link to nothing: capture cannot make its directory there.
+    fail "$out exists and is not a directory"
   else
     parent="$(dirname "$out")"
     mkdir -p "$parent" 2>/dev/null || fail "cannot create $parent"

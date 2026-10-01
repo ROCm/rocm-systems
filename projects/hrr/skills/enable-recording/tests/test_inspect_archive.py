@@ -991,3 +991,16 @@ def test_an_output_directory_that_exists_is_checked_itself(tmp_path):
 
     # Not there yet: capture creates it inside its parent, so the parent counts.
     assert f"filesystem: fs-of:{tmp_path}," in _output_path_log(tmp_path / "run.hrr")
+
+
+def test_an_output_path_that_is_not_a_directory_is_refused(tmp_path):
+    """Capture cannot create its archive directory on top of a file, and a
+    preflight that passed left the run to end with no archive at all.
+    """
+    regular = tmp_path / "run.hrr"
+    regular.write_text("")
+    assert f"error: {regular} exists and is not a directory" in _output_path_log(regular)
+
+    dangling = tmp_path / "gone.hrr"
+    dangling.symlink_to(tmp_path / "nowhere")
+    assert f"error: {dangling} exists and is not a directory" in _output_path_log(dangling)
