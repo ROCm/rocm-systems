@@ -16,6 +16,8 @@
 #include "nccl.h"
 #include "rccl_common.h"
 #include "graph.h"
+#include "rccl_decision.h"
+#include "rocmwrap.h"
 
 #include <chrono>
 #include <cstdint>
@@ -393,6 +395,94 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
     ProcessIsolatedTestRunner::ExecutionOptions options;
     options.stopOnFirstFailure = false;
     options.verboseLogging     = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// query=true so the mock never probes a stream. ncclProd skips ncclSymkInitOnce
+// (symEligible requires Sum). Empty winSorted is a safe FindWindow miss.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredSelectsCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 4;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                alignas(16) float send[1024];
+                alignas(16) float recv[1024];
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), send, recv, 1024, ncclFloat32, ncclProd,
+                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                    &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "FORCE + unregistered buffers must enqueue CE before staging is allocated";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// FORCE + unregistered above the 32 MiB staging buffer still takes CE up to
+// the 2-shot cap; AllGather is pipelined through slots.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredOverStagingSelectsCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 8;
+                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                const size_t staging =
+                    ncclCeAllReduceStagingBufBytes(mock.comm.nRanks, NCCL_CE_AR_STAGING_BYTES);
+                ASSERT_GT(staging, 0u);
+                size_t count = (staging / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
+                while (count * sizeof(float) <= staging) count += static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
+                ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES));
+
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
+                    ncclProd, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "FORCE unregistered above staging still enqueues CE up to the 2-shot cap";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
