@@ -2,7 +2,8 @@
 
 Every C++ library we ship runs inside somebody else's callback. The
 rocprofiler-sdk tool callbacks call us. The torch dispatcher calls us through a
-`RecordFunction` observer. Python calls the extension module.
+`RecordFunction` observer. Python calls our `extern "C"` functions through
+`ctypes`.
 
 We do not own the thread, we do not own the stack, and we do not own the
 lifetime. That shapes three things at once, which is why they are in one file.
@@ -51,8 +52,8 @@ So every function that the host can call directly is a firewall:
 
 - Wrap the body in `try` and catch `...` at the outermost level.
 - Convert the failure into whatever the host expects. A status code for
-  rocprofiler-sdk, a null or a no-op for a torch observer, a Python exception
-  set through pybind for the module.
+  rocprofiler-sdk, a null or a no-op for a torch observer, a status code for
+  an `extern "C"` function that Python calls.
 - Report it. Bump an error counter and write one line to `stderr`. Do not throw,
   do not allocate a message on the hot path, and do not retry.
 - Leave our own state consistent on the way out. `handle_start_error` in
@@ -69,14 +70,12 @@ We need state that outlives every object we own. The reason is the callback API,
 not how the library gets loaded: the host calls us, and there is no object of
 ours that owns the state and no parameter we can thread it through.
 
-`LD_PRELOAD` is the wrong test for this. `torch_trace_collector` is an ordinary
-Python extension module and it still needs a process-wide `ProcessState`.
+`LD_PRELOAD` is the wrong test for this. Python loads `torch_trace_collector`
+through `ctypes`, and it still needs a process-wide `ProcessState`.
 
 ### Allowed
 
-Only for state that a host callback API leaves us no place to own:
-rocprofiler-sdk tool callbacks, torch `RecordFunction` observers, and module
-init.
+Use this only when a host callback gives us nowhere else to keep the state.
 
 It must take one of two forms. Which one depends on a single question: **does
 the host call us after our static destructors would have run?**

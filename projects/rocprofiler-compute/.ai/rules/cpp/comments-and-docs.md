@@ -41,7 +41,7 @@ Tags: `@param`, `@return`, `@throws`, `@note`, `@warning`, `@see`,
 Only when all three hold:
 
 1. The reader cannot get the intent from the code.
-2. It will still be true a year from now, after refactors.
+2. It stays true when the surrounding code is refactored.
 3. It is not already in the commit message, the PR description, the tracker, or
    another file.
 

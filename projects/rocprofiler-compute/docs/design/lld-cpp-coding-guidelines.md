@@ -70,7 +70,7 @@ Dropped:
 - Upstream has nothing like it, because their code is not shaped like ours.
 - Every C++ library we ship runs inside somebody else's callback. The
   rocprofiler-sdk tool callbacks call us. The torch dispatcher calls us. Python
-  calls the extension module.
+  calls our `extern "C"` functions through `ctypes`.
 - That shapes three things at once, so they belong in one file:
   - What thread we are on and what is allowed there. No I/O and only brief
     locks on the dispatch path. `synchronized_t`, atomics, `thread_local`.
@@ -84,13 +84,11 @@ Dropped:
 - We need process-lifetime state in places, and the reason is the callback API,
   not how the library is loaded. The host calls us. There is no object of ours
   that owns the state and no call we can thread it through.
-- `LD_PRELOAD` is not the right test for this. `torch_trace_collector` is a
-  Python extension module and it already keeps a process-wide `ProcessState`
-  and a `thread_local ThreadState`.
+- `LD_PRELOAD` is not the right test for this. Python loads
+  `torch_trace_collector` through `ctypes`, and it already keeps a
+  process-wide `ProcessState` and a `thread_local ThreadState`.
 - So the rule keys off the cause:
-  - Allowed for process-lifetime state that a host callback API leaves us no
-    place to own: rocprofiler-sdk tool callbacks, torch `RecordFunction`
-    observers, module init.
+  - Allowed only when a host callback gives us nowhere else to keep the state.
   - It must never be a namespace scope object whose destructor runs at
     shutdown. Two forms satisfy that, and the choice turns on whether the host
     calls us after our static destructors would have run:
