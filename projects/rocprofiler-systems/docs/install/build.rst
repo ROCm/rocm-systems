@@ -161,7 +161,7 @@ Clone the ``rocm-systems`` repository and check out only the ROCm Systems Profil
    git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
    git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
 
-CMake presets live in ``projects/rocprofiler-systems/CMakePresets.json``. Run the
+CMake presets are defined in ``CMakePresets.json`` in the projects root directory. Run the
 configure and build commands from that directory.
 
 Configure and build with CMake presets
