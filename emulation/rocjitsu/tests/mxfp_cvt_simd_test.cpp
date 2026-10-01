@@ -936,6 +936,67 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackSpecialScalesMasksAndOverflowAreBitExa
   }
 }
 
+TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackNaNOperandsMatchScalar) {
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
+  } else {
+    HeldFloatingEnvironment environment;
+    ASSERT_TRUE(environment.valid());
+    ConversionFixture fixture("gfx1250_mxfp_cvt_unpack_nan_operands");
+    ASSERT_NE(fixture.cu, nullptr);
+    ASSERT_NE(fixture.decoder, nullptr);
+    ASSERT_NE(fixture.wf, nullptr);
+
+    struct RunResult {
+      int clear_result;
+      int exceptions;
+      bool succeeded;
+      std::array<uint32_t, kMaxDestinationRegs * kWaveSize> destination;
+    };
+    for (const ConversionCase &test_case : kConversionCases) {
+      if (test_case.kind != ConversionKind::Unpack || test_case.low_bits != 8u)
+        continue;
+      SCOPED_TRACE(test_case.mnemonic.data());
+      const auto words = build_conversion(test_case);
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+
+      // Both NaN signs and every BF8 NaN payload, with a NaN or unity scale.
+      // The generated scalar consumer determines which NaN multiplication keeps.
+      for (uint32_t code : {0x7cu, 0x7du, 0x7eu, 0x7fu, 0xfcu, 0xfdu, 0xfeu, 0xffu}) {
+        SCOPED_TRACE(code);
+        for (uint32_t scale_code : {0xffu, 0x7fu}) {
+          SCOPED_TRACE(scale_code);
+          for (uint64_t exec : {kFullExec, kSparseExec}) {
+            SCOPED_TRACE(exec);
+            const auto run = [&](bool force_scalar) {
+              fixture.seed(test_case, exec);
+              fixture.fill_packed_source(test_case, kSourceBase, code);
+              for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+                fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, lane,
+                                       scale_code << (kUnpackScaleByte * 8u));
+              ForceScalarGuard guard(force_scalar);
+              const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
+              const bool succeeded =
+                  fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+              const int exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+              return RunResult{clear_result, exceptions, succeeded, fixture.snapshot_vgpr_window()};
+            };
+            const RunResult scalar = run(true);
+            const RunResult simd = run(false);
+            ASSERT_EQ(scalar.clear_result, 0);
+            ASSERT_EQ(simd.clear_result, 0);
+            ASSERT_TRUE(scalar.succeeded);
+            ASSERT_TRUE(simd.succeeded);
+            EXPECT_EQ(simd.destination, scalar.destination);
+            EXPECT_EQ(simd.exceptions, scalar.exceptions);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(Gfx1250MxfpCvtSimdCorrectness, AllOpcodesMatchScalarFloatingPointExceptions) {
   if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
     GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
