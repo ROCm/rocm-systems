@@ -36,8 +36,8 @@
 /// ordinary register the body reads. Relative and GPR-indexed forms break that
 /// by displacing an index at runtime, so they are rejected rather than analyzed:
 /// the VGPR forms via `LivenessAnalysis::global_vgpr_usage_is_complete()`, the
-/// scalar `s_movrel*` family via a local scan, since liveness models no scalar
-/// equivalent.
+/// scalar `s_movrel*` family via `accesses_sgprs_indirectly_via_movrel()`
+/// (`analysis/liveness.h`), since liveness models no scalar equivalent.
 
 #pragma once
 

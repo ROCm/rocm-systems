@@ -40,6 +40,14 @@ struct KernelDescriptorInfo {
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index = std::nullopt);
 
+/// @brief SGPRs at the top of a CDNA kernel's allocation that hold special
+///        registers rather than ordinary ones.
+///
+/// @details On CDNA targets COMPUTE_PGM_RSRC1's SGPR count includes
+/// FLAT_SCRATCH (N-6), XNACK_MASK (N-4) and VCC (N-2), which alias the
+/// allocation's top six SGPRs, matching LLVM's getBaseReservedNumSGPRs.
+inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 6;
+
 /// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
 ///
 /// @details CDNA is Wave64; gfx1250 is Wave32-only; RDNA opts into Wave32 via the
