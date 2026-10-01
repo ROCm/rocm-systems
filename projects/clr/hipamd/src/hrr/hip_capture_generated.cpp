@@ -7813,6 +7813,35 @@ static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t li
 }
 
 // Generated shim
+static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) {
+  hipError_t r = g_real_table.hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetAttributeForDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.attr = static_cast<decltype(a.attr)>(attr);
+    a.value = static_cast<decltype(a.value)>(value);
+    a.device = static_cast<decltype(a.device)>(device);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetExecAffinitySupport(int* p0, hipExecAffinityType p1, hipDevice_t p2) {
+  hipError_t r = g_real_table.hipDeviceGetExecAffinitySupport_fn(p0, p1, p2);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetExecAffinitySupport a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.p0 = reinterpret_cast<uint64_t>(p0);
+    a.p1 = static_cast<decltype(a.p1)>(p1);
+    a.p2 = static_cast<uint64_t>(static_cast<int>(p2));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8549,6 +8578,8 @@ void hip_capture_build_table() {
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
+  g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
+  g_cap_table.hipDeviceGetExecAffinitySupport_fn = capture_hipDeviceGetExecAffinitySupport;
 }
 
 void hip_capture_build_compiler_table() {
