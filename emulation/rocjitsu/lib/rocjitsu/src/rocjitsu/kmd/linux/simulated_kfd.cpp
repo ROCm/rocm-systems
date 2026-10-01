@@ -2114,9 +2114,10 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
     return alloc.host_ptr;
 
-  // A VRAM CPU mapping is an alias of the BO, not its GPU backing. Keep the
+  // A GTT/VRAM CPU mapping is an alias of the BO, not its GPU backing. Keep the
   // private driver mapping alive when the client maps or unmaps an alias.
-  if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) && alloc.memfd >= 0) {
+  if ((alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT)) &&
+      alloc.memfd >= 0) {
     if (length > alloc.size) {
       errno = EINVAL;
       return MAP_FAILED;
@@ -2465,10 +2466,11 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
   const bool is_vram = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0;
+  const bool is_gtt = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_GTT) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va || is_vram) {
+  } else if (daemon_mode_ || !user_provided_va || is_vram || is_gtt) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2485,10 +2487,12 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
         fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
         safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
-        // amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu allocates a VRAM BO even
-        // without PUBLIC (CPU access). A supplied GPU VA is not host backing.
+        // amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu allocates GTT/VRAM BOs
+        // independently of CPU mappings, including VRAM without PUBLIC access.
+        // GTT BOs also need shareable backing for kfd_mem_export_dmabuf;
+        // a supplied GPU VA is not host backing.
         // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
-        if ((daemon_mode_ || is_vram) && !is_doorbell) {
+        if ((daemon_mode_ || is_vram || is_gtt) && !is_doorbell) {
           auto *mapped =
               safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
@@ -2655,10 +2659,12 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    const bool vram_backing = (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) && alloc.host_ptr_owned;
-    if (alloc.host_ptr && (!alloc.user_va || vram_backing))
+    const bool bo_backing =
+        (alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT)) &&
+        alloc.host_ptr_owned;
+    if (alloc.host_ptr && (!alloc.user_va || bo_backing))
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-    if (vram_backing)
+    if (bo_backing)
       safe_munmap(alloc.host_ptr, alloc.size);
     if (alloc.memfd >= 0) {
       {
@@ -3170,6 +3176,16 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   if (dupfd < 0)
     return -errno;
 
+  // IMPORT attaches the BO at a GPU VA, even when no CPU alias exists there.
+  // Hold a private mapping so closing the export fd or unmapping a client
+  // alias cannot revoke the imported GPU backing.
+  void *backing = safe_mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, dupfd, 0);
+  if (backing == MAP_FAILED) {
+    int error = errno;
+    libc_passthrough().close(dupfd);
+    return -error;
+  }
+
   uint64_t handle;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -3182,7 +3198,9 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.user_va = true;
     alloc.imported = true;
     alloc.dmabuf_fd = dupfd;
-    alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    alloc.host_ptr = backing;
+    alloc.host_ptr_owned = true;
+    alloc.gpu_id = args->gpu_id;
     proc.allocations_[handle] = alloc;
 
     KfdProcess::ImportedDmabuf info{};
@@ -3196,8 +3214,8 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   }
 
   if (args->va_addr)
-    map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
-               amdgpu::Mtype::UC);
+    map_to_gpu(proc, args->va_addr, backing, size, amdgpu::Mtype::UC,
+               KfdProcess::HostExtentOwner::Driver);
 
   args->handle = handle;
   return 0;
