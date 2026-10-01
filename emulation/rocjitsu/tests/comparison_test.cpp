@@ -225,17 +225,14 @@ TEST(ComparisonTest, SignedZerosAreEqual) {
 }
 
 // ---------------------------------------------------------------------------
-// Target gating.
+// MODE gating.
 // ---------------------------------------------------------------------------
 
-TEST(ComparisonTest, FlushesOnlyMeasuredTargetsWithInputDenormalsDisabled) {
-  EXPECT_TRUE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA4, 0u).flush_inputs);
-  EXPECT_TRUE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA4, 2u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA4, 1u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA4, 3u).flush_inputs);
-  EXPECT_TRUE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA3, 0u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(ROCJITSU_CODE_ARCH_RDNA3_5, 0u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(ROCJITSU_CODE_ARCH_CDNA3, 0u).flush_inputs);
+TEST(ComparisonTest, FlushesWhenInputDenormalsAreDisabled) {
+  EXPECT_TRUE(cmp::Policy::make(0u).flush_inputs);
+  EXPECT_TRUE(cmp::Policy::make(2u).flush_inputs);
+  EXPECT_FALSE(cmp::Policy::make(1u).flush_inputs);
+  EXPECT_FALSE(cmp::Policy::make(3u).flush_inputs);
 }
 
 // ---------------------------------------------------------------------------

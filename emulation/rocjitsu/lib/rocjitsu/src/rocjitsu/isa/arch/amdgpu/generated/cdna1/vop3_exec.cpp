@@ -3425,16 +3425,14 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3458,16 +3456,14 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3491,16 +3487,14 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3524,16 +3518,14 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3557,16 +3549,14 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3590,16 +3580,14 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3623,16 +3611,14 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3656,16 +3642,14 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3689,16 +3673,14 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3722,16 +3704,14 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3755,16 +3735,14 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3788,16 +3766,14 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3821,16 +3797,14 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3854,16 +3828,14 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
       commit_result, uint32_t,
-      [compare_policy =
-           amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64()),
+      [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64()),
        abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
         return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
             a, b, abs_mods, neg_mods, compare_policy);
       });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3923,8 +3895,7 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3946,8 +3917,7 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3969,8 +3939,7 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3992,8 +3961,7 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4015,8 +3983,7 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4038,8 +4005,7 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4061,8 +4027,7 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4084,8 +4049,7 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4107,8 +4071,7 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4130,8 +4093,7 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4153,8 +4115,7 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4176,8 +4137,7 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4199,8 +4159,7 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4222,8 +4181,7 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4404,8 +4362,7 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4426,8 +4383,7 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4448,8 +4404,7 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4470,8 +4425,7 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4492,8 +4446,7 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4514,8 +4467,7 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4536,8 +4488,7 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4558,8 +4509,7 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4580,8 +4530,7 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4602,8 +4551,7 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4624,8 +4572,7 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4646,8 +4593,7 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4668,8 +4614,7 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4690,8 +4635,7 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f32());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4872,8 +4816,7 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4894,8 +4837,7 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4916,8 +4858,7 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4938,8 +4879,7 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4960,8 +4900,7 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4982,8 +4921,7 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5004,8 +4942,7 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5026,8 +4963,7 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5048,8 +4984,7 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5070,8 +5005,7 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5092,8 +5026,7 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5114,8 +5047,7 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5136,8 +5068,7 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5158,8 +5089,7 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  const auto compare_policy =
-      amdgpu::comparison::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

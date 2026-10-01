@@ -31,8 +31,6 @@
 /// values above the format width are ignored. CLASS tests read the raw
 /// encoding and do not use these stages.
 
-#include "rocjitsu/code/rj_code.h"
-
 #include <cstdint>
 #include <functional>
 #include <type_traits>
@@ -58,22 +56,15 @@ using F16 = Format<uint32_t, 5, 10>;
 using F32 = Format<uint32_t, 8, 23>;
 using F64 = Format<uint64_t, 11, 52>;
 
-/// @brief Whether an architecture uses the measured compare rules.
-/// @details gfx1201 captures across every MODE.FP_DENORM setting, and gfx1100
-/// captures that agree with them on every compare variant. Other targets keep
-/// comparing their inputs unflushed.
-constexpr bool measured_rules(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
-}
-
 /// @brief Per-instruction compare policy, fixed before any lane is evaluated.
 struct Policy {
   bool flush_inputs = false;
 
+  /// @details Every ISA manual applies the MODE denormal controls to all
+  /// floating-point operations, with no exception for compares; gfx1201
+  /// captures across every MODE.FP_DENORM setting confirm it.
   /// @param denorm_mode MODE.FP_DENORM field of the source format; bit 0 allows input denormals.
-  static constexpr Policy make(rj_code_arch_t arch, uint32_t denorm_mode) {
-    return {measured_rules(arch) && (denorm_mode & 1u) == 0};
-  }
+  static constexpr Policy make(uint32_t denorm_mode) { return {(denorm_mode & 1u) == 0}; }
 };
 
 /// @brief A relation: an operation on order keys, optionally negated.

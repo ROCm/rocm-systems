@@ -48,7 +48,7 @@ def lane_type(dtype: str) -> str:
 
 def policy_expr(dtype: str) -> str:
     mode = 'f32' if dtype == 'f32' else 'f16_f64'
-    return f'{_NS}::Policy::make(wf.cu().arch(), wf.fp_denorm_mode_{mode}())'
+    return f'{_NS}::Policy::make(wf.fp_denorm_mode_{mode}())'
 
 
 def policy_decl(dtype: str, indent: str = '  ') -> str:
