@@ -8,9 +8,13 @@ from __future__ import annotations
 from rocprof_compute_soc.counter_grouping_refill import rebuild_counter_file
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
+    _bucket_tcc_channel_bases,
     _ensure_packable_union,
+    _expand_tcc_ea_affinity_partners,
     _first_fit_unplaced,
     _reduce_passes,
+    _split_independent_tcc_ea_req_union,
+    _strip_orphan_tcc_ea_req_duplicates,
     legacy_heuristic_enabled_from_env,
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
@@ -208,3 +212,96 @@ def test_allocator_integrates_slot_limit_fill(monkeypatch):
     placed = {c for f in files for c in flat_counters_in_perfmon_file(f)}
     assert slot <= placed
     assert work_set == set()
+
+
+def test_split_independent_tcc_ea_req_union_splits_1805_style():
+    group = frozenset({
+        "TCC_EA0_RDREQ[0]",
+        "TCC_EA0_RDREQ[1]",
+        "TCC_EA0_WRREQ[0]",
+        "TCC_EA0_WRREQ[1]",
+        "TCC_EA0_ATOMIC[0]",
+        "TCC_EA0_ATOMIC[1]",
+    })
+    subgroups = _split_independent_tcc_ea_req_union(group)
+    assert len(subgroups) == 3
+    bases = [{ctr.split("[")[0] for ctr in subgroup} for subgroup in subgroups]
+    assert {"TCC_EA0_RDREQ"} in bases
+    assert {"TCC_EA0_WRREQ"} in bases
+    assert {"TCC_EA0_ATOMIC"} in bases
+
+
+def test_split_keeps_level_req_affinity_pair_intact():
+    group = frozenset({
+        "TCC_EA0_RDREQ[0]",
+        "TCC_EA0_RDREQ_LEVEL[0]",
+        "TCC_EA0_WRREQ[0]",
+        "TCC_EA0_WRREQ_LEVEL[0]",
+    })
+    assert _split_independent_tcc_ea_req_union(group) == [group]
+
+
+def test_expand_tcc_ea_affinity_partners_adds_matching_req():
+    group = frozenset({"TCC_EA0_RDREQ_LEVEL[0]", "TCC_EA0_RDREQ_LEVEL[1]"})
+    profile = {
+        "TCC_EA0_RDREQ_LEVEL[0]",
+        "TCC_EA0_RDREQ_LEVEL[1]",
+        "TCC_EA0_RDREQ[0]",
+        "TCC_EA0_RDREQ[1]",
+        "TCC_EA0_WRREQ[0]",
+    }
+    expanded = _expand_tcc_ea_affinity_partners(group, profile)
+    assert "TCC_EA0_RDREQ[0]" in expanded
+    assert "TCC_EA0_RDREQ[1]" in expanded
+    assert "TCC_EA0_WRREQ[0]" not in expanded
+
+
+def test_strip_orphan_tcc_ea_req_duplicates_keeps_level_home():
+    cfg = {"TCC": 4, "SQ": 8}
+    atomic = rebuild_counter_file(
+        "1",
+        cfg,
+        {
+            "TCC_EA0_ATOMIC[0]",
+            "TCC_EA0_ATOMIC_LEVEL[0]",
+            "TCC_EA0_RDREQ[0]",
+            "TCC_EA0_WRREQ[0]",
+        },
+    )
+    latency = rebuild_counter_file(
+        "2",
+        cfg,
+        {
+            "TCC_EA0_RDREQ[0]",
+            "TCC_EA0_RDREQ_LEVEL[0]",
+            "TCC_EA0_WRREQ[0]",
+            "TCC_EA0_WRREQ_LEVEL[0]",
+        },
+    )
+    assert atomic is not None and latency is not None
+    files = _strip_orphan_tcc_ea_req_duplicates([atomic, latency], cfg)
+    assert _bucket_tcc_channel_bases(files[0]) == {
+        "TCC_EA0_ATOMIC",
+        "TCC_EA0_ATOMIC_LEVEL",
+    }
+    assert _bucket_tcc_channel_bases(files[1]) == {
+        "TCC_EA0_RDREQ",
+        "TCC_EA0_RDREQ_LEVEL",
+        "TCC_EA0_WRREQ",
+        "TCC_EA0_WRREQ_LEVEL",
+    }
+
+
+def test_strip_orphan_noop_without_level_home():
+    cfg = {"TCC": 4, "SQ": 8}
+    only_req = rebuild_counter_file(
+        "0",
+        cfg,
+        {"TCC_EA0_RDREQ[0]", "TCC_EA0_WRREQ[0]"},
+    )
+    assert only_req is not None
+    files = _strip_orphan_tcc_ea_req_duplicates([only_req], cfg)
+    assert _bucket_tcc_channel_bases(files[0]) == {
+        "TCC_EA0_RDREQ",
+        "TCC_EA0_WRREQ",
+    }

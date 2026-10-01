@@ -6,6 +6,7 @@
 - [Session handoff (resume here)](aiprofcomp-865-session-handoff.md)
 - [problem-decompose HTML](aiprofcomp-865-problem-decompose.html)
 - [Phase 2 WEIGHTED_AVG design](aiprofcomp-865-phase2-weighted-avg-design.md)
+- [TCC series affinity + coverage](aiprofcomp-865-tcc-series-affinity-coverage.md) (approved harden on SPP; **not** Phase-2 `WEIGHTED_AVG`)
 - [impact report](aiprofcomp-865-gfx942-single-pass-impact-report.md)
 - [collectables scope](aiprofcomp-865-collectables-scope.md)
 
@@ -343,6 +344,9 @@ Days 8–18     Phase 2 pilots → remaining unique SLOT sets
 5. Analyze paths that assume **unique** PMC→file mapping — audit before cutover.
 6. gfx1250 **anti-affinity** — express in SPP or separate constraint.
 7. Whether CP-SAT remains a debug alternative or is deleted with the heuristic.
+8. **TCC series affinity + coverage** — approved policy + pass-count eval in
+   [aiprofcomp-865-tcc-series-affinity-coverage.md](aiprofcomp-865-tcc-series-affinity-coverage.md);
+   implement after Phase 1 validation (no pass increase expected on gfx942).
 
 ---
 

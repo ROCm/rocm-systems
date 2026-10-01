@@ -11,13 +11,17 @@ Goal
 3. Counters not required by any packable union use ordinary first-fit.
 4. Place remaining ``SLOT_LIMIT`` PMCs into existing buckets when possible
    (open new passes only if needed).
+5. TCC series affinity + coverage: keep LEVEL with matching REQ/ATOMIC in
+   the same pass; cover every selected series; never emit orphan REQ
+   duplicates across channel passes (see AIPROFCOMP-865 design).
 
 Notes
 -----
 Overlapping packable unions that cannot share one bucket are handled by
 **duplicating** counters into an additional bucket (additive passes). That
 differs from the legacy heuristic, which places each counter in at most one
-bucket.
+bucket. Affinity forbids duplicating the same EA REQ series into a second
+pass when a LEVEL+REQ home already exists.
 
 Disable with ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1`` (or
 ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0``) to restore the priority
@@ -46,6 +50,19 @@ from .soc_base import (
 
 if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
+
+# LEVEL base -> matching REQ/ATOMIC denominator base (hard co-residence).
+_TCC_EA_LEVEL_TO_REQ: dict[str, str] = {
+    "TCC_EA0_RDREQ_LEVEL": "TCC_EA0_RDREQ",
+    "TCC_EA0_WRREQ_LEVEL": "TCC_EA0_WRREQ",
+    "TCC_EA0_ATOMIC_LEVEL": "TCC_EA0_ATOMIC",
+}
+_TCC_EA_REQ_TO_LEVEL: dict[str, str] = {
+    req: level for level, req in _TCC_EA_LEVEL_TO_REQ.items()
+}
+# Independent EA count columns (panel 1805); split so they do not force
+# orphan REQ copies into the ATOMIC+LEVEL pass.
+_TCC_EA_INDEPENDENT_REQ_BASES: frozenset[str] = frozenset(_TCC_EA_REQ_TO_LEVEL)
 
 
 @dataclass(frozen=True)
@@ -86,12 +103,77 @@ def single_pass_packable_enabled_from_env() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def _tcc_channel_base(counter: str) -> str:
+    return counter.split("[")[0]
+
+
+def _bucket_tcc_channel_bases(bucket: CounterFile) -> set[str]:
+    return {
+        _tcc_channel_base(ctr)
+        for ctr in flat_counters_in_perfmon_file(bucket)
+        if is_tcc_channel_counter(ctr)
+    }
+
+
+def _split_independent_tcc_ea_req_union(
+    group: frozenset[str],
+) -> list[frozenset[str]]:
+    """Split multi-column EA REQ unions (e.g. panel 1805) into per-series groups.
+
+    Independent count columns must not force REQ into a LEVEL-home pass for a
+    different series (orphan REQ dups). Each series is covered alone.
+    """
+    bases_in_group = {
+        _tcc_channel_base(ctr) for ctr in group if is_tcc_channel_counter(ctr)
+    }
+    if bases_in_group & set(_TCC_EA_LEVEL_TO_REQ):
+        return [group]
+    independent = bases_in_group & _TCC_EA_INDEPENDENT_REQ_BASES
+    if len(independent) < 2:
+        return [group]
+
+    subgroups: list[frozenset[str]] = []
+    remaining = set(group)
+    for base in sorted(independent):
+        series = frozenset(
+            ctr
+            for ctr in group
+            if is_tcc_channel_counter(ctr) and _tcc_channel_base(ctr) == base
+        )
+        subgroups.append(series)
+        remaining -= series
+    if remaining:
+        subgroups.append(frozenset(remaining))
+    return subgroups
+
+
+def _expand_tcc_ea_affinity_partners(
+    group: frozenset[str],
+    profile_counters: set[str],
+) -> frozenset[str]:
+    """Ensure LEVEL bases keep matching REQ/ATOMIC channels from the profile."""
+    bases = {_tcc_channel_base(ctr) for ctr in group if is_tcc_channel_counter(ctr)}
+    expanded = set(group)
+    for level_base, req_base in _TCC_EA_LEVEL_TO_REQ.items():
+        if level_base not in bases:
+            continue
+        for ctr in profile_counters:
+            if not is_tcc_channel_counter(ctr):
+                continue
+            if _tcc_channel_base(ctr) == req_base:
+                expanded.add(ctr)
+    return frozenset(expanded)
+
+
 def collect_unique_packable_unions(
     soc: OmniSoC_Base,
     profile_counters: set[str],
     perfmon_config: dict[str, int],
 ) -> tuple[list[frozenset[str]], int]:
     """Unique PMC sets for metrics that fit one hardware bucket.
+
+    Multi-column EA REQ tables (e.g. 1805) are split into per-series unions so
+    affinity can keep LEVEL+REQ co-resident without orphan REQ duplicates.
 
     Returns (unions sorted largest-first, packable_metric_count).
     """
@@ -102,10 +184,16 @@ def collect_unique_packable_unions(
         if not counters_fit_one_bucket(group, perfmon_config):
             continue
         packable_metric_count += 1
-        if group in seen:
-            continue
-        seen.add(group)
-        unions.append(group)
+        for subgroup in _split_independent_tcc_ea_req_union(group):
+            affinity_group = _expand_tcc_ea_affinity_partners(
+                subgroup, profile_counters
+            )
+            if not counters_fit_one_bucket(affinity_group, perfmon_config):
+                affinity_group = subgroup
+            if affinity_group in seen:
+                continue
+            seen.add(affinity_group)
+            unions.append(affinity_group)
     unions.sort(key=lambda g: (-len(g), sorted(g)))
     return unions, packable_metric_count
 
@@ -373,6 +461,69 @@ def _count_packable_multi(
     return sum(1 for group in unions if not _any_bucket_has_full_group(files, group))
 
 
+def _strip_orphan_tcc_ea_req_duplicates(
+    files: list[CounterFile],
+    perfmon_config: dict[str, int],
+) -> list[CounterFile]:
+    """Remove EA REQ series from non-home passes when a LEVEL+REQ home exists.
+
+    Ban placing the same per-channel EA REQ family in two passes with
+    divergent channel maps (AIPROFCOMP-865 §1.4). ``*_sum`` aggregates are
+    untouched (not channel series).
+    """
+    if not files:
+        return files
+
+    home_bases: set[str] = set()
+    for bucket in files:
+        bases = _bucket_tcc_channel_bases(bucket)
+        for req_base, level_base in _TCC_EA_REQ_TO_LEVEL.items():
+            if req_base in bases and level_base in bases:
+                home_bases.add(req_base)
+
+    if not home_bases:
+        return files
+
+    updated: list[CounterFile] = []
+    changed = False
+    for bucket in files:
+        bases = _bucket_tcc_channel_bases(bucket)
+        drop_bases = {
+            req_base
+            for req_base in home_bases
+            if req_base in bases and _TCC_EA_REQ_TO_LEVEL[req_base] not in bases
+        }
+        if not drop_bases:
+            updated.append(bucket)
+            continue
+        kept = {
+            ctr
+            for ctr in flat_counters_in_perfmon_file(bucket)
+            if not (
+                is_tcc_channel_counter(ctr) and _tcc_channel_base(ctr) in drop_bases
+            )
+        }
+        rebuilt = rebuild_counter_file(bucket.name, perfmon_config, kept)
+        if rebuilt is None:
+            console_warning(
+                "profiling",
+                "single-pass-packable: orphan TCC EA REQ strip rebuild failed "
+                f"for bucket {bucket.name!r}; leaving bucket unchanged.",
+            )
+            updated.append(bucket)
+            continue
+        changed = True
+        updated.append(rebuilt)
+
+    if changed:
+        console_debug(
+            "profiling",
+            "single-pass-packable: stripped orphan TCC EA REQ series from "
+            f"non-home passes ({sorted(home_bases)}).",
+        )
+    return updated
+
+
 def _try_merge_bucket_indices(
     files: list[CounterFile],
     indices: set[int],
@@ -454,6 +605,7 @@ def try_allocate_single_pass_packable(
 
     files, file_count = _first_fit_unplaced(files, work_set, perfmon_config, file_count)
     files, merges = _reduce_passes(files, unions, perfmon_config)
+    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config)
     file_count = file_count_start + len(files)
 
     packable_multi = _count_packable_multi(files, unions)
@@ -476,6 +628,8 @@ def try_allocate_single_pass_packable(
         slot_limit_metric_count=slot_n,
         file_count_start=file_count,
     )
+    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config)
+    file_count = file_count_start + len(files)
 
     stats = SinglePassPackableStats(
         bucket_count=len(files),

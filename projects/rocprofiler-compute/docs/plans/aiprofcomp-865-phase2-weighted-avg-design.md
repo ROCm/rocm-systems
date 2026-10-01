@@ -3,7 +3,7 @@
 **Status:** Milestone A implemented on branch (parser, aggregation, analyze wiring); pilot YAML pending SLOT_LIMIT sign-off
 **JIRA:** AIPROFCOMP-865 (bullet 2–3), parent AIPROFCOMP-864
 **Prerequisite:** Phase 1 Single-pass packable ships (see [single-pass packable plan](aiprofcomp-865-single-pass-packable-plan.md)); remaining gaps are `SLOT_LIMIT` only
-**Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows; former POLICY_GAP metrics (fixed by Phase 1 packing, not `WEIGHTED_AVG`)
+**Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows; former POLICY_GAP metrics (fixed by Phase 1 packing, not `WEIGHTED_AVG`); **[TCC series affinity + coverage](aiprofcomp-865-tcc-series-affinity-coverage.md)** (SPP packing harden — not `SLOT_LIMIT` / `WEIGHTED_AVG`)
 
 ---
 
