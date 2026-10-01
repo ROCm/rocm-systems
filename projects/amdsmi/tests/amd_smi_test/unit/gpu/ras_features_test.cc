@@ -11,8 +11,11 @@
 // through to AMDSMI_STATUS_SUCCESS with every ecc count left at 0,
 // indistinguishable from a GPU that genuinely has no errors. It now propagates
 // the failure so callers can tell "RAS state unknown" apart from a real zero.
+// A cleanly-parsed 0x0 mask is a legitimate "no blocks enabled" reading,
+// though, and must not be conflated with a failure.
 
 #include <gtest/gtest.h>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -33,6 +36,7 @@ namespace {
 
 using amd::smi::AMDSmiDrm;
 using amd::smi::AMDSmiGPUDevice;
+using amd::smi::testing::ScopedFileWatch;
 using amd::smi::testing::ScopedOverride;
 using amd::smi::testing::ScopedProcessorRegistration;
 
@@ -64,6 +68,16 @@ amdsmi_status_t CallTotalEccCount(const FakeSysfsTree& tree, const std::string& 
   ScopedProcessorRegistration registration(&gpu_device);
 
   return amdsmi_get_gpu_total_ecc_count(registration.handle(), ec);
+}
+
+// Skips the assertion (rather than failing) when the watch itself couldn't be
+// established -- see ScopedFileWatch::IsAvailable()'s doc comment.
+void ExpectNoFileOpens(ScopedFileWatch& watch) {
+  if (!watch.IsAvailable()) {
+    std::cerr << "ScopedFileWatch unavailable; skipping OpenCount() assertion" << std::endl;
+    return;
+  }
+  EXPECT_EQ(watch.OpenCount(), 0u);
 }
 
 TEST(GpuUnit, RAS_FEATURES__ValidMaskSucceeds) {
@@ -111,11 +125,68 @@ TEST(GpuUnit, RAS_FEATURES__ValidMaskOverwritesStaleOutput) {
   EXPECT_EQ(ec.deferred_count, 0) << kLeakHint;
 }
 
-TEST(GpuUnit, RAS_FEATURES__ZeroMaskFails) {
-  // Non-zero sentinel to prove the failure path leaves ec untouched rather
-  // than falling through to a misleading zero total.
-  constexpr uint64_t kSentinelEccCount = 4242;
+// Two real blocks (UMC, SDMA) with distinct counts must sum correctly -- not
+// overwrite each other -- proving accumulation works across blocks, not just
+// within one. A third enabled block (GFX) has no err_count fixture, so its
+// read fails; it must contribute 0 rather than garbage or abort the total.
+TEST(GpuUnit, RAS_FEATURES__MultipleBlocksSumCorrectlyIgnoringUnreadableBlock) {
+  constexpr uint64_t kUmcUncorrectable = 7;
+  constexpr uint64_t kUmcCorrectable = 2;
+  constexpr uint64_t kSdmaUncorrectable = 4;
+  constexpr uint64_t kSdmaCorrectable = 1;
+  // UMC (bit 0) | SDMA (bit 1) | GFX (bit 2).
+  constexpr char kThreeBlockMaskLine[] = "feature mask: 0x7\n";
 
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/ras/features", kThreeBlockMaskLine);
+  tree.WriteFile("card0/device/ras/umc_err_count", "ue: " + std::to_string(kUmcUncorrectable) +
+                                                       "\nce: " + std::to_string(kUmcCorrectable) +
+                                                       "\n");
+  tree.WriteFile("card0/device/ras/sdma_err_count",
+                 "ue: " + std::to_string(kSdmaUncorrectable) +
+                     "\nce: " + std::to_string(kSdmaCorrectable) + "\n");
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+
+  amdsmi_error_count_t ec = {};
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ec.uncorrectable_count, kUmcUncorrectable + kSdmaUncorrectable);
+  EXPECT_EQ(ec.correctable_count, kUmcCorrectable + kSdmaCorrectable);
+  EXPECT_EQ(ec.deferred_count, 0);
+}
+
+// The PR's core performance claim: the mask is read exactly once per
+// amdsmi_get_gpu_total_ecc_count() call, not once per RAS block (up to 39
+// reads pre-fix). A multi-block mask exercises the full block-iteration
+// loop, so a regression back to the old per-block read pattern would be
+// caught here. Uses a real inotify watch (ScopedFileWatch) rather than an
+// in-process counter -- see docs/design/faking-external-interfaces.md's
+// "Monitoring file operations in tests" section for why.
+TEST(GpuUnit, RAS_FEATURES__ReadsMaskExactlyOncePerCall) {
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+
+  // IN_ACCESS is also watched so back-to-back IN_OPEN events can't coalesce
+  // in the inotify queue -- see faking-external-interfaces.md's "Limitation:
+  // inotify can't exactly count back-to-back identical events" section.
+  ScopedFileWatch watch(tree.root() + "/card0/device/ras/features", IN_OPEN | IN_ACCESS);
+  if (!watch.IsAvailable()) {
+    GTEST_SKIP() << "inotify watch unavailable in this environment";
+  }
+
+  amdsmi_error_count_t ec = {};
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(watch.OpenCount(), 1u);
+}
+
+// A cleanly-parsed 0x0 is a legitimate "no RAS blocks enabled" reading on real
+// hardware (RAS present but disabled), not a read failure -- it must succeed
+// with a zeroed total rather than being conflated with a malformed mask.
+TEST(GpuUnit, RAS_FEATURES__ZeroMaskSucceedsWithZeroedOutput) {
   ScopedAmdsmiInit smi_init;
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kZeroFeatureMaskLine);
@@ -123,10 +194,10 @@ TEST(GpuUnit, RAS_FEATURES__ZeroMaskFails) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  ec.correctable_count = ec.uncorrectable_count = ec.deferred_count = kSentinelEccCount;
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_API_FAILED);
-  // The failure must propagate instead of masking as a misleading zero total.
-  EXPECT_EQ(ec.correctable_count, kSentinelEccCount);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ec.correctable_count, 0);
+  EXPECT_EQ(ec.uncorrectable_count, 0);
+  EXPECT_EQ(ec.deferred_count, 0);
 }
 
 TEST(GpuUnit, RAS_FEATURES__UlongMaxMaskFails) {
@@ -219,7 +290,17 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
   ScopedAmdsmiInit smi_init;
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
+
+  // Constructed BEFORE SetPermissions() below, while the file is still
+  // readable -- inotify_add_watch() itself needs read permission at
+  // attach time, but once attached the watch keeps observing that inode
+  // regardless of later permission changes (verified empirically; see
+  // ScopedFileWatch's doc comment). This keeps the watch valid under both
+  // root and non-root test runs.
+  ScopedFileWatch watch(tree.root() + "/card0/device/ras/features", IN_OPEN);
+
   tree.SetPermissions("card0/device/ras/features", kNoPermissions);
+
   ScopedOverride<std::string> root_guard(
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
@@ -227,6 +308,7 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
     // Non-root: the 0000 mode above already forces a real EACCES, no fork needed.
     amdsmi_error_count_t ec = {};
     EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_NOT_SUPPORTED);
+    ExpectNoFileOpens(watch);
   } else {
     // mkdtemp() makes tree.root() itself 0700 (owner-only); relax it so the
     // unprivileged child below can still traverse down to the 0000 leaf file --
@@ -265,6 +347,7 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
 
     ASSERT_EQ(bytes_read, static_cast<ssize_t>(sizeof(child_status)));
     EXPECT_EQ(child_status, AMDSMI_STATUS_NOT_SUPPORTED);
+    ExpectNoFileOpens(watch);
   }
 }
 
