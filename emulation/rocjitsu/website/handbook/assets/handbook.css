@@ -41,7 +41,12 @@
 .md-typeset p a:is(:hover, :focus-visible), .md-typeset li a:is(:hover, :focus-visible) { text-decoration: underline; text-underline-offset: 3px; }
 .md-typeset :not(pre) > code { overflow-wrap: anywhere; }
 .md-typeset pre > code { font-size: 13px; line-height: 1.65; border-radius: 4px; padding: 14px 16px; scrollbar-width: thin; }
-.md-typeset .highlight:has(.md-code__button) pre > code { padding-top: 36px; }
+/* Keep the copy control beside the code, outside its horizontal scroll area. */
+.md-typeset .highlight:has(.md-code__button) pre {
+  padding-right: 40px;
+  background: var(--md-code-bg-color);
+  border-radius: 4px;
+}
 .md-typeset table:not([class]) { font-size: 13px; line-height: 1.6; box-shadow: none; border: 1px solid var(--handbook-border); border-radius: 4px; }
 .md-typeset table:not([class]) th { color: var(--handbook-heading); background: var(--handbook-surface); vertical-align: top; }
 .md-typeset table:not([class]) td { border-top-color: var(--handbook-border); }

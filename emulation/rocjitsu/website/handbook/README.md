@@ -37,6 +37,32 @@ The production build writes `site/`; generated files and the virtual environment
 are ignored by Git. The pinned MkDocs 1.x and Material versions match the tested
 theme and hook APIs; review compatibility before changing them.
 
+## Adding a guide
+
+1. Add the Markdown file under `emulation/rocjitsu/docs/`.
+2. Register its path, relative to `docs/`, in the `nav` section of
+   [mkdocs.yml](mkdocs.yml). Choose **User guide** for building, running,
+   configuring, or troubleshooting Rocjitsu; **Developer guide** for understanding
+   or extending its internals; or **Project** for project information.
+   For example, add `- My guide: my-guide.md` under the appropriate existing group.
+3. From `emulation/rocjitsu/website/handbook/`, using the environment configured
+   in [Build and preview](#build-and-preview), run:
+
+   ```bash
+   .venv/bin/python -m mkdocs build --strict -f mkdocs.yml
+   ```
+
+MkDocs discovers Markdown files automatically, but sidebar placement is explicit.
+A regular guide missing from `nav` fails the strict build in both CI and
+publication. Preview the site and check the guide's sidebar placement and links
+before submitting the change.
+
+Blog posts under `docs/blog/posts/` are registered by the blog plugin and do not
+need individual `nav` entries. `docs/sphinx/` is excluded from this handbook.
+If a page should deliberately be published without a sidebar entry, document that
+choice in `mkdocs.yml` using `not_in_nav`; use `exclude_docs` for content that
+should not be published. Keep navigation validation enabled.
+
 ## Editing
 
 | Path | Purpose |
