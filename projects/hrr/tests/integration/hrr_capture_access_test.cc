@@ -20,7 +20,9 @@
  *   Unit_HRR_CaptureRefusesPlantedLinks:
  *     a symbolic link planted at pid-<pid>/events.bin, at pid-<pid> itself, or
  *     at pid-<pid>/blobs, or a hard link planted at pid-<pid>/events.bin,
- *     disables the capture, and a hard link planted at pid-<pid>/manifest.json
+ *     disables the capture; links planted at every pid-<pid>/blobs/<prefix>
+ *     are not written through and leave the archive marked incomplete; and a
+ *     hard link planted at pid-<pid>/manifest.json
  *     is not written through, neither at exit nor from the crash callback
  *     (POSIX).
  *
@@ -214,8 +216,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  * Test Description
  * ----------------
  *   - Plants a symbolic link at pid-<pid>/events.bin pointing at a file with
- *     known contents, at pid-<pid> pointing at an empty directory, or at
- *     pid-<pid>/blobs pointing at an empty directory; a hard link at
+ *     known contents, at pid-<pid> pointing at an empty directory, at
+ *     pid-<pid>/blobs pointing at an empty directory, or at every
+ *     pid-<pid>/blobs/<prefix> pointing at an empty directory; a hard link at
  *     pid-<pid>/events.bin to a file with known contents; and a hard link at
  *     pid-<pid>/manifest.json pointing at a file with known contents, followed
  *     by a workload that exits cleanly or one that aborts and leaves the
@@ -224,8 +227,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  *     append to the file, and a fresh capture would fill the directory or
  *     overwrite the hard-linked manifest.
  *   - Each symbolic link and the hard link at events.bin disable the capture,
- *     which says so on stderr, and the workload still succeeds; with the hard
- *     link at manifest.json the capture runs and writes events.bin.
+ *     which says so on stderr, and the workload still succeeds; with the links
+ *     at the blob prefixes the capture runs without its blobs and its manifest
+ *     says complete: false; with the hard link at manifest.json the capture
+ *     runs and writes events.bin.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
@@ -274,6 +279,26 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     CHECK(refused_archive_dir(run.output));
     CHECK(fs::is_empty(victim_dir));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
+  }
+
+  SECTION("link at every pid-<pid>/blobs/<prefix>") {
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "mkdir -m 0700 \"$HRR_TEST_BASE/pid-$$\" \"$HRR_TEST_BASE/pid-$$/blobs\"\n"
+        "for a in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do\n"
+        "  for b in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do\n"
+        "    ln -s '" + victim_dir.string() + "' \"$HRR_TEST_BASE/pid-$$/blobs/$a$b\"\n"
+        "  done\n"
+        "done\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(fs::is_empty(victim_dir));
+    CHECK(run.output.find("[HRR capture] Archive marked INCOMPLETE: a blob directory "
+                          "could not be used") != std::string::npos);
+    const std::vector<fs::path> archives = hrr_process_archives(base);
+    REQUIRE(archives.size() == 1);
+    CHECK(read_text_file(archives.front() / "manifest.json").find("\"complete\": false") !=
+          std::string::npos);
   }
 
   SECTION("hard link at pid-<pid>/events.bin") {

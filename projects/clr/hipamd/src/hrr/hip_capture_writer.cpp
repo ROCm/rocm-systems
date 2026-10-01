@@ -837,6 +837,9 @@ bool open(const char* output_dir) {
   g_buf_len           = 0;
   g_events_since_ckpt = 0;
   g_trailer_written   = false;
+  // A forked child inherits the parent's flag, which is about the parent's
+  // archive.
+  g_capture_incomplete.store(false, std::memory_order_relaxed);
 
   std::error_code exists_ec;
   const bool created_pid_dir =
