@@ -212,6 +212,13 @@ static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
 
+// Blob and code object writes claimed under g_blob_mu and not finished yet.
+// flush() waits for them before it decides on the trailer, since one that fails
+// leaves events naming a file that does not exist. flush() waits holding
+// g_file_mu, so a claimed write must finish without taking it.
+static uint64_t                g_blob_writes_in_flight = 0;  // under g_blob_mu
+static std::condition_variable g_blob_writes_done;
+
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
 // Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
@@ -219,13 +226,6 @@ static std::atomic<uint64_t> g_blob_count{0};
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
-
-// Blob and code object writes claimed under g_blob_mu and not finished yet.
-// flush() waits for them before it decides on the trailer, since one that fails
-// leaves events naming a file that does not exist. flush() waits holding
-// g_file_mu, so a claimed write must finish without taking it.
-static uint64_t                g_blob_writes_in_flight = 0;  // under g_blob_mu
-static std::condition_variable g_blob_writes_done;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
