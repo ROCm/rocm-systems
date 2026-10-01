@@ -411,6 +411,12 @@ inline void hrr_capture_direct(const std::string& direct_case,
 }
 #endif  // HRR_TEST_EXE
 
+// How many children Unit_HRR_ForkWhileRecording_Direct forks. Every other
+// child records a call before it exits, starting with the first, and the
+// roundtrip expects one archive for each of those besides the parent's.
+inline constexpr int kHrrForkWhileRecordingForks = 200;
+inline constexpr int kHrrForkWhileRecordingArchives = 1 + (kHrrForkWhileRecordingForks + 1) / 2;
+
 inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,
     const std::vector<std::pair<std::string, std::string>>& env,

@@ -39,6 +39,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <algorithm>
 #include <vector>
@@ -163,6 +164,8 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
+// Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu. atfork_prepare is
+// the only path that holds all three.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -195,21 +198,40 @@ static std::atomic<bool> g_capture_incomplete{false};
 // crash-callback <-> writer coordination point.
 static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
+// Raise g_buf_busy for a thread that already holds g_file_mu. Writers are
+// serialized by the mutex, so the flag can only be up already because the crash
+// callback is flushing g_buf; wait for it rather than mutating under it. The
+// callback holds the flag only for that flush and never takes g_file_mu, which
+// is what bounds this wait.
+static void claim_buf_locked() {
+  while (g_buf_busy.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+}
+
 // RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
 // the crash callback can tell a g_buf mutation is in flight. Member order
 // matters: the mutex locks first and unlocks last, with the busy window nested
 // strictly inside it.
 struct BufWriteGuard {
   std::lock_guard<std::mutex> lk_;
-  BufWriteGuard() : lk_(g_file_mu) {
-    g_buf_busy.test_and_set(std::memory_order_acquire);
-  }
+  BufWriteGuard() : lk_(g_file_mu) { claim_buf_locked(); }
   ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
 };
+
+// emergency_finalize builds the crash manifest here rather than on the stack:
+// the crash handler can run on a thread with little stack left.
+static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
+static char g_emergency_manifest_buf[kEmergencyManifestMax];
 
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
+
+// Set in a forked child. POSIX allows the child of a multithreaded process only
+// async-signal-safe calls until it execs, and open() is far from that, so the
+// child's archive is opened by its first record, blob or code object rather
+// than in atfork_child. A child that only execs or exits opens none.
+static std::atomic<bool> g_reopen_after_fork{false};
+static std::mutex        g_reopen_mu;
 
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
@@ -454,42 +476,68 @@ static void index_existing_blobs_locked() {
   }
 }
 
+static void reopen_after_fork() {
+  if (!g_reopen_after_fork.load(std::memory_order_acquire)) return;
+  std::lock_guard<std::mutex> lk(g_reopen_mu);
+  if (!g_reopen_after_fork.load(std::memory_order_relaxed)) return;
+  // From the *base* dir, so the child selects its own pid-<pid> sub-archive.
+  // open() assigns g_base_dir, so pass it a copy.
+  const std::string base = g_base_dir;
+  (void)open(base.c_str());
+  g_reopen_after_fork.store(false, std::memory_order_release);
+}
+
 #ifndef _WIN32
+// The writer mutexes are held across fork(): a child must not inherit one that
+// a thread which does not exist in the child had locked, because the child
+// reopens its archive under them.
 static void atfork_prepare() {
-  BufWriteGuard lk;
+  g_reopen_mu.lock();
+  g_blob_mu.lock();
+  g_file_mu.lock();
+  claim_buf_locked();
   if (g_events_fd >= 0)
     flush_buffer_locked();
+  g_buf_busy.clear(std::memory_order_release);
+}
+
+static void atfork_parent() {
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
+  g_reopen_mu.unlock();
 }
 
 static void atfork_child() {
-  std::string dir;
-  {
-    std::lock_guard<std::mutex> lk(g_file_mu);
-    if (g_events_fd >= 0) {
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-    }
-    g_buf_len = 0;
-    g_events_since_ckpt = 0;
-    g_trailer_written = false;
-    // Re-open from the *base* dir so the forked child selects its own
-    // pid-<pid> sub-archive.
-    dir = g_base_dir;
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
+  g_reopen_mu.unlock();
+  // A crash callback on another thread can raise g_buf_busy after
+  // atfork_prepare clears it, or hold g_emergency_manifest_busy, which
+  // atfork_prepare does not take. That thread does not exist in the child.
+  g_buf_busy.clear(std::memory_order_release);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
+  // Only async-signal-safe work from here: drop the parent's events fd and
+  // forget its paths, so neither shutdown nor the crash path writes into the
+  // parent's archive. reopen_after_fork() opens the child's.
+  if (g_events_fd >= 0) {
+    HRR_CLOSE(g_events_fd);
+    g_events_fd = -1;
   }
-  // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
-  // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen,
-  // which are not async-signal-safe in general, but pthread_atfork's child
-  // handler runs in the (single-threaded) child immediately after fork() with no
-  // mutex held, so these calls are safe here. We deliberately do NOT call this
-  // from any async-signal context.
-  if (!dir.empty())
-    (void)writer::open(dir.c_str());
+  g_buf_len = 0;
+  g_events_since_ckpt = 0;
+  g_trailer_written = false;
+  g_output_dir.clear();
+  g_manifest_path[0] = '\0';
+  // The child's archive is a new one: an event the parent dropped is not
+  // missing from it.
+  g_capture_incomplete.store(false, std::memory_order_relaxed);
+  if (!g_base_dir.empty()) g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
 
 static void install_atfork_handlers_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    pthread_atfork(atfork_prepare, nullptr, atfork_child);
+    pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
   });
 }
 #endif
@@ -892,10 +940,16 @@ void emergency_finalize(bool clean_shutdown) {
   // complete:true (the trailer is present); a crash writes complete:false — its
   // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
+  // Concurrent crash callbacks must not share the emergency buffer. A second
+  // entrant skips the manifest.
+  if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
-  if (mfd < 0) return;
-  char buf[kEmergencyManifestMax];
+  if (mfd < 0) {
+    g_emergency_manifest_busy.clear(std::memory_order_release);
+    return;
+  }
+  auto& buf = g_emergency_manifest_buf;
   size_t p = 0;
   p = append_lit(buf, p,
                  "{\n"
@@ -922,6 +976,7 @@ void emergency_finalize(bool clean_shutdown) {
   write_all_fd(mfd, buf, p);
   HRR_FSYNC(mfd);
   HRR_CLOSE(mfd);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -933,6 +988,7 @@ void emergency_finalize(bool clean_shutdown) {
 // ---------------------------------------------------------------------------
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
+  reopen_after_fork();
   // Fill fields that don't require the lock (timestamp and thread_id are
   // cheap and per-thread; getting them outside the lock keeps contention low).
   hdr->event_type     = api_id;
@@ -1000,6 +1056,7 @@ static bool atomic_write_file(const std::string& path,
 // ---------------------------------------------------------------------------
 
 Hash128 write_blob(const void* data, size_t len) {
+  reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0) return {};  // writer not open — drop silently
@@ -1037,6 +1094,7 @@ Hash128 write_blob(const void* data, size_t len) {
 // ---------------------------------------------------------------------------
 
 Hash128 write_code_object(const void* image, size_t image_size) {
+  reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0) return {};  // writer not open — drop silently
