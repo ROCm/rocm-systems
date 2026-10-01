@@ -29,6 +29,7 @@ namespace rocprofsys
 namespace
 {
 
+using ::testing::_;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::Eq;
@@ -110,11 +111,6 @@ protected:
         EXPECT_CALL(*g_mock, create_context(NotNull()))
             .Times(1)
             .WillOnce(DoAll(SetArgPointee<0>(context), Return()));
-    }
-
-    void expect_start_context(const mock_sdk::context_id_t& context)
-    {
-        EXPECT_CALL(*g_mock, start_context(Eq(context))).Times(1);
     }
 
     // NOLINTNEXTLINE(readability-function-size)
@@ -649,7 +645,6 @@ TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_final
                               static_cast<mock_sdk::callback_tracing_kind_t>(
                                   mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
                               k_code_object_definition.on_record, {});
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
@@ -685,7 +680,6 @@ TEST_F(domain_service_test,
         context,
         static_cast<mock_sdk::callback_tracing_kind_t>(mock_sdk::CALLBACK_TRACING_OMPT),
         k_ompt_definition.on_record, {});
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "ompt", .group = std::nullopt, .operations = std::nullopt } });
@@ -700,6 +694,9 @@ TEST_F(domain_service_test,
         record.correlation_id.internal,
         domains::callback::ompt::detail::pending_region<mock_sdk>{
             record, /*begin_timestamp=*/1, function_args_t{} });
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(1);
 
     service.finalize();
 
