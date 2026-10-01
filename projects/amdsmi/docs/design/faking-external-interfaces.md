@@ -161,6 +161,107 @@ behavior — the thing this fix changed — with no real hardware involved.
    dependencies never needed faking here. Don't over-build fixtures for code paths
    your specific test doesn't reach.
 
+## Monitoring file operations in tests
+
+Some regressions can only be caught by observing *how many times* (or whether)
+production code actually touched a file — not just by asserting on the
+function's return value. `ScopedFileWatch` (`test_fixture_utils.h`) covers
+this: an RAII wrapper around a Linux `inotify(7)` watch on one
+already-existing file path (construct it right after
+`FakeSysfsTree::WriteFile()`). It tallies operations — `OpenCount()`,
+`WriteCount()`, or `Count(mask)` for any other `IN_*` flag — performed by
+*any* process on that path, including a forked-and-privilege-dropped child
+(see `RAS_FEATURES__PermissionDeniedIsNotSupported`), with **zero changes to
+the production code under test**. Check `IsAvailable()` before trusting a
+count — it's `false` if the watch couldn't be set up (e.g. the target path
+didn't exist yet), and a test should `GTEST_SKIP()` or skip just that
+assertion rather than treat a failed-to-construct watch as "zero events."
+
+### Constraint: construct the watch before locking the file down
+
+`inotify_add_watch(2)` requires read permission on the target file only at
+construction time, not on every later event (verified empirically: a watch
+attached while a file is still readable keeps observing that inode even
+after a later `chmod()` revokes read access). `RAS_FEATURES__PermissionDeniedIsNotSupported`
+constructs its watch right after `FakeSysfsTree::WriteFile()` but *before*
+`FakeSysfsTree::SetPermissions(..., 0000)`, so `IsAvailable()` stays true
+regardless of whether the test binary runs as root — keeping the
+zero-successful-opens assertion meaningful either way.
+
+### Limitation: inotify can't exactly count back-to-back identical events
+
+Per `man 7 inotify`: "successive identical events are coalesced into a
+single event if the older event has not yet been read ... an application
+can't use inotify to reliably count file events." The kernel only compares
+a new event against the single most-recently-queued (still-unread) entry
+for that watch — not the whole queue — so a run of identical events
+collapses to one:
+
+```
+watch mask = IN_OPEN only:
+real events:  OPEN  OPEN  OPEN  OPEN  ...        (39 times)
+queue state:  [OPEN] [OPEN] [OPEN] [OPEN]        <- each new OPEN matches the
+                                                     last queued OPEN -> merged
+final queue:  [OPEN]                             <- only 1 survives
+```
+
+This bit `RAS_FEATURES__ReadsMaskExactlyOncePerCall`: watching `IN_OPEN`
+alone, `OpenCount()` reported `1` even though the file was genuinely
+`open()`'d 39 times in a row (confirmed via `strace -f -e trace=openat`) —
+a false negative that would have silently let the regression it guards
+against pass.
+
+**Fix:** also watch a second event type that naturally interleaves with the
+first (here, `IN_ACCESS` alongside `IN_OPEN`, since each `std::ifstream`
+open is followed by a real `read()`). Adjacent queued events then alternate
+types and never match, so nothing coalesces:
+
+```
+watch mask = IN_OPEN | IN_ACCESS:
+real events:  OPEN ACCESS OPEN ACCESS OPEN ACCESS ...   (39 of each)
+queue state:  [OPEN] [OPEN,ACCESS] [OPEN,ACCESS,OPEN] ...
+              each new entry compared only to the PREVIOUS one -> never
+              identical (OPEN != ACCESS) -> nothing merges
+final queue:  [OPEN, ACCESS, OPEN, ACCESS, ..., OPEN, ACCESS]  <- all 78 survive
+```
+
+`Count(IN_OPEN)` still sums only the `IN_OPEN` entries (39), ignoring
+`IN_ACCESS`. Only matters for *exact* repeat-count assertions in a tight
+loop; the zero-vs-nonzero checks elsewhere in this file are unaffected
+(zero real events still means zero coalesced events).
+
+### Alternatives considered for monitoring file operations
+
+- **A single bespoke global counter** incremented inside the one function
+  under test — simplest, but can't separate multiple devices and needs a new
+  copy-pasted counter for every future function someone wants to monitor.
+- **A path-keyed in-process seam** (a `std::map<path, count>` + a
+  `record_...()` call added at each production read/write site) — reusable as
+  a *pattern*, and able to count failed attempts (unlike inotify), but still
+  requires manually instrumenting every new call site, and its in-process
+  counting state doesn't survive `fork()` (a forked child's increments live
+  in its own copy-on-write memory, invisible to the parent afterward) —
+  a real problem given the fork-based privilege-drop pattern already used in
+  this file.
+- **A centralized "open" wrapper / dependency-injected stream factory** that
+  every read/write site is migrated onto — general once migrated, but a much
+  bigger upfront diff, and still bypassable by a future author writing a raw
+  `std::ifstream`/`std::ofstream` directly.
+- **`stat()`/atime-based detection** — zero source changes, but unreliable:
+  `relatime` (the default mount option on most modern Linux, including CI)
+  only updates atime once per day or on an mtime change, so it can't reliably
+  distinguish one read from many in a fast unit test.
+- **`LD_PRELOAD` syscall interposition** — even more fully external than
+  inotify, but scopes to the *entire test binary process*, not one test case,
+  and depends on libstdc++'s unspecified internal use of libc file APIs; a new
+  category of build/test infrastructure this suite has no other precedent for.
+
+inotify avoids all of these: it requires no production-code changes, keys
+naturally per-device (one watch per resolved path), and observes operations
+performed by any process against the watched inode — including a child that
+dropped privileges after `fork()` — since the watch lives in the kernel, not
+in any process's memory.
+
 ## Explicitly out of scope for this fix
 
 - Migrating the other ~12 `"/sys/class/drm/" + device->get_gpu_path()` call sites in
