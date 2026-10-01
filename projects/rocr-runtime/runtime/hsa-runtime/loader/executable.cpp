@@ -1704,6 +1704,14 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
 
+    // Every kernel runs on at least one column, and a hardware context cannot be given more
+    // columns than the agent has, so a kernel declaring either could never be dispatched.
+    if (ki->num_cols == 0 || ki->num_cols > aie_agent->num_cols()) {
+      log_warning_n(10, "AIE: kernel '%s' declares %u columns; the agent has %u.\n",
+                    kernel_name.c_str(), ki->num_cols, aie_agent->num_cols());
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
     desc->kind = ki->kind;

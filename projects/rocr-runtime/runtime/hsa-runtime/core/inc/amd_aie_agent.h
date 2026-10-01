@@ -104,6 +104,12 @@ public:
  /// @brief Architecture name accepted in AIE hsaco section names.
  std::string_view arch_name() const { return arch_name_; }
 
+ /// @brief Number of array columns a hardware context on this agent can be given.
+ uint32_t num_cols() const { return node_props_.NumArrays; }
+
+ /// @brief Number of core tiles in each column.
+ uint32_t num_core_rows() const { return node_props_.NumCUPerArray; }
+
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();

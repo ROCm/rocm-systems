@@ -111,11 +111,9 @@ struct AieKernelDescriptor {
   uint32_t pdi_bo_handle;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
-  /// @brief Number of NPU columns the kernel uses.
-  ///
-  /// Carried for the partition geometry a payload declares; no dispatch path reads it yet. The
-  /// AIE queue is created with a hardcoded single core tile, so there is nothing to check it
-  /// against today.
+  /// @brief Number of NPU columns the kernel uses. The loader has checked it is at least 1 and
+  /// no more than the agent has; dispatch sizes the hardware context to the most any kernel in
+  /// it declares.
   uint32_t num_cols;
   /// @brief Pristine control code, in host memory. FullElf only; empty for PdiInsts.
   ///

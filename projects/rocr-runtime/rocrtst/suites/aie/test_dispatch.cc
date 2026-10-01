@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -26,8 +27,8 @@
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa_ext_amd_aie.h"
 
-// Only the on-disk struct layout is needed (to locate and corrupt the `kind` field for
-// AieKindIsValidated below); pure header, no core/inc source file is linked into this binary.
+// Only the on-disk struct layout is needed (to locate and corrupt kernel-table fields in the
+// negative tests below); pure header, no core/inc source file is linked into this binary.
 #include "core/inc/amd_aie_section.h"
 
 #define STRINGIFY2(x) #x
@@ -2926,4 +2927,54 @@ TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// ---------------------------------------------------------------------------
+// Kernel column counts
+//
+// Each kernel declares how many NPU columns it uses (its hsaco entry's num_cols), and dispatch
+// sizes the queue's hardware context to the most any kernel in it declares. A kernel declaring
+// none, or more than the agent has, could never be dispatched, so the loader refuses it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Returns a copy of `hsaco` with every kernel-table entry declaring `num_cols` columns, or an
+// empty vector if the AIE section cannot be located.
+std::vector<std::uint8_t> WithNumCols(std::vector<std::uint8_t> hsaco, std::uint32_t num_cols) {
+  const std::size_t section_offset = FindAieSectionOffset(hsaco);
+  if (section_offset == 0) return {};
+  rocr::AMD::aie_section_header hdr{};
+  std::memcpy(&hdr, hsaco.data() + section_offset, sizeof(hdr));
+  for (std::uint32_t i = 0; i < hdr.kernel_count; ++i) {
+    const std::size_t offset = section_offset + hdr.header_size + i * hdr.kernel_entry_size +
+                               offsetof(rocr::AMD::aie_kernel_entry, num_cols);
+    if (offset + sizeof(num_cols) > hsaco.size()) return {};
+    std::memcpy(hsaco.data() + offset, &num_cols, sizeof(num_cols));
+  }
+  return hsaco;
+}
+
+}  // namespace
+
+TEST_F(DispatchTest, NumColsOutOfRangeRejectedAtLoad) {
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+
+  const auto hsaco = hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kHsacoPath;
+
+  // No columns at all, and more than any NPU has.
+  for (const std::uint32_t num_cols : {0u, std::numeric_limits<std::uint32_t>::max()}) {
+    SCOPED_TRACE(num_cols);
+    const auto patched = WithNumCols(hsaco, num_cols);
+    ASSERT_FALSE(patched.empty()) << "could not locate the AIE section in " << kHsacoPath;
+    hsa_executable_t executable{};
+    hsa_code_object_reader_t reader{};
+    EXPECT_EQ(TryLoad(patched, aie_agents.front(), &executable, &reader),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  }
+
+  // The unmodified hsaco's single column is accepted.
+  loaded_hsaco loaded;
+  EXPECT_TRUE(loaded.load(hsaco, aie_agents.front()));
 }

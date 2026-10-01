@@ -840,8 +840,11 @@ struct KmqMetadata {
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   /// @brief DRM sync object the hardware context signals command completion on.
   uint32_t syncobj_handle = 0;
-  /// @brief Core tiles the queue's hardware context is created with.
-  uint32_t num_core_tiles = 0;
+  /// @brief Core tiles per column; a context of N columns asks the driver for N times this many
+  /// tiles, which is how the driver's column count is expressed.
+  uint32_t num_core_rows = 0;
+  /// @brief Columns the current hardware context is created with.
+  uint32_t num_cols = 0;
   /// @brief Device the queue dispatches to, resolved once at creation.
   XDNADeviceType device_type = XDNADeviceType::Unknown;
   /// @brief PDIs the current hardware context has compute units configured for, indexed by CU.
@@ -912,8 +915,8 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
 /// configuration set now could not be undone later.
 ///
 /// @param[in] fd driver file descriptor
-/// @param[in,out] kmq_metadata KMQ metadata supplying the core tile count, and updated with the
-/// hardware context handle and syncobj handle
+/// @param[in,out] kmq_metadata KMQ metadata supplying the column count and core rows, and updated
+/// with the hardware context handle and syncobj handle
 static hsa_status_t CreateHwCtx(int fd, KmqMetadata* kmq_metadata) {
   // Create QoS information; we don't leverage any external Qos hints.
   amdxdna_qos_info qos_info = {};
@@ -923,7 +926,7 @@ static hsa_status_t CreateHwCtx(int fd, KmqMetadata* kmq_metadata) {
   amdxdna_drm_create_hwctx create_hwctx_args = {};
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
-  create_hwctx_args.num_tiles = kmq_metadata->num_core_tiles;
+  create_hwctx_args.num_tiles = kmq_metadata->num_cols * kmq_metadata->num_core_rows;
   hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
   if (err != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to create hardware context for KMQ");
@@ -1231,20 +1234,23 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
       assert(name.size() < HSA_PUBLIC_NAME_SIZE);
       std::copy(name.begin(), name.end(), node_props.AMDName);
       // Only target N-1 columns as that is the number of shim DMAs in NPU1 devices.
-      node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.core.row_count;
+      node_props.NumArrays = aie_metadata.cols - 1;
     } break;
 
     case XDNADeviceType::Stx: {
       constexpr std::string_view name("aie2p");
       assert(name.size() < HSA_PUBLIC_NAME_SIZE);
       std::copy(name.begin(), name.end(), node_props.AMDName);
-      node_props.NumNeuralCores = aie_metadata.cols * aie_metadata.core.row_count;
+      node_props.NumArrays = aie_metadata.cols;
     } break;
 
     default:
       assert(false && "Unsupported XDNA device.");
       return HSA_STATUS_ERROR;
   }
+  // An AIE column is the array; its core tiles are the compute units in it.
+  node_props.NumCUPerArray = aie_metadata.core.row_count;
+  node_props.NumNeuralCores = node_props.NumArrays * node_props.NumCUPerArray;
 
   // Read device name from sysfs.
   {
@@ -1396,8 +1402,9 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
   return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
 }
 
-hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles,
-                                               uint16_t device_id, void** queue_metadata) const {
+hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_cols,
+                                               uint32_t num_core_rows, uint16_t device_id,
+                                               void** queue_metadata) const {
   // A queue with no packet slots would give the pool no entries, and an empty pool cannot hand
   // one out.
   if (queue_size == 0) {
@@ -1405,7 +1412,8 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
   }
 
   auto kmq_metadata = std::make_unique<KmqMetadata>();
-  kmq_metadata->num_core_tiles = num_core_tiles;
+  kmq_metadata->num_cols = num_cols;
+  kmq_metadata->num_core_rows = num_core_rows;
   kmq_metadata->device_type = DeviceTypeOf(device_id);
   hsa_status_t err = CreateHwCtx(fd_, kmq_metadata.get());
   if (err != HSA_STATUS_SUCCESS) {
@@ -2213,6 +2221,21 @@ static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_ha
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Returns how many columns the hardware context needs to run a batch: the most any kernel
+/// it holds asks for.
+///
+/// Within one mode the context keeps the columns it already has, since what earlier batches
+/// loaded into it -- the PDI cache's compute units -- stays there and still has to fit. A mode
+/// switch starts over, because the rebuild it forces drops all of that.
+///
+/// @param[in] kmq_metadata KMQ metadata holding the current context's column count
+/// @param[in] mode_changed whether the batch switches the queue to the other dispatch kind
+/// @param[in] batch_num_cols the most columns any kernel in the batch declares
+static uint32_t RequiredNumCols(const KmqMetadata& kmq_metadata, bool mode_changed,
+                                uint32_t batch_num_cols) {
+  return std::max(mode_changed ? 0u : kmq_metadata.num_cols, batch_num_cols);
+}
+
 /// @brief Validates that the packet at @p pkt is a KMQ packet whose descriptor names @p mode, for
 /// the per-packet checks shared by both dispatch kinds' build loops.
 ///
@@ -2286,12 +2309,16 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
   cmd_bo_handles.reserve(num_pkts);
   cmd_arg_cnts.reserve(num_pkts);
 
+  // The most columns any packet's kernel declares; the context has to have at least that many.
+  uint32_t batch_num_cols = 0;
+
   for (uint64_t i = 0; i < num_pkts; ++i) {
     auto* pkt = queue + ((first_pkt_idx + i) & mask);
 
     const AieKernelDescriptor* desc = nullptr;
     hsa_status_t err = ValidateBatchPacket(pkt, AieKernelKind::FullElf, &desc);
     if (err != HSA_STATUS_SUCCESS) return err;
+    batch_num_cols = std::max(batch_num_cols, desc->num_cols);
 
     BOHandle cmd_bo_handle;
     uint32_t arg_cnt = 0;
@@ -2303,15 +2330,18 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
     cmd_arg_cnts.push_back(arg_cnt);
   }
 
-  // Rebuild the hardware context when this batch needs one the queue does not have: either the
-  // dispatch mode changed, or the queue never had a context to begin with. Undecided counts as a
-  // change, so a queue's first batch always lands here.
-  if (mode_changed || no_context) {
+  // Rebuild the hardware context when this batch needs one the queue does not have: the dispatch
+  // mode changed, the context has fewer columns than a kernel in the batch needs, or the queue
+  // never had a context to begin with. Undecided counts as a change, so a queue's first batch
+  // always lands here.
+  const uint32_t num_cols = RequiredNumCols(*kmq_metadata, mode_changed, batch_num_cols);
+  if (mode_changed || no_context || num_cols > kmq_metadata->num_cols) {
     // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
     // PDI cache, so the cache is dropped before the rebuild. Switching back to PDI+insts later
     // finds it empty and re-adds each PDI, which is what forces the reconfigure that restores the
     // CU config.
     kmq_metadata->pdi_cache.Truncate(0);
+    kmq_metadata->num_cols = num_cols;
     const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
     if (err != HSA_STATUS_SUCCESS) return err;
   }
@@ -2353,6 +2383,8 @@ static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_pack
 
   // Flag to reconfigure the hardware context because of a new PDI.
   bool reconfigure_queue = false;
+  // The most columns any packet's kernel declares; the context has to have at least that many.
+  uint32_t batch_num_cols = 0;
 
   // Building a command adds its PDI to the cache, but the hardware context is only reconfigured
   // to match once every packet has been built. If the batch fails in between, those entries would
@@ -2369,6 +2401,7 @@ static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_pack
     const AieKernelDescriptor* desc = nullptr;
     hsa_status_t err = ValidateBatchPacket(pkt, AieKernelKind::PdiInsts, &desc);
     if (err != HSA_STATUS_SUCCESS) return err;
+    batch_num_cols = std::max(batch_num_cols, desc->num_cols);
 
     BOHandle cmd_bo_handle;
     uint32_t arg_cnt = 0;
@@ -2380,12 +2413,14 @@ static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_pack
     cmd_arg_cnts.push_back(arg_cnt);
   }
 
-  // Rebuild the hardware context when this batch needs one the queue does not have: either the
-  // dispatch mode changed, a new PDI needs a compute unit, or the queue never had a context to
-  // begin with.
+  // Rebuild the hardware context when this batch needs one the queue does not have: the dispatch
+  // mode changed, a new PDI needs a compute unit, the context has fewer columns than a kernel in
+  // the batch needs, or the queue never had a context to begin with.
   const bool mode_changed = (kmq_metadata->mode != AieKernelKind::PdiInsts);
   const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
-  if (mode_changed || reconfigure_queue || no_context) {
+  const uint32_t num_cols = RequiredNumCols(*kmq_metadata, mode_changed, batch_num_cols);
+  if (mode_changed || reconfigure_queue || no_context || num_cols > kmq_metadata->num_cols) {
+    kmq_metadata->num_cols = num_cols;
     const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
     if (err != HSA_STATUS_SUCCESS) return err;
   }
