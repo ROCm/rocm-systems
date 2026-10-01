@@ -113,7 +113,7 @@ PlantedRun capture_after_planting(const fs::path& base, const fs::path& script,
   hrr::test::SpawnProc proc("/bin/sh", /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
   proc.setEnv("HRR_TEST_BASE", base.string());
-  proc.setEnv("HRR_TEST_WORKLOAD", HRR_TEST_EXE);
+  proc.setEnv("HRR_TEST_WORKLOAD", hrr_test_exe());
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(script.string(), kCaptureTimeoutSeconds);
   return {ret, proc.getOutput()};
