@@ -412,19 +412,22 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
 
   const amd::Device& device = stream->vdev()->device();
   amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
+  // All-zero dims mean "no cluster" and emit no metadata, so a zero here is malformed. The
+  // kernel's block index is computed from it, so no dispatch of such a kernel is correct.
+  if (devKernel->hasClusterAttr() &&
+      (devKernel->getClusterSize(0) == 0 || devKernel->getClusterSize(1) == 0 ||
+       devKernel->getClusterSize(2) == 0)) {
+    LogPrintfError("Kernel %s was compiled for cluster dimensions (%zu, %zu, %zu) "
+                   "with a zero dimension",
+                   kernel->name().c_str(), devKernel->getClusterSize(0),
+                   devKernel->getClusterSize(1), devKernel->getClusterSize(2));
+    return hipErrorInvalidConfiguration;
+  }
   // If cluster size from device kernel is > 1, then we need to update the cluster params.
   if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
       devKernel->getClusterSize(2) > 1) {
     // Code-object dims bypass the hipLaunchKernelExC() checks. An oversized cluster is dropped
     // by the SPI without signalling completion, which hangs the host, so bound it here.
-    if (devKernel->getClusterSize(0) == 0 || devKernel->getClusterSize(1) == 0 ||
-        devKernel->getClusterSize(2) == 0) {
-      LogPrintfError("Kernel %s was compiled for cluster dimensions (%zu, %zu, %zu) "
-                     "with a zero dimension",
-                     kernel->name().c_str(), devKernel->getClusterSize(0),
-                     devKernel->getClusterSize(1), devKernel->getClusterSize(2));
-      return hipErrorInvalidClusterSize;
-    }
     if (device.info().clusterMaxSize_ == 0) {
       LogPrintfError("Kernel %s requires a multi-workgroup cluster, "
                      "but this device does not support clusters",

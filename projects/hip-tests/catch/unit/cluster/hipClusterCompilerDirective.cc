@@ -21,6 +21,8 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip/hip_ext.h>
 
+#include <vector>
+
 #include "ClusterHelper.hpp"
 
 /**
@@ -49,6 +51,22 @@ __global__ void CLUSTER_DIMS(CLX, CLY, CLZ) ClusterLaunchKernelBasicCD(int* in, 
 
 __global__ void CLUSTER_DIMS(OVERSIZED_CLX, OVERSIZED_CLY, OVERSIZED_CLZ)
     ClusterLaunchKernelOversizedCD(int* out, int n) {
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+  if (idx < n) {
+    out[idx] = idx;
+  }
+}
+
+// The compiler accepts a zero in some but not all axes and emits it into the code object.
+__global__ void CLUSTER_DIMS(0, 1, 1) ClusterLaunchKernelZeroDimCD(int* out, int n) {
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+  if (idx < n) {
+    out[idx] = idx;
+  }
+}
+
+// All-zero dims mean "no cluster" and emit no cluster metadata.
+__global__ void CLUSTER_DIMS(0, 0, 0) ClusterLaunchKernelNoClusterCD(int* out, int n) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx < n) {
     out[idx] = idx;
@@ -189,6 +207,148 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_OversizedCluster)
 
   INFO("Launch returned: " << hipGetErrorString(launch_status));
   REQUIRE(launch_status == hipErrorInvalidClusterSize);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Launches a kernel whose __cluster_dims__ has a zero in one axis and checks that the runtime
+ *    rejects it with hipErrorInvalidConfiguration, as it does for a zero cluster dimension passed
+ *    through hipLaunchAttributeClusterDimension.
+ *
+ * Test source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterCompilerDirective.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+
+HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_ZeroClusterDim) {
+  if (!CheckTargetSupport()) {
+    INFO("Target Not Supported!");
+    return;
+  }
+
+  int* dptr = nullptr;
+  HIP_CHECK(hipMalloc(&dptr, num_size));
+
+  ClusterLaunchKernelZeroDimCD<<<nbig, ntib>>>(dptr, num_elems);
+  const hipError_t launch_status = hipGetLastError();
+
+  // Free before REQUIRE; drain first if the launch was wrongly accepted.
+  if (launch_status == hipSuccess) {
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+  HIP_CHECK(hipFree(dptr));
+
+  INFO("Launch returned: " << hipGetErrorString(launch_status));
+  REQUIRE(launch_status == hipErrorInvalidConfiguration);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Adds a kernel whose __cluster_dims__ has a zero in one axis to a graph and checks that the
+ *    rejection reaches the caller through hipGraphInstantiate or hipGraphLaunch.
+ *
+ * Test source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterCompilerDirective.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+
+HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_ZeroClusterDim_Graph) {
+  if (!CheckTargetSupport()) {
+    INFO("Target Not Supported!");
+    return;
+  }
+
+  int* dptr = nullptr;
+  HIP_CHECK(hipMalloc(&dptr, num_size));
+  int n = num_elems;
+  void* kernel_args[] = {&dptr, &n};
+
+  hipKernelNodeParams node_params = {};
+  node_params.func = reinterpret_cast<void*>(ClusterLaunchKernelZeroDimCD);
+  node_params.gridDim = dim3(nbig);
+  node_params.blockDim = dim3(ntib);
+  node_params.kernelParams = kernel_args;
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &node_params));
+
+  // The kernel's command is built at instantiation or at first launch, depending on the
+  // graph execution path, so accept the rejection at either point.
+  hipGraphExec_t graph_exec = nullptr;
+  const hipError_t instantiate_status =
+      hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0);
+  hipError_t launch_status = hipSuccess;
+  if (instantiate_status == hipSuccess) {
+    launch_status = hipGraphLaunch(graph_exec, nullptr);
+    // Drain before freeing if the launch was wrongly accepted.
+    if (launch_status == hipSuccess) {
+      HIP_CHECK(hipDeviceSynchronize());
+    }
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  }
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(dptr));
+  // Clear the last error so the rejection doesn't leak into later tests.
+  (void)hipGetLastError();
+
+  INFO("hipGraphInstantiate returned: " << hipGetErrorString(instantiate_status));
+  INFO("hipGraphLaunch returned: " << hipGetErrorString(launch_status));
+  const hipError_t status =
+      instantiate_status != hipSuccess ? instantiate_status : launch_status;
+  REQUIRE(status == hipErrorInvalidConfiguration);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Launches a kernel with __cluster_dims__(0, 0, 0), which means no cluster, and checks that it
+ *    runs as an ordinary launch with every block computing its own index.
+ *
+ * Test source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterCompilerDirective.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+
+HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_NoCluster) {
+  if (!CheckTargetSupport()) {
+    INFO("Target Not Supported!");
+    return;
+  }
+
+  // One element per thread, several blocks, so a wrong block index shows in the output.
+  constexpr int threads_per_block = num_elems / nbig;
+
+  std::vector<int> hout(num_elems, -1);
+  int* dptr = nullptr;
+  HIP_CHECK(hipMalloc(&dptr, num_size));
+  HIP_CHECK(hipMemset(dptr, 0xff, num_size));
+
+  ClusterLaunchKernelNoClusterCD<<<nbig, threads_per_block>>>(dptr, num_elems);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(hout.data(), dptr, num_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(dptr));
+
+  for (size_t idx = 0; idx < num_elems; ++idx) {
+    INFO("Index " << idx);
+    REQUIRE(hout[idx] == static_cast<int>(idx));
+  }
 }
 
 /**
