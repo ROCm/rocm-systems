@@ -67,9 +67,51 @@ uint32_t accumulator(uint32_t form, uint32_t reg, uint32_t lane) {
 }
 
 void seed_registers(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t form, uint32_t scenario) {
+  if (scenario >= 17) {
+    const uint32_t seed_scenario = scenario >= 20 ? scenario - 3 : scenario;
+    const bool f16 = form < 2;
+    const bool packed_acc = form == 1 || form == 3;
+    uint16_t a, b, c16;
+    uint32_t c32;
+    if (seed_scenario == 17) {
+      // One K=0 product: half an f32 ULP at +1 for f32 accumulators,
+      // or a product just beyond a packed-output rounding boundary.
+      a = packed_acc ? (f16 ? 0x3c01u : 0x3f81u) : (f16 ? 0x0001u : 0x3380u);
+      b = packed_acc ? (f16 ? 0x3c02u : 0x3f82u) : (f16 ? 0x3c00u : 0x3f80u);
+      c16 = f16 ? 0x3c00u : 0x3f80u;
+      c32 = 0x3f800000u;
+    } else if (seed_scenario == 18) {
+      a = 0x0001u; // Minimum f16/bf16 input subnormal.
+      b = f16 ? 0x3c00u : 0x3f80u;
+      c16 = 0x0001u;
+      c32 = 0x00000001u; // Minimum f32 accumulator subnormal.
+    } else {
+      a = b = f16 ? 0x7bffu : 0x7f7fu; // Finite inputs overflow packed outputs.
+      c16 = f16 ? 0x3c00u : 0x3f80u;
+      c32 = 0x3f800000u;
+    }
+    const uint32_t c = packed_acc ? uint32_t{c16} | (uint32_t{c16} << 16) : c32;
+    for (uint32_t reg = 0; reg < kInputRegs; ++reg)
+      for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+        // K=0 occupies the low half of register zero in lanes 0..15.
+        const bool k_zero = reg == 0 && lane < 16;
+        const uint32_t a_word =
+            seed_scenario == 17 ? (k_zero ? uint32_t{a} : 0u) : uint32_t{a} | (uint32_t{a} << 16);
+        const uint32_t b_word =
+            seed_scenario == 17 ? (k_zero ? uint32_t{b} : 0u) : uint32_t{b} | (uint32_t{b} << 16);
+        cu.write_vgpr(base + kA + reg, lane, a_word);
+        cu.write_vgpr(base + kB + reg, lane, b_word);
+      }
+    for (uint32_t reg = 0; reg < kAccRegs; ++reg)
+      for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+        cu.write_vgpr(base + kC + reg, lane, c);
+        cu.write_vgpr(base + kDst + reg, lane, 0xDEAD0000u | (reg << 8) | lane);
+      }
+    return;
+  }
   // Distinct signed payloads expose host FMA operand-order differences that
   // canonical NaNs cannot detect. Cover A/B/C priority and signaling inputs.
-  if (scenario >= 9) {
+  if (scenario >= 9 && scenario <= 14) {
     const bool f16 = form < 2;
     const uint16_t one = f16 ? 0x3c00u : 0x3f80u;
     const uint16_t aq = f16 ? 0x7e11u : 0x7fc1u;
@@ -113,7 +155,9 @@ void seed_registers(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t form, u
   if (scenario != 1 && scenario != 2 && scenario != 3)
     for (uint32_t reg = 0; reg < kAccRegs; ++reg)
       for (uint32_t lane = 0; lane < kWaveSize; ++lane)
-        cu.write_vgpr(base + kDst + reg, lane, dst_initial);
+        cu.write_vgpr(base + kDst + reg, lane,
+                      scenario == 15 || scenario == 16 ? 0xDEAD0000u | (reg << 8) | lane
+                                                       : dst_initial);
 }
 
 template <typename T> const cdna5::Operand *decoded_src2(Instruction *inst) {
@@ -177,7 +221,7 @@ int run_probe(uint32_t form, uint32_t scenario, uint32_t iterations, bool observ
   if (!out)
     return -1;
   std::memset(out, 0, sizeof(*out));
-  if (form >= kOpcodes.size() || scenario > 14)
+  if (form >= kOpcodes.size() || scenario > RJ_TEST_WMMA_MAX_SCENARIO)
     return error(out, "invalid form or scenario");
   if (scenario >= 5 && scenario <= 7 && (form == 1 || form == 3))
     return error(out, "C modifier is not applicable to packed-output form");
@@ -199,6 +243,18 @@ int run_probe(uint32_t form, uint32_t scenario, uint32_t iterations, bool observ
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     if (!wf)
       return error(out, "failed to dispatch wavefront");
+    if (scenario == 15)
+      wf->set_exec(0xA5A5A5A5u);
+    else if (scenario == 16)
+      wf->set_exec(0);
+    if (scenario == 17)
+      wf->set_mode_raw(1u | (3u << 2) | amdgpu::Wavefront::IEEE_BIT);
+    else if (scenario == 18)
+      wf->set_mode_raw((3u << 4) | (3u << 6) | amdgpu::Wavefront::IEEE_BIT);
+    else if (scenario == 19)
+      wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT | amdgpu::Wavefront::IEEE_BIT);
+    const uint64_t initial_exec = wf->exec();
+    const uint32_t initial_mode = wf->mode_raw();
 
     const uint32_t dst = scenario == 1 ? kA : scenario == 2 ? kB : scenario == 3 ? kC : kDst;
     seed_registers(*cu, wf->vgpr_alloc().base, form, scenario);
@@ -248,6 +304,8 @@ int run_probe(uint32_t form, uint32_t scenario, uint32_t iterations, bool observ
     }
     if (!cu->execute_instruction(inst.get(), *wf).succeeded())
       return error(out, "first WMMA execution failed");
+    if (wf->exec() != initial_exec || wf->mode_raw() != initial_mode)
+      return error(out, "WMMA execution modified guest EXEC or MODE");
     if (observer) {
       if (!observer->valid())
         return error(out, "observed VGPR access is outside the probe wavefront");

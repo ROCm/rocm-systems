@@ -10,7 +10,11 @@
 
 // Private, BUILD_TESTING-only ABI. The implementation is compiled into
 // librocjitsu.so, so it decodes and executes with that image's ISA backend.
-enum { RJ_TEST_WMMA_MAX_OUTPUT_WORDS = 8 * 32, RJ_TEST_WMMA_MAX_VGPRS = 256 };
+enum {
+  RJ_TEST_WMMA_MAX_OUTPUT_WORDS = 8 * 32,
+  RJ_TEST_WMMA_MAX_VGPRS = 256,
+  RJ_TEST_WMMA_MAX_SCENARIO = 22
+};
 
 typedef struct rj_test_cdna5_wmma_result {
   uint64_t elapsed_ns;
@@ -38,6 +42,12 @@ typedef struct rj_test_cdna5_wmma_result {
 //           8=inline constant +1.0 C. Modifier scenarios are valid only for
 //           the F32-output and BF16F32 forms (0, 2, and 4).
 //           9..14=distinct signed NaN payloads in A/B/C.
+//           15=partial EXEC, 16=empty EXEC,
+//           17=non-default rounding MODE, 18=preserve-denorm MODE,
+//           19=MODE.FP16_OVFL, 20..22=matching edge inputs with default MODE.
+// These five emulator callbacks currently access full tiles regardless of
+// EXEC and do not apply guest FP MODE. The new cases preserve that baseline
+// contract rather than establish additional hardware semantics.
 // Nonzero iterations are accepted only for scenario 0, whose source windows
 // remain unchanged across executions. Returns zero on success.
 #ifdef __cplusplus

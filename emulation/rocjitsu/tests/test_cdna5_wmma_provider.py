@@ -8,6 +8,20 @@ import re
 import subprocess
 import sys
 
+# These emulator callbacks currently ignore EXEC and guest FP MODE. Compare
+# each altered state with the same inputs under default state, in addition to
+# comparing provider dispatch with the fresh-process scalar oracle.
+STATE_BASELINES = {15: 0, 16: 0, 17: 20, 18: 21, 19: 22}
+
+
+def check_state_baselines(results, label):
+    for scenario, baseline in STATE_BASELINES.items():
+        if results[scenario] != results[baseline]:
+            raise AssertionError(
+                f"{label} scenario={scenario}: changed the emulator's "
+                f"full-tile EXEC / MODE-independent baseline scenario={baseline}"
+            )
+
 
 def parse_accesses(text):
     accesses = {}
@@ -81,29 +95,32 @@ def probe(driver, scenario, backend, force_scalar, *, observe=False):
 
 def check_observations(driver):
     comparisons = 0
-    for scenario in (0, 3, 8):
+    scalar_observations = {}
+    for scenario in (0, 3, 8, *range(15, 23)):
         scalar = probe(driver, scenario, "v3", 1, observe=True)
+        scalar_observations[scenario] = scalar
         scalar_values = probe(driver, scenario, "v3", 1)
         for name, (words, reads, writes) in scalar.items():
             if words != scalar_values[name]:
                 raise AssertionError(
                     f"scalar {name} scenario={scenario}: observation or D poison changed output"
                 )
-            output_regs = 8 if name in ("f32_f16", "f32_bf16") else 4
-            acc_regs = 4 if name in ("f16_f16", "bf16_bf16") else 8
-            sources = set(range(8)) | set(range(32, 40))
-            if scenario != 8:
-                sources |= set(range(96, 96 + acc_regs))
-            dst = 96 if scenario == 3 else 64
-            expected_reads = {reg: (0xFFFFFFFF, 0xF) for reg in sources}
-            expected_writes = {
-                reg: (0xFFFFFFFF, 0xF) for reg in range(dst, dst + output_regs)
-            }
-            if reads != expected_reads or writes != expected_writes:
-                raise AssertionError(
-                    f"scalar {name} scenario={scenario}: "
-                    f"{reads=} {expected_reads=} {writes=} {expected_writes=}"
-                )
+            if scenario in (0, 3, 8):
+                output_regs = 8 if name in ("f32_f16", "f32_bf16") else 4
+                acc_regs = 4 if name in ("f16_f16", "bf16_bf16") else 8
+                sources = set(range(8)) | set(range(32, 40))
+                if scenario != 8:
+                    sources |= set(range(96, 96 + acc_regs))
+                dst = 96 if scenario == 3 else 64
+                expected_reads = {reg: (0xFFFFFFFF, 0xF) for reg in sources}
+                expected_writes = {
+                    reg: (0xFFFFFFFF, 0xF) for reg in range(dst, dst + output_regs)
+                }
+                if reads != expected_reads or writes != expected_writes:
+                    raise AssertionError(
+                        f"scalar {name} scenario={scenario}: "
+                        f"{reads=} {expected_reads=} {writes=} {expected_writes=}"
+                    )
         for backend in ("v3", "v4", "auto"):
             observed = probe(driver, scenario, backend, 0, observe=True)
             if observed is None:
@@ -118,6 +135,9 @@ def check_observations(driver):
                             f"actual_writes={observed[name][2]} scalar_writes={scalar[name][2]}"
                         )
             comparisons += len(scalar)
+    # New cases inherit exact masks/bytes from their scalar baseline, rather
+    # than assuming empty EXEC implies no reads or preserves inactive lanes.
+    check_state_baselines(scalar_observations, "observed scalar")
     return comparisons
 
 
@@ -126,7 +146,8 @@ def main():
         raise ValueError("usage: test_cdna5_wmma_provider.py <probe-driver>")
     driver = sys.argv[1]
     comparisons = 0
-    for scenario in range(15):
+    scalar_values = {}
+    for scenario in range(23):
         # An explicit v4 request must fail on loader/ABI errors; the driver
         # returns 77 only for unsupported CPU/OS AVX-512 state.
         v4 = probe(driver, scenario, "v4", 0)
@@ -134,6 +155,7 @@ def main():
             print("Skipped: x86-v4 provider requires CPU and OS AVX-512 support")
             return 77
         scalar = probe(driver, scenario, "v3", 1)
+        scalar_values[scenario] = scalar
         for backend, actual in (
             ("v4", v4),
             ("auto", probe(driver, scenario, "auto", 0)),
@@ -152,6 +174,7 @@ def main():
                             f"actual=0x{actual[name][lane]:08x} scalar=0x{scalar[name][lane]:08x}"
                         )
             comparisons += len(scalar)
+    check_state_baselines(scalar_values, "scalar values")
     observations = check_observations(driver)
     if observations is None:
         print("Skipped: x86-v4 provider requires CPU and OS AVX-512 support")

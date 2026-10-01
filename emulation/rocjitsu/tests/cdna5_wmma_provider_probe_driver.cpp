@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
   if (argc < 3 || argc > 6) {
     std::fprintf(stderr,
                  "usage: %s --cold-load | --chdir-and-probe <dir> <all|form> <main|provider> "
-                 "| <all|form 0..4> <iterations> [scenario 0..14] "
+                 "| <all|form 0..4> <iterations> [scenario 0..22] "
                  "[expected main|provider|any] [--dump|--observe]\n",
                  argv[0]);
     return 2;
@@ -203,8 +203,8 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "invalid scenario: %s\n", argv[3]);
     return 2;
   }
-  if (scenario > 14) {
-    std::fprintf(stderr, "scenario must be in 0..14\n");
+  if (scenario > RJ_TEST_WMMA_MAX_SCENARIO) {
+    std::fprintf(stderr, "scenario must be in 0..%u\n", unsigned{RJ_TEST_WMMA_MAX_SCENARIO});
     return 2;
   }
   const std::string_view expected = argc >= 5 ? argv[4] : "any";
