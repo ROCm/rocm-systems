@@ -171,7 +171,7 @@ __global__ void kernelOneBitMaskCall(PutRecord* records) {
 }
 
 class GinBackendMaskDispatchTest : public DeviceTestBase {
- protected:
+protected:
   static constexpr uintptr_t kDstToken = 0xD57000;
   static constexpr uintptr_t kSrcToken = 0x5C2000;
   static constexpr uint32_t kDstOffset4K = 3;
@@ -180,6 +180,7 @@ class GinBackendMaskDispatchTest : public DeviceTestBase {
   static constexpr uint64_t kSignalAddValue = 7;
 
   void SetUp() override {
+    ASSERT_EQ(setDeviceErr_, hipSuccess);
     ASSERT_NO_FATAL_FAILURE(DeviceTestBase::SetUp());
     ASSERT_NO_FATAL_FAILURE(d_records_.zero());
     ASSERT_NO_FATAL_FAILURE(d_signalShadows_.zero());
@@ -266,6 +267,7 @@ class GinBackendMaskDispatchTest : public DeviceTestBase {
     EXPECT_EQ(rec.optFlags, args.optFlags);
   }
 
+  hipError_t setDeviceErr_ = hipSetDevice(0);  // Must precede the DeviceBuffers; they allocate on the current device.
   DeviceBuffer<PutRecord> d_records_{kNumSlots};
   DeviceBuffer<ncclWindow_vidmem> d_dstWin_{1};
   DeviceBuffer<ncclWindow_vidmem> d_srcWin_{1};

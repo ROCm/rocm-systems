@@ -446,7 +446,9 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_FencesOnlyForWeakerGivenAtSystemScop
     kernelPutValueScoped<<<1, 1>>>(env.dHarness.ptr, val, c.required, c.given);
     syncAndCheck();
     EXPECT_EQ(readThreadfenceCount(), c.fences);
-    EXPECT_EQ(readInlinePutsAtFence(), 0ULL) << "the fence must precede the inline put";
+    if (c.fences != 0) {
+      EXPECT_EQ(readInlinePutsAtFence(), 0ULL) << "the fence must precede the inline put";
+    }
     EXPECT_EQ(readPutValCount(), 1ULL);
     EXPECT_EQ(readSignalCount(), 0ULL) << "no signal descriptor, so no AMO";
     auto got = env.dst.copyTo();
