@@ -212,10 +212,6 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes
   HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice));
 
-  // hipExtMemcpyBatchAsync with all extended parameters null (no asymmetric swap
-  // sizes, no wait/signal) and default attributes must behave like
-  // hipMemcpyBatchAsync: each source is delivered to its matching destination
-  // after the stream is synchronized.
   hipExtMemcpyAttributes attribute{};
   attribute.srcAccessOrder = hipMemcpySrcAccessOrderStream;
   attribute.srcLocHint = DeviceLocation();
