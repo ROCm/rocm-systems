@@ -607,10 +607,10 @@ protected:
         uint64_t value = 0;
         *p_num_bytes_read = 0;
         *p_value = 0;
-        for (uint32_t len = 0; len < 8; ++len) {
-            if (len >= size_in_bytes) {
-                return PARSER_OUT_OF_RANGE;
-            }
+        // leb128() reads at most 8 bytes, and must also stay inside what is left of the chunk.
+        // The encoding is 1 to 8 bytes, so a short tail is normal rather than an error here.
+        uint32_t max_len = size_in_bytes < 8 ? static_cast<uint32_t>(size_in_bytes) : 8;
+        for (uint32_t len = 0; len < max_len; ++len) {
             // Accumulate in 64 bits: the last of the 8 bytes is shifted by 49.
             value |= static_cast<uint64_t>(p_stream[len] & 0x7F) << (len * 7);
             if ((p_stream[len] & 0x80) == 0) {
@@ -622,7 +622,7 @@ protected:
                 return PARSER_OK;
             }
         }
-        // leb128() reads at most 8 bytes, so a run of 8 continuation bytes has no terminator.
+        // Either the chunk ran out or there was no terminating byte within 8.
         return PARSER_OUT_OF_RANGE;
     }
 
