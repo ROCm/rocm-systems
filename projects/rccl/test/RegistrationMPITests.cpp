@@ -1388,7 +1388,7 @@ TEST_F(UBR_MultiSegment, NetSegmentCountOddSizedHipMalloc)
  * AllReduce whose receive half ends at the final registered byte. This drives
  * sendProxyRegBuffer and recvProxyRegBuffer through netIbRegMrMultiSeg with a
  * short final MR and verifies the mapped-but-unregistered tail is untouched.
- * Ranks that took the NET path must record netNSegments==3 on that cache entry.
+ * Ranks that took the NET path must cache a segment count of 3 on that entry.
  */
 TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
 {
@@ -1476,7 +1476,7 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
     }
     if (netDone) {
         ASSERT_NE(reg->netHandleHead, nullptr);
-        ASSERT_EQ(reg->netNSegments, kMappedSegments)
+        ASSERT_EQ(reg->rcclNet.nSegments, kMappedSegments)
             << "NET proxy must enumerate three physical segments for a 2.5-segment clip";
     }
 }
