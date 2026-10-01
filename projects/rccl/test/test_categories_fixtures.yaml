@@ -21,6 +21,7 @@ test_categories:
       - "u32fpDecode.*"
       - "getHash.*"
       - "eatHash.*"
+      - "Add4G.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "CommTests.*"
@@ -78,6 +79,7 @@ test_categories:
       - "u32fpDecode.*"
       - "getHash.*"
       - "eatHash.*"
+      - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
     exclude_windows:
