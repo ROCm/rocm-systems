@@ -11,6 +11,7 @@
 #include "comm.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
+#include <cstdio>
 #include <fstream>
 #include <thread>
 
@@ -66,6 +67,70 @@ namespace RcclUnitTesting
         EXPECT_EQ(result, 0) << "Round-tripped rcclApiCall fields do not match";
       },
       {{"RCCL_REPLAY_FILE", "/tmp/test.json"}}
+    );
+  }
+
+  /**
+   * \brief Verify the RedOp record() overload writes PreMulSum scalar/datatype/residence and Destroy op/comm to json
+   * ******************************************************************************************/
+  TEST(Recorder, RedOpRecordJson)
+  {
+    RUN_ISOLATED_TEST_WITH_ENV(
+      "RedOpRecordJson",
+      []()
+      {
+        int array[] = {2, 3, 5};
+        ncclComm comm{.nRanks = 1, .localRank = 1, .localRankToRank = array, .opCount = 8,
+                      .planner = {.nTasksColl = 13, .nTasksP2p = 21}};
+        float scalar = 2.0f;
+        // Non-zero datatype and residence so a dropped PreMulSum branch is not hidden by the zero-initialised defaults.
+        ASSERT_EQ(ncclSuccess, rccl::Recorder::instance().record(rccl::rrRedOpCreatePreMulSum, ncclMax, &comm,
+                                                                 ncclFloat32, ncclScalarHostImmediate, &scalar));
+        ASSERT_EQ(ncclSuccess, rccl::Recorder::instance().record(rccl::rrRedOpDestroy, ncclMax, &comm));
+
+        char line[4096];
+        gethostname(line, sizeof(line));
+        std::string filename = "/tmp/test_redop." + std::to_string(getpid()) + "." + std::string(line) + ".json";
+        std::ifstream fp(filename);
+        ASSERT_TRUE(fp.is_open()) << "Recorder did not create expected file: " << filename;
+        fp.getline(line, sizeof(line)); // line 1: "{"
+        fp.getline(line, sizeof(line)); // line 2: "  version : 1,"
+        fp.getline(line, sizeof(line)); // line 3: RedOpCreatePreMulSum
+        std::string create(line);
+        fp.getline(line, sizeof(line)); // line 4: RedOpDestroy
+        std::string destroy(line);
+        fp.close();
+        std::remove(filename.c_str());
+
+        // parseJsonEntry is not used: its RedOp sscanf calls pass fewer pointers than conversions (UB) inside assert().
+        size_t pos = create.find("RedOpCreatePreMulSum : [");
+        ASSERT_NE(pos, std::string::npos) << "raw line: " << create;
+        void* gotScalar = nullptr;
+        void* gotComm = nullptr;
+        int gotDatatype = -1;
+        int gotOp = -1;
+        int gotResidence = -1;
+        constexpr const char* kCreateFmt =
+          "RedOpCreatePreMulSum : [scalar : %p, datatype : %d, op : %d, residence : %d, comm : %p,";
+        ASSERT_EQ(5, std::sscanf(create.c_str() + pos, kCreateFmt, &gotScalar, &gotDatatype, &gotOp, &gotResidence,
+                                 &gotComm))
+          << "raw line: " << create;
+        EXPECT_EQ(gotScalar, static_cast<void*>(&scalar));
+        EXPECT_EQ(gotDatatype, ncclFloat32);
+        EXPECT_EQ(gotOp, ncclMax);
+        EXPECT_EQ(gotResidence, ncclScalarHostImmediate);
+        EXPECT_EQ(gotComm, static_cast<void*>(&comm));
+
+        pos = destroy.find("RedOpDestroy : [");
+        ASSERT_NE(pos, std::string::npos) << "raw line: " << destroy;
+        gotOp = -1;
+        gotComm = nullptr;
+        ASSERT_EQ(2, std::sscanf(destroy.c_str() + pos, "RedOpDestroy : [op : %d, comm : %p,", &gotOp, &gotComm))
+          << "raw line: " << destroy;
+        EXPECT_EQ(gotOp, ncclMax);
+        EXPECT_EQ(gotComm, static_cast<void*>(&comm));
+      },
+      {{"RCCL_REPLAY_FILE", "/tmp/test_redop.json"}}
     );
   }
 
