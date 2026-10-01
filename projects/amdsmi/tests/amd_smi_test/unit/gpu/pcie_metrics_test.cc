@@ -151,12 +151,15 @@ TEST_F(GpuUnit, PcieUnsupportedCurrentLinksKeepStaticInfo) {
 }
 
 TEST_F(GpuUnit, PcieCurrentLinkReadErrorsAreNotUnsupported) {
-  for (int error : {EACCES, EPERM, EIO}) {
-    SCOPED_TRACE(error);
-    open_errors["current_link_speed"] = error;
-    amdsmi_pcie_info_t info{};
-    EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info),
-              error == EIO ? AMDSMI_STATUS_API_FAILED : AMDSMI_STATUS_NO_PERM);
+  for (const char* attribute : {"current_link_width", "current_link_speed"}) {
+    SCOPED_TRACE(attribute);
+    for (int error : {EACCES, EPERM, EIO}) {
+      SCOPED_TRACE(error);
+      open_errors = {{attribute, error}};
+      amdsmi_pcie_info_t info{};
+      EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info),
+                error == EIO ? AMDSMI_STATUS_API_FAILED : AMDSMI_STATUS_NO_PERM);
+    }
   }
 }
 
@@ -262,6 +265,34 @@ TEST_F(GpuUnit, PcieUnknownCurrentSpeedKeepsStaticInfo) {
   EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
   EXPECT_EQ(info.pcie_metric.pcie_width, 8);
   EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
+}
+
+TEST_F(GpuUnit, PcieLegacyUnknownSpeedKeepsStaticInfo) {
+  Write("current_link_speed", "Unknown speed\n");
+  amdsmi_pcie_info_t info{};
+  ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
+  EXPECT_EQ(info.pcie_metric.pcie_width, 8);
+  EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
+}
+
+TEST_F(GpuUnit, PcieUnknownSpeedRejectsTrailingText) {
+  for (const char* value : {"Unknown garbage\n", "Unknown speed garbage\n", "Unknownspeed\n",
+                            "Unknown speed speed\n", "Unknown PCIe\n"}) {
+    SCOPED_TRACE(value);
+    Write("current_link_speed", value);
+    amdsmi_pcie_info_t info{};
+    EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_UNEXPECTED_DATA);
+  }
+}
+
+TEST_F(GpuUnit, PcieCurrentLinksAcceptEofWithoutNewline) {
+  Write("current_link_width", "8");
+  Write("current_link_speed", "2.5 GT/s PCIe");
+  amdsmi_pcie_info_t info{};
+  ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.pcie_metric.pcie_width, 8);
+  EXPECT_EQ(info.pcie_metric.pcie_speed, 2500);
 }
 
 TEST_F(GpuUnit, PcieZeroNegotiatedWidthIsUnavailable) {

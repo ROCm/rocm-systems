@@ -240,6 +240,7 @@ re-run:
 ```cmake
 file(GLOB_RECURSE unitSources  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+list(REMOVE_ITEM unitSources ${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/pcie_metrics_test.cc)
 
 add_executable(amdsmitst
     main.cc test_base.cc test_common.cc test_utils.cc
@@ -259,8 +260,10 @@ add_executable(amdsmitst
 
 ### Running C++ tests
 
-All examples use `amdsmitst` directly with `--gtest_filter`. The binary is at
-`<build>/tests/amd_smi_test/amdsmitst` or `/opt/rocm/share/amd_smi/tests/amdsmitst` after install.
+Run these examples from `<build>/tests/amd_smi_test` or
+`/opt/rocm/share/amd_smi/tests` after install. `amdsmitst` contains the general suites;
+`amdsmi_pcie_metrics_test` contains the isolated PCIe unit suite. Run both for complete
+C++ coverage. The PCIe target requires the default static-library test build.
 
 The suite naming scheme `<Component><Type>[<Operation>]` keeps every axis independently filterable:
 - **Component**: `Gpu*`, `Cpu*`, `Nic*`, `Ifoe*`, `System*`
@@ -270,16 +273,17 @@ The suite naming scheme `<Component><Type>[<Operation>]` keeps every axis indepe
 ```shell
 # List all available tests
 ./amdsmitst --gtest_list_tests
+./amdsmi_pcie_metrics_test --gtest_list_tests
 
 # All tests
-sudo ./amdsmitst
+./amdsmi_pcie_metrics_test && sudo ./amdsmitst
 ```
 
 **By type:**
 
 ```shell
-# Unit tests only — no hardware required
-./amdsmitst --gtest_filter="*Unit*"
+# Unit tests only, no hardware required
+./amdsmitst --gtest_filter="*Unit*" && ./amdsmi_pcie_metrics_test
 
 # All functional tests (read-only + read/write)
 sudo ./amdsmitst --gtest_filter="*Functional*"
@@ -295,16 +299,16 @@ sudo ./amdsmitst --gtest_filter="*FunctionalReadWrite*"
 
 ```shell
 # All GPU tests (unit + functional)
-sudo ./amdsmitst --gtest_filter="Gpu*"
+./amdsmi_pcie_metrics_test && sudo ./amdsmitst --gtest_filter="Gpu*"
 
 # GPU functional only
 sudo ./amdsmitst --gtest_filter="GpuFunctional*"
 
 # GPU unit only
-./amdsmitst --gtest_filter="GpuUnit*"
+./amdsmitst --gtest_filter="GpuUnit*" && ./amdsmi_pcie_metrics_test
 
 # Any component unit tests
-./amdsmitst --gtest_filter="*Unit*"
+./amdsmitst --gtest_filter="*Unit*" && ./amdsmi_pcie_metrics_test
 
 # CPU tests (when added)
 ./amdsmitst --gtest_filter="Cpu*"
@@ -504,20 +508,20 @@ as running a pytest test file directly. Always go through a runner with a `-k` f
 ```
 
 **Equivalent matrix between Python and C++.**  
-The two suites are structurally asymmetric: Python has **three independent runners** (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`),
-while C++ is a **single `amdsmitst` binary** filtered with `--gtest_filter`. Some concepts map only
-one way — **CLI tests are Python-only**, and the **read-only/read-write split is C++-only**.
+Python has **three independent runners** (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`).
+C++ uses `amdsmitst` plus the isolated `amdsmi_pcie_metrics_test`, both supporting
+`--gtest_filter`. **CLI tests are Python-only**, and the **read-only/read-write split is C++-only**.
 
-| Intent | Python | C++ (`amdsmitst`) |
+| Intent | Python | C++ |
 | :--- | :--- | :--- |
-| List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`) | `--gtest_list_tests` |
-| Unit only (no hardware) | `unit_tests.py -v` | `--gtest_filter="*Unit*"` |
+| List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`) | `--gtest_list_tests` on both executables |
+| Unit only (no hardware) | `unit_tests.py -v` | `./amdsmitst --gtest_filter="*Unit*" && ./amdsmi_pcie_metrics_test` |
 | All functional | `integration_test.py -v` | `--gtest_filter="*Functional*"` |
 | Functional read-only / read-write | Not distinguished — Python groups functional tests by component/feature, not by RO/RW | `--gtest_filter="*FunctionalReadOnly*"` / `"*FunctionalReadWrite*"` |
 | CLI tests | `cli_unit_test.py -v` | _Python-only — no C++ equivalent_ |
 | Feature filter (e.g. power) | `integration_test.py -k power -v` (use the runner that owns that test type) | `--gtest_filter="*.*Power*"` |
 | Exclude / negate | `integration_test.py -x partition -v` (skip tests whose id contains `partition`) | `--gtest_filter="-*.*Partition*"` |
-| Everything | `unit_tests.py -v && integration_test.py -v && cli_unit_test.py -v` | `./amdsmitst` |
+| Everything | `unit_tests.py -v && integration_test.py -v && cli_unit_test.py -v` | `./amdsmi_pcie_metrics_test && ./amdsmitst` |
 
 ### CMake integration
 

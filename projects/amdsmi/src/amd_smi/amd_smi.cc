@@ -5959,8 +5959,10 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       if (is_speed && input.peek() == 'U') {
         std::string unknown, extra;
         input >> unknown;
-        return unknown == "Unknown" && !(input >> extra) ? AMDSMI_STATUS_SUCCESS
-                                                         : AMDSMI_STATUS_UNEXPECTED_DATA;
+        if (unknown != "Unknown") return AMDSMI_STATUS_UNEXPECTED_DATA;
+        if (!(input >> extra)) return AMDSMI_STATUS_SUCCESS;
+        if (extra != "speed" || (input >> extra)) return AMDSMI_STATUS_UNEXPECTED_DATA;
+        return AMDSMI_STATUS_SUCCESS;
       }
       double number = 0;
       if (!(input >> number)) return AMDSMI_STATUS_UNEXPECTED_DATA;
