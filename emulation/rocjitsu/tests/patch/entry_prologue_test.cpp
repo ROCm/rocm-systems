@@ -188,6 +188,24 @@ TEST(PlanDbiEntryStorage, RunInTheCdnaSpecialRegisterTailFailsClosed) {
   EXPECT_NE(error.find("special registers"), std::string::npos) << error;
 }
 
+// Pin the tail size from both sides: a run ending at s25 fits a 32-SGPR
+// allocation (fails if the tail grows past 6), and one ending at s27 does not
+// (fails if it shrinks below 5).
+TEST(PlanDbiEntryStorage, RunEndingSixBelowTheCdnaAllocationFits) {
+  const Kernel kernel(kernel_naming_sgpr(21));
+  const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
+                                              kArch, /*kernel_sgpr_count=*/32, link_pair());
+  ASSERT_TRUE(storage.has_value());
+  EXPECT_EQ(storage->persistent_base, 22u);
+}
+
+TEST(PlanDbiEntryStorage, RunEndingFourBelowTheCdnaAllocationFailsClosed) {
+  const Kernel kernel(kernel_naming_sgpr(23));
+  EXPECT_FALSE(plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
+                                      /*kernel_sgpr_count=*/32, link_pair())
+                   .has_value());
+}
+
 // The same kernel with room below the tail places the run under the reserved
 // link pair rather than treating s[30:31] as a floor.
 TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheCdnaSpecialRegisterTail) {
@@ -197,6 +215,28 @@ TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheCdnaSpecialRegisterTail) {
   ASSERT_TRUE(storage.has_value());
   EXPECT_EQ(storage->persistent_base, 20u);
   EXPECT_EQ(storage->entry_temp_base, 22u);
+}
+
+// The tail is at the top of the allocation, not of the addressable range. A
+// 112-SGPR allocation holds its special registers at s106..s111, so the
+// ordinary SGPRs reach the addressable maximum and a run at s[96:99] fits.
+TEST(PlanDbiEntryStorage, LargeCdnaAllocationKeepsTheTailAboveTheAddressableMaximum) {
+  const Kernel kernel(kernel_naming_sgpr(94));
+  const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
+                                              kArch, /*kernel_sgpr_count=*/112, link_pair());
+  ASSERT_TRUE(storage.has_value());
+  EXPECT_EQ(storage->persistent_base, 96u);
+}
+
+// An allocation smaller than the tail leaves no ordinary SGPRs to search.
+TEST(PlanDbiEntryStorage, CdnaAllocationSmallerThanTheTailFailsClosed) {
+  const Kernel kernel({build_s_endpgm(kArch)});
+  std::string error;
+  const auto storage =
+      plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
+                             /*kernel_sgpr_count=*/4, link_pair(), &error);
+  EXPECT_FALSE(storage.has_value());
+  EXPECT_NE(error.find("special registers"), std::string::npos) << error;
 }
 
 // RDNA's special registers sit outside the per-wave pool, so the same request
@@ -227,9 +267,9 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheAllocationCannotHoldTheRun) {
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
-                             /*kernel_sgpr_count=*/34, link_pair(), &error);
+                             /*kernel_sgpr_count=*/40, link_pair(), &error);
   EXPECT_FALSE(storage.has_value());
-  EXPECT_FALSE(error.empty());
+  EXPECT_NE(error.find("no free run"), std::string::npos) << error;
 }
 
 TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {

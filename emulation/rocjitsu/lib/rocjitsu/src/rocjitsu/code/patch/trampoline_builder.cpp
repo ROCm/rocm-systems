@@ -224,7 +224,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
   // The entry-storage pair holds a value produced once at kernel entry and read
   // at arbitrary later sites, so both lanes must be inside the allocation the
-  // temps are drawn from
+  // temps are drawn from.
   RegisterSet entry_storage;
   if (plan.entry_storage_base) {
     const uint32_t last = static_cast<uint32_t>(*plan.entry_storage_base) + 1u;

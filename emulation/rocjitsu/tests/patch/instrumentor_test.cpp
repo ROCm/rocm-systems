@@ -2273,9 +2273,7 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 //
 // A probe asking for the framework's entry storage makes the instrumentor
 // synthesize a site at the kernel entry that defines it. These cover the gates
-// that refuse a kernel the prologue could not cover. Acceptance needs a
-// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which no fixture builds
-// yet.
+// that refuse a kernel the prologue could not cover.
 //==============================================================================
 
 namespace {

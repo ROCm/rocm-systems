@@ -1046,6 +1046,8 @@ InstrumentedCodeObject Instrumentor::patch() {
     if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
                      [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
       continue;
+    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+      continue;
     if (!readers.empty())
       readers += ", ";
     readers += "'" + pt.probe_symbol + "'";
@@ -1103,7 +1105,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     liveness_scope.push_back(block.get());
   const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
 
-  // Lay out the appended region as [probe bodies][trampolines]. Each distinct
+  // Lay out the appended region as [probe bodies][entry prologue][trampolines],
+  // the entry prologue only when a probe reads the entry storage. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a
   // trampoline's target address is known before it is emitted and sites sharing
   // a probe share its single body.

@@ -294,6 +294,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// @param summaries One clobber summary per entry of @p probes, in the same
 ///                  order. A size mismatch is a caller error and fails closed.
 /// @param out       Filled with the union on success; untouched on failure.
+/// @returns false when the inputs disagree in size or a probe's ABI names no
+///          usable link pair.
 [[nodiscard]] bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
                                                     std::span<const ProbeClobberSummary> summaries,
                                                     RegisterSet &out,
