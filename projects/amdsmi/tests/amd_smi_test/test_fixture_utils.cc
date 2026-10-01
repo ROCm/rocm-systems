@@ -4,6 +4,9 @@
 #include "test_fixture_utils.h"
 
 #include <gtest/gtest.h>
+#include <linux/limits.h>
+#include <sys/inotify.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -73,6 +76,66 @@ ScopedProcessorRegistration::~ScopedProcessorRegistration() {
 amdsmi_processor_handle ScopedProcessorRegistration::handle() const {
   return reinterpret_cast<amdsmi_processor_handle>(processor_);
 }
+
+ScopedFileWatch::ScopedFileWatch(const std::string& path, uint32_t event_mask) {
+  inotify_fd_ = inotify_init1(IN_NONBLOCK);
+  if (inotify_fd_ < 0) {
+    return;  // IsAvailable() reports false; nothing else to clean up.
+  }
+  watch_fd_ = inotify_add_watch(inotify_fd_, path.c_str(), event_mask);
+  if (watch_fd_ < 0) {
+    close(inotify_fd_);
+    inotify_fd_ = -1;
+    return;
+  }
+}
+
+ScopedFileWatch::~ScopedFileWatch() {
+  if (watch_fd_ >= 0) {
+    inotify_rm_watch(inotify_fd_, watch_fd_);
+  }
+  if (inotify_fd_ >= 0) {
+    close(inotify_fd_);
+  }
+}
+
+void ScopedFileWatch::Drain() {
+  if (inotify_fd_ < 0) return;
+  // Per man 7 inotify: struct inotify_event has a variable-length trailing
+  // name, so the buffer must hold several whole entries, properly aligned.
+  constexpr std::size_t kMaxBufferedEvents = 16;
+  constexpr std::size_t kBufferSize =
+      kMaxBufferedEvents * (sizeof(struct inotify_event) + NAME_MAX + 1);
+  alignas(struct inotify_event) std::array<char, kBufferSize> buf;
+  for (;;) {
+    ssize_t len = read(inotify_fd_, buf.data(), buf.size());
+    if (len <= 0) {
+      // len < 0 with EAGAIN/EWOULDBLOCK just means no more events are
+      // pending right now -- not an error worth distinguishing here.
+      break;
+    }
+    for (char* ptr = buf.data(); ptr < buf.data() + len;) {
+      auto* event = reinterpret_cast<struct inotify_event*>(ptr);
+      for (std::size_t bit = 0; bit < kBitsPerMask; ++bit) {
+        if (event->mask & (1u << bit)) ++event_tally_[bit];
+      }
+      ptr += sizeof(struct inotify_event) + event->len;
+    }
+  }
+}
+
+uint32_t ScopedFileWatch::Count(uint32_t mask) {
+  Drain();
+  uint32_t total = 0;
+  for (std::size_t bit = 0; bit < kBitsPerMask; ++bit) {
+    if (mask & (1u << bit)) total += event_tally_[bit];
+  }
+  return total;
+}
+
+uint32_t ScopedFileWatch::OpenCount() { return Count(IN_OPEN); }
+
+uint32_t ScopedFileWatch::WriteCount() { return Count(IN_CLOSE_WRITE); }
 
 }  // namespace amd::smi::testing
 
