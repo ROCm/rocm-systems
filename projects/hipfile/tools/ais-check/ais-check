@@ -26,9 +26,11 @@ src/amd_detail/backend/fastpath.cpp (the accept rule) for the authoritative
 logic the volume scan reproduces.
 
 The BACKING column (nvme, lvm, md, ...) names the block layer under the
-filesystem. Raw local NVMe and LVM stacked directly on local NVMe qualify; any
-other interposing layer (multipath, dm-crypt, MD RAID, loopback) breaks the
-direct P2P-DMA path and forces the compatibility fallback.
+filesystem. Raw local NVMe and LVM stacked directly on local NVMe qualify,
+including mirrored (RAID1) logical volumes: LVM builds those out of sub-LVs
+that are themselves LVM targets, so every layer down to the physical volumes
+is still LVM. Any other interposing layer (multipath, dm-crypt, MD RAID,
+loopback) breaks the direct P2P-DMA path and forces the compatibility fallback.
 """
 
 # pylint: enable=invalid-name
@@ -636,6 +638,14 @@ def lvm_over_nvme(devno):
     underlying physical block device is NVMe. Returns False when a non-LVM dm
     layer (multipath, dm-crypt, ...) or a non-NVMe leaf (scsi, MD RAID, ...) is
     found, and None when the topology can't be resolved from sysfs.
+
+    Mirrored (RAID1) logical volumes are accepted by that same walk rather than
+    by a case of their own: LVM implements a dm-raid LV as a tree of rimage/
+    rmeta sub-LVs, and every one of them carries an "LVM-" dm uuid, so the
+    recursion classifies each leg as an LVM layer and keeps descending until it
+    reaches the physical volumes. MD RAID is not device-mapper at all and never
+    reaches here -- backing_storage labels it "md" and backing_supported
+    rejects it outright.
     """
     try:
         start = os.path.realpath(os.path.join("/sys/dev/block", devno))
@@ -717,10 +727,11 @@ def backing_supported(backing, devno):
     Whether the backing storage allows hipFile's direct P2P-DMA path.
 
     Raw local NVMe qualifies, as does an LVM logical volume whose underlying
-    physical volumes are all local NVMe (see lvm_over_nvme). Any other
-    interposing layer (multipath, dm-crypt, MD RAID, loopback) breaks the direct
-    path to the device, so the kernel rejects the IO at runtime
-    (pcie_p2pdma_distance < 0) even when the filesystem and O_DIRECT checks pass.
+    physical volumes are all local NVMe -- linear, striped or mirrored (RAID1)
+    alike (see lvm_over_nvme). Any other interposing layer (multipath, dm-crypt,
+    MD RAID, loopback) breaks the direct path to the device, so the kernel
+    rejects the IO at runtime (pcie_p2pdma_distance < 0) even when the
+    filesystem and O_DIRECT checks pass.
 
     Returns None when the backing could not be determined.
     """

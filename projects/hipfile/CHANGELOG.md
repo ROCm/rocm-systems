@@ -4,6 +4,8 @@
 
 ### Added
 
+* Mirrored LVM logical volumes (`lvcreate --type raid1`) are documented as fastpath capable when every mirror leg resides on a local NVMe physical volume, and `ais-check` reports them as such. MD software RAID remains unsupported.
+
 ### Changed
 
 ### Fixed
