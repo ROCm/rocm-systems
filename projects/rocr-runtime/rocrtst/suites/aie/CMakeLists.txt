@@ -22,10 +22,10 @@ find_package(hsa-runtime64 CONFIG REQUIRED NAMES hsa_runtime64 hsa-runtime64)
 
 include(GoogleTest)
 
-# error_callback_test: validates the per-queue error callback for AIE queues. Self-contained;
+# test_error_callback: validates the per-queue error callback for AIE queues. Self-contained;
 # it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
-add_executable(error_callback_test error_callback_test.cc)
-set_target_properties(error_callback_test
+add_executable(test_error_callback test_error_callback.cc)
+set_target_properties(test_error_callback
   PROPERTIES
     CXX_STANDARD                17
     CXX_EXTENSIONS              OFF
@@ -33,25 +33,49 @@ set_target_properties(error_callback_test
     VISIBILITY_INLINES_HIDDEN   ON
     POSITION_INDEPENDENT_CODE   ON
 )
-target_compile_options(error_callback_test
+target_compile_options(test_error_callback
   PRIVATE
     -Wall
     -Wextra
     -Wpedantic
 )
-target_link_libraries(error_callback_test
+target_link_libraries(test_error_callback
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-gtest_discover_tests(error_callback_test)
+gtest_discover_tests(test_error_callback)
+
+# test_memory: allocation, VMem and sharing tests for AIE agents. Self-contained;
+# it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
+add_executable(test_memory test_memory.cc)
+set_target_properties(test_memory
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(test_memory
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_link_libraries(test_memory
+  PRIVATE
+    hsa-runtime64::hsa-runtime64
+    GTest::gtest_main
+)
+gtest_discover_tests(test_memory)
 
 # ---------------------------------------------------------------------------
 # Everything below builds AIE kernel artifacts and the dispatch tests that need
 # them. It is all conditional on the kernel toolchain being present, because
-# error_callback_test above needs none of it and is expected to configure and
-# run on any machine -- a missing NPU or IRON environment must not fail the
-# configure and take that target down with it.
+# test_error_callback and test_memory above need none of it and are expected to
+# configure and run on any machine -- a missing NPU or IRON environment must not
+# fail the configure and take those targets down with it.
 #
 # AIE_KERNEL_TOOLCHAIN is set to FALSE by the first missing piece; each probe
 # below is skipped once it is false, so the reason reported is the first thing
@@ -119,7 +143,7 @@ if(AIE_KERNEL_TOOLCHAIN)
 endif()
 
 if(NOT AIE_KERNEL_TOOLCHAIN)
-  message(STATUS "AIE kernel toolchain incomplete: building error_callback_test only.")
+  message(STATUS "AIE kernel toolchain incomplete: building test_error_callback and test_memory only.")
   return()
 endif()
 
@@ -281,10 +305,10 @@ set(VSMUL_SCALE 3)
 add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale=${VSMUL_SCALE}")
 
 # ---------------------------------------------------------------------------
-# dispatch test executable
+# test_dispatch executable
 # ---------------------------------------------------------------------------
-add_executable(dispatch dispatch.cc)
-set_target_properties(dispatch
+add_executable(test_dispatch test_dispatch.cc)
+set_target_properties(test_dispatch
   PROPERTIES
     CXX_STANDARD                17
     CXX_EXTENSIONS              OFF
@@ -292,13 +316,13 @@ set_target_properties(dispatch
     VISIBILITY_INLINES_HIDDEN   ON
     POSITION_INDEPENDENT_CODE   ON
 )
-target_compile_options(dispatch
+target_compile_options(test_dispatch
   PRIVATE
     -Wall
     -Wextra
     -Wpedantic
 )
-target_compile_definitions(dispatch
+target_compile_definitions(test_dispatch
   PRIVATE
     DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}
     DEFAULT_INSTS_PATH=${vsadd_INSTS_BIN}
@@ -313,18 +337,18 @@ target_compile_definitions(dispatch
     MUL_ELF_PATH=${vsmul_FULL_ELF}
     MUL_SCALE=${VSMUL_SCALE}
 )
-target_link_libraries(dispatch
+target_link_libraries(test_dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts)
+add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts)
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
 # function never defined.
 if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
-  add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
+  add_dependencies(test_dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 
-gtest_discover_tests(dispatch)
+gtest_discover_tests(test_dispatch)

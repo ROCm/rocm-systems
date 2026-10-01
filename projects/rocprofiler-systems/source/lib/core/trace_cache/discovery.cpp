@@ -34,7 +34,7 @@ list_dir_files(const std::string& path)
         return {};
     }
 
-    auto dir_deleter = [](DIR* d) {
+    auto const dir_deleter = [](DIR* d) {
         if(d)
         {
             closedir(d);
@@ -73,7 +73,7 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
 
     data::mapped_cache_files_t cache_map{};
 
-    auto parse_and_fill_cache = [&](const std::string& filename) {
+    auto const parse_and_fill_cache = [&](const std::string& filename) {
         if(filename.empty())
         {
             return;
@@ -174,10 +174,10 @@ merge_perfetto_files()
         return;
     }
 
-    auto _filename      = config::get_perfetto_output_filename();
-    auto _output_folder = path::parent_path(_filename);
-    auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-    auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
+    auto const _filename      = config::get_perfetto_output_filename();
+    auto const _output_folder = path::parent_path(_filename);
+    auto       _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+    auto       _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
     if(!_script_dir.empty())
     {

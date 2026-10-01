@@ -96,6 +96,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `profile -b 3 --experimental --membw-analysis` not collecting memory bandwidth analysis counters.
 
+* Fixed `analyze -b` crashing when only the gfx950 LDS bandwidth metrics are selected.
+
 ### Upcoming changes
 
 ### Known issues
