@@ -118,7 +118,7 @@ public:
 
             typename Backend::counter_id_t config_id{};
             m_backend_api->query_record_counter_id(record, &config_id);
-            auto         id     = config_id.handle;
+            auto const   id     = config_id.handle;
             const double raw    = record.counter_value;
             auto [it, inserted] = m_prev_values.try_emplace(id, raw);
             const double delta  = inserted ? raw : raw - it->second;

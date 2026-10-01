@@ -84,7 +84,7 @@ get_name(procedure_t* _func)
 {
     static auto _v = std::unordered_map<procedure_t*, std::string>{};
 
-    auto itr = _v.find(_func);
+    auto const itr = _v.find(_func);
     if(itr == _v.end())
     {
         _v.emplace(_func, _func ? _func->getDemangledName() : std::string{});
@@ -98,7 +98,7 @@ get_name(module_t* _module)
 {
     static auto _v = std::unordered_map<module_t*, std::string>{};
 
-    auto itr = _v.find(_module);
+    auto const itr = _v.find(_module);
     if(itr == _v.end())
     {
         std::array<char, k_funcnamelen + 1> name{};
@@ -122,12 +122,12 @@ get_symtab_function(procedure_t* _func)
 {
     static auto _v = std::unordered_map<procedure_t*, symtab_func_t*>{};
 
-    auto itr = _v.find(_func);
+    auto const itr = _v.find(_func);
     if(itr == _v.end())
     {
-        auto _name = _func->getName();
+        auto const _name = _func->getName();
         {
-            auto nitr = symtab_data.mangled_symbol_names.find(_name);
+            auto const nitr = symtab_data.mangled_symbol_names.find(_name);
             if(nitr != symtab_data.mangled_symbol_names.end())
             {
                 _v.emplace(_func, nitr->second->getFunction());
@@ -135,7 +135,7 @@ get_symtab_function(procedure_t* _func)
             }
         }
 
-        for(auto& fitr : symtab_data.symbols)
+        for(auto const& fitr : symtab_data.symbols)
         {
             if(_name == fitr.first->getName())
             {
@@ -144,10 +144,10 @@ get_symtab_function(procedure_t* _func)
             }
         }
 
-        auto _dname = _func->getDemangledName();
+        auto const _dname = _func->getDemangledName();
 
         {
-            auto nitr = symtab_data.typed_func_names.find(_dname);
+            auto const nitr = symtab_data.typed_func_names.find(_dname);
             if(nitr != symtab_data.typed_func_names.end())
             {
                 _v.emplace(_func, nitr->second);
@@ -156,7 +156,7 @@ get_symtab_function(procedure_t* _func)
         }
 
         {
-            auto nitr = symtab_data.typed_symbol_names.find(_dname);
+            auto const nitr = symtab_data.typed_symbol_names.find(_dname);
             if(nitr != symtab_data.typed_symbol_names.end())
             {
                 _v.emplace(_func, nitr->second->getFunction());
@@ -164,7 +164,7 @@ get_symtab_function(procedure_t* _func)
             }
         }
 
-        if(_v.find(_func) == _v.end())
+        if(!_v.contains(_func))
         {
             _v.emplace(_func, nullptr);
         }
@@ -191,7 +191,7 @@ get_parameter_types(procedure_t* func)
     auto _param_names = std::vector<std::string>{};
     if(func && func->isInstrumentable())
     {
-        auto* _params = func->getParams();
+        auto const* _params = func->getParams();
         if(_params)
         {
             _param_names.reserve(_params->size());
@@ -229,18 +229,18 @@ get_func_file_line_info(module_t* module, procedure_t* func)
 
     ROCPROFSYS_ADD_LOG_ENTRY("Getting function line info for", get_name(func));
 
-    auto _file_name   = get_name(module);
-    auto _func_name   = get_name(func);
-    auto _return_type = get_return_type(func);
-    auto _param_types = get_parameter_types(func);
-    auto _base_addr   = address_t{};
-    auto _last_addr   = address_t{};
-    auto _src_lines   = std::vector<statement_t>{};
+    auto const _file_name   = get_name(module);
+    auto const _func_name   = get_name(func);
+    auto const _return_type = get_return_type(func);
+    auto const _param_types = get_parameter_types(func);
+    auto       _base_addr   = address_t{};
+    auto       _last_addr   = address_t{};
+    auto       _src_lines   = std::vector<statement_t>{};
 
     if(func->getAddressRange(_base_addr, _last_addr) &&
        module->getSourceLines(_base_addr, _src_lines) && !_src_lines.empty())
     {
-        auto _row = _src_lines.front().lineNumber();
+        auto const _row = _src_lines.front().lineNumber();
         return function_signature(_return_type, _func_name, _file_name, _param_types,
                                   { _row, 0 }, { 0, 0 }, false, true, false);
     }
@@ -285,12 +285,12 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
         }
     }
 
-    auto _file_name   = get_name(module);
-    auto _func_name   = get_name(func);
-    auto _return_type = get_return_type(func);
-    auto _param_types = get_parameter_types(func);
-    auto _lines_beg   = std::vector<statement_t>{};
-    auto _lines_end   = std::vector<statement_t>{};
+    auto const _file_name   = get_name(module);
+    auto const _func_name   = get_name(func);
+    auto const _return_type = get_return_type(func);
+    auto const _param_types = get_parameter_types(func);
+    auto       _lines_beg   = std::vector<statement_t>{};
+    auto       _lines_end   = std::vector<statement_t>{};
 
     if(module->getSourceLines(_base_addr, _lines_beg))
     {
@@ -372,15 +372,15 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
         return _data;
     }
 
-    auto _file_name   = get_name(module);
-    auto _func_name   = get_name(func);
-    auto _return_type = get_return_type(func);
-    auto _param_types = get_parameter_types(func);
+    auto const _file_name   = get_name(module);
+    auto const _func_name   = get_name(func);
+    auto const _return_type = get_return_type(func);
+    auto const _param_types = get_parameter_types(func);
 
     for(auto&& itr : _basic_blocks)
     {
-        auto _base_addr = itr->getStartAddress();
-        auto _last_addr = itr->getEndAddress();
+        auto const _base_addr = itr->getStartAddress();
+        auto const _last_addr = itr->getEndAddress();
 
         verbprintf(4,
                    "[%s][%s] basic_block: size = %lu: base_addr = %lu, last_addr = %lu\n",
@@ -392,7 +392,7 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 
         // Filter out DWARF line-0 entries ("no source statement") which some
         // compilers (e.g. amdclang++) emit for compiler-generated basic blocks.
-        auto _remove_line_zero = [](std::vector<statement_t>& _lines) {
+        auto const _remove_line_zero = [](std::vector<statement_t>& _lines) {
             _lines.erase(
                 std::remove_if(_lines.begin(), _lines.end(),
                                [](statement_t& stmt) { return stmt.lineNumber() == 0; }),
@@ -433,27 +433,30 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 
                 _data.emplace(
                     itr, basic_block_signature{
-                             _base_addr, _last_addr,
-                             function_signature(_return_type, _func_name, _file_name,
-                                                _param_types, { _row1, _row2 },
-                                                { _col1, _col2 }, true, true, true) });
+                             .start_address = _base_addr,
+                             .last_address  = _last_addr,
+                             .signature     = function_signature(
+                                 _return_type, _func_name, _file_name, _param_types,
+                                 { _row1, _row2 }, { _col1, _col2 }, true, true, true) });
             }
             else
             {
                 _data.emplace(itr,
                               basic_block_signature{
-                                  _base_addr, _last_addr,
-                                  function_signature(_return_type, _func_name, _file_name,
-                                                     _param_types, { _row1, 0 },
-                                                     { _col1, 0 }, true, true, false) });
+                                  .start_address = _base_addr,
+                                  .last_address  = _last_addr,
+                                  .signature     = function_signature(
+                                      _return_type, _func_name, _file_name, _param_types,
+                                      { _row1, 0 }, { _col1, 0 }, true, true, false) });
             }
         }
         else
         {
-            _data.emplace(itr, basic_block_signature{
-                                   _base_addr, _last_addr,
-                                   function_signature(_return_type, _func_name,
-                                                      _file_name, _param_types) });
+            _data.emplace(itr, basic_block_signature{ .start_address = _base_addr,
+                                                      .last_address  = _last_addr,
+                                                      .signature     = function_signature(
+                                                          _return_type, _func_name,
+                                                          _file_name, _param_types) });
         }
     }
 
@@ -480,8 +483,10 @@ get_source_code(module_t* module, procedure_t* func)
 
     for(auto&& itr : _basic_blocks)
     {
-        auto _base_addr = itr->getStartAddress();
-        auto _last_addr = itr->getEndAddress();
+        // NOLINTNEXTLINE(misc-const-correctness) - decltype(_base_addr) below must stay
+        // non-const, or the loop counter can't be incremented
+        auto       _base_addr = itr->getStartAddress();
+        auto const _last_addr = itr->getEndAddress();
         for(decltype(_base_addr) _addr = _base_addr; _addr <= _last_addr; ++_addr)
         {
             std::vector<statement_t> _src{};
@@ -546,7 +551,7 @@ find_function(const std::vector<module_t*>& _modules, const std::string& _name,
                     continue;
                 }
                 _found.clear();
-                auto* ret =
+                auto const* ret =
                     mod->findFunction(_f.c_str(), _found, false, true, false, false);
                 if(ret && !_found.empty())
                 {
@@ -572,7 +577,8 @@ find_function(const std::vector<object_t*>& _objects, const std::string& _name,
                     continue;
                 }
                 _found.clear();
-                auto* ret = obj->findFunction(_f, _found, false, true, false, false);
+                auto const* ret =
+                    obj->findFunction(_f, _found, false, true, false, false);
                 if(ret && !_found.empty())
                 {
                     return _found.at(0);
@@ -597,8 +603,8 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
     }
 
     // Search helper lambda for code reuse
-    auto _find_symbol = [](SymTab::Symtab*    symtab,
-                           const std::string& target_name) -> symtab_symbol_t* {
+    auto const _find_symbol = [](SymTab::Symtab*    symtab,
+                                 const std::string& target_name) -> symtab_symbol_t* {
         if(!symtab)
         {
             return nullptr;
@@ -638,7 +644,7 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
         return nullptr;
     };
 
-    for(auto* obj : _objects)
+    for(auto const* obj : _objects)
     {
         if(!obj)
         {
@@ -744,7 +750,7 @@ rocprofsys_get_exe_realpath()
 //
 
 size_t
-get_object_procedure_count_lb(object_t* _object)
+get_object_procedure_count_lb(object_t const* _object)
 {
     if(!_object)
     {
@@ -779,10 +785,10 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
     }
 
-    auto _get_chain = [&_open_modes](const char* _name) {
+    auto const _get_chain = [&_open_modes](const char* _name) {
         void* _handle = nullptr;
         bool  _noload = false;
-        for(auto _mode : _open_modes)
+        for(auto const _mode : _open_modes)
         {
             _handle = dlopen(_name, _mode);
             _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -797,7 +803,7 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         {
             struct link_map* _link_map = nullptr;
             dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-            struct link_map* _next = _link_map;
+            struct link_map const* _next = _link_map;
             while(_next)
             {
                 if(_name == nullptr && _next == _link_map &&
@@ -822,17 +828,17 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         return _chain;
     };
 
-    auto _full_chain = _get_chain(_lib);
-    auto _excl_chain = _exclude_linked_by.empty()
-                           ? std::vector<std::string>{}
-                           : _get_chain(_exclude_linked_by.c_str());
-    auto _fini_chain = std::vector<std::string>{};
+    auto const _full_chain = _get_chain(_lib);
+    auto       _excl_chain = _exclude_linked_by.empty()
+                                 ? std::vector<std::string>{}
+                                 : _get_chain(_exclude_linked_by.c_str());
+    auto       _fini_chain = std::vector<std::string>{};
     _fini_chain.reserve(_full_chain.size());
 
     for(const auto& itr : _full_chain)
     {
-        auto _found = std::any_of(_excl_chain.begin(), _excl_chain.end(),
-                                  [itr](const auto& _v) { return (itr == _v); });
+        auto const _found = std::any_of(_excl_chain.begin(), _excl_chain.end(),
+                                        [itr](const auto& _v) { return (itr == _v); });
         if(!_found)
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))
@@ -863,7 +869,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
 
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -904,7 +910,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
 
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -937,7 +943,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
 //  Error callback routine.
 //
 void
-errorFunc(error_level_t level, int num, const char** params)
+errorFunc(error_level_t level, int num, const char* const* params)
 {
     error_func_real(level, num, params);
 }
@@ -1017,7 +1023,7 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 //
 
 std::vector<object_t*>
-filter_objects(std::vector<object_t*>* app_objects)
+filter_objects(std::vector<object_t*> const* app_objects)
 {
     if(!app_objects || app_objects->empty())
     {
@@ -1071,7 +1077,7 @@ filter_objects(std::vector<object_t*>* app_objects)
                 {
                     continue;
                 }
-                auto _module_name = std::string{ get_name(mod) };
+                auto const _module_name = std::string{ get_name(mod) };
                 if(regex_match_any(_module_name, file_include))
                 {
                     _included_module = true;
@@ -1097,7 +1103,7 @@ filter_objects(std::vector<object_t*>* app_objects)
         // --max-library-functions: shared libs only; main executable is never gated
         if(!_included_module && max_library_functions > 0 && obj->isSharedLib())
         {
-            auto _proc_count = get_object_procedure_count_lb(obj);
+            auto const _proc_count = get_object_procedure_count_lb(obj);
             if(_proc_count > max_library_functions)
             {
                 _is_excluded = true;
@@ -1128,7 +1134,7 @@ filter_objects(std::vector<object_t*>* app_objects)
     if(verbose_level >= 2)
     {
         verbprintf(2, "[filter] The following objects will be processed:\n");
-        for(auto* obj : _result)
+        for(auto const* obj : _result)
         {
             if(!obj)
             {
@@ -1147,7 +1153,7 @@ filter_objects(std::vector<object_t*>* app_objects)
 //
 
 std::vector<module_t*>
-filter_modules(std::vector<module_t*>* app_modules)
+filter_modules(std::vector<module_t*> const* app_modules)
 {
     if(!app_modules || app_modules->empty())
     {
@@ -1173,15 +1179,14 @@ filter_modules(std::vector<module_t*>* app_modules)
             continue;
         }
 
-        auto _module_name = std::string{ get_name(mod) };
-        auto _module_base = rocprofsys::path::filename(_module_name);
-        auto _module_real = rocprofsys::path::realpath(_module_name);
+        auto const _module_name = std::string{ get_name(mod) };
+        auto const _module_base = rocprofsys::path::filename(_module_name);
+        auto const _module_real = rocprofsys::path::realpath(_module_name);
 
         bool _is_excluded = false;
 
-        if(_internal_libs.find(_module_name) != _internal_libs.end() ||
-           _internal_libs.find(_module_real) != _internal_libs.end() ||
-           _internal_libs.find(_module_base) != _internal_libs.end())
+        if(_internal_libs.contains(_module_name) ||
+           _internal_libs.contains(_module_real) || _internal_libs.contains(_module_base))
         {
             _is_excluded = true;
         }
@@ -1190,11 +1195,10 @@ filter_modules(std::vector<module_t*>* app_modules)
         {
             for(const auto& [lib_path, sub_map] : _internal_libs)
             {
-                auto _lib_base = rocprofsys::path::filename(lib_path);
+                auto const _lib_base = rocprofsys::path::filename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
-                   sub_map.find(_module_base) != sub_map.end() ||
-                   sub_map.find(_module_real) != sub_map.end() ||
-                   sub_map.find(_module_name) != sub_map.end())
+                   sub_map.contains(_module_base) || sub_map.contains(_module_real) ||
+                   sub_map.contains(_module_name))
                 {
                     _is_excluded = true;
                     break;
@@ -1282,7 +1286,7 @@ filter_modules(std::vector<module_t*>* app_modules)
 //
 
 std::unique_ptr<std::vector<module_t*>>
-get_modules(std::vector<object_t*>* app_objects)
+get_modules(std::vector<object_t*> const* app_objects)
 {
     auto modlist = std::make_unique<std::vector<module_t*>>();
     if(!app_objects || app_objects->empty())
@@ -1323,7 +1327,7 @@ get_modules(std::vector<object_t*>* app_objects)
 }
 
 std::unique_ptr<std::vector<procedure_t*>>
-get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable)
+get_procedures(std::vector<module_t*> const* app_modules, bool include_uninstrumentable)
 {
     auto proclist = std::make_unique<std::vector<procedure_t*>>();
     if(!app_modules || app_modules->empty())
@@ -1371,7 +1375,7 @@ process_modules(const std::vector<module_t*>& _app_modules)
 {
     parse_internal_libs_data();
 
-    auto _erase_nullptrs = [](auto& _vec) {
+    auto const _erase_nullptrs = [](auto& _vec) {
         _vec.erase(std::remove_if(_vec.begin(), _vec.end(),
                                   [](const auto* itr) { return (itr == nullptr); }),
                    _vec.end());
@@ -1382,7 +1386,7 @@ process_modules(const std::vector<module_t*>& _app_modules)
     _wc.start();
     _pr.start();
 
-    for(auto* itr : _app_modules)
+    for(auto const* itr : _app_modules)
     {
         auto* _module = SymTab::convert(itr);
         if(_module)
@@ -1416,10 +1420,10 @@ process_modules(const std::vector<module_t*>& _app_modules)
 
     for(auto* itr : symtab_data.modules)
     {
-        auto _base_name = rocprofsys::path::filename(itr->fullName());
-        auto _real_name = rocprofsys::path::realpath(itr->fullName());
+        auto const _base_name = rocprofsys::path::filename(itr->fullName());
+        auto const _real_name = rocprofsys::path::realpath(itr->fullName());
 
-        if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
+        if(!_names.contains(_base_name) && !_names.contains(_real_name))
         {
             verbprintf(2, "Processing symbol table for module '%s'...\n",
                        itr->fullName().c_str());

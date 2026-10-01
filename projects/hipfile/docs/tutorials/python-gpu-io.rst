@@ -37,7 +37,7 @@ Complete example
 
 The following script reads a source file into GPU memory and writes its
 contents to a destination file. It uses the same API sequence as
-``python/main.py`` in the hipFile source tree, adapted for chunked copying
+``python/tests/main.py`` in the hipFile source tree, adapted for chunked copying
 with CLI arguments. Save it as ``gpu_copy.py``:
 
 .. code-block:: python

@@ -96,10 +96,13 @@ generate_xcp_metrics(const char* base_name, const std::string& base_track,
         const auto& arr = get_array(m.xcp_stats[xcp]);
         for(size_t i = 0; i < arr.size(); ++i)
         {
-            auto suffix   = "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
-            auto pmc_name = std::string(base_name) + suffix;
-            auto track_name = base_track + suffix;
-            entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+            auto const suffix =
+                "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
+            auto const pmc_name   = std::string(base_name) + suffix;
+            auto const track_name = base_track + suffix;
+            entries.push_back({ .pmc_name   = pmc_name,
+                                .track_name = track_name,
+                                .value      = static_cast<double>(arr[i]) });
         }
     }
     return entries;
@@ -118,10 +121,12 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
     }
     for(size_t i = 0; i < arr.size(); ++i)
     {
-        auto suffix     = "_" + std::to_string(i);
-        auto pmc_name   = base_name + suffix;
-        auto track_name = pmc_name;
-        entries.push_back({ pmc_name, track_name, static_cast<double>(arr[i]) });
+        auto const suffix     = "_" + std::to_string(i);
+        auto const pmc_name   = base_name + suffix;
+        auto const track_name = pmc_name;
+        entries.push_back({ .pmc_name   = pmc_name,
+                            .track_name = track_name,
+                            .value      = static_cast<double>(arr[i]) });
     }
     return entries;
 }
@@ -250,7 +255,7 @@ TEST_F(xcp_output_test, DisabledVcnBusyProducesNoOutput)
 {
     m.xcp_stats[0].vcn_busy[0] = 50;
 
-    auto entries = generate_xcp_metrics(
+    auto const entries = generate_xcp_metrics(
         "device_vcn_activity", "device_vcn_activity", false, m,
         [](const mock_xcp_metrics& xcp) -> const auto& { return xcp.vcn_busy; });
 
@@ -262,7 +267,7 @@ TEST_F(xcp_output_test, DisabledJpegBusyProducesNoOutput)
 {
     m.xcp_stats[0].jpeg_busy[0] = 50;
 
-    auto entries = generate_xcp_metrics(
+    auto const entries = generate_xcp_metrics(
         "device_jpeg_activity", "device_jpeg_activity", false, m,
         [](const mock_xcp_metrics& xcp) -> const auto& { return xcp.jpeg_busy; });
 
@@ -290,9 +295,9 @@ TEST_F(xcp_output_test, AllXcpPartitionsWritten)
     {
         for(size_t eng = 0; eng < MAX_NUM_VCN; ++eng)
         {
-            const size_t idx   = xcp * MAX_NUM_VCN + eng;
-            auto expected_name = "device_vcn_activity_xcp" + std::to_string(xcp) + "[" +
-                                 std::to_string(eng) + "]";
+            const size_t idx           = xcp * MAX_NUM_VCN + eng;
+            auto const   expected_name = "device_vcn_activity_xcp" + std::to_string(xcp) +
+                                       "[" + std::to_string(eng) + "]";
             EXPECT_EQ(entries[idx].pmc_name, expected_name)
                 << "Mismatch at xcp=" << xcp << " eng=" << eng;
             EXPECT_DOUBLE_EQ(entries[idx].value, static_cast<double>(xcp * 10 + eng));
@@ -328,19 +333,19 @@ TEST_F(xcp_output_test, PerfettoXcpTrackNameFormat)
 {
     const std::uint32_t device_id = 0;
 
-    auto vcn_name = format_perfetto_xcp_track(device_id, "VCN Busy", 3, 2);
+    auto const vcn_name = format_perfetto_xcp_track(device_id, "VCN Busy", 3, 2);
     EXPECT_EQ(vcn_name, "GPU [0] VCN Busy XCP_3: [02] (S)");
 
-    auto jpeg_name = format_perfetto_xcp_track(device_id, "JPEG Busy", 7, 0);
+    auto const jpeg_name = format_perfetto_xcp_track(device_id, "JPEG Busy", 7, 0);
     EXPECT_EQ(jpeg_name, "GPU [0] JPEG Busy XCP_7: [00] (S)");
 
-    auto dev_vcn = format_perfetto_device_track(device_id, "VCN Activity", 1);
+    auto const dev_vcn = format_perfetto_device_track(device_id, "VCN Activity", 1);
     EXPECT_EQ(dev_vcn, "GPU [0] VCN Activity [01] (S)");
 
-    auto dev_jpeg = format_perfetto_device_track(device_id, "JPEG Activity", 3);
+    auto const dev_jpeg = format_perfetto_device_track(device_id, "JPEG Activity", 3);
     EXPECT_EQ(dev_jpeg, "GPU [0] JPEG Activity [03] (S)");
 
-    auto multi_dev = format_perfetto_xcp_track(5, "VCN Busy", 0, 0);
+    auto const multi_dev = format_perfetto_xcp_track(5, "VCN Busy", 0, 0);
     EXPECT_EQ(multi_dev, "GPU [5] VCN Busy XCP_0: [00] (S)");
 }
 
@@ -374,7 +379,7 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
     {
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
-            auto value = m.xcp_stats[xcp].vcn_busy[i];
+            auto const value = m.xcp_stats[xcp].vcn_busy[i];
             if(value == std::numeric_limits<std::uint16_t>::max())
             {
                 continue;
@@ -393,7 +398,7 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
     {
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
-            auto value = m.xcp_stats[xcp].vcn_busy[i];
+            auto const value = m.xcp_stats[xcp].vcn_busy[i];
             if(value == std::numeric_limits<std::uint16_t>::max())
             {
                 continue;
