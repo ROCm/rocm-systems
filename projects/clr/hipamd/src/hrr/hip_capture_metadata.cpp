@@ -20,6 +20,9 @@
 // namespace.
 #if defined(__linux__)
 #include <sys/auxv.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23  // Linux ABI value; same fallback as ROCr's runtime.cpp
+#endif
 #endif
 
 namespace hip {
