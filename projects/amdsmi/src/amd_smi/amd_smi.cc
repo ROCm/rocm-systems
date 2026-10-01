@@ -5460,6 +5460,9 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
     // from a genuine zero-error total.
     return mask_status;
   }
+  // The loop below only adds to *ec; without this it returns garbage for any
+  // caller whose struct wasn't already zeroed (or is being reused).
+  *ec = {};
 
   // Iterate through the ecc blocks
   for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
