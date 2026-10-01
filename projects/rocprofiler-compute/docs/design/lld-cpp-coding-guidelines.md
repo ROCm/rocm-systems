@@ -33,7 +33,7 @@
 | [programming-cpp-design-patterns](https://github.com/ROCm/rocprofiler-systems-skills/blob/main/skills/programming-cpp-design-patterns/SKILL.md) | Catalogue of creational, structural, and behavioural patterns with the problem signals that suggest each one. |
 | [programming-cpp-constexpr](https://github.com/ROCm/rocprofiler-systems-skills/blob/main/skills/programming-cpp-constexpr/SKILL.md) | Move computation to compile time: `constexpr` values and functions, `if constexpr` dispatch, precomputed tables. |
 | [programming-cpp-policy-based-di](https://github.com/ROCm/rocprofiler-systems-skills/blob/main/skills/programming-cpp-policy-based-di/SKILL.md) | Compile-time dependency injection through template policy parameters, for mockable code without virtual dispatch. |
-| [programming-cmake-best-practices](https://github.com/ROCm/rocprofiler-systems-skills/blob/main/skills/programming-cmake-best-practices/SKILL.md) | Modern CMake 3.15+: target-based commands, `PUBLIC`/`PRIVATE`/`INTERFACE` scoping, no global variable soup. |
+| [programming-cmake-best-practices](https://github.com/ROCm/rocprofiler-systems-skills/blob/main/skills/programming-cmake-best-practices/SKILL.md) | Modern CMake: target-based commands, `PUBLIC`/`PRIVATE`/`INTERFACE` scoping, no global variable soup. |
 
 ## One file per topic, not one file for everything
 
