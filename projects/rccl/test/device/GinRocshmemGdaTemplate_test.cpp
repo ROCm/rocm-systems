@@ -32,8 +32,11 @@
 // Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
 // Override must precede gin_rocshmem_gda.h so the templates expand our counter.
 __device__ unsigned long long g_gdaStubThreadfenceCount = 0;
+// Inline puts already posted when the last fence ran; nonzero means the fence came after the put.
+__device__ unsigned long long g_gdaInlinePutsAtFence = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
-#define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_gdaStubThreadfenceCount, 1ULL)
+#define NCCL_GIN_THREADFENCE_SYSTEM() \
+  (g_gdaInlinePutsAtFence = rocshmem::QueuePairMock::rma_inline_count, atomicAdd(&g_gdaStubThreadfenceCount, 1ULL))
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h"
 #endif
 
@@ -176,6 +179,17 @@ static size_t readThreadfenceCount() {
   size_t c = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_gdaStubThreadfenceCount), sizeof(c)));
   return c;
+}
+
+static void resetInlinePutsAtFence() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaInlinePutsAtFence), &z, sizeof(z)));
+}
+
+static unsigned long long readInlinePutsAtFence() {
+  unsigned long long n = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaInlinePutsAtFence), sizeof(n)));
+  return n;
 }
 
 // G1: Put with data (no signal) copies src -> peer's remote buffer.
@@ -392,8 +406,9 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_EqualScopeTakesNoFence) {
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
 }
 
-// G8: PutValue writes an inline scalar to the peer buffer (lkey=0 inline WQE).
-__global__ void kernelPutValueScalar(GdaHarness* h, uint64_t val) {
+// G8: PutValue inlines the scalar (lkey=0 WQE) and fences first only when required=system and given < required.
+__global__ void kernelPutValueScoped(GdaHarness* h, uint64_t val, cuda::thread_scope required,
+                                     cuda::thread_scope given) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
@@ -401,22 +416,44 @@ __global__ void kernelPutValueScalar(GdaHarness* h, uint64_t val) {
   sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
   ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
       ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig,
-      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+      ncclGinSignalInc, 0, false, nullptr, required, given);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, PutValue_InlineScalar) {
-  GdaEnv env(sizeof(uint64_t));
-  env.dst.zero();
-  env.build();
-  resetPutValCount();
-  const uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
-  kernelPutValueScalar<<<1, 1>>>(env.dHarness.ptr, kVal);
-  syncAndCheck();
-  EXPECT_EQ(readPutValCount(), 1ULL);  // put inlined
-  auto got = env.dst.copyTo();
-  uint64_t observed = 0;
-  std::memcpy(&observed, got.data(), sizeof(observed));
-  EXPECT_EQ(observed, kVal);
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_FencesOnlyForWeakerGivenAtSystemScope) {
+  struct ScopeCase {
+    cuda::thread_scope required;
+    cuda::thread_scope given;
+    size_t fences;
+  };
+  const ScopeCase cases[] = {
+      {cuda::thread_scope_system, cuda::thread_scope_thread, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_block, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_device, 1},
+      {cuda::thread_scope_system, cuda::thread_scope_system, 0},
+      {cuda::thread_scope_device, cuda::thread_scope_block, 0},  // weaker given, but required is not system
+  };
+  uint64_t val = 0xC0FFEE0000000000ULL;
+  for (const ScopeCase& c : cases) {
+    SCOPED_TRACE(::testing::Message() << "required=" << c.required << " given=" << c.given);
+    ++val;
+    GdaEnv env(sizeof(uint64_t));
+    env.dst.zero();
+    env.build();
+    resetThreadfenceCount();
+    resetInlinePutsAtFence();
+    resetPutValCount();
+    resetSignalCount();
+    kernelPutValueScoped<<<1, 1>>>(env.dHarness.ptr, val, c.required, c.given);
+    syncAndCheck();
+    EXPECT_EQ(readThreadfenceCount(), c.fences);
+    EXPECT_EQ(readInlinePutsAtFence(), 0ULL) << "the fence must precede the inline put";
+    EXPECT_EQ(readPutValCount(), 1ULL);
+    EXPECT_EQ(readSignalCount(), 0ULL) << "no signal descriptor, so no AMO";
+    auto got = env.dst.copyTo();
+    uint64_t observed = 0;
+    std::memcpy(&observed, got.data(), sizeof(observed));
+    EXPECT_EQ(observed, val);
+  }
 }
 
 // G9: PutValue with signal delivers both the scalar and the signal.
