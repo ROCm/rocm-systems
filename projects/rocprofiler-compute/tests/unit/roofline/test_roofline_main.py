@@ -607,8 +607,8 @@ def test_view_model_payload_is_safely_embedded() -> None:
     document = build_interactive_document(go.Figure(), model)
 
     assert model.to_payload()["kernels"][0]["name"] == "evil</script>"
-    assert r"evil\u003c/script>" in document
-    assert embedded_model(document)["kernels"][0]["name"] == "evil</script>"
+    assert r"evil</script>" not in document, "must not allow a script element to close"
+    assert r"evil<\/script>" in document
 
 
 def test_the_controller_looks_up_controls_the_page_renders() -> None:

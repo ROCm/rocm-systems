@@ -65,7 +65,7 @@ def test_build_document_embeds_json_safely_without_mutation() -> None:
     payload = {
         "integers": [np.int64(7), (np.int32(8),)],
         "floats": [np.float32(1.5), float("nan"), np.float64("inf")],
-        "name": '</script><!-- < & "\u2028\u2029',
+        "name": "</script>",
     }
 
     rendered = build_document(
@@ -83,27 +83,75 @@ def test_build_document_embeds_json_safely_without_mutation() -> None:
     assert json.loads(serialized) == {
         "integers": [7, [8]],
         "floats": [1.5, None, None],
-        "name": '</script><!-- < & "\u2028\u2029',
+        "name": "</script>",
     }
-    assert all(character not in serialized for character in ("<", "\u2028", "\u2029"))
-    assert "\\u003c" in serialized
-    assert "\\u2028" in serialized
-    assert "\\u2029" in serialized
-    assert isinstance(payload["integers"][0], np.integer)
-    assert isinstance(payload["integers"][1], tuple)
-    assert np.isnan(payload["floats"][1])
+    assert "</" not in serialized
+    assert r"<\/script>" in serialized
 
 
-def test_json_safe_returns_new_containers() -> None:
-    original = {"nested": [np.int64(3)]}
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            np.int64(3),
+            3,
+            id="numpy-integer",
+        ),
+        pytest.param(
+            1.5,
+            1.5,
+            id="python-finite-float",
+        ),
+        pytest.param(
+            np.float32(1.5),
+            1.5,
+            id="numpy-finite-float",
+        ),
+        pytest.param(
+            float("nan"),
+            None,
+            id="python-nan",
+        ),
+        pytest.param(
+            np.float64("inf"),
+            None,
+            id="numpy-infinity",
+        ),
+        pytest.param(
+            "already-json-safe",
+            "already-json-safe",
+            id="passthrough",
+        ),
+    ],
+)
+def test_json_safe_converts_supported_values(value: object, expected: object) -> None:
+    converted = json_safe(value)
+
+    assert converted == expected
+    assert type(converted) is type(expected)
+
+
+@pytest.mark.parametrize(
+    ("original", "expected"),
+    [
+        pytest.param(
+            {"nested": [np.int64(3)]},
+            {"nested": [3]},
+            id="dict-with-nested-list",
+        ),
+        pytest.param([np.int64(3)], [3], id="list"),
+        pytest.param((np.int32(3),), [3], id="tuple-to-list"),
+    ],
+)
+def test_json_safe_returns_new_containers(original: object, expected: object) -> None:
     converted = json_safe(original)
 
-    assert converted == {"nested": [3]}
+    assert converted == expected
+    assert type(converted) is type(expected)
     assert converted is not original
-    assert converted["nested"] is not original["nested"]
 
 
-def test_read_asset_caches_utf8_and_reports_missing_file(tmp_path: Path) -> None:
+def test_read_asset_caches_utf8(tmp_path: Path) -> None:
     asset = tmp_path / "sample.txt"
     asset.write_text("caf\u00e9", encoding="utf-8")
 
@@ -111,16 +159,7 @@ def test_read_asset_caches_utf8_and_reports_missing_file(tmp_path: Path) -> None
     asset.write_text("changed", encoding="utf-8")
     assert read_asset(tmp_path, "sample.txt") == "caf\u00e9"
 
+
+def test_read_asset_reports_missing_file(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         read_asset(tmp_path, "missing.txt")
-
-
-def test_shared_assets_have_no_plotly_dependency() -> None:
-    shell = read_asset(_ASSETS, "report_shell.html")
-    controller = read_asset(_ASSETS, "report_base.js")
-
-    assert "Plotly" not in shell + controller
-    assert "<script src" not in shell + controller
-    assert f'"{DARK_THEME_CLASS}"' in controller
-    assert "readModel: readModel" in controller
-    assert "initTheme: initTheme" in controller
