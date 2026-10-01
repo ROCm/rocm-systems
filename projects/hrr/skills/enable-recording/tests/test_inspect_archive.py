@@ -959,6 +959,12 @@ def _strip_launchers(command: str) -> str:
         # Launchers whose grammar we do not model stop the search at themselves
         # rather than guessing.
         ("srun -N2 python train.py", "srun"),
+        # env's own options change the environment in ways an assignment
+        # cannot carry, and used to come back as the workload themselves.
+        ("env -u LD_PRELOAD app", "env"),
+        ("env --ignore-environment app", "env"),
+        ("/usr/bin/env -i A=1 app", "/usr/bin/env"),
+        ("env -- A=1 app", "A=1\napp"),
     ],
 )
 def test_the_workload_is_found_behind_its_launcher(command, expected):
@@ -1163,6 +1169,20 @@ def test_the_workload_can_be_interrupted(tmp_path):
     wrapper.communicate(timeout=60)
 
     assert seen.read_text() == "True"
+
+
+def test_the_archive_directory_is_private_and_the_workload_umask_is_not(tmp_path):
+    """The writer creates its files 0644, so under a 022 umask the archive was
+    readable by every user on the host. The directory is created 0700 instead,
+    and the workload keeps the umask it was started with.
+    """
+    seen = tmp_path / "umask"
+    probe = "import os, sys\nopen(sys.argv[1], 'w').write(oct(os.umask(0)))"
+    wrapper = _run(tmp_path, "-c", probe, str(seen), preexec_fn=lambda: os.umask(0o022))
+    wrapper.communicate(timeout=60)
+
+    assert (tmp_path / "capture").stat().st_mode & 0o777 == 0o700
+    assert seen.read_text() == "0o22"
 
 
 def _output_path_log(out: Path) -> str:

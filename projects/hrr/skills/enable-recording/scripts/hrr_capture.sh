@@ -124,7 +124,13 @@ strip_launchers() {
   while (( $# )); do
     case "${1##*/}" in
       env)
+        # Its options change the environment in ways the assignments below
+        # cannot carry: -i empties it, -u removes a name, -C moves the working
+        # directory. Stop at env when one is given rather than resolve the
+        # workload in an environment it will not have.
+        [[ "${2:-}" == -* && "$2" != -- ]] && { printf '%s\n' "$1"; return 0; }
         shift
+        [[ "${1:-}" == -- ]] && shift
         while (( $# )) && [[ "$1" == *=* ]]; do printf '%s\n' "$1"; shift; done ;;
       nohup)
         shift ;;
@@ -579,6 +585,18 @@ case "$VERB" in
       else
         fail "$OUTPUT already holds a capture. Capture would add this run to it and the two would be indistinguishable afterwards. Move it aside, or give --output a new path."
       fi
+    fi
+
+    # The archive holds blobs, prompts and weights in clear, and a writer that
+    # creates its files 0644 leaves them to every user on a shared host under
+    # the usual umask. A directory created 0700 here closes that without
+    # changing the umask the workload's own files are written with.
+    if [[ ! -e "$OUTPUT" ]]; then
+      mkdir -p -- "$(dirname -- "$OUTPUT")" && ( umask 077 && mkdir -- "$OUTPUT" ) ||
+        fail "cannot create $OUTPUT"
+    elif [[ -n "$(find "$OUTPUT" -maxdepth 0 -perm /077 2>/dev/null)" ]]; then
+      log "note: $OUTPUT can be read by other users, and so can the archive inside it."
+      log "chmod 700 it, or give --output a new path, if this host is shared."
     fi
 
     if (( RUNTIME_UNRESOLVED )); then
