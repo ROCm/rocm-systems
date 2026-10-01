@@ -1,8 +1,7 @@
 # AMD SMI Python library
 
 The AMD SMI Python interface offers an accessible way to interact
-with AMD hardware through a user-friendly API. Find the documentation in the
-`docs/` directory.
+with AMD hardware through a user-friendly API.
 
 ## Online documentation
 

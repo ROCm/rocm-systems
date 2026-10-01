@@ -107,6 +107,10 @@ For instructions, see {doc}`Install AMD ROCm <rocm:install/rocm>`. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
 
+The Core SDK installs the `amdsmi` Python module only under
+`/opt/rocm/core-<major>.<minor>/share/amd_smi`. To use it, set `PYTHONPATH` as
+described in step 3 of {ref}`install_without_rocm`.
+
 (install_without_rocm)=
 ## Install AMD SMI standalone on Linux
 
@@ -292,8 +296,10 @@ removing packages that other ROCm tools depend on.
    installations, use the directory discovered in {ref}`install_nightly`.
    Set this after activating the target virtual environment. Current wrappers
    load their native library relative to their ROCm tree. Wrappers shipped
-   before ROCm 7.14 use the legacy loader: also set `export ROCM_PATH=<root>`
-   and `unset ROCM_HOME` to select the same native library. Check that
+   with ROCm 7.1 and earlier use the legacy loader: for those, set
+   `ROCM_PATH=<root>` with `ROCM_HOME` unset for the Python command only, for
+   example `env -u ROCM_HOME ROCM_PATH=<root> python3 my_script.py`. Exporting
+   `ROCM_PATH` would also redirect `amd-smi` in that shell. Check that
    `AMDSMI_LIB_OVERRIDE` is unset unless you deliberately want another library.
 
 The CLI selects `$ROCM_PATH/share/amd_smi` (or `$ROCM_HOME` when `ROCM_PATH`
