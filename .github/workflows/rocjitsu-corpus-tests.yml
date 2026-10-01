@@ -366,6 +366,14 @@ jobs:
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           fi
+          if [[ "${{ matrix.enable_asan }}" == "1" ]]; then
+            ROCJITSU_ASAN_SYMBOLIZER="$(rocm-sdk path --root)/lib/llvm/bin/llvm-symbolizer"
+            if [[ ! -x "${ROCJITSU_ASAN_SYMBOLIZER}" ]]; then
+              echo "The ROCm SDK ASan symbolizer is unavailable: ${ROCJITSU_ASAN_SYMBOLIZER}" >&2
+              exit 1
+            fi
+            export ASAN_SYMBOLIZER_PATH="${ROCJITSU_ASAN_SYMBOLIZER}"
+          fi
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
