@@ -1109,7 +1109,11 @@ hipError_t PlatformState::RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dy
 
   const auto [it, inserted] = dynCO_map_.try_emplace(hmod, dynCO);
   if (!inserted) {
-    return (it->second == dynCO) ? hipSuccess : hipErrorAlreadyMapped;
+    // module_registered_ in LibraryContainer prevents re-registration of the same
+    // library; two distinct DynCOs cannot share the same module handle since
+    // UnregisterLibraryModule removes the entry before the handle can be reused.
+    assert(it->second == dynCO);
+    return hipSuccess;
   }
   library_modules_.insert(hmod);
 
