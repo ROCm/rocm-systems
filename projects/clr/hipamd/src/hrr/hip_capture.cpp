@@ -1530,6 +1530,11 @@ void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
   std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
               &g_real_table, sizeof(HipDispatchTable));
+  // The compiler shims go as well, or a forked child whose archive failed to
+  // open keeps running them with capture off.
+  if (g_compiler_installed.exchange(false))
+    std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
+                &g_real_compiler_table, sizeof(HipCompilerDispatchTable));
 }
 
 // ---------------------------------------------------------------------------
