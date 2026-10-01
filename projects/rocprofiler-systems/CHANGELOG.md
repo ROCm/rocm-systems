@@ -27,6 +27,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   now restricted to its two documented, supported values (realtime,
   cputime), and an invalid value now fails cleanly at startup instead of
   aborting mid-run.
+- Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
