@@ -2131,13 +2131,13 @@ resume()
     }
 
     LOG_DEBUG("Resuming sampling...");
-    auto const _pause_ts = pending_pause_ts.exchange(0);
+    auto const pause_ts  = pending_pause_ts.exchange(0);
     auto const resume_ts = control::clocks::timeline_ns();
-    if(_pause_ts > 0)
+    if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };
         pause_intervals.push_back(
-            pause_interval_t{ .pause_ts = _pause_ts, .resume_ts = resume_ts });
+            pause_interval_t{ .pause_ts = pause_ts, .resume_ts = resume_ts });
     }
 
     set_sampler_timers(timer_state::running);
