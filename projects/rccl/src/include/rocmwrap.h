@@ -70,6 +70,19 @@
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
+// CMake sets RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED when hipMemLocationTypeHost
+// compiles. Stock ROCm 7.0.2 has the backport's HIP_VERSION but no host location
+// types, so compile-time host VMM code needs the probe as well as the version.
+#if defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+#define NCCL_CUMEM_HOST_PROBE 1
+#else
+#define NCCL_CUMEM_HOST_PROBE 0
+#endif
+
+#define NCCL_CUMEM_HOST_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_HOST_GATE NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION)
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
