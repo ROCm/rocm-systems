@@ -18,6 +18,7 @@
 #include "param.h"
 #include "profiler/net_ib.h"
 #include "net_telemetry.h"
+#include "wqe_lat_mon_cast.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -445,6 +446,9 @@ struct ncclIbQp {
   // Resolved telemetry slot (NULL if untracked); the pointer keeps a posted WQE
   // to one slot resolution. Reuses padding, so ncclIbQp keeps its size.
   RcclQpStats* telQpStats;
+
+  // Per-QP CPU post-to-poll latency tracking (AICOMRCCL-2013 port).
+  struct ncclIbCastWqeLatMon latMon;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive

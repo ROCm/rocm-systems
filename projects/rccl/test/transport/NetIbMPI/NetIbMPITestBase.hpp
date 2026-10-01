@@ -2684,6 +2684,41 @@ protected:
         }
     }
 
+    // Like CastDoBatchSendRecv, but the sender waits for each send's own
+    // completion before posting the next one. Needed by callers that inspect
+    // per-QP WQE-latency state: the monitor tracks only one outstanding
+    // signaled WQE per QP at a time (mirrors net_ib's upstream wqe_lat_mon.cc),
+    // so back-to-back posts on the same QP silently starve it down to one
+    // counted completion total, regardless of nMsgs. The receiver side still
+    // pre-posts all N irecvs up front -- only the sender's own QP accumulates
+    // latMon stats in these tests, so its posting pattern is what matters.
+    void CastDoSyncSendRecv(int rank, void* sendComm, void* recvComm,
+                            char* sendBuf, char* recvBuf,
+                            size_t msgSz, int nMsgs, int baseTag, void* mhandle) {
+        if (rank == 0) {
+            std::vector<void*> reqs(nMsgs, nullptr);
+            for (int i = 0; i < nMsgs; i++) {
+                void*  bufs[1]    = {recvBuf + i * msgSz};
+                size_t sizes[1]   = {msgSz};
+                int    tags[1]    = {baseTag + i};
+                void*  handles[1] = {mhandle};
+                ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &reqs[i]), ncclSuccess);
+                ASSERT_NE(reqs[i], nullptr);
+            }
+            for (int i = 0; i < nMsgs; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &sz, 10000), ncclSuccess);
+            }
+        } else {
+            for (int i = 0; i < nMsgs; i++) {
+                void* req = nullptr;
+                PostSendWithRetry(sendComm, sendBuf + i * msgSz, msgSz, baseTag + i, mhandle, &req);
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+            }
+        }
+    }
+
     // Poll req until done or maxPolls exhausted. Safe to call with req==nullptr.
     // Does not assert completion — the recv may legitimately time out when
     // the sender faulted.

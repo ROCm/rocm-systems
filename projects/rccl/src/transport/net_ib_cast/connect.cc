@@ -531,6 +531,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   qp->telQpStats = NULL;
+  IbCastWqeLatMonInit(&qp->latMon);
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -2567,6 +2568,7 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     struct IbCastSharedQp* slot0 = NULL;
     for (int q = 0; q < comm->base.nqps; q++) {
       if (comm->base.qps[q].qp == NULL) continue;
+      IbCastWqeLatReportQpSummary(&comm->base, comm->base.qps[q].devIndex, &comm->base.qps[q]);
       if (isSharing) {
         struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, true);
         if (slot) {
@@ -2658,6 +2660,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
     struct IbCastSharedQp* slot0 = NULL;
     for (int q = 0; q < comm->base.nqps; q++) {
       if (comm->base.qps[q].qp == NULL) continue;
+      IbCastWqeLatReportQpSummary(&comm->base, comm->base.qps[q].devIndex, &comm->base.qps[q]);
       if (isSharing) {
         struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, false);
         if (slot) {
