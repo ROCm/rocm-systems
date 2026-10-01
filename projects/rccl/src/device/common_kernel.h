@@ -606,7 +606,7 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
   // alignment.
   constexpr int AlignedPathPackSize = 4;
   constexpr int NativeScalarUnroll = Unroll * (16 / sizeof(T)) / 2;
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
   // Larger pack loops make LLVM register allocation scale pathologically on gfx1250.
   // Limit the helper's work quantum; its outer loop still consumes all requested bytes.
   constexpr int ScalarUnroll = (useAcc && NativeScalarUnroll > 64) ? 64 : NativeScalarUnroll;

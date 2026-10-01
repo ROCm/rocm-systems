@@ -387,7 +387,7 @@ template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> const _lk{ s_mutex };
     using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::set_ready(false);
 }
@@ -396,7 +396,7 @@ template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> const _lk{ s_mutex };
     using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::set_ready(true);
 }

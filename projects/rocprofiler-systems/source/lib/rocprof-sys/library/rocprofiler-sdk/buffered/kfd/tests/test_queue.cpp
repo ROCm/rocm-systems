@@ -84,8 +84,8 @@ TEST(kfd_queue_test, on_configure_registers_pmc_info_for_each_gpu_agent)
 {
     g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
 
-    auto gpu_agent  = std::make_shared<agent_t>();
-    gpu_agent->type = externals::k_agent_type_gpu;
+    auto const gpu_agent = std::make_shared<agent_t>();
+    gpu_agent->type      = externals::k_agent_type_gpu;
     // NOLINTNEXTLINE(readability-magic-numbers) arbitrary device index for the test
     gpu_agent->device_type_index = 5;
 
