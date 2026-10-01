@@ -7,6 +7,9 @@
 #include "NetIbMPITestBase.hpp"
 #include <sstream>
 #include <array>
+#include <map>
+#include <string>
+#include <dlfcn.h>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -75,6 +78,66 @@ TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
     // Invalid device ID (too large)
     ncclResult_t result = GetDeviceProperties(ndev + kInvalidDeviceOffset, &props);
     EXPECT_NE(result, ncclSuccess) << "Should fail for invalid device ID";
+}
+
+// NCCL_IB_QUERY_PORT_SPEED parity: IB and IB-CAST must derive the same port
+// speed, whether through ibv_query_port_speed (IBVERBS_1.16) or the
+// active_speed/active_width fallback. Devices are matched by name because the
+// two plugins may enumerate a different set.
+TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
+
+    net_ = &ncclNetIb;
+    int ndevIb = 0;
+    AssertInitAndGetDevices(&ndevIb);
+
+    std::map<std::string, int> ibSpeeds;
+    for (int i = 0; i < ndevIb; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(GetDeviceProperties(i, &props), ncclSuccess) << "IB device " << i;
+        ibSpeeds[props.name] = props.speed;
+    }
+
+    void* castCtx = nullptr;
+    ncclNetCommConfig_t commConfig = {};
+    commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+    if (netIbCast.init(&castCtx, 0, &commConfig, nullptr, nullptr) != ncclSuccess) {
+        GTEST_SKIP() << "IB-CAST plugin failed to initialize on this host";
+    }
+    struct CastFinalizer {
+        void* ctx;
+        ~CastFinalizer() { netIbCast.finalize(ctx); }
+    } castFinalizer{castCtx};
+
+    int ndevCast = 0;
+    ASSERT_EQ(netIbCast.devices(&ndevCast), ncclSuccess);
+
+    int matched = 0;
+    for (int i = 0; i < ndevCast; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(netIbCast.getProperties(i, &props), ncclSuccess) << "IB-CAST device " << i;
+        EXPECT_GT(props.speed, 0) << "IB-CAST device " << props.name << " has invalid speed";
+        auto it = ibSpeeds.find(props.name);
+        if (it == ibSpeeds.end()) continue;
+        EXPECT_EQ(props.speed, it->second) << "Speed mismatch for " << props.name;
+        matched++;
+        if (MPIEnvironment::world_rank == 0) {
+            TEST_INFO("Device %s: IB speed=%d IB-CAST speed=%d", props.name, it->second, props.speed);
+        }
+    }
+
+    if (MPIEnvironment::world_rank == 0) {
+        void* verbs = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_NOLOAD);
+        const char* path = !verbs ? "unknown (libibverbs.so.1 not loaded)"
+                         : dlvsym(verbs, "ibv_query_port_speed", "IBVERBS_1.16") ? "ibv_query_port_speed available"
+                         : "ibv_query_port_speed missing, active_speed/active_width fallback";
+        if (verbs) dlclose(verbs);
+        TEST_INFO("Port speed source: %s; %d device(s) compared", path, matched);
+    }
+    if (matched == 0) GTEST_SKIP() << "No device name common to IB and IB-CAST";
 }
 
 // Connection Setup Tests
