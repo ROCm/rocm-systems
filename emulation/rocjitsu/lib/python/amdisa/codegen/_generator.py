@@ -976,6 +976,15 @@ class CodeGenerator:
         if (
             inst_sem
             and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
+            and opnd.is_output
+            and opnd.operand_type == 'OPR_SREG_NOVCC'
+        ):
+            # CDNA1-4 metadata marks only these two lane-read instructions NOVCC,
+            # but their scalar destinations can hold VCC spill reloads.
+            return 'OPR_SREG'
+        if (
+            inst_sem
+            and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
             and opnd.name == 'src0'
             and opnd.is_input
             and 'OPR_SRC_VGPR' in self.isa_spec.operand_types
@@ -7270,15 +7279,12 @@ class CodeGenerator:
 
         if cls == 'vector_readfirstlane':
             L.append('  uint64_t exec = wf.exec();')
-            L.append('  uint32_t val = 0;')
-            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (exec & (1ULL << lane)) {')
             L.append(
-                f'      val = amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane);'
+                '  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;'
             )
-            L.append('      break;')
-            L.append('    }')
-            L.append('  }')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane({src_ops[0]}, lane);'
+            )
             L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, val);')
             return '\n'.join(L)
 
