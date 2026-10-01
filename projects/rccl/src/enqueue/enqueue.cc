@@ -2170,20 +2170,34 @@ static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
 }
 } // namespace
 
+// GRAPH_STREAM_ORDERING=0: makes a capture on the graph origin wait on serialEvent via
+// hipEventWaitExternal, which HIP allows on the origin stream during capture. That wait is what
+// serializes graph launches of one communicator.
+static ncclResult_t rcclGraphOriginWaitSerialEvent(struct ncclComm* comm, cudaStream_t stream) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
+    // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
+    // node can fire immediately. The wait stays unconditional, so graph structure is identical
+    // across all captures (ExternalWait always present) and hipGraphExecUpdate succeeds.
+    // Latch after the record so a failed record is retried instead of suppressed for good.
+    CUDACHECK(cudaEventRecord(ss->serialEvent, ss->liveStream));
+    COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
+  }
+  // everCaptured still has to be set: ncclStrongStream{Acquire,Release} read it to interlock
+  // non-captured work with graphs when a comm sharing this sharedRes uses graphUsageMode=2.
+  COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
+  CUDACHECK(cudaStreamWaitEvent(stream, ss->serialEvent, hipEventWaitExternal));
+  return ncclSuccess;
+}
+
 // Joins a captured addon launch to the per-communicator capture chain, as ncclLaunchPrepare does for
-// kernel plans. ncclLaunchPrepare is upstream NCCL code kept verbatim, so this copy has to follow any
-// change to its capture ordering by hand.
+// kernel plans. The deviceStream half is a copy of ncclLaunchPrepare's and has to follow any change
+// to it by hand.
 static ncclResult_t rcclAddonCaptureOrderBegin(struct ncclComm* comm, cudaStream_t stream,
                                                struct rcclAddonLaunchState* state) {
   struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
   if (!ncclGraphStreamOrderingSerialize(comm)) {
-    if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
-      CUDACHECK(cudaEventRecord(ss->serialEvent, ss->liveStream));
-      COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
-    }
-    COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
-    CUDACHECK(cudaStreamWaitEvent(stream, ss->serialEvent, hipEventWaitExternal));
-    return ncclSuccess;
+    return rcclGraphOriginWaitSerialEvent(comm, stream);
   }
   NCCLCHECK(ncclStrongStreamAcquire(state->graph, ss, /*concurrent=*/false, &state->deviceStream));
   state->deviceStreamAcquired = true;
@@ -2419,21 +2433,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
 
     if (useLaunchStream) {
       // GRAPH_STREAM_ORDERING=0: run kernels on the graph origin (launchStream) without a
-      // secondary captureStream. Serialize graph launches by waiting on serialEvent via
-      // hipEventWaitExternal, which HIP allows on the origin stream during capture.
-      struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
-      if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
-        // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
-        // node can fire immediately. The wait stays unconditional, so graph structure is identical
-        // across all captures (ExternalWait always present) and hipGraphExecUpdate succeeds.
-        // Latch after the record so a failed record is retried instead of suppressed for good.
-        CUDACHECKGOTO(cudaEventRecord(ss->serialEvent, ss->liveStream), result, failure);
-        COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
-      }
-      // everCaptured still has to be set: ncclStrongStream{Acquire,Release} read it to interlock
-      // non-captured work with graphs when a comm sharing this sharedRes uses graphUsageMode=2.
-      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
-      CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, ss->serialEvent, hipEventWaitExternal), result, failure);
+      // secondary captureStream.
+      NCCLCHECKGOTO(rcclGraphOriginWaitSerialEvent(comm, launchStream), result, failure);
       deviceStream = launchStream;
     } else {
       NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream,
