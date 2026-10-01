@@ -390,6 +390,9 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst));
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -650,6 +653,9 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const VopcVopDpp16MachineInst *>(inst));
 }
 
 bool Vopc::default_encoding() {
@@ -753,6 +759,9 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst));
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -1574,6 +1583,15 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+}
+
+void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  if (!inst_.nsa)
+    return;
+  nsa_vaddr_operand_ = vaddr;
+  size_ = sizeof(OpEncoding) + sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
 bool Mimg::has_nsa() { return (inst_.nsa == 1); }

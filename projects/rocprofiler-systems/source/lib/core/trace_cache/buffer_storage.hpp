@@ -140,8 +140,8 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        size_t const sample_size      = get_size(value);
+        size_t const bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -149,12 +149,13 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard scope{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const scope{ m_mutex };
 
-        auto*  buf      = reserve_memory_space(bytes_to_reserve);
-        size_t position = 0;
-        auto   type_identifier_value =
+        auto*      buf      = reserve_memory_space(bytes_to_reserve);
+        size_t     position = 0;
+        auto const type_identifier_value =
             static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
 
         utility::store_value(type_identifier_value, buf, position);
@@ -173,18 +174,20 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard guard{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const guard{ m_mutex };
 
-        size_t _head = m_head;
-        size_t _tail = m_tail;
+        size_t const _head = m_head;
+        size_t const _tail = m_tail;
 
         if(_head == _tail)
         {
             return;
         }
 
-        auto used_space = _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
+        auto const used_space =
+            _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
         if(!force && used_space < flush_threshold)
         {
             return;
