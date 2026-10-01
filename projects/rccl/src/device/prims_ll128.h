@@ -16,16 +16,13 @@
 #endif
 #endif
 
-// 128-bit load for FIFO and non-registered user buffers. On gfx1250, sibling
-// P2P into a cacheable comm FIFO is not coherent under a nontemporal load; use
-// system-scope b128 there. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default
-// hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
-// load128 which bypasses the cache.
+// 128-bit load for non-registered user buffers, and the comm-FIFO load when
+// cooperative atomics are unavailable (see load128Fifo). On gfx1250 a
+// nontemporal load of a cacheable FIFO is not coherent with sibling P2P, so
+// that fallback is a system-scope b128. See RCCL_LL_FIFO_SYS_SCOPE in
+// rccl_ptr.h. Registered user buffers use load128, which is system-scope too.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
+  rcclB128 u;
 #if RCCL_LL_FIFO_SYS_SCOPE
   u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
 #else
@@ -35,29 +32,49 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
   v1 = u.u64[1];
 }
 
+// LL128 comm-FIFO load. On gfx1250 this is a cooperative 8x16B atomic: each
+// 8-lane group is one 128-byte line, and the builtin is one non-tearing
+// transaction at system scope (a sibling partition's store is not visible to
+// a device-scope load). Every lane in the group must execute it.
+// recvReduceSendCopy does; loadUser128 must not, because user-buffer loads are
+// predicated and are not required to be 128-byte aligned.
+inline __device__ void load128Fifo(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  rcclB128 u;
+  u.vi = __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)ptr, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  // Pin the pun in VGPRs. At -O1, folding this bitcast into the narrow masks
+  // of an fp8 reduction crashes AMDGPU instruction selection
+  // (APInt::andAssignSlowCase) in the tree LL128 kernels.
+  asm volatile("" : "=v"(v0), "=v"(v1) : "v"(u.u64[0]), "v"(u.u64[1]));
+#else
+  load128NT(ptr, v0, v1);
+#endif
+}
+
 // Plain (cacheable) 128-bit store. Used for non-registered user buffers, and off
 // gfx1250 it is also where store128Fifo sends the LL128 comm FIFO. Width is one
 // b128 so data and flag stay in a single transaction.
 inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
+  rcclB128 u;
   u.u64[0] = v0;
   u.u64[1] = v1;
   *((v4u_gptr)ptr) = u.v;
 }
 
 // LL128 comm-FIFO store. Same 128-bit width as store128Plain (data+flag one
-// transaction). On gfx1250 the store is system-scope: a plain store to a
-// cacheable FIFO can retire in the writer's cache and never reach a sibling
-// partition's poll. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
+// transaction). On gfx1250 the store is a cooperative 8x16B atomic at system
+// scope: a plain store to a cacheable FIFO can retire in the writer's cache
+// and never reach a sibling partition's poll. Without the builtin, use the
+// system-scope b128 when it is available, otherwise the plain store. See
+// RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
 inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  rcclB128 u;
+  // Same ISel workaround as load128Fifo.
+  asm volatile("" : "=v"(u.u64[0]), "=v"(u.u64[1]) : "v"(v0), "v"(v1));
+  __builtin_amdgcn_cooperative_atomic_store_8x16B((v4i_gptr)ptr, u.vi, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+#elif RCCL_LL_FIFO_SYS_SCOPE
+  rcclB128 u;
   u.u64[0] = v0;
   u.u64[1] = v1;
   __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
@@ -354,13 +371,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         needReload = false;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+          load128Fifo(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
           needReload |= flagThread && (vr[u + 1] != flag);
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
 #pragma unroll
-      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128Fifo(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
     }
 
     /************* Finish register load **************/
@@ -398,14 +415,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
           needReload = false;
 #pragma unroll
           for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-            load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+            load128Fifo(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
             needReload |= flagThread && (vr[u + 1] != flag);
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
 
 #pragma unroll
-        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128Fifo(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
 
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
