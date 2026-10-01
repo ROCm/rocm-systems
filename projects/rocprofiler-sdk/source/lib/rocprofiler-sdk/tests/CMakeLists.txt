@@ -11,6 +11,11 @@ target_link_libraries(
     rocprofiler-sdk-registration-attach-fixture
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags)
+install(
+    TARGETS rocprofiler-sdk-registration-attach-fixture
+    LIBRARY
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/lib
+        COMPONENT tests)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -87,7 +92,7 @@ target_link_libraries(
 target_compile_definitions(
     rocprofiler-sdk-lib-tests-shared
     PRIVATE
-        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"$<TARGET_FILE:rocprofiler-sdk-registration-attach-fixture>\""
+        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"\$ORIGIN/../lib/$<TARGET_FILE_NAME:rocprofiler-sdk-registration-attach-fixture>\""
     )
 add_dependencies(rocprofiler-sdk-lib-tests-shared
                  rocprofiler-sdk-registration-attach-fixture)
