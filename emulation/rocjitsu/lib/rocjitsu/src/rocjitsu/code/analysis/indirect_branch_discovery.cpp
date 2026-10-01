@@ -388,6 +388,9 @@ struct AnalysisContext {
   uint32_t wavefront_size = 0;
   bool setreg_vgpr_msb_fixup = false;
   std::vector<InstructionFacts> facts;
+  // Sparse candidates collected with the initial facts, in instruction order.
+  // CFG refinement changes block boundaries but not the instruction stream.
+  std::vector<size_t> getpc_indices;
 
   // Whole-text superset of every SGPR pair that a deferred cross-block
   // consumer can name. Every PendingConsumer producer must originate from one
@@ -1607,12 +1610,18 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     target = registry.find_default_gpu_target(*architecture);
   ctx.setreg_vgpr_msb_fixup = target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
 
+  const auto getpc_opcode = scalar_pc_opcode(arch, ScalarPcOp::GetPc64);
   ctx.facts.resize(insts.size());
   for (size_t i = 0; i < insts.size(); ++i) {
     const Instruction &inst = *insts[i];
     InstructionFacts &facts = ctx.facts[i];
     facts.word = text_word_at(text, inst.src_loc());
     facts.getpc_sdst = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::GetPc64);
+    // This is only a sparse prefilter. The recovery matcher still validates
+    // instruction size and decoded register identity, including special pairs.
+    if (getpc_opcode && (facts.word >> 23) == kSop1EncodingPrefix &&
+        ((facts.word >> 8) & 0xffu) == *getpc_opcode)
+      ctx.getpc_indices.push_back(i);
     facts.setpc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SetPc64);
     facts.swappc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SwapPc64);
     if (facts.swappc_ssrc) {
@@ -5277,8 +5286,13 @@ void recover_special_pair_pc_templates(const AnalysisContext &ctx,
   // Special architectural pairs are deliberately excluded from the ordinary
   // SGPR lattice. Prove only a closed straight-line getpc/update/setpc template
   // using decoded register identities; any unmodeled instruction ends it.
+  auto candidate = ctx.getpc_indices.begin();
   for (const AnalysisBlock &block : blocks) {
-    for (size_t getpc_index = block.first_index; getpc_index <= block.last_index; ++getpc_index) {
+    if (candidate == ctx.getpc_indices.end())
+      break;
+    while (candidate != ctx.getpc_indices.end() && *candidate <= block.last_index) {
+      const size_t getpc_index = *candidate++;
+      assert(getpc_index >= block.first_index);
       const Instruction &getpc_inst = *ctx.insts[getpc_index];
       auto carrier =
           scalar_pc_carrier(ctx.arch, getpc_inst, ctx.facts[getpc_index].word, ScalarPcOp::GetPc64);

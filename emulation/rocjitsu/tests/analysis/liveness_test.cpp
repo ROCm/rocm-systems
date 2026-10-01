@@ -3501,6 +3501,39 @@ TEST(CfgAnalysis, RecoversCdna4VccAndAlignedTtmpPcBuilders) {
   }
 }
 
+TEST(CfgAnalysis, RecoversSparseSpecialPcProducersAcrossBlocks) {
+  // Mix ordinary SGPR builders with multiple special pairs, separated by
+  // blocks without any PC producer. Recovery must retain every candidate
+  // across CFG refinement, including the first instruction and late blocks.
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<uint32_t> words;
+    std::vector<uint64_t> call_offsets;
+    std::vector<uint64_t> target_offsets;
+    for (const uint16_t selector : {106u, 2u, 108u, 106u}) {
+      target_offsets.push_back(words.size() * sizeof(uint32_t) + 20u);
+      words.push_back(build_s_getpc_b64(selector, arch));
+      ASSERT_TRUE(append_pc_delta_builder(words, arch, selector, /*delta=*/16));
+      call_offsets.push_back(words.size() * sizeof(uint32_t));
+      words.push_back(build_s_setpc_b64(selector, arch));
+      words.push_back(build_s_endpgm(arch));
+      for (size_t i = 0; i < 17; ++i)
+        words.push_back(build_s_nop(0, arch));
+      words.push_back(build_s_endpgm(arch));
+    }
+    const auto fixups = discover_test_indirect_fixups(words, arch, {},
+                                                      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 64u);
+    ASSERT_EQ(fixups.size(), call_offsets.size());
+    for (size_t i = 0; i < call_offsets.size(); ++i) {
+      const auto found =
+          std::ranges::find(fixups, call_offsets[i], &IndirectCallFixup::source_call_offset);
+      ASSERT_NE(found, fixups.end());
+      EXPECT_EQ(found->source_target_offset, target_offsets[i]);
+      EXPECT_TRUE(found->source_targets_exhaustive);
+    }
+  }
+}
+
 TEST(CfgAnalysis, RejectsUnsupportedSpecialPcCarriers) {
   // FLAT_SCRATCH and EXEC have independent architectural semantics. TTMP1 is
   // not the low half of an aligned TTMP pair.
