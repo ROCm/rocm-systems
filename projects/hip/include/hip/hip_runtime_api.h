@@ -7269,28 +7269,6 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
 hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 
 /**
- * @brief Get a pointer to a unified function defined in a library.
- *
- * Returns in @p fptr the function pointer to the unified function named
- * @p symbol within the library's code object. Mirrors CUDA's
- * `cuLibraryGetUnifiedFunction` / `cudaLibraryGetUnifiedFunction`. Returns
- * #hipErrorNotFound if no unified function with that name exists, or if no
- * device in the system reports `unifiedFunctionPointers` in `hipDeviceProp_t`.
- *
- * @param [out] fptr    Pointer to receive the unified function pointer.
- * @param [in]  library Input hip library handle.
- * @param [in]  symbol  Name of the unified function to look up.
- * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
- *         #hipErrorNotFound
- *
- * @note No AMD GPU supports unified function pointers, so on the AMD platform
- * this call returns #hipErrorNotFound for every valid set of arguments.
- *
- * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload
- */
-hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library, const char* symbol);
-
-/**
  * @brief Retrieve kernel handles within a library
  *
  * @param [out] kernels Buffer for kernel handles

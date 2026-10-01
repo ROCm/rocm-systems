@@ -5828,15 +5828,6 @@ typedef struct {
     uint64_t library;
 } hrr_args_hipLibraryGetModule;
 
-/* hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library, const char* symbol) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t fptr;
-    uint64_t library;
-    uint64_t symbol;
-} hrr_args_hipLibraryGetUnifiedFunction;
-
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6385,17 +6376,16 @@ typedef enum hrr_api_id {
     HRR_API_HIPINITDEVICE = 543,
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
     HRR_API_HIPLIBRARYGETMODULE = 545,
-    HRR_API_HIPLIBRARYGETUNIFIEDFUNCTION = 546,
-    HRR_API_HIPPOPCALLCONFIGURATION = 547,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 548,
-    HRR_API_HIPREGISTERFATBINARY = 549,
-    HRR_API_HIPREGISTERFUNCTION = 550,
-    HRR_API_HIPREGISTERMANAGEDVAR = 551,
-    HRR_API_HIPREGISTERSURFACE = 552,
-    HRR_API_HIPREGISTERTEXTURE = 553,
-    HRR_API_HIPREGISTERVAR = 554,
-    HRR_API_HIPUNREGISTERFATBINARY = 555,
-    HRR_API_COUNT = 556
+    HRR_API_HIPPOPCALLCONFIGURATION = 546,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 547,
+    HRR_API_HIPREGISTERFATBINARY = 548,
+    HRR_API_HIPREGISTERFUNCTION = 549,
+    HRR_API_HIPREGISTERMANAGEDVAR = 550,
+    HRR_API_HIPREGISTERSURFACE = 551,
+    HRR_API_HIPREGISTERTEXTURE = 552,
+    HRR_API_HIPREGISTERVAR = 553,
+    HRR_API_HIPUNREGISTERFATBINARY = 554,
+    HRR_API_COUNT = 555
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6947,7 +6937,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipInitDevice",
     "hipModuleEnumerateFunctions",
     "hipLibraryGetModule",
-    "hipLibraryGetUnifiedFunction",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

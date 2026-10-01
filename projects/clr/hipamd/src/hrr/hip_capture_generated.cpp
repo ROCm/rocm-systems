@@ -7802,20 +7802,6 @@ static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t li
 }
 
 // Generated shim
-static hipError_t capture_hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library, const char* symbol) {
-  hipError_t r = g_real_table.hipLibraryGetUnifiedFunction_fn(fptr, library, symbol);
-  if (r == hipSuccess) {
-    hrr_args_hipLibraryGetUnifiedFunction a{};
-    a.ret     = static_cast<int32_t>(r);
-    a.library = reinterpret_cast<uint64_t>(library);
-    a.symbol  = reinterpret_cast<uint64_t>(symbol);
-    if (fptr) a.fptr = reinterpret_cast<uint64_t>(*fptr);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETUNIFIEDFUNCTION, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8551,7 +8537,6 @@ void hip_capture_build_table() {
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
-  g_cap_table.hipLibraryGetUnifiedFunction_fn = capture_hipLibraryGetUnifiedFunction;
 }
 
 void hip_capture_build_compiler_table() {

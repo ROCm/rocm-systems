@@ -3986,11 +3986,6 @@ inline static hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t lib
   return hipCUResultTohipError(cuLibraryGetModule(pMod, library));
 }
 
-inline static hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library,
-                                                      const char* symbol) {
-  return hipCUResultTohipError(cuLibraryGetUnifiedFunction(fptr, library, symbol));
-}
-
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
