@@ -20,7 +20,9 @@
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iomanip>
+#include <vector>
 
 namespace RcclUnitTesting
 {
@@ -1149,6 +1151,203 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
     EXPECT_EQ(static_cast<uint64_t>(queues[kQueueSize + s].qword[ncclGinProxyGfdHeader].header.size), 0ULL)
         << "peer 1 slot " << s << " was unexpectedly written";
   }
+}
+
+// ---------------------------------------------------------------------------
+// FlushAsync<PROXY> snapshots a per-peer (pi, lastIssuedGet) pair that Wait<PROXY> later consumes.
+// ---------------------------------------------------------------------------
+
+__global__ void kernelProxyFlushAsync(ncclGinCtx ctx, int peer, ncclGinRequest_t* outRequest) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) {
+    return;
+  }
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, peer, outRequest, /*hasDescriptor=*/false,
+                                                         /*descriptor=*/nullptr, /*optFlags=*/0);
+}
+
+// Uses the timeout Wait overload; postExtra posts one GFD to the peer between FlushAsync and Wait.
+__global__ void kernelProxyFlushAsyncTimedWait(ncclGinCtx ctx, int peer, bool postExtra, uint64_t timeoutCycles,
+                                               ncclResult_t* outResult) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) {
+    return;
+  }
+  ncclGinRequest_t request;
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, peer, &request, /*hasDescriptor=*/false,
+                                                         /*descriptor=*/nullptr, /*optFlags=*/0);
+  if (postExtra) {
+    ncclGinProxyGpuCtx_t* proxyCtx = &static_cast<ncclGinProxyGpuCtx_t*>(ctx.handle)[ctx.contextId];
+    ncclGinProxyGfd_t gfd{};
+    nccl::gin::proxy::postGfd(ncclCoopThread(), proxyCtx, &gfd, peer);
+  }
+  *outResult = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false,
+                                                                /*descriptor=*/nullptr, cuda::memory_order_acquire,
+                                                                /*abortFlag=*/nullptr, timeoutCycles);
+}
+
+// Two proxy contexts; context 0 is a decoy with different counters, so a dropped [ctx.contextId] index is visible.
+class GinProxyFlushWaitTest : public GinDeviceTest {
+ protected:
+  static constexpr int kNranks = 3;
+  static constexpr uint32_t kQueueSize = 4;
+  static constexpr int kNumContexts = 2;
+  static constexpr int kContextId = 1;
+  static constexpr int kRank = 0;
+  static constexpr int kPeer = 1;
+  static constexpr uint64_t kTimeoutCycles = 10000000;
+
+  GinProxyFlushWaitTest()
+      : setDeviceErr_(hipSetDevice(0)),
+        d_queues_(kNumContexts * kNranks * kQueueSize),
+        d_pis_(kNumContexts * kNranks),
+        d_cis_(kNumContexts * kNranks),
+        d_lastIssuedGet_(kNumContexts * kNranks),
+        d_lastVisibleGet_(kNumContexts * kNranks),
+        d_proxyCtxs_(kNumContexts),
+        pis_(kNumContexts * kNranks),
+        cis_(kNumContexts * kNranks),
+        lastIssuedGet_(kNumContexts * kNranks),
+        lastVisibleGet_(kNumContexts * kNranks) {}
+
+  // Distinct values per counter, context and peer; by default every GFD is consumed and every get is visible.
+  void SetUp() override {
+    ASSERT_EQ(setDeviceErr_, hipSuccess);
+    GinDeviceTest::SetUp();
+    for (int c = 0; c < kNumContexts; c++) {
+      for (int p = 0; p < kNranks; p++) {
+        pis_[Idx(c, p)] = 0x1000u + 0x100u * c + 0x10u * p;
+        lastIssuedGet_[Idx(c, p)] = 0x7000u + 0x100u * c + 0x10u * p;
+      }
+    }
+    cis_ = pis_;
+    lastVisibleGet_ = lastIssuedGet_;
+  }
+
+  static int Idx(int contextId, int peer) {
+    return contextId * kNranks + peer;
+  }
+
+  void Upload() {
+    d_queues_.zero();
+    d_pis_.copyFrom(pis_);
+    d_cis_.copyFrom(cis_);
+    d_lastIssuedGet_.copyFrom(lastIssuedGet_);
+    d_lastVisibleGet_.copyFrom(lastVisibleGet_);
+    std::vector<ncclGinProxyGpuCtx_t> hostCtxs(kNumContexts);
+    for (int c = 0; c < kNumContexts; c++) {
+      hostCtxs[c].nranks = kNranks;
+      hostCtxs[c].queueSize = kQueueSize;
+      hostCtxs[c].queues = d_queues_.ptr + Idx(c, 0) * kQueueSize;
+      hostCtxs[c].pis = d_pis_.ptr + Idx(c, 0);
+      hostCtxs[c].cis = d_cis_.ptr + Idx(c, 0);
+      hostCtxs[c].lastIssuedGet = d_lastIssuedGet_.ptr + Idx(c, 0);
+      hostCtxs[c].lastVisibleGet = d_lastVisibleGet_.ptr + Idx(c, 0);
+    }
+    d_proxyCtxs_.copyFrom(hostCtxs);
+  }
+
+  ncclGinCtx MakeCtx() const {
+    ncclGinCtx ctx{};
+    ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+    ctx.rank = kRank;
+    ctx.nRanks = kNranks;
+    ctx.handle = d_proxyCtxs_.ptr;
+    ctx.contextId = kContextId;
+    return ctx;
+  }
+
+  // Expects exactly one local GFD; the queues start zeroed, so a complete flush GFD in its slot proves Wait posted it.
+  void ExpectLocalFlushGfd(uint32_t localPi) {
+    std::vector<uint32_t> expectedPis = pis_;
+    expectedPis[Idx(kContextId, kRank)] = localPi + 1;
+    EXPECT_EQ(d_pis_.copyTo(), expectedPis) << "exactly one flush GFD, posted to the local rank queue of ctx.contextId";
+    std::vector<ncclGinProxyGfd_t> queues = d_queues_.copyTo();
+    const ncclGinProxyGfd_t& gfd = queues[Idx(kContextId, kRank) * kQueueSize + (localPi & (kQueueSize - 1))];
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
+              static_cast<uint64_t>(ncclGinProxyOpFlush));
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), 0ULL);
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+              static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
+    for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[i].flag.v), 1ULL) << "qword " << i;
+    }
+  }
+
+  hipError_t setDeviceErr_;  // Must precede the DeviceBuffers; they allocate on the current device.
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues_;
+  DeviceBuffer<uint32_t> d_pis_;
+  DeviceBuffer<uint32_t> d_cis_;
+  DeviceBuffer<uint32_t> d_lastIssuedGet_;
+  DeviceBuffer<uint32_t> d_lastVisibleGet_;
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtxs_;
+  std::vector<uint32_t> pis_;
+  std::vector<uint32_t> cis_;
+  std::vector<uint32_t> lastIssuedGet_;
+  std::vector<uint32_t> lastVisibleGet_;
+};
+
+TEST_F(GinProxyFlushWaitTest, FlushAsyncSnapshotsPiAndLastIssuedGet) {
+  Upload();
+  DeviceBuffer<ncclGinRequest_t> d_request(1);
+  ncclGinRequest_t poison;
+  poison.opaque[0] = ~0ULL;
+  poison.opaque[1] = ~0ULL;
+  d_request.upload(poison);
+
+  kernelProxyFlushAsync<<<1, 1>>>(MakeCtx(), kPeer, d_request.ptr);
+  syncAndCheck();
+
+  const ncclGinRequest_t raw = d_request.download();
+  ncclGinCpuProxyRequest req;
+  std::memcpy(&req, &raw, sizeof(req));
+  EXPECT_EQ(req.peer, kPeer);
+  EXPECT_EQ(req.nextGfdIdx, pis_[Idx(kContextId, kPeer)]) << "nextGfdIdx must be pis[peer] of ctx.contextId";
+  EXPECT_EQ(req.lastIssuedGet, lastIssuedGet_[Idx(kContextId, kPeer)])
+      << "lastIssuedGet must be lastIssuedGet[peer] of ctx.contextId";
+  EXPECT_EQ(d_pis_.copyTo(), pis_) << "FlushAsync must not post a GFD";
+  EXPECT_EQ(d_lastIssuedGet_.copyTo(), lastIssuedGet_);
+}
+
+TEST_F(GinProxyFlushWaitTest, WaitCoversOnlyGfdsPostedBeforeFlushAsync) {
+  // Snapshot 0, so case 2 seeds CI 0xFFFFFFFF and only a wrap-aware compare keeps Wait spinning.
+  pis_[Idx(kContextId, kPeer)] = 0u;
+  cis_ = pis_;
+  const uint32_t snapshot = pis_[Idx(kContextId, kPeer)];
+  DeviceBuffer<ncclResult_t> d_result(1);
+
+  // CI equal to the snapshot: Wait must succeed even though the GFD posted after FlushAsync is still pending.
+  Upload();
+  d_result.upload(ncclInternalError);
+  kernelProxyFlushAsyncTimedWait<<<1, 1>>>(MakeCtx(), kPeer, /*postExtra=*/true, kTimeoutCycles, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess) << "Wait must wait on req.nextGfdIdx, not the live pi";
+  std::vector<uint32_t> expectedPis = pis_;
+  expectedPis[Idx(kContextId, kPeer)] = snapshot + 1;
+  EXPECT_EQ(d_pis_.copyTo(), expectedPis) << "only the extra GFD is posted; no local flush when all gets are visible";
+  EXPECT_EQ(d_lastVisibleGet_.copyTo(), lastVisibleGet_);
+
+  // CI one short of the snapshot: a GFD posted before FlushAsync is unconsumed, so Wait must time out.
+  cis_[Idx(kContextId, kPeer)] = snapshot - 1;
+  Upload();
+  d_result.upload(ncclInternalError);
+  kernelProxyFlushAsyncTimedWait<<<1, 1>>>(MakeCtx(), kPeer, /*postExtra=*/true, kTimeoutCycles, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout) << "Wait must not return before CI reaches req.nextGfdIdx";
+}
+
+TEST_F(GinProxyFlushWaitTest, TimedWaitFlushesLocalQueueWhenGetsPending) {
+  const uint32_t localPi = pis_[Idx(kContextId, kRank)];
+  lastVisibleGet_[Idx(kContextId, kPeer)] = lastIssuedGet_[Idx(kContextId, kPeer)] - 2;
+  Upload();
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+
+  kernelProxyFlushAsyncTimedWait<<<1, 1>>>(MakeCtx(), kPeer, /*postExtra=*/false, kTimeoutCycles, d_result.ptr);
+  syncAndCheck();
+
+  // Nothing consumes the local flush GFD, so the timed flush must spin on the local queue until it times out.
+  EXPECT_EQ(d_result.download(), ncclTimeout) << "Wait must flush the local rank queue, not skip or flush the peer";
+  ExpectLocalFlushGfd(localPi);
+  EXPECT_EQ(d_lastVisibleGet_.copyTo(), lastVisibleGet_) << "a timed-out Wait must not publish lastVisibleGet";
 }
 
 // ---------------------------------------------------------------------------
