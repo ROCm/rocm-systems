@@ -180,6 +180,8 @@ pick_gpu() {
       # word Total and must be tested first. Total and used arrive on separate
       # lines whose order is not guaranteed, so collect both per device and
       # subtract at END rather than on whichever line happens to land last.
+      # printf, because mawk, the Ubuntu default, prints a difference that size
+      # as 2.73804e+11, which the bash arithmetic above cannot read.
       /GPU\[/ {
         id = $1; gsub(/[^0-9]/, "", id)
         if ($0 ~ /Total Used Memory/) used[id] = $NF
@@ -187,7 +189,7 @@ pick_gpu() {
       }
       END {
         for (id in total)
-          if (id in used) print id, total[id] - used[id]
+          if (id in used) printf "%s %.0f\n", id, total[id] - used[id]
       }')
     [[ -n "$best" ]] && { echo "[triage] GPU $best (most free VRAM)" >&2; echo "$best"; return; }
   fi
