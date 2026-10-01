@@ -35,7 +35,9 @@
 #include <cstring>
 #include <cerrno>
 #include <filesystem>
+#include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <algorithm>
@@ -215,6 +217,15 @@ static std::atomic<uint64_t> g_blob_count{0};
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
+
+// APIs recorded in this archive that replay cannot reproduce (note_unreplayable).
+// Listed in manifest.json so the gap is a property of the archive rather than
+// something only visible in a replay log.
+static std::mutex                      g_unreplayable_mu;
+// api -> distinct reasons it was noted for. One API can be unreplayable for
+// several reasons (e.g. a different truncated argument on different calls),
+// and each is worth reporting.
+static std::map<std::string, std::set<std::string>> g_unreplayable_apis;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
@@ -499,6 +510,26 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    if (!g_unreplayable_apis.empty()) {
+      fprintf(mf, ",\n  \"unreplayable_apis\": {");
+      bool first_api = true;
+      for (const auto& [api, reasons] : g_unreplayable_apis) {
+        fprintf(mf, "%s\n    \"%s\": [", first_api ? "" : ",",
+                metadata::json_escape(api.c_str()).c_str());
+        bool first_reason = true;
+        for (const auto& reason : reasons) {
+          fprintf(mf, "%s\"%s\"", first_reason ? "" : ", ",
+                  metadata::json_escape(reason.c_str()).c_str());
+          first_reason = false;
+        }
+        fprintf(mf, "]");
+        first_api = false;
+      }
+      fprintf(mf, "\n  }");
+    }
+  }
   if (g_metadata_json_len > 0) {
     fprintf(mf, ",\n  \"metadata\": %.*s\n",
             static_cast<int>(g_metadata_json_len), g_metadata_json);
@@ -750,6 +781,23 @@ void mark_incomplete(const char* reason) {
 }
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
+
+void note_unreplayable(const char* api, const char* reason) {
+  if (!api) return;
+  if (!reason) reason = "(unspecified)";
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    if (!g_unreplayable_apis[api].insert(reason).second) return;
+  }
+  // Warning, not Error: unlike mark_incomplete() the archive is well-formed and
+  // every event is present — only the ability to re-execute this one call is
+  // lost. That is a degradation, not a failure.
+  // log_printf appends its own newline, so the format string omits it.
+  LogPrintfWarning(
+      "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
+      "replay will report it as unreplayable rather than reproduce it",
+      api, reason);
+}
 
 void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to

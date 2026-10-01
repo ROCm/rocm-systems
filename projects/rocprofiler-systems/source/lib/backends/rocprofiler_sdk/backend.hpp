@@ -284,7 +284,7 @@ struct backend
     /// available, falling back to v0 otherwise.
     static std::vector<counter_metadata> query_counter_details(counter_id_t counter_id)
     {
-        auto safe_str = [](const char* s) {
+        auto const safe_str = [](const char* s) {
             return s ? std::string{ s } : std::string{};
         };
 
@@ -298,11 +298,11 @@ struct backend
                 return {};
             }
 
-            auto result   = std::vector<counter_metadata>{};
-            auto name_str = std::string{ info.name };
-            auto desc_str = safe_str(info.description);
-            auto blk_str  = safe_str(info.block);
-            auto expr_str = safe_str(info.expression);
+            auto       result   = std::vector<counter_metadata>{};
+            auto const name_str = std::string{ info.name };
+            auto const desc_str = safe_str(info.description);
+            auto const blk_str  = safe_str(info.block);
+            auto const expr_str = safe_str(info.expression);
             result.reserve(info.dimensions_instances_count);
 
             for(std::uint64_t i = 0; i < info.dimensions_instances_count; ++i)
@@ -353,7 +353,7 @@ struct backend
 
     static void flush_buffer(buffer_id_t buf)
     {
-        auto status = Wrapper::flush_buffer(buf);
+        auto const status = Wrapper::flush_buffer(buf);
         if(status != Wrapper::STATUS_ERROR_BUFFER_BUSY)
         {
             sdk_check<Wrapper>(status);
@@ -486,7 +486,7 @@ public:
             std::uint32_t maj    = 0;
             std::uint32_t min    = 0;
             std::uint32_t pat    = 0;
-            auto          status = Wrapper::get_version(&maj, &min, &pat);
+            auto const    status = Wrapper::get_version(&maj, &min, &pat);
             return std::tuple{ status, maj, min, pat };
         }();
 

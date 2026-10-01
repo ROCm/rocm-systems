@@ -96,7 +96,7 @@ private:
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
-    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
+    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

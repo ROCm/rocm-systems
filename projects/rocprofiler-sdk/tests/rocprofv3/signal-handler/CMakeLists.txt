@@ -29,11 +29,12 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # add_signal_handler_test(<name> [keyword args])
 #
 #   <name>                            : scenario name; ctest is registered as "app-<name>-<type>"
-#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn
+#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn | lingering-child
 #   VALIDATE_EXPECT <outcome>         : what validate.py asserts:
 #                                          clean-exit: app exits cleanly via atexit, exit_marker present
 #                                          flushed-markers: profiler flushed >10 markers before signal death
 #   PASS_REGEX <regex>                : execute PASS_REGULAR_EXPRESSION
+#   NO_TIMEOUT_SIGNAL                 : run the app without `timeout --signal=INT` wrapper
 #   APP_EXTRA_FLAGS <flags...>        : appended to the signal-handler-test command
 #                                       (e.g. --app-signal-handler / --no-app-signal-handler)
 #   ROCPROFV3_EXTRA_FLAGS <flags...>  : inserted into the rocprofv3 command
@@ -45,12 +46,21 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #   validate runs after execute (FIXTURES_REQUIRED <name>).
 # cmake-format: on
 function(add_signal_handler_test NAME)
-    cmake_parse_arguments(arg "" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
-                          "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
+    cmake_parse_arguments(
+        arg "NO_TIMEOUT_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
+        "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
 
     set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
     set(_subdir "${NAME}-${arg_PROCESS_TYPE}")
     set(_outdir ${BASE_OUT_DIR}/${_subdir})
+
+    # By default the app loops until `timeout` sends SIGINT (simulated Ctrl+C). With
+    # NO_TIMEOUT_SIGNAL the app is run directly and must self-terminate (normal-exit
+    # scenarios). A finalize hang is caught by the ctest's TIMEOUT.
+    set(_signal_wrapper ${TIMEOUT_CMD})
+    if(arg_NO_TIMEOUT_SIGNAL)
+        set(_signal_wrapper "")
+    endif()
 
     rocprofiler_add_integration_cleanup_test(
         ${_name}
@@ -61,7 +71,7 @@ function(add_signal_handler_test NAME)
     rocprofiler_add_integration_execute_test(
         ${_name}
         COMMAND
-            ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
+            ${_signal_wrapper} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
             --marker-trace --output-format json ${arg_ROCPROFV3_EXTRA_FLAGS} -d ${_outdir}
             -o out_%pid% -- $<TARGET_FILE:signal-handler-test> --${arg_PROCESS_TYPE}
             ${arg_APP_EXTRA_FLAGS}
@@ -164,3 +174,18 @@ add_signal_handler_test(
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
     APP_EXTRA_FLAGS --app-signal-handler)
+
+# PR# 6717 regression: profiled app leaves a long-lived child alive at NORMAL exit.
+#
+# No signal is involved. The app forks a child that ignores SIGINT/SIGTERM and outlives
+# the parent, while the parent returns normally. Without the profiler, this exits
+# immediately (the child is orphaned to init). In this case, the profiler must be neutral:
+# rocprofv3's finalization worker must not block in wait_for_children() reaping a child
+# that never exits. That block is the soft-hang and a regression here trips the ctest
+# TIMEOUT.
+add_signal_handler_test(
+    normal-exit
+    PROCESS_TYPE lingering-child
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit"
+    NO_TIMEOUT_SIGNAL)
