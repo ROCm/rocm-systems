@@ -658,7 +658,7 @@ public:
             // Configure SQ block
             if(block_info->attr & CounterBlockSqAttr)
             {
-                if(Primitives::GFXIP_LEVEL == 9)
+                if(!(Primitives::SQ_PERFCOUNTER_MASK_ADDR == Register()))
                     builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                        Primitives::SQ_PERFCOUNTER_MASK_ADDR,
                                                        Primitives::sq_mask_value(counter_des));

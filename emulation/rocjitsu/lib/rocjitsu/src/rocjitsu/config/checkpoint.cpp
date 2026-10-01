@@ -118,7 +118,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         builder.ForceDefaults(true);
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
                                             cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
-                                            cu_cfg.functional_quantum);
+                                            cu_cfg.functional_quantum,
+                                            se->compute_unit(0)->scratch_slots_per_cu());
         builder.ForceDefaults(false);
       }
     }
@@ -181,6 +182,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           // old omitted zero would otherwise be reinterpreted as 1024.
           if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
             cu_cfg.functional_quantum = cu->functional_quantum();
+          vm_config.soc.scratch_slots_per_cu = cu->scratch_slots_per_cu();
         }
       }
     }

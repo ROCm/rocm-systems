@@ -56,14 +56,14 @@ on_tracing_api_enter(typename SdkBackend::callback_tracing_record_t record,
         return;
     }
 
-    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp();
+    typename SdkBackend::timestamp_t const timestamp = SdkBackend::get_timestamp();
 
     if(user_data)
     {
         user_data->value = timestamp;
     }
 
-    auto name =
+    auto const name =
         SdkBackend::get_callback_tracing_names().at(record.kind, record.operation);
 
     if(Externals::get_use_timemory())
@@ -81,17 +81,19 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
 {
     (void) callback_data;
 
-    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp();
+    typename SdkBackend::timestamp_t const timestamp = SdkBackend::get_timestamp();
 
     if(!Externals::is_active() || !user_data)
     {
         return;
     }
 
+    // NOLINTNEXTLINE(misc-const-correctness) - filled in by get_backtrace_json() below
+    // (out-param)
     auto backtrace_data = Externals::get_backtrace_data(
         Externals::check_backtrace_operations(record.kind, record.operation));
 
-    auto name =
+    auto const name =
         SdkBackend::get_callback_tracing_names().at(record.kind, record.operation);
 
     const auto begin_timestamp = user_data->value;
@@ -107,7 +109,7 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
     SdkBackend::iterate_callback_tracing_kind_operation_args(
         record, detail::iterate_args_callback, 2, &args);
 
-    auto call_stack = Externals::get_backtrace_json(backtrace_data);
+    auto const call_stack = Externals::get_backtrace_json(backtrace_data);
 
     Externals::metadata_add_string(Category<Externals>::k_name);
 

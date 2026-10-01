@@ -27,7 +27,9 @@ std::string
 temp_root()
 {
     if(const char* env = std::getenv("TMPDIR"); env != nullptr && env[0] != '\0')
+    {
         return env;
+    }
     return "/tmp";
 }
 
@@ -41,12 +43,18 @@ void
 remove_dir_recursive(const std::string& dir)
 {
     DIR* d = ::opendir(dir.c_str());
-    if(d == nullptr) return;
+    if(d == nullptr)
+    {
+        return;
+    }
 
     while(dirent* entry = ::readdir(d))
     {
         const std::string name = entry->d_name;
-        if(name == "." || name == "..") continue;
+        if(name == "." || name == "..")
+        {
+            continue;
+        }
         ::unlink(fmt::format("{}/{}", dir, name).c_str());  // best effort, files only
     }
     ::closedir(d);
@@ -143,7 +151,7 @@ TEST(discovery_test, find_cache_files_pairs_buffered_and_metadata_for_same_pid)
 
 TEST(discovery_test, find_cache_files_skips_mismatched_parent_pid)
 {
-    auto m = find_cache_files(100, { "buffered_storage_999_42.bin" });
+    auto const m = find_cache_files(100, { "buffered_storage_999_42.bin" });
     EXPECT_TRUE(m.empty());
 }
 

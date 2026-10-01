@@ -36,6 +36,8 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 PROFILE_OUTPUT_FORMAT = "rocpd"
+# Panel id of block 30, Memory Bandwidth Analysis
+MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
 # Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (

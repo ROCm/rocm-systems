@@ -281,6 +281,10 @@ namespace RcclUnitTesting
   constexpr std::initializer_list<int> STANDARD_ELEM_COUNTS    = {2048, 384}; // For Sum/Max/Min
   constexpr std::initializer_list<int> PROD_ELEM_COUNTS_MEDIUM = {32}; // For Int32/Uint32 Prod
   constexpr std::initializer_list<int> PROD_ELEM_COUNTS_LARGE  = {64}; // For Int8/Uint8/Int64/Uint64/Float Prod
+  // gfx1250 uses at most 256 worker threads (four 64-lane warps). With the capped
+  // scalar unroll of 64, 16384 f16 elements make one full pass. Exercise two
+  // full passes and a 17-element partial tail.
+  constexpr int GFX1250_CAPPED_CHUNK_TAIL_COUNT = 2 * 16384 + 17;
 
   // Bias and input pattern constants
   constexpr int BIAS_CONSTANT_ONE = 1; // Use constant bias value of 1 (prevents overflow)
@@ -303,13 +307,19 @@ namespace RcclUnitTesting
                    ncclRedOp_t      redOp,
                    std::vector<int> numElements,
                    int              biasConstVal  = BiasTestConstants::BIAS_INCREMENTAL_PATTERN,
-                   int              inputConstVal = BiasTestConstants::INPUT_RANK_BASED_PATTERN)
+                   int              inputConstVal = BiasTestConstants::INPUT_RANK_BASED_PATTERN,
+                   bool             gfx1250Only   = false)
   {
       // Create TestBed first (doesn't create child processes yet)
       TestBed testBed;
 
-      // Check if architecture is gfx94 (covers gfx942) or gfx95 (covers gfx950)
-      if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95)
+      if (gfx1250Only && !testBed.ev.isGfx1250)
+      {
+          GTEST_SKIP() << "This AllReduce with Bias test requires gfx1250.";
+      }
+      // Existing bias coverage runs on gfx942 and gfx950. gfx1250 coverage is
+      // opt-in per test so unrelated cases are not enabled on a new architecture.
+      if (!gfx1250Only && !testBed.ev.isGfx94 && !testBed.ev.isGfx95)
       {
           TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.");
           return;
@@ -372,6 +382,17 @@ namespace RcclUnitTesting
           testBed.DestroyComms();
       }
       testBed.Finalize();
+  }
+
+  TEST(AllReduce, BiasGfx1250CappedChunksAndTail)
+  {
+      using namespace BiasTestConstants;
+      RunBiasTest(ncclFloat16,
+                  ncclMax,
+                  {GFX1250_CAPPED_CHUNK_TAIL_COUNT},
+                  BIAS_INCREMENTAL_PATTERN,
+                  INPUT_RANK_BASED_PATTERN,
+                  true);
   }
 
   // Int8 Tests
