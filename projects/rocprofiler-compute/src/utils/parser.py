@@ -797,3 +797,60 @@ def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> pd.DataFrame
             )
     # Convert dict to DataFrame for downstream pandas-based processing
     return pd.DataFrame(mspec.get_class_members(), index=[0])
+
+
+def reconcile_sysinfo_l2_channels(sys_info: pd.DataFrame) -> pd.DataFrame:
+    """Down-correct inflated L2 channel counts in saved sysinfo.
+
+    Isolating via ``ROCR_VISIBLE_DEVICES`` can yield a single-XCD profiled
+    device (``cu_per_gpu=38``, ``se_per_gpu=4`` on MI300X) while amd-smi
+    still reports SPX. Re-analyzing those workloads without this step still
+    expands block 18 to 128 channels and yields N/A for channels 16–127.
+    """
+    from utils.specs import MachineSpecsCDNA, totall2_banks
+
+    if sys_info.empty:
+        return sys_info
+    row = sys_info.iloc[0]
+    gpu_arch = row.get("gpu_arch")
+    if not isinstance(gpu_arch, str) or not gpu_arch.startswith("gfx9"):
+        return sys_info
+
+    probe = MachineSpecsCDNA(
+        gpu_arch=str(gpu_arch),
+        gpu_model=str(row["gpu_model"]) if pd.notna(row.get("gpu_model")) else None,
+        cu_per_gpu=(
+            str(int(row["cu_per_gpu"])) if pd.notna(row.get("cu_per_gpu")) else None
+        ),
+        se_per_gpu=(
+            str(int(row["se_per_gpu"])) if pd.notna(row.get("se_per_gpu")) else None
+        ),
+        num_xcd=str(int(row["num_xcd"])) if pd.notna(row.get("num_xcd")) else None,
+        l2_banks=(str(int(row["l2_banks"])) if pd.notna(row.get("l2_banks")) else None),
+        compute_partition=(
+            str(row["compute_partition"])
+            if pd.notna(row.get("compute_partition"))
+            else None
+        ),
+    )
+    reason = probe._should_downcorrect_inflated_multi_xcd(None)
+    if not reason:
+        return sys_info
+
+    out = sys_info.copy()
+    out.loc[out.index[0], "num_xcd"] = 1
+    out.loc[out.index[0], "compute_partition"] = "CPX"
+    corrected = totall2_banks(
+        probe.gpu_arch,
+        probe.gpu_model,
+        probe.l2_banks,
+        "CPX",
+    )
+    if corrected is not None:
+        out.loc[out.index[0], "total_l2_chan"] = int(corrected)
+    console_warning(
+        "analyze",
+        f"{reason}. Using num_xcd=1 / total_l2_chan="
+        f"{out.iloc[0].get('total_l2_chan')} for L2 channel expansion.",
+    )
+    return out
