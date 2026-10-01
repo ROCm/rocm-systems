@@ -62,7 +62,7 @@ Installing the rocpd Python prerequisites
 +++++++++++++++++++++++++++++++++++++++++
 
 Before running ``rocpd``, install the Python packages it depends on, such as ``pandas``, ``otf2``, and ``jinja2``.
-The ROCm installation ships the list of these packages in ``<ROCM_INSTALL>/share/rocprofiler-sdk/requirements.txt``, where ``<ROCM_INSTALL>`` is the ROCm installation directory, for example ``/opt/rocm``:
+The ROCm installation ships the list of these packages in ``<ROCM_PATH>/share/rocprofiler-sdk/requirements.txt``, where ``<ROCM_PATH>`` is the ROCm installation directory, for example ``/opt/rocm``:
 
 .. code-block:: bash
 
