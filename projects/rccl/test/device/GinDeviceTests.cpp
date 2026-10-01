@@ -807,7 +807,7 @@ TEST_F(GinDeviceTest, PostGfd_MultiPeer) {
 constexpr uint64_t kProxyShortTimeoutCycles = 1ULL << 20;
 
 // True when every qword of a proxy GFD slot is zero, i.e. nothing was posted to it.
-static bool GfdSlotIsZero(const ncclGinProxyGfd_t& slot) {
+static bool gfdSlotIsZero(const ncclGinProxyGfd_t& slot) {
   for (int q = 0; q < ncclGinProxyGfdQwords; q++) {
     if (slot.qword[q].raw != 0) {
       return false;
@@ -817,15 +817,15 @@ static bool GfdSlotIsZero(const ncclGinProxyGfd_t& slot) {
 }
 
 // Expects every slot of every queue in the buffer to be unwritten.
-static void ExpectQueuesZero(const DeviceBuffer<ncclGinProxyGfd_t>& queues, const char* what) {
+static void expectQueuesZero(const DeviceBuffer<ncclGinProxyGfd_t>& queues, const char* what) {
   const std::vector<ncclGinProxyGfd_t> slots = queues.copyTo();
   for (size_t s = 0; s < slots.size(); s++) {
-    EXPECT_TRUE(GfdSlotIsZero(slots[s])) << what << " posted to queue slot " << s;
+    EXPECT_TRUE(gfdSlotIsZero(slots[s])) << what << " posted to queue slot " << s;
   }
 }
 
 // Uploads one proxy ctx per element of d_ctxs, each over its own contiguous nranks slice of the device arrays.
-static void UploadProxyGpuCtxs(DeviceBuffer<ncclGinProxyGpuCtx_t>& d_ctxs, int nranks, uint32_t queueSize,
+static void uploadProxyGpuCtxs(DeviceBuffer<ncclGinProxyGpuCtx_t>& d_ctxs, int nranks, uint32_t queueSize,
                                ncclGinProxyGfd_t* queues, uint32_t* pis, uint32_t* cis, uint32_t* lastIssuedGet,
                                uint32_t* lastVisibleGet) {
   std::vector<ncclGinProxyGpuCtx_t> hostCtxs(d_ctxs.count);
@@ -843,7 +843,7 @@ static void UploadProxyGpuCtxs(DeviceBuffer<ncclGinProxyGpuCtx_t>& d_ctxs, int n
 }
 
 // A GIN_PROXY ncclGinCtx whose handle is the d_ctxs array, selecting contextId.
-static ncclGinCtx MakeProxyGinCtx(const DeviceBuffer<ncclGinProxyGpuCtx_t>& d_ctxs, int rank, int nRanks,
+static ncclGinCtx makeProxyGinCtx(const DeviceBuffer<ncclGinProxyGpuCtx_t>& d_ctxs, int rank, int nRanks,
                                   int contextId) {
   ncclGinCtx ctx{};
   ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
@@ -874,14 +874,14 @@ struct GinApiFlushRig {
     }
     // No consumer runs, so a raised abort ends every ci wait.
     d_abortFlag.upload(1u);
-    UploadProxyGpuCtxs(d_proxyCtx, kNranks, kQueueSize, d_queues.ptr, d_pis.ptr, d_cis.ptr, d_lastIssuedGet.ptr,
+    uploadProxyGpuCtxs(d_proxyCtx, kNranks, kQueueSize, d_queues.ptr, d_pis.ptr, d_cis.ptr, d_lastIssuedGet.ptr,
                        d_lastVisibleGet.ptr);
   }
 
   // Uploads hostIssued, so callers can seed the padding slots first.
   ncclGinCtx UploadAndMakeCtx() {
     d_lastIssuedGet.copyFrom(hostIssued);
-    return MakeProxyGinCtx(d_proxyCtx, kRank, kNranks, /*contextId=*/0);
+    return makeProxyGinCtx(d_proxyCtx, kRank, kNranks, /*contextId=*/0);
   }
 
   DeviceBuffer<ncclGinProxyGfd_t> d_queues;
@@ -913,7 +913,7 @@ TEST_F(GinDeviceTest, Flush_FlushesEveryPeerOnLocalQueue) {
   std::vector<uint32_t> visible = rig.d_lastVisibleGet.copyTo();
   std::vector<ncclGinProxyGfd_t> queues = rig.d_queues.copyTo();
 
-  // Visibility is observed through Wait's lastVisibleGet store, which currently runs even when abort ended the flush.
+  // Pins a gap: an abort-ended flush still publishes lastVisibleGet; correct is unpublished (fix at gin_proxy.h:375).
   for (int pe = 0; pe < Rig::kNranks; pe++) {
     EXPECT_EQ(visible[pe], Rig::kGetBase + pe) << "lastVisibleGet[" << pe << "] not advanced by Flush";
     EXPECT_EQ(cis[pe], 0u) << "cis[" << pe << "] is consumer-owned and must be untouched";
@@ -934,7 +934,7 @@ TEST_F(GinDeviceTest, Flush_FlushesEveryPeerOnLocalQueue) {
                   static_cast<uint64_t>(ncclGinProxyOpFlush))
           << "local slot " << s << " is not a flush GFD";
       } else {
-        EXPECT_TRUE(GfdSlotIsZero(slot)) << "queue " << pe << " slot " << s << " was unexpectedly written";
+        EXPECT_TRUE(gfdSlotIsZero(slot)) << "queue " << pe << " slot " << s << " was unexpectedly written";
       }
     }
     if (pe != Rig::kRank) {
@@ -975,10 +975,10 @@ TEST_F(GinDeviceTest, FlushTimeout_ReportsLaggingPeer) {
   d_queues.zero();
   d_gets.zero();
 
-  UploadProxyGpuCtxs(d_proxyCtx, static_cast<int>(kNranks), kQueueSize, d_queues.ptr, d_pis.ptr, d_cis.ptr, d_gets.ptr,
+  uploadProxyGpuCtxs(d_proxyCtx, static_cast<int>(kNranks), kQueueSize, d_queues.ptr, d_pis.ptr, d_cis.ptr, d_gets.ptr,
                      d_gets.ptr);
   const ncclGinCtx ctx =
-    MakeProxyGinCtx(d_proxyCtx, /*rank=*/0, static_cast<int>(kNranks), static_cast<int>(kContextId));
+    makeProxyGinCtx(d_proxyCtx, /*rank=*/0, static_cast<int>(kNranks), static_cast<int>(kContextId));
 
   // Case A: every peer of the selected context is drained; only the past-the-end sentinel lags, so all threads succeed.
   std::vector<uint32_t> hostPis(kIdxSize, 0u);
@@ -1038,7 +1038,7 @@ TEST_F(GinDeviceTest, FlushTimeout_CurrentlyLeavesPendingGetsInvisible) {
   EXPECT_EQ(rig.d_lastVisibleGet.copyTo(), zeros) << "timeout Flush advanced lastVisibleGet";
   EXPECT_EQ(rig.d_pis.copyTo(), zeros) << "timeout Flush moved a producer index";
   EXPECT_EQ(rig.d_cis.copyTo(), zeros) << "timeout Flush moved a consumer index";
-  ExpectQueuesZero(rig.d_queues, "timeout Flush");
+  expectQueuesZero(rig.d_queues, "timeout Flush");
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,7 +1205,7 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
 // FlushAsync<PROXY> snapshots pi and lastIssuedGet; Wait<PROXY> gates on it, flushes locally if needed, publishes.
 // ---------------------------------------------------------------------------
 
-static __device__ ncclGinProxyGpuCtx_t* ProxyCtxOf(const ncclGinCtx& ctx) {
+static __device__ ncclGinProxyGpuCtx_t* proxyCtxOf(const ncclGinCtx& ctx) {
   return &static_cast<ncclGinProxyGpuCtx_t*>(ctx.handle)[ctx.contextId];
 }
 
@@ -1228,7 +1228,7 @@ __global__ void kernelGinApiFlushAsyncTimedWait(ncclGinCtx ctx, int peer, bool p
                                                          /*descriptor=*/nullptr, /*optFlags=*/0);
   if (postExtra) {
     ncclGinProxyGfd_t gfd{};
-    nccl::gin::proxy::postGfd(ncclCoopThread(), ProxyCtxOf(ctx), &gfd, peer);
+    nccl::gin::proxy::postGfd(ncclCoopThread(), proxyCtxOf(ctx), &gfd, peer);
   }
   *outResult = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false,
                                                                 /*descriptor=*/nullptr, cuda::memory_order_acquire,
@@ -1247,7 +1247,7 @@ __global__ void kernelGinApiWait(ncclGinCtx ctx, ncclGinRequest_t request, int c
                                                                   /*abortFlag=*/nullptr, timeoutCycles);
     return;
   }
-  ncclGinProxyGpuCtx_t* proxyCtx = ProxyCtxOf(ctx);
+  ncclGinProxyGpuCtx_t* proxyCtx = proxyCtxOf(ctx);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[consumerPe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[consumerPe]);
   const uint32_t consumed = ci.load(cuda::memory_order_relaxed);
@@ -1261,7 +1261,7 @@ __global__ void kernelGinApiWait(ncclGinCtx ctx, ncclGinRequest_t request, int c
 }
 
 // Block 0 runs one Wait overload under abortFlag; an optional block 1 drains cis[peer] only if Wait outlives cycles.
-// state[0] is set once Wait returns, state[1] once the watchdog had to rescue it.
+// state[0] is set once Wait returns, state[1] once the watchdog rescued it; only the timed arm writes outResult.
 __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, bool timed, uint32_t* abortFlag,
                                       uint64_t cycles, ncclResult_t* outResult, uint32_t* state) {
   if (threadIdx.x != 0) {
@@ -1276,7 +1276,6 @@ __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, 
     } else {
       ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false, /*descriptor=*/nullptr,
                                                        cuda::memory_order_acquire, abortFlag);
-      *outResult = ncclSuccess;
     }
     done.store(1u, cuda::memory_order_release);
     return;
@@ -1286,7 +1285,7 @@ __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, 
     if (clock64() - startCycle >= cycles) {
       state[1] = 1u;
       const ncclGinCpuProxyRequest& req = reinterpret_cast<const ncclGinCpuProxyRequest&>(request);
-      cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(ProxyCtxOf(ctx)->cis[req.peer]);
+      cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtxOf(ctx)->cis[req.peer]);
       ci.store(req.nextGfdIdx, cuda::memory_order_release);
       return;
     }
@@ -1335,12 +1334,12 @@ protected:
     d_cis_.copyFrom(cis_);
     d_lastIssuedGet_.copyFrom(lastIssuedGet_);
     d_lastVisibleGet_.copyFrom(lastVisibleGet_);
-    UploadProxyGpuCtxs(d_proxyCtxs_, kNranks, kQueueSize, d_queues_.ptr, d_pis_.ptr, d_cis_.ptr, d_lastIssuedGet_.ptr,
+    uploadProxyGpuCtxs(d_proxyCtxs_, kNranks, kQueueSize, d_queues_.ptr, d_pis_.ptr, d_cis_.ptr, d_lastIssuedGet_.ptr,
                        d_lastVisibleGet_.ptr);
   }
 
   ncclGinCtx MakeCtx() const {
-    return MakeProxyGinCtx(d_proxyCtxs_, kRank, kNranks, kContextId);
+    return makeProxyGinCtx(d_proxyCtxs_, kRank, kNranks, kContextId);
   }
 
   static ncclGinRequest_t MakeWaitRequest(int peer, uint32_t nextGfdIdx, uint32_t lastIssuedGet) {
@@ -1477,7 +1476,7 @@ TEST_F(GinProxyFlushWaitTest, WaitSkipsFlushWhenGetsAlreadyVisible) {
 
     EXPECT_EQ(d_result.download(), ncclSuccess) << "no flush is needed, so nothing can time out";
     EXPECT_EQ(d_pis_.copyTo(), pis_) << "Wait must not post a flush GFD when all gets are visible";
-    ExpectQueuesZero(d_queues_, "Wait");
+    expectQueuesZero(d_queues_, "Wait");
     EXPECT_EQ(d_lastVisibleGet_.copyTo(), lastVisibleGet_) << "lastVisibleGet must not move backward";
   }
 }
@@ -1502,11 +1501,13 @@ TEST_F(GinProxyFlushWaitTest, WaitGateHonorsAbortFlag) {
                                                 d_result.ptr, d_state.ptr);
     syncAndCheck();
 
-    EXPECT_EQ(d_result.download(), ncclSuccess) << "Wait must leave its GFD gate via abortFlag, not time out";
+    if (timed) {
+      EXPECT_EQ(d_result.download(), ncclSuccess) << "timed Wait must leave its GFD gate via abortFlag, not time out";
+    }
     EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u})) << "Wait ignored abortFlag; the watchdog drained cis";
     EXPECT_EQ(d_cis_.copyTo(), cis_) << "nothing consumed the pending GFD";
     EXPECT_EQ(d_pis_.copyTo(), pis_) << "gets are visible, so Wait must not post a flush GFD";
-    ExpectQueuesZero(d_queues_, "aborted Wait");
+    expectQueuesZero(d_queues_, "aborted Wait");
     EXPECT_EQ(d_lastVisibleGet_.copyTo(), lastVisibleGet_);
   }
 }
@@ -1700,7 +1701,7 @@ struct ProxyFlushQueues {
 };
 
 // Runs one flush on peer pe and checks it never moves pi or ci; ncclInProgress means the kernel did not run.
-static ncclResult_t RunProxyFlush(const std::vector<uint32_t>& pis, const std::vector<uint32_t>& cis, uint32_t pe,
+static ncclResult_t runProxyFlush(const std::vector<uint32_t>& pis, const std::vector<uint32_t>& cis, uint32_t pe,
                                   uint32_t abortValue, uint64_t timeoutCycles) {
   SCOPED_TRACE(testing::Message() << "pe=" << pe << " abort=" << abortValue << " timeout=" << timeoutCycles);
   ProxyFlushQueues queues(pis, cis);
@@ -1720,11 +1721,11 @@ TEST_F(GinDeviceTest, ProxyFlush_SucceedsOnlyWhenCiReachesPiOfThatPeer) {
   // Peer 0 is fully consumed (ci == pi); peer 1 still has one GFD in flight.
   const std::vector<uint32_t> pis = {7u, 9u};
   const std::vector<uint32_t> cis = {7u, 8u};
-  EXPECT_EQ(RunProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclSuccess)
+  EXPECT_EQ(runProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclSuccess)
     << "ci == pi must count as complete";
-  EXPECT_EQ(RunProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, /*timeoutCycles=*/0u), ncclSuccess)
+  EXPECT_EQ(runProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, /*timeoutCycles=*/0u), ncclSuccess)
     << "a complete peer must succeed even with no time left; success is checked before the timeout";
-  EXPECT_EQ(RunProxyFlush(pis, cis, /*pe=*/1u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclTimeout)
+  EXPECT_EQ(runProxyFlush(pis, cis, /*pe=*/1u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclTimeout)
     << "flush must wait while ci < pi";
 }
 
@@ -1732,30 +1733,30 @@ TEST_F(GinDeviceTest, ProxyFlush_ReadsPiAndCiOfTheSamePeer) {
   // Only peer 1 is complete; reading either neighbour's pi or ci for peer 1 makes it time out.
   const std::vector<uint32_t> pis = {10u, 5u, 9u};
   const std::vector<uint32_t> cis = {4u, 5u, 0u};
-  EXPECT_EQ(RunProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclTimeout)
+  EXPECT_EQ(runProxyFlush(pis, cis, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclTimeout)
     << "peer 0 has six GFDs pending";
-  EXPECT_EQ(RunProxyFlush(pis, cis, /*pe=*/1u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclSuccess)
+  EXPECT_EQ(runProxyFlush(pis, cis, /*pe=*/1u, /*abortValue=*/0u, kProxyShortTimeoutCycles), ncclSuccess)
     << "peer 1 is fully consumed";
 }
 
 TEST_F(GinDeviceTest, ProxyFlush_ComparesAcrossUint32Wrap) {
   // pi wrapped to 2 while ci is still at 0xFFFFFFFE: four GFDs pending, so flush must time out.
-  EXPECT_EQ(RunProxyFlush({2u, 0u}, {0xFFFFFFFEu, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
+  EXPECT_EQ(runProxyFlush({2u, 0u}, {0xFFFFFFFEu, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
             ncclTimeout)
     << "a plain unsigned compare reads 2 <= 0xFFFFFFFE as complete";
   // ci wrapped to 1, past a stale pi snapshot of 0xFFFFFFFF: complete, so flush must succeed.
-  EXPECT_EQ(RunProxyFlush({0xFFFFFFFFu, 0u}, {1u, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
+  EXPECT_EQ(runProxyFlush({0xFFFFFFFFu, 0u}, {1u, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
             ncclSuccess)
     << "a plain unsigned compare reads 0xFFFFFFFF <= 1 as pending";
   // Half-range edge: ci up to 2^31-1 ahead of pi is complete; exactly 2^31 reads as behind. Fails for any width < 32.
-  EXPECT_EQ(RunProxyFlush({0u, 0u}, {0x7FFFFFFFu, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
+  EXPECT_EQ(runProxyFlush({0u, 0u}, {0x7FFFFFFFu, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
             ncclSuccess);
-  EXPECT_EQ(RunProxyFlush({0u, 0u}, {0x80000000u, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
+  EXPECT_EQ(runProxyFlush({0u, 0u}, {0x80000000u, 0u}, /*pe=*/0u, /*abortValue=*/0u, kProxyShortTimeoutCycles),
             ncclTimeout);
 }
 
 TEST_F(GinDeviceTest, ProxyFlush_AbortFlagExitsWithSuccessBeforeTimeout) {
-  EXPECT_EQ(RunProxyFlush({5u, 5u}, {4u, 5u}, /*pe=*/0u, /*abortValue=*/1u, kProxyFlushLongTimeoutCycles), ncclSuccess)
+  EXPECT_EQ(runProxyFlush({5u, 5u}, {4u, 5u}, /*pe=*/0u, /*abortValue=*/1u, kProxyFlushLongTimeoutCycles), ncclSuccess)
     << "a set abortFlag must end the spin through testAbort, not through the timeout";
 }
 
