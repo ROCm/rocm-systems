@@ -5313,10 +5313,9 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotPreemptsDdaIpc) {
       });
 }
 
-// CE now outranks DDA even on the fabric arch, where DDA used to win. That also retires the
-// block's `(ddaFabricArch || !ceReduceScatterAllowed)`: reaching it needs
-// `symEligible || !ceReduceScatterAllowed`, and its own `!symEligible` leaves only the second
-// disjunct, so the conjunct is true whenever evaluated.
+// CE now outranks DDA even on the fabric arch, where DDA used to win. The DDA
+// block no longer ORs in ddaFabricArch: both CE arms return before it, so a
+// call that reaches DDA has already declined CE.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250",
@@ -5584,9 +5583,9 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegi
       });
 }
 
-// The 2-shot arm's `!symEligible`: CeTwoShotChosenWhenForcedAndStagingBufferReady with the
-// symmetric seam saying "requested". Nothing else can intercept, DDA, Hierarchical and Direct all
-// carrying their own `!symEligible` and the late arm having no g_ceAvailable hook.
+// The 2-shot arm's `!symEligible`. Force is on and CTA policy is not zero, but
+// the symmetric seam says requested and g_ceAvailable is not hooked, so the late
+// registered arm does not run either.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_SymmetricEligibleExcludesCeTwoShot",
@@ -5626,6 +5625,56 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesCeRegis
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Past the 2-shot cap, the late registered-window arm is the CE candidate. It
+// still takes priority over symk when CE is enabled and the window is eligible.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredPreemptsSymmetric",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The late arm rebuilds its own gate and used to miss the Float8 reject in rcclUseCeReduceScatter.
+// fp8 has no CE reduce kernel, so this must fall through instead of returning CE and then
+// ncclInvalidArgument from the launcher.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredRejectsFloat8",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/16,
+                                                       ncclFloat8e4m3, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

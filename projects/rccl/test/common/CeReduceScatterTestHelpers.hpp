@@ -27,10 +27,10 @@ inline bool isCeRuntimeDriverSupported()
            (driverVer >= 70051831 && driverVer < 70060000);
 }
 
-// The chunk-size helpers live in ce_coll.h (ncclCeAllReduceMaxChunkBytes,
-// ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes). CE ReduceScatter
-// reuses that staging layout, so these tests exercise the same code
-// ncclCeReduceScatter() uses instead of a copy that can drift.
+// The chunk-size helpers live in ce_coll.h (ncclCeAllReduceSlotChunkBytes,
+// ncclCeAllReduceChooseChunkBytes). CE ReduceScatter sizes the slot from
+// ceArStagingBytes / nRanks, which defaults to NCCL_CE_AR_STAGING_BYTES and is
+// overridden by RCCL_CE_AR_STAGING_BYTES. Tests pass that capacity in.
 
 // 2-shot size cap rcclUseCeReduceScatter() applies when the comm has no arch
 // table (rcclCeAr2ShotMax fallback), which is the case for the mock comm below.

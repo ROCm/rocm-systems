@@ -2419,11 +2419,6 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     return ncclInvalidUsage;
   }
 
-  if (((uintptr_t)recvbuff & 15) != 0) {
-    WARN("CE ReduceScatter: recvbuff %p is not 16-byte aligned", recvbuff);
-    return ncclInvalidArgument;
-  }
-
   const size_t eltSize = ncclTypeSize(datatype);
   const size_t totalBytes = count * eltSize * (size_t)comm->nRanks;
   const size_t shardElems = count;
