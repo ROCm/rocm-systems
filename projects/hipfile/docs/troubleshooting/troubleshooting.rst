@@ -40,6 +40,50 @@ resolve that issue first before investigating further.
 For the full list of fastpath prerequisites, how to run ``ais-check``, and how
 to interpret its output, see :doc:`/how-to/checking-system-compatibility`.
 
+Kernel P2PDMA support
+=====================
+
+hipFile's fastpath requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``.
+A kernel without it cannot perform peer-to-peer DMA between the GPU and the
+storage device, so every I/O request falls back to the slower compatibility
+path. No error is reported; the only symptom is lower than expected throughput.
+
+This is a common cause of unexpected fallback-path use, because a distribution
+supported by ROCm doesn't necessarily ship a kernel with the option enabled. The
+Ubuntu 22.04 LTS default 5.15 kernel is one such case.
+
+``ais-check`` reports the problem as ``Kernel P2PDMA support : False``, even
+when the volumes table shows capable mounts:
+
+.. code-block:: none
+
+  Mounted volumes:
+  MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
+  /           ext4 (ordered)  nvme0n1  nvme     yes       yes
+
+  AIS support in:
+          Kernel P2PDMA support   : False
+          HIP runtime             : True
+          amdgpu                  : True
+          hipFile-capable volume  : True
+
+Confirm the kernel configuration directly:
+
+.. code-block:: none
+
+  $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
+  # CONFIG_PCI_P2PDMA is not set
+
+For the list of verified distributions and instructions on booting a kernel that
+enables the option, see :ref:`hipfile-kernel-p2pdma`.
+
+.. note::
+
+   If ``ais-check`` prints ``No kernel config files found!`` to stderr, it could
+   not locate a kernel configuration at ``/boot/config-$(uname -r)``,
+   ``/lib/modules/$(uname -r)/build/.config``, or ``/proc/config.gz``. In that
+   case P2PDMA support is unverified rather than known to be missing.
+
 Backing Storage
 ===============
 

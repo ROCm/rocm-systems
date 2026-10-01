@@ -6,6 +6,8 @@
 
 ### Changed
 
+* Documented that the fastpath requires a Linux kernel built with `CONFIG_PCI_P2PDMA=y`, including how to check the running kernel, a table of verified distribution kernels, and how to enable the option. A ROCm-supported distribution does not necessarily ship a kernel with P2PDMA enabled; the Ubuntu 22.04 LTS default 5.15 kernel does not.
+
 ### Fixed
 
 ### Removed
