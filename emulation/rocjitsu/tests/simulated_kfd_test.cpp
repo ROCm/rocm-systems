@@ -456,6 +456,34 @@ TEST_F(SimulatedKfdTest, FailedMonitorMmapPreservesFixedTarget) {
   EXPECT_EQ(::munmap(target, doorbell_page_size), 0);
 }
 
+TEST_F(SimulatedKfdTest, ClientDoorbellUnmapPreservesMonitorAndRemapContents) {
+  auto fixture = create_test_vm();
+  auto *driver = fixture.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t bytes = 8192;
+  const off_t offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                          rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+  void *client = driver->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+  ASSERT_NE(client, MAP_FAILED);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  auto *monitor = static_cast<uint64_t *>(process->gpu(0).doorbell_monitor_page);
+  ASSERT_NE(monitor, nullptr);
+  static_cast<uint64_t *>(client)[0] = 123;
+  ASSERT_EQ(driver->munmap(client, bytes), 0);
+  EXPECT_EQ(process->gpu(0).doorbell_monitor_page, monitor);
+  EXPECT_EQ(monitor[0], 123u);
+  EXPECT_TRUE(process->gpu(0).doorbell_views.empty());
+  client = driver->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+  ASSERT_NE(client, MAP_FAILED);
+  EXPECT_EQ(static_cast<uint64_t *>(client)[0], 123u);
+  static_cast<uint64_t *>(client)[0] = 456;
+  EXPECT_EQ(monitor[0], 456u);
+  EXPECT_EQ(driver->munmap(client, bytes), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, DoorbellMonitorRejectsOverlappingMunmapWhileQueueIsLive) {
   auto t = create_test_vm();
   auto *driver = t.driver();
