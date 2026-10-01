@@ -183,7 +183,7 @@ while true; do
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --enable-rccl-ep-tests)     enable_rccl_ep_tests=true;                                                                        shift ;;
-         --enable-tdm-prim-ll128)    enable_tdm_prim_ll128=true;                                                                   shift ;;
+         --enable-tdm-prim-ll128)    enable_tdm_prim_ll128=true;                                                                       shift ;;
          --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;

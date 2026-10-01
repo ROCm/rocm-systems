@@ -25,7 +25,6 @@
       "-t",
       "--enable-tdm-prim-ll128"
     ],
-    "cmake_options": "-DBITCODE_LIB_ARCH=gfx1250",
     "parallel_jobs": 64
   },
   "test_configurations": {
@@ -68,12 +67,17 @@
         {
           "name": "TDM_LL128_Ring_ReduceScatter",
           "description": "ReduceScatter under forced Ring + LL128",
-          "test_filter": "ReduceScatter.*:-ReduceScatter.UserBufferRegistration:-ReduceScatter.ManagedMemUserBufferRegistration"
+          "test_filter": "ReduceScatter.*"
         },
         {
           "name": "TDM_LL128_Ring_Broadcast",
           "description": "Broadcast under forced Ring + LL128",
           "test_filter": "Broadcast.*"
+        },
+        {
+          "name": "TDM_LL128_Ring_Scatter",
+          "description": "Scatter under forced Ring + LL128, whose in-place destination offset is arbitrarily aligned",
+          "test_filter": "Scatter.*"
         }
       ]
     },
@@ -138,11 +142,6 @@
           "name": "TDM_LL128_Ring_AllGather_UserBufferRegistration",
           "description": "Registered user buffers for AllGather under forced Ring + LL128",
           "test_filter": "AllGather.UserBufferRegistration:AllGather.ManagedMemUserBufferRegistration"
-        },
-        {
-          "name": "TDM_LL128_Ring_ReduceScatter_UserBufferRegistration",
-          "description": "Registered user buffers for ReduceScatter under forced Ring + LL128",
-          "test_filter": "ReduceScatter.UserBufferRegistration:ReduceScatter.ManagedMemUserBufferRegistration"
         }
       ]
     }
