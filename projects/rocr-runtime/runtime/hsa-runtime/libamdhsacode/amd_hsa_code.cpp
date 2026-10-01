@@ -604,6 +604,9 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
     struct MachInfo {
       std::string Name = "";
       bool XnackSupported = false;
+      // Whether XNACK is a selectable target-ID feature. Hardware support alone
+      // is insufficient: gfx1250 always enables replay.
+      bool XnackOnOffModes = false;
       bool SrameccSupported = false;
     };
 
@@ -619,25 +622,25 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703:  MI.Name = "gfx703";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704:  MI.Name = "gfx704";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX705:  MI.Name = "gfx705";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  MI.Name = "gfx801";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  MI.Name = "gfx801";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802:  MI.Name = "gfx802";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803:  MI.Name = "gfx803";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX805:  MI.Name = "gfx805";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  MI.Name = "gfx810";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  MI.Name = "gfx900";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  MI.Name = "gfx902";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  MI.Name = "gfx904";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  MI.Name = "gfx906";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  MI.Name = "gfx908";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909:  MI.Name = "gfx909";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90A:  MI.Name = "gfx90a";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  MI.Name = "gfx90c";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX942:  MI.Name = "gfx942";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX950:  MI.Name = "gfx950";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: MI.Name = "gfx1010"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: MI.Name = "gfx1011"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: MI.Name = "gfx1012"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1013: MI.Name = "gfx1013"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  MI.Name = "gfx810";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  MI.Name = "gfx900";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  MI.Name = "gfx902";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  MI.Name = "gfx904";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  MI.Name = "gfx906";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  MI.Name = "gfx908";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909:  MI.Name = "gfx909";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90A:  MI.Name = "gfx90a";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  MI.Name = "gfx90c";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX942:  MI.Name = "gfx942";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX950:  MI.Name = "gfx950";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: MI.Name = "gfx1010"; MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: MI.Name = "gfx1011"; MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: MI.Name = "gfx1012"; MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1013: MI.Name = "gfx1013"; MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030: MI.Name = "gfx1030"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031: MI.Name = "gfx1031"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1032: MI.Name = "gfx1032"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
@@ -658,9 +661,9 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250: MI.Name = "gfx1250"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT: MI.Name = "gfx1250-strict"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
 
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    MI.Name = "gfx9-generic";    MI.XnackSupported = true; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  MI.Name = "gfx9-4-generic";  MI.XnackSupported = true;  MI.SrameccSupported = true; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC: MI.Name = "gfx10-1-generic"; MI.XnackSupported = true; MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    MI.Name = "gfx9-generic";    MI.XnackSupported = true; MI.XnackOnOffModes = true; MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  MI.Name = "gfx9-4-generic";  MI.XnackSupported = true; MI.XnackOnOffModes = true;  MI.SrameccSupported = true; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC: MI.Name = "gfx10-1-generic"; MI.XnackSupported = true; MI.XnackOnOffModes = true; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: MI.Name = "gfx10-3-generic"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC:   MI.Name = "gfx11-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   MI.Name = "gfx12-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
@@ -819,13 +822,17 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
             break;
           }
 
-          switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4) {
-          case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
-            MI.Name += ":xnack-";
-            break;
-          case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
-            MI.Name += ":xnack+";
-            break;
+          // Match Comgr's canonical target ID: always-on XNACK is implied by
+          // the processor and must not introduce an unselectable modifier.
+          if (MI.XnackOnOffModes) {
+            switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4) {
+            case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
+              MI.Name += ":xnack-";
+              break;
+            case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
+              MI.Name += ":xnack+";
+              break;
+            }
           }
 
           // Generic version is not part of the ISA name.

@@ -554,61 +554,70 @@ namespace code {
       return true;
     }
 
+    struct MachInfo {
+      std::string Name;
+      bool XnackSupported = false;
+      // Target-ID modifiers describe selectable modes, not hardware support.
+      // Keep this separate for processors that always enable XNACK.
+      bool XnackOnOffModes = false;
+      bool SrameccSupported = false;
+    };
+
     // TODO: Move isa registry into the loader.
-    static bool GetMachInfo(unsigned mach, std::string &name, bool &sramecc_supported, bool &xnack_supported) {
+    static bool GetMachInfo(unsigned mach, MachInfo &info) {
       switch (mach) {
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX700:  name = "gfx700";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX701:  name = "gfx701";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX702:  name = "gfx702";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703:  name = "gfx703";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704:  name = "gfx704";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  name = "gfx801";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802:  name = "gfx802";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803:  name = "gfx803";  xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  name = "gfx810";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  name = "gfx900";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  name = "gfx902";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  name = "gfx904";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  name = "gfx906";  xnack_supported = true;  sramecc_supported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  name = "gfx908";  xnack_supported = true;  sramecc_supported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  name = "gfx90c";  xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1000: name = "gfx1000"; xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: name = "gfx1010"; xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: name = "gfx1011"; xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: name = "gfx1012"; xnack_supported = true;  sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030: name = "gfx1030"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031: name = "gfx1031"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1032: name = "gfx1032"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1033: name = "gfx1033"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1034: name = "gfx1034"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1035: name = "gfx1035"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1036: name = "gfx1036"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX700:  info.Name = "gfx700";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX701:  info.Name = "gfx701";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX702:  info.Name = "gfx702";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703:  info.Name = "gfx703";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704:  info.Name = "gfx704";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  info.Name = "gfx801";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802:  info.Name = "gfx802";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803:  info.Name = "gfx803";  info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  info.Name = "gfx810";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  info.Name = "gfx900";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  info.Name = "gfx902";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  info.Name = "gfx904";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  info.Name = "gfx906";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  info.Name = "gfx908";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  info.Name = "gfx90c";  info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1000: info.Name = "gfx1000"; info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: info.Name = "gfx1010"; info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: info.Name = "gfx1011"; info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: info.Name = "gfx1012"; info.XnackSupported = true; info.XnackOnOffModes = true;  info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030: info.Name = "gfx1030"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031: info.Name = "gfx1031"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1032: info.Name = "gfx1032"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1033: info.Name = "gfx1033"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1034: info.Name = "gfx1034"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1035: info.Name = "gfx1035"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1036: info.Name = "gfx1036"; info.XnackSupported = false; info.SrameccSupported = false; break;
 #if defined(GFX40_BUILD)
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4000: name = "gfx4000"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4010: name = "gfx4010"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4020: name = "gfx4020"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4030: name = "gfx4030"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4000: info.Name = "gfx4000"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4010: info.Name = "gfx4010"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4020: info.Name = "gfx4020"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX4030: info.Name = "gfx4030"; info.XnackSupported = false; info.SrameccSupported = false; break;
 #endif // GFX40_BUILD
 #if defined(GFX11_BUILD)
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100: name = "gfx1100"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1101: name = "gfx1101"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1102: name = "gfx1102"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1103: name = "gfx1103"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1150: name = "gfx1150"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151: name = "gfx1151"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1152: name = "gfx1152"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: name = "gfx1153"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC: name = "gfx11-generic"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100: info.Name = "gfx1100"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1101: info.Name = "gfx1101"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1102: info.Name = "gfx1102"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1103: info.Name = "gfx1103"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1150: info.Name = "gfx1150"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151: info.Name = "gfx1151"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1152: info.Name = "gfx1152"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: info.Name = "gfx1153"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC: info.Name = "gfx11-generic"; info.XnackSupported = false; info.SrameccSupported = false; break;
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: name = "gfx1200"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: name = "gfx1201"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   name = "gfx12-generic";   xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: info.Name = "gfx1200"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: info.Name = "gfx1201"; info.XnackSupported = false; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   info.Name = "gfx12-generic";   info.XnackSupported = false; info.SrameccSupported = false; break;
 #endif // GFX12_BUILD
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    name = "gfx9-generic";    xnack_supported = true; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  name = "gfx9-4-generic";  xnack_supported = true; sramecc_supported = true; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC: name = "gfx10-1-generic"; xnack_supported = true; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: name = "gfx10-3-generic"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    info.Name = "gfx9-generic";    info.XnackSupported = true; info.XnackOnOffModes = true; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  info.Name = "gfx9-4-generic";  info.XnackSupported = true; info.XnackOnOffModes = true; info.SrameccSupported = true; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC: info.Name = "gfx10-1-generic"; info.XnackSupported = true; info.XnackOnOffModes = true; info.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: info.Name = "gfx10-3-generic"; info.XnackSupported = false; info.SrameccSupported = false; break;
       default: return false;
       }
       return true;
@@ -704,42 +713,40 @@ namespace code {
         // NOT the lightning compiler.
         return "";
       }
-      std::string name;
-      bool sramecc_supported = false;
-      bool xnack_supported = false;
-      if (!GetMachInfo(mach, name, sramecc_supported, xnack_supported))
+      MachInfo info;
+      if (!GetMachInfo(mach, info))
         return "";
 
       // Only "AMD:AMDGPU:9:0:6" and "AMD:AMDGPU:9:0:7" supports SRAMECC for
       // code object V2, and it must be OFF.
-      if (sramecc_supported)
-        name += ":sramecc-";
+      if (info.SrameccSupported)
+        info.Name += ":sramecc-";
 
       if (is_finalizer) {
         if (e_flags & ELF::EF_AMDGPU_FEATURE_XNACK_V2)
-          name += ":xnack+";
-        else if (xnack_supported)
-          name += ":xnack-";
+          info.Name += ":xnack+";
+        else if (info.XnackSupported)
+          info.Name += ":xnack-";
       } else {
         if (old_name == "AMD:AMDGPU:8:0:1")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:8:1:0")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:1")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:3")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:5")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:7")
-          name += ":xnack+";
+          info.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:13")
-          name += ":xnack+";
-        else if (xnack_supported)
-          name += ":xnack-";
+          info.Name += ":xnack+";
+        else if (info.XnackSupported)
+          info.Name += ":xnack-";
       }
 
-      return name;
+      return info.Name;
     }
 
     bool AmdHsaCode::GetIsa(std::string& isa_name, unsigned *genericVersion)
@@ -785,24 +792,22 @@ namespace code {
         isa_name += "--";
 
         unsigned mach = img->EFlags() & ELF::EF_AMDGPU_MACH;
-        std::string name = "";
-        bool xnack_supported = false;
-        bool sramecc_supported = false;
+        MachInfo info;
 
-        if (!GetMachInfo(mach, name, sramecc_supported, xnack_supported))
+        if (!GetMachInfo(mach, info))
           return false;
 
-        isa_name += name;
+        isa_name += info.Name;
 
         if (code_object_major_version == 3) {
           if (img->EFlags() & ELF::EF_AMDGPU_FEATURE_SRAMECC_V3)
             isa_name += ":sramecc+";
-          else if (sramecc_supported)
+          else if (info.SrameccSupported)
             isa_name += ":sramecc-";
 
           if (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V3)
             isa_name += ":xnack+";
-          else if (xnack_supported)
+          else if (info.XnackSupported)
             isa_name += ":xnack-";
         } else if (code_object_major_version >= 4) {
           switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_SRAMECC_V4) {
@@ -814,13 +819,17 @@ namespace code {
             break;
           }
 
-          switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4) {
-          case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
-            isa_name += ":xnack-";
-            break;
-          case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
-            isa_name += ":xnack+";
-            break;
+          // Match Comgr and ROCr: XNACK implied by the processor must not
+          // introduce an unselectable target-ID modifier.
+          if (info.XnackOnOffModes) {
+            switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4) {
+            case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
+              isa_name += ":xnack-";
+              break;
+            case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
+              isa_name += ":xnack+";
+              break;
+            }
           }
 
           // Generic version is not part of the ISA name.
