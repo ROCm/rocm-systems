@@ -43,6 +43,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
   - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
 
+- **Fixed crashes and mixed-up per-GPU values in GPU process lists**.  
+  - `amdsmi_get_gpu_process_list()` could crash, omit processes, or show a process that uses several GPUs with another GPU's memory usage when called from several threads at once or when the GPUs were queried alternately within the `AMDSMI_PROCESS_INFO_CACHE_MS` period.
+
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
