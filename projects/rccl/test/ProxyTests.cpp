@@ -13,9 +13,11 @@
 #include "socket.h"
 #define ENABLE_TIMER 0
 #include <assert.h>
+#include <errno.h>
 #include <poll.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -24,9 +26,13 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -315,6 +321,348 @@ TEST(ProxyTests, ncclProxyCallBlockingUDS)
     delete[] x_mem2;
 
     TEST_INFO("[ProxyTests] Test Complete");
+}
+
+namespace
+{
+constexpr int  kProxyCallConnId     = 7;
+constexpr auto kProxyCallTimeout    = std::chrono::seconds(30);
+constexpr auto kProxyCallReplyDelay = std::chrono::milliseconds(100);
+constexpr auto kNoReplyDelay        = std::chrono::milliseconds(0);
+
+// Loops recv until len bytes arrive; false on EOF or error.
+bool ReadFull(int fd, void* buf, size_t len)
+{
+    char* p = static_cast<char*>(buf);
+    while(len > 0)
+    {
+        ssize_t n = recv(fd, p, len, 0);
+        if(n <= 0)
+        {
+            return false;
+        }
+        p += n;
+        len -= static_cast<size_t>(n);
+    }
+    return true;
+}
+
+// Loops send until len bytes are written; false on error.
+bool WriteFull(int fd, const void* buf, size_t len)
+{
+    const char* p = static_cast<const char*>(buf);
+    while(len > 0)
+    {
+        ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
+        if(n <= 0)
+        {
+            return false;
+        }
+        p += n;
+        len -= static_cast<size_t>(n);
+    }
+    return true;
+}
+
+// One RPC as ncclProxyCallAsync puts it on the wire, decoded by the fake proxy.
+struct ProxyRpcRequest
+{
+    int               type     = -1;
+    int               connId   = -1;
+    int               reqSize  = -1;
+    int               respSize = -1;
+    std::vector<char> req;
+    void*             opId = nullptr;
+};
+
+bool ReadProxyRpcRequest(int fd, ProxyRpcRequest* out)
+{
+    if(!ReadFull(fd, &out->type, sizeof(out->type))
+       || !ReadFull(fd, &out->connId, sizeof(out->connId))
+       || !ReadFull(fd, &out->reqSize, sizeof(out->reqSize))
+       || !ReadFull(fd, &out->respSize, sizeof(out->respSize)))
+    {
+        return false;
+    }
+    if(out->reqSize < 0)
+    {
+        return false;
+    }
+    out->req.resize(static_cast<size_t>(out->reqSize));
+    if(out->reqSize > 0 && !ReadFull(fd, out->req.data(), out->req.size()))
+    {
+        return false;
+    }
+    return ReadFull(fd, &out->opId, sizeof(out->opId));
+}
+
+// Checks the fixed RPC header fields every ncclProxyCallBlocking request must carry.
+void ExpectProxyRpcHeader(const ProxyRpcRequest& seen, int reqSize, int respSize)
+{
+    EXPECT_EQ(seen.type, ncclProxyMsgSetup);
+    EXPECT_EQ(seen.connId, kProxyCallConnId);
+    EXPECT_EQ(seen.reqSize, reqSize);
+    EXPECT_EQ(seen.respSize, respSize);
+    EXPECT_NE(seen.opId, nullptr);
+}
+
+// Expects fd to have no unread bytes, so the client sent nothing beyond what was already consumed.
+void ExpectNoPendingBytes(int fd)
+{
+    char    byte    = 0;
+    ssize_t n       = recv(fd, &byte, 1, MSG_DONTWAIT);
+    int     recvErr = errno;
+    EXPECT_EQ(n, -1);
+    EXPECT_TRUE(recvErr == EAGAIN || recvErr == EWOULDBLOCK) << "errno " << recvErr;
+}
+
+// Client side of ncclProxyCallBlocking: a socketpair end wrapped as a Ready ncclSocket on a heap comm.
+class ProxyCallHarness
+{
+public:
+    ProxyCallHarness() = default;
+    ProxyCallHarness(const ProxyCallHarness&)            = delete;
+    ProxyCallHarness& operator=(const ProxyCallHarness&) = delete;
+
+    ~ProxyCallHarness()
+    {
+        // Unblocks a fake proxy still waiting in recv before the fds go away.
+        if(fds_[0] >= 0)
+        {
+            shutdown(fds_[0], SHUT_RDWR);
+        }
+        JoinProxy();
+        for(int fd : fds_)
+        {
+            if(fd >= 0)
+            {
+                close(fd);
+            }
+        }
+    }
+
+    bool Init()
+    {
+        if(socketpair(AF_UNIX, SOCK_STREAM, 0, fds_) != 0)
+        {
+            return false;
+        }
+        // sock_.abortFlag stays null, unlike production; the poll loop's abort check reads comm_->abortFlag instead.
+        sock_                  = ncclSocket{};
+        sock_.socketDescriptor = fds_[0];
+        sock_.state            = ncclSocketStateReady;
+        proxyState_            = std::make_unique<ncclProxyState>();
+        proxyState_->peerSocks = &sock_;
+        comm_                  = std::make_unique<ncclComm>();
+        comm_->proxyState      = proxyState_.get();
+        comm_->abortFlag       = &abortFlag_;
+        conn_                  = ncclProxyConnector{};
+        conn_.tpLocalRank      = 0;
+        conn_.connId           = kProxyCallConnId;
+        return true;
+    }
+
+    // Plays the proxy for one RPC: reads the request, waits delay, then replies with res and resp.
+    void StartReplyingProxy(ncclResult_t res, std::vector<char> resp, std::chrono::milliseconds delay)
+    {
+        int peer = fds_[1];
+        proxy_   = std::thread([this, res, resp = std::move(resp), delay, peer]() {
+            readOk_ = ReadProxyRpcRequest(peer, &seen_);
+            if(readOk_)
+            {
+                std::this_thread::sleep_for(delay);
+                ncclProxyRpcResponseHeader hdr = {seen_.opId, res, static_cast<int>(resp.size())};
+                writeOk_ = WriteFull(peer, &hdr, sizeof(hdr))
+                           && (resp.empty() || WriteFull(peer, resp.data(), resp.size()));
+            }
+            if(!readOk_ || !writeOk_)
+            {
+                // EOF makes the client's poll fail fast instead of waiting for the test timeout.
+                shutdown(peer, SHUT_RDWR);
+            }
+        });
+    }
+
+    // Plays a proxy that reads the request, then raises the comm abort flag instead of replying.
+    void StartAbortingProxy()
+    {
+        int peer = fds_[1];
+        proxy_   = std::thread([this, peer]() {
+            readOk_ = ReadProxyRpcRequest(peer, &seen_);
+            __atomic_store_n(&abortFlag_, 1, __ATOMIC_RELEASE);
+        });
+    }
+
+    void JoinProxy()
+    {
+        if(proxy_.joinable())
+        {
+            proxy_.join();
+        }
+    }
+
+    ncclResult_t Call(int type, void* req, int reqSize, void* resp, int respSize)
+    {
+        return ncclProxyCallBlocking(comm_.get(), &conn_, type, req, reqSize, resp, respSize);
+    }
+
+    ncclSocket& sock()
+    {
+        return sock_;
+    }
+
+    ncclProxyState* proxyState()
+    {
+        return proxyState_.get();
+    }
+
+    int clientFd() const
+    {
+        return fds_[0];
+    }
+
+    int peerFd() const
+    {
+        return fds_[1];
+    }
+
+    // Valid only after JoinProxy().
+    const ProxyRpcRequest& seen() const
+    {
+        return seen_;
+    }
+
+    bool readOk() const
+    {
+        return readOk_;
+    }
+
+    bool writeOk() const
+    {
+        return writeOk_;
+    }
+
+private:
+    int                             fds_[2]    = {-1, -1};
+    uint32_t                        abortFlag_ = 0;
+    ncclSocket                      sock_{};
+    ncclProxyConnector              conn_{};
+    std::unique_ptr<ncclProxyState> proxyState_;
+    std::unique_ptr<ncclComm>       comm_;
+    ProxyRpcRequest                 seen_;
+    bool                            readOk_  = false;
+    bool                            writeOk_ = false;
+    std::thread                     proxy_;
+};
+} // namespace
+
+// Delayed reply forces InProgress polls; the call must keep polling and return the proxy's payload.
+TEST(ProxyTests, ProxyCallBlockingWaitsForDelayedResponse)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingWaitsForDelayedResponse",
+            []() {
+                constexpr uint64_t kReqPayload  = 0x1122334455667788ULL;
+                constexpr uint64_t kRespPayload = 0xA5A5C3C3F00F0FF0ULL;
+                ProxyCallHarness harness;
+                ASSERT_TRUE(harness.Init());
+                std::vector<char> reply(sizeof(kRespPayload));
+                memcpy(reply.data(), &kRespPayload, sizeof(kRespPayload));
+                harness.StartReplyingProxy(ncclSuccess, std::move(reply), kProxyCallReplyDelay);
+
+                uint64_t     req  = kReqPayload;
+                uint64_t     resp = 0;
+                ncclResult_t res  = harness.Call(ncclProxyMsgSetup, &req, sizeof(req), &resp, sizeof(resp));
+                harness.JoinProxy();
+
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(resp, kRespPayload);
+                ASSERT_TRUE(harness.readOk());
+                EXPECT_TRUE(harness.writeOk());
+                const ProxyRpcRequest& seen = harness.seen();
+                ExpectProxyRpcHeader(seen, static_cast<int>(sizeof(req)), static_cast<int>(sizeof(resp)));
+                ASSERT_EQ(seen.req.size(), sizeof(req));
+                uint64_t sentReq = 0;
+                memcpy(&sentReq, seen.req.data(), sizeof(req));
+                EXPECT_EQ(sentReq, kReqPayload);
+                EXPECT_EQ(harness.proxyState()->expectedResponses, nullptr);
+            })
+            .withTimeout(kProxyCallTimeout));
+}
+
+// A non-InProgress error from the proxy must end the poll loop and be returned unchanged.
+TEST(ProxyTests, ProxyCallBlockingReturnsProxyErrorResult)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingReturnsProxyErrorResult",
+            []() {
+                ProxyCallHarness harness;
+                ASSERT_TRUE(harness.Init());
+                harness.StartReplyingProxy(ncclInvalidUsage, {}, kNoReplyDelay);
+
+                ncclResult_t res = harness.Call(ncclProxyMsgSetup, nullptr, 0, nullptr, 0);
+                harness.JoinProxy();
+
+                EXPECT_EQ(res, ncclInvalidUsage);
+                ASSERT_TRUE(harness.readOk());
+                EXPECT_TRUE(harness.writeOk());
+                ExpectProxyRpcHeader(harness.seen(), 0, 0);
+                EXPECT_EQ(harness.proxyState()->expectedResponses, nullptr);
+            })
+            .withTimeout(kProxyCallTimeout));
+}
+
+// Abort while waiting is the only exit from a proxy that never replies; the call must return, not hang.
+TEST(ProxyTests, ProxyCallBlockingReturnsOnAbortWhileWaiting)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingReturnsOnAbortWhileWaiting",
+            []() {
+                ProxyCallHarness harness;
+                ASSERT_TRUE(harness.Init());
+                harness.StartAbortingProxy();
+
+                ncclResult_t res = harness.Call(ncclProxyMsgSetup, nullptr, 0, nullptr, 0);
+                harness.JoinProxy();
+
+                EXPECT_EQ(res, ncclInternalError);
+                ASSERT_TRUE(harness.readOk());
+                ExpectProxyRpcHeader(harness.seen(), 0, 0);
+                // The proxy consumed exactly one request; a resend while polling would leave bytes here.
+                ExpectNoPendingBytes(harness.peerFd());
+            })
+            .withTimeout(kProxyCallTimeout));
+}
+
+// A send failure must return straight away without polling for a reply that will never come.
+TEST(ProxyTests, ProxyCallBlockingReturnsSendErrorWithoutPolling)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ProxyCallBlockingReturnsSendErrorWithoutPolling",
+            []() {
+                ProxyCallHarness harness;
+                ASSERT_TRUE(harness.Init());
+                // A poll would consume this foreign reply and fail in expectedProxyResponseStore, so it must remain.
+                const ncclProxyRpcResponseHeader sentinel
+                    = {reinterpret_cast<void*>(uintptr_t{0x5E471E1}), ncclSuccess, 0};
+                ASSERT_TRUE(WriteFull(harness.peerFd(), &sentinel, sizeof(sentinel)));
+                harness.sock().state = ncclSocketStateTerminating;
+
+                ncclResult_t res = harness.Call(ncclProxyMsgSetup, nullptr, 0, nullptr, 0);
+
+                EXPECT_EQ(res, ncclInternalError);
+                const int                  clientFd   = harness.clientFd();
+                ncclProxyRpcResponseHeader pending    = {};
+                ssize_t                    pendingLen = recv(clientFd, &pending, sizeof(pending), MSG_DONTWAIT);
+                EXPECT_EQ(pendingLen, static_cast<ssize_t>(sizeof(pending)));
+                EXPECT_EQ(pending.opId, sentinel.opId);
+                ExpectNoPendingBytes(harness.peerFd());
+            })
+            .withTimeout(kProxyCallTimeout));
 }
 
 TEST(ProxyTests, ncclProxyClientGetFdBlocking)
