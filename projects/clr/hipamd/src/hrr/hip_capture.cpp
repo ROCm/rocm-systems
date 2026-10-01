@@ -2532,8 +2532,7 @@ void hip_capture_init() {
       fprintf(stderr,
               "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
               "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
-              "LSM transition).
-");
+              "LSM transition).\n");
     return;
   }
 
