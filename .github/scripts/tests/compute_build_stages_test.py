@@ -60,7 +60,6 @@ class ComputeBuildStagesTest(unittest.TestCase):
         profiler_projects = [
             "aqlprofile",
             "rocprofiler",
-            "rocprofiler-compute",
             "rocprofiler-register",
             "rocprofiler-sdk",
             "rocprofiler-systems",
