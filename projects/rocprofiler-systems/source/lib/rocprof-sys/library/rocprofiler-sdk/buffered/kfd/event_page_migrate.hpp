@@ -25,9 +25,9 @@ on_kfd_event_page_migrate_configure()
 {
     Externals::add_string(Externals::k_kfd_event_page_migrate_category_name);
 
-    auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
-    auto  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
+    auto const& agent_mgr  = Externals::get_agent_manager();
+    auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
+    auto const  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
     if(gpu_agents.empty() && cpu_agents.empty())
     {
         LOG_DEBUG("no GPU or CPU agents found; no PMC info will "
@@ -133,7 +133,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
-    auto agent_label = [](const auto* agent_ptr) {
+    auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
         {
             return std::string{ "?" };
@@ -143,8 +143,8 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    auto track_name = fmt::format("KFD Event Page Migrate [{}->{}]",
-                                  agent_label(src_agent), agent_label(dst_agent));
+    auto const track_name = fmt::format("KFD Event Page Migrate [{}->{}]",
+                                        agent_label(src_agent), agent_label(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_args = "";
@@ -152,7 +152,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
     const auto pmc_value =
         static_cast<double>(record->end_address.value - record->start_address.value);
 
-    auto event_metadata = fmt::format(
+    auto const event_metadata = fmt::format(
         R"({{"start_address":{},"end_address":{},"prefetch_agent":{},"preferred_agent":{},"error_code":{}}})",
         record->start_address.value, record->end_address.value,
         record->prefetch_agent.handle, record->preferred_agent.handle,

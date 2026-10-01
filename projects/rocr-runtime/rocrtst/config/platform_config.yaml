@@ -103,6 +103,14 @@ groups:
     - rocrtstFunc.Memory_Atomic_Dec_Test
     - rocrtstFunc.Memory_Atomic_Xchg_Test
 
+  GL2Cache:
+    - rocrtstFunc.GL2_PersistingCache_QueryMax
+    - rocrtstFunc.GL2_PersistingCache_QueryRequest
+    - rocrtstFunc.GL2_PersistingCache_Set
+    - rocrtstFunc.GL2_PersistingCache_SetAndReadBack
+    - rocrtstFunc.GL2_PersistingCache_NegativeInvalidSize
+    - rocrtstFunc.GL2_PersistingCache_NegativeCPUAgent
+
   Performance:
     - rocrtstPerf.Memory_Async_Copy_On_Engine
     - rocrtstPerf.ENQUEUE_LATENCY
@@ -173,6 +181,12 @@ platforms:
       - rocrtstFunc.GpuCoreDump_InvalidPath
       - rocrtstFunc.GpuCoreDump_ContentIntegrity
       - rocrtstFunc.GpuCoreDump_PipePattern
+      - rocrtstFunc.GL2_PersistingCache_QueryMax
+      - rocrtstFunc.GL2_PersistingCache_QueryRequest
+      - rocrtstFunc.GL2_PersistingCache_Set
+      - rocrtstFunc.GL2_PersistingCache_SetAndReadBack
+      - rocrtstFunc.GL2_PersistingCache_NegativeInvalidSize
+      - rocrtstFunc.GL2_PersistingCache_NegativeCPUAgent
       - rocrtstPerf.Memory_Async_Copy_On_Engine
       - rocrtstNeg.Memory_Negative_Tests
       - rocrtstNeg.Queue_Validation_InvalidDimension

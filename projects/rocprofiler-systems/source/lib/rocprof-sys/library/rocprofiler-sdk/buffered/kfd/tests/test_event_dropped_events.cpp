@@ -13,9 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys::domains::buffered
-{
-namespace kfd
+namespace rocprofsys::domains::buffered::kfd
 {
 namespace
 {
@@ -88,7 +86,7 @@ TEST(kfd_event_dropped_events_test, on_configure_registers_pmc_info_for_first_gp
 {
     g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
 
-    auto gpu_agent               = std::make_shared<agent_t>();
+    auto const gpu_agent         = std::make_shared<agent_t>();
     gpu_agent->type              = externals::k_agent_type_gpu;
     gpu_agent->device_type_index = 3;
 
@@ -117,6 +115,4 @@ TEST(kfd_event_dropped_events_test, on_configure_registers_pmc_info_for_first_gp
     g_externals_mock.reset();
 }
 
-}  // namespace kfd
-
-}  // namespace rocprofsys::domains::buffered
+}  // namespace rocprofsys::domains::buffered::kfd

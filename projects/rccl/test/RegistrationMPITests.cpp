@@ -2677,11 +2677,18 @@ protected:
         cleanup(recvInfo);
     }
 
-    // Compute pattern value - use integer patterns for bfloat16 precision
-    // Pattern: rank * 100 + dest * 10 + (iter % 10) + offset
+    // Pattern: rank * 100 + dest * 10 + (iter % 10) + offset.
+    // hip_bfloat16 ULP is 4 above 512, so the float formula and the stored
+    // value differ for some ranks. encodePattern is the cast both init and
+    // verify already applied; an exact != after that cast is a real mismatch.
     static float computePattern(int rank, int peerRank, int iter, float offset = 0.0f)
     {
         return static_cast<float>(rank * 100 + peerRank * 10 + (iter % 10)) + offset;
+    }
+
+    static T encodePattern(int rank, int peerRank, int iter, float offset = 0.0f)
+    {
+        return static_cast<T>(computePattern(rank, peerRank, iter, offset));
     }
 
     void initBuffer(void* buffer, size_t countPerRank, int nRanks, int rank, int iter, float offset = 0.0f)
@@ -2689,7 +2696,7 @@ protected:
         (void)initializeBufferWithPattern<T>(buffer, countPerRank * nRanks,
             [rank, countPerRank, iter, offset](size_t i) {
                 int dest = static_cast<int>(i / countPerRank);
-                return static_cast<T>(computePattern(rank, dest, iter, offset));
+                return encodePattern(rank, dest, iter, offset);
             });
     }
 
@@ -2700,11 +2707,10 @@ protected:
             return false;
 
         for (int src = 0; src < nRanks; src++) {
-            T expected = static_cast<T>(computePattern(src, myRank, iter, offset));
+            T expected = encodePattern(src, myRank, iter, offset);
             for (size_t i = 0; i < countPerRank; i++) {
-                // Round the formula through T first. bfloat16 ULP is 8 around 1100,
-                // so comparing the unrounded float (1100) against a stored 1104 fails
-                // even when the collective is correct.
+                // Expected is the value init stored, after rounding to T. A mismatch
+                // here is not the bfloat16 ULP gap between the float formula and T.
                 if (data[src * countPerRank + i] != expected) {
                     TEST_WARN("Mismatch src=%d idx=%zu exp=%f got=%f iter=%d",
                               src, i, static_cast<float>(expected),
@@ -2725,7 +2731,7 @@ protected:
         std::vector<T> data(total);
 
         for (int dest = 0; dest < nRanks; dest++) {
-            T value = static_cast<T>(computePattern(rank, dest, iter, 0.5f));
+            T value = encodePattern(rank, dest, iter, 0.5f);
             for (size_t i = 0; i < counts[dest]; i++)
                 data[displs[dest] + i] = value;
         }
@@ -2742,9 +2748,14 @@ protected:
             return false;
 
         for (int src = 0; src < nRanks; src++) {
-            T expected = static_cast<T>(computePattern(src, myRank, iter, 0.5f));
+            T expected = encodePattern(src, myRank, iter, 0.5f);
             for (size_t i = 0; i < counts[src]; i++) {
-                if (data[displs[src] + i] != expected) return false;
+                if (data[displs[src] + i] != expected) {
+                    TEST_WARN("Mismatch src=%d idx=%zu exp=%f got=%f iter=%d",
+                              src, i, static_cast<float>(expected),
+                              static_cast<float>(data[displs[src] + i]), iter);
+                    return false;
+                }
             }
         }
         return true;
@@ -2805,7 +2816,7 @@ protected:
                     (void)hipMemcpy(&sample, sendInfo.buffer, sizeof(T), hipMemcpyDeviceToHost);
                     TEST_INFO("[%s] iter=%d PRE-AllToAll: sendBuf[0]=%.1f (expected=%.1f)",
                               label.c_str(), iter, static_cast<float>(sample),
-                              computePattern(ctx.rank, 0, iter, 0.0f));
+                              static_cast<float>(encodePattern(ctx.rank, 0, iter, 0.0f)));
                 }
 
                 (void)hipMemset(recvInfo.buffer, 0, totalSize);
@@ -2819,7 +2830,7 @@ protected:
                     (void)hipMemcpy(&recvSample, recvInfo.buffer, sizeof(T), hipMemcpyDeviceToHost);
                     TEST_INFO("[%s] iter=%d POST-AllToAll: recvBuf[0]=%.1f (expected from rank0=%.1f)",
                               label.c_str(), iter, static_cast<float>(recvSample),
-                              computePattern(0, ctx.rank, iter, 0.0f));
+                              static_cast<float>(encodePattern(0, ctx.rank, iter, 0.0f)));
                 }
 
                 ok = verifyBuffer(recvInfo.buffer, countPerRank, ctx.nRanks, ctx.rank, iter);
@@ -2833,7 +2844,7 @@ protected:
                     (void)hipMemcpy(&sample, sendInfoV.buffer, sizeof(T), hipMemcpyDeviceToHost);
                     TEST_INFO("[%s] iter=%d PRE-AllToAllv: sendBufV[0]=%.1f (expected=%.1f)",
                               label.c_str(), iter, static_cast<float>(sample),
-                              computePattern(ctx.rank, 0, iter, 0.5f));
+                              static_cast<float>(encodePattern(ctx.rank, 0, iter, 0.5f)));
                 }
 
                 (void)hipMemset(recvInfoV.buffer, 0, recvTotal * sizeof(T));
@@ -2848,7 +2859,7 @@ protected:
                     (void)hipMemcpy(&recvSample, recvInfoV.buffer, sizeof(T), hipMemcpyDeviceToHost);
                     TEST_INFO("[%s] iter=%d POST-AllToAllv: recvBufV[0]=%.1f (expected from rank0=%.1f)",
                               label.c_str(), iter, static_cast<float>(recvSample),
-                              computePattern(0, ctx.rank, iter, 0.5f));
+                              static_cast<float>(encodePattern(0, ctx.rank, iter, 0.5f)));
                 }
 
                 ok = verifyBufferV(recvInfoV.buffer, recvcounts, rdispls, ctx.nRanks, ctx.rank, iter);

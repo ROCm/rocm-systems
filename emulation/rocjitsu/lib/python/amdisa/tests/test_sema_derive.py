@@ -17,6 +17,7 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_enrich import enrich_block
 from amdisa.codegen.execute.sema_lower import (
     LoweringContext,
     OperandBinding,
@@ -282,7 +283,10 @@ class TestDeriveScalarBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.FMA in all_kinds
         cpp = lower_sema_block(block)
-        assert 'std::fma' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
+        assert 'wf.fp_round_mode_f32()' in cpp
+        assert 'wf.fp_denorm_mode_f32()' in cpp
+        assert 'wf.cu().arch(), wf.ieee_mode()' in cpp
 
     def test_scalar_fma_reads_third_source(self):
         sem = _FakeSem('S_FMAAK_F32', 'scalar_binop', 'fma', 'f32', 'none')
@@ -290,7 +294,10 @@ class TestDeriveScalarBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.FMA in all_kinds
         cpp = lower_sema_block(block)
-        assert 'std::fma' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
+        assert 'wf.fp_round_mode_f32()' in cpp
+        assert 'wf.fp_denorm_mode_f32()' in cpp
+        assert 'wf.cu().arch(), wf.ieee_mode()' in cpp
         assert 'src2' in cpp
 
     def test_scc_carry(self):
@@ -545,8 +552,8 @@ class TestDeriveScalarSaveexec:
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'wf.exec_raw()' in cpp
-        assert 'wf.set_exec_raw(' in cpp
+        assert 'wf.read_exec()' in cpp
+        assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 
     def test_saves_old_exec(self):
@@ -554,7 +561,7 @@ class TestDeriveScalarSaveexec:
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
-        assert 'wf.exec_raw()' in cpp
+        assert 'wf.read_exec()' in cpp
 
     def test_not1_saveexec_uses_source_and_negated_exec(self):
         sem = _FakeSem(
@@ -805,10 +812,10 @@ class TestDeriveVectorUnary:
     @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0f'),
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP3', 'cvt_norm_i16_f16', '32767.0f'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP1', 'cvt_norm_u16_f16', '65535.0f'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP3', 'cvt_norm_u16_f16', '65535.0f'),
+            ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),
+            ('V_CVT_NORM_I16_F16', 'ENC_VOP3', 'cvt_norm_i16_f16', '32767.0'),
+            ('V_CVT_NORM_U16_F16', 'ENC_VOP1', 'cvt_norm_u16_f16', '65535.0'),
+            ('V_CVT_NORM_U16_F16', 'ENC_VOP3', 'cvt_norm_u16_f16', '65535.0'),
         ],
     )
     def test_cvt_norm_i16_u16_f16_lowers_to_scaled_saturating_convert(
@@ -827,6 +834,50 @@ class TestDeriveVectorUnary:
         assert 'std::isnan' in cpp
         assert 'std::clamp' in cpp
         assert scale in cpp
+        assert 'util::rndne_scalar' in cpp
+        assert 'static_cast<double>(s)' in cpp
+        assert '-32768' not in cpp
+
+    @pytest.mark.parametrize('suffix', ['I16', 'U16'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_norm_i16_u16_f16_modifiers_precede_rounding(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_NORM_{suffix}_F16', 'ENC_VOP3')
+        fields = {'neg', 'clamp', 'omod'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
+        assert cpp.index('sv = -sv') < cpp.index('util::rndne_scalar')
+        assert ('std::fabs(sv)' in cpp) == has_abs
+        if has_abs:
+            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        assert 'inst_.omod' not in cpp
+        assert 'inst_.clamp' not in cpp
+
+    @pytest.mark.parametrize('suffix', ['I16', 'U16', 'F32'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_i16_u16_f32_f16_modifiers_precede_conversion(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_{suffix}_F16', 'ENC_VOP3')
+        fields = {'neg', 'clamp', 'omod'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
+        assert ('std::fabs(sv)' in cpp) == has_abs
+        if has_abs:
+            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        if suffix == 'F32':
+            assert 'inst_.omod' in cpp
+            assert 'inst_.clamp' in cpp
+            assert 'wf.fp_denorm_mode_f32()' in cpp
+            assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+            assert 'wf.ieee_mode()' in cpp
+        else:
+            assert 'inst_.omod' not in cpp
+            assert 'inst_.clamp' not in cpp
+            assert cpp.index('sv = -sv') < cpp.index('std::isnan(s)')
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
@@ -1522,7 +1573,11 @@ class TestDerivePseudoScalarUnary:
         assert 'if (exec != 0)' not in cpp
         assert 'for (uint32_t lane = 0' not in cpp
         assert 'write_scalar' in cpp
-        assert 'amdgpu::pseudo_scalar::execute_' in cpp
+        assert (
+            'amdgpu::transcendental::execute_pseudo_f16'
+            if name.endswith('_F16')
+            else 'amdgpu::pseudo_scalar::execute_f32'
+        ) in cpp
         assert 'wf.fp_round_mode_' in cpp
         assert 'wf.fp_denorm_mode_' in cpp
 
@@ -1699,11 +1754,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_std_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'std::fma(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
@@ -2774,13 +2829,14 @@ class TestDeriveMfma:
     @pytest.mark.parametrize(
         'name',
         [
+            'V_WMMA_F64_16X16X4_F64',
             'V_WMMA_BF16F32_16X16X32_BF16',
             'V_WMMA_F32_16X16X128_F8F6F4',
             'V_WMMA_F32_32X16X128_F4',
             'V_SWMMAC_BF16F32_16X16X64_BF16',
         ],
     )
-    def test_gfx1250_low_precision_wmma_derives_mfma(self, name):
+    def test_cdna5_wmma_profiles_derive_mfma(self, name):
         sem = derive_semantics(name, 'ENC_VOP3P')
         assert sem is not None
         assert sem.semantic_class == 'mfma'
@@ -2853,10 +2909,10 @@ class TestDeriveSpecialScalar:
         if dtype == 'b32':
             assert 'wf.exec()' in cpp
             assert 'wf.set_exec(' in cpp
-            assert 'exec_raw' not in cpp
+            assert 'wf.read_exec()' not in cpp
         else:
-            assert 'wf.exec_raw()' in cpp
-            assert 'wf.set_exec_raw(' in cpp
+            assert 'wf.read_exec()' in cpp
+            assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 
     @pytest.mark.parametrize(
@@ -2927,7 +2983,7 @@ class TestDeriveSpecialScalar:
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
                 'static_cast<uint64_t>(result));'
             ) in cpp
-            assert 'wf.set_exec_raw(result);' in cpp
+            assert 'wf.write_exec(result);' in cpp
 
     def test_wrexec_rejects_unsupported_operation(self):
         sem = _FakeSem(
@@ -3183,10 +3239,11 @@ class TestDeriveBufferFormat:
         assert sem.num_elems == 1
         assert sem.d16_lo and not sem.d16_hi
 
-    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+    def test_typed_non_d16_load_under_vbuffer_is_executable(self):
         sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
         assert sem is not None
-        assert sem.semantic_class == 'nop'
+        assert sem.semantic_class == 'tbuffer_load'
+        assert sem.num_elems == 4
 
     @pytest.mark.parametrize(
         'legacy,rdna_ordered,enc',

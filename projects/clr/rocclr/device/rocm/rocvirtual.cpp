@@ -1870,6 +1870,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+    // A segmented graph's cross-stream dependencies are BARRIER_AND/OR or vendor
+    // BARRIER_VALUE packets.  They carry the timing of the wait they perform,
+    // so report them alongside the dispatches instead of dropping their signal.
+    const bool isBarrier = (pktType == HSA_PACKET_TYPE_BARRIER_AND) ||
+                           (pktType == HSA_PACKET_TYPE_BARRIER_OR) ||
+                           (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                            amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
     if (timestamp_ != nullptr) {
       // Read the pre-patched completion signal from the host-side flat buffer, not
       // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
@@ -1880,7 +1887,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       if (prePatchedHandle == 0) {
         pkt->completion_signal =
             Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
-        if (isKernelDispatch) {
+        if (isKernelDispatch || isBarrier) {
           if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             pkt->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
@@ -1897,7 +1904,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         auto it = prePatchedSignals.find(prePatchedHandle);
         if (it != prePatchedSignals.end()) {
           timestamp_->AddProfilingSignal(it->second);
-          return isKernelDispatch ? it->second : nullptr;
+          return (isKernelDispatch || isBarrier) ? it->second : nullptr;
         }
       }
     } else if (isLast && (attach_signal || blocking)) {
@@ -1906,9 +1913,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     return nullptr;
   };
 
-  // Kernel-name collection is required when dispatch activity tracing is on; detailed
-  // packet logging when LOG_KERN2 / LOG_AQL is on.  Both are handled by reportBatchPacket.
+  // Kernel-name collection is required when dispatch activity tracing is on; barrier slot
+  // reservation when barrier tracing is on; detailed packet logging when LOG_KERN2/LOG_AQL.
   const bool needKernelNamesReported = amd::activity_prof::IsEnabled(OP_ID_DISPATCH);
+  const bool needBarriersReported = amd::activity_prof::IsEnabled(OP_ID_BARRIER);
   const bool kLogBatch = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
                          IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL);
 
@@ -1960,6 +1968,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
               priority_);
         }
       }
+    } else if ((needKernelNamesReported || needBarriersReported) && packetSignal != nullptr &&
+               (pktType == HSA_PACKET_TYPE_BARRIER_AND || pktType == HSA_PACKET_TYPE_BARRIER_OR ||
+                (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                 amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE))) {
+      // Cross-stream sync in a segmented graph arrives as a BARRIER_AND/OR or vendor
+      // BARRIER_VALUE packet; without a slot of its own the wait never reaches the timeline.
+      packetSignal->dispatch_slot_ = vcmd->addBarrierDispatch(index());
     } else if (kLogBatch && pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
                amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
@@ -2041,7 +2056,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
-      if (timestamp_ != nullptr || needKernelNamesReported || kLogBatch) {
+      if (timestamp_ != nullptr || needKernelNamesReported || needBarriersReported || kLogBatch) {
         for (size_t i = chunkStart; i < chunkEnd; ++i) {
           const uint64_t slotIdx = (startIndex + i) & queueMask;
           auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -2050,7 +2065,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           if (timestamp_ != nullptr) {
             packetSignal = attachPacketSignal(slot, i, i == numPackets - 1);
           }
-          if (needKernelNamesReported || kLogBatch) {
+          if (needKernelNamesReported || needBarriersReported || kLogBatch) {
             reportBatchPacket(i, slotIdx, packetSignal);
           }
         }
@@ -2096,7 +2111,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         *reinterpret_cast<uint32_t*>(&stg) = hdr | (static_cast<uint32_t>(setup) << 16);
         auto* dst = queueBase + slotIdx * kPacketSize;
         amd::movdir64b_copy64(dst, &stg);
-        if (needKernelNamesReported || kLogBatch) {
+        if (needKernelNamesReported || needBarriersReported || kLogBatch) {
           reportBatchPacket(i, slotIdx, packetSignal);
         }
       }
@@ -3235,6 +3250,9 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
   profilingBegin(cmd);
 
   if (dev().info().hmmSupported_) {
+    // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+    // work in the queue
+    releaseGpuMemoryFence(kSkipCpuWait);
     // Initialize signal for the barrier
     auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
     hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
@@ -3274,6 +3292,9 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+  // work in the queue
+  releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(command.Count(), timestamp_);
 
@@ -3314,6 +3335,9 @@ void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& co
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  // ROCr orders the discard only by the wait signals, so a signal must cover all earlier
+  // work in the queue
+  releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 
