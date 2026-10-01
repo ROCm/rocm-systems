@@ -34,12 +34,7 @@ class TestCpuPower(unittest.TestCase):
     def test_cpu_core_boostlimit(self):
         self.common.print_func_name("")
 
-        try:
-            cpu_processors = amdsmi.amdsmi_get_cpucore_handles()
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-
-        for i, cpu in enumerate(cpu_processors):
+        for i, cpu in enumerate(self.common.skip_without_cpu_core()):
             found_error = False
 
             # Set invalid boostlimit
@@ -86,13 +81,7 @@ class TestCpuPower(unittest.TestCase):
     def test_cpu_socket_power_cap(self):
         self.common.print_func_name("")
 
-        try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-
-        for i, cpu in enumerate(cpu_processors):
+        for i, cpu in enumerate(self.common.skip_without_cpu()):
             found_error = False
 
             # Set cpu socket power to invalid number
@@ -160,15 +149,9 @@ class TestCpuPower(unittest.TestCase):
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name("")
 
-        try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-
         # TODO boost_limit = 0
         boost_limit = 0
-        for i, cpu in enumerate(cpu_processors):
+        for i, cpu in enumerate(self.common.skip_without_cpu()):
             msg = f"cpu({i}):"
             msg1 = f"{msg} boost_limit({boost_limit}):"
             try:
@@ -210,9 +193,7 @@ class TestCpuPower(unittest.TestCase):
     def test_set_cpu_pwr_efficiency_mode(self):
         self.common.print_func_name("")
         modes = [0, 1, 2]
-        cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
-        for i, cpu in enumerate(cpu_handles):
-            self.common.print_device_header(i)
+        for i, cpu in enumerate(self.common.skip_without_cpu()):
             for mode in modes:
                 msg = f"\t### amdsmi_set_cpu_pwr_efficiency_mode(cpu={i}, mode={mode}):"
                 try:
