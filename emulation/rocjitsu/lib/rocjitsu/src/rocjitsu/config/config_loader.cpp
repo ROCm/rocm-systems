@@ -53,12 +53,13 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
   if (request.helpers < -1 || request.helpers > 128)
     throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
-  const uint32_t cpu_budget =
-      request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
   xcds = std::max(xcds, 1u);
-  if (clocked)
+  if (clocked) {
+    const uint32_t cpu_budget =
+        request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
     return {std::min(request.engines ? request.engines : cpu_budget, xcds),
             std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+  }
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
@@ -80,11 +81,6 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)
       cpu_cost += width - 1;
-    // Extra affinity can supply helpers without increasing the automatic
-    // engine/dispatch allocation beyond its existing cap. Explicit CPU knobs
-    // retain their override behavior.
-    if (!request.engines && !request.dispatch && cpu_cost > cpu_budget)
-      continue;
     const uint64_t cost = cpu_cost + candidate.helpers;
     if (cost <= budget && cost >= best_cost) {
       result = std::move(candidate);
@@ -569,6 +565,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
       cc.functional_quantum =
           config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+      if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second == "warn")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
+        else
+          throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -851,11 +855,14 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
       }
       self(self, child, checked(copies * n));
     }
-    // Match do_wire_cps(): a CP drains its sibling SEs, or direct sibling CUs
-    // when the parent has no shader engines.
-    if (has_cp)
-      result.dispatch_capacity =
-          std::max(result.dispatch_capacity, checked(has_se ? se_cus : direct_cus));
+    // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
+    // use at most CUs-1 pool workers, but concurrent XCDs share the whole pool.
+    // This is maximum demand; fewer engine partitions can leave workers idle.
+    if (has_cp) {
+      const uint64_t cus = has_se ? se_cus : direct_cus;
+      if (cus)
+        result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
+    }
   };
   if (root)
     visit(visit, root, 1);
@@ -961,6 +968,11 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   result.build_result =
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
+  if (result.device.present)
+    if (SoC *soc = result.soc())
+      soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+      });
 
   // A config that describes no bus still yields usable defaults, so front ends
   // that attach the GPU to a VMM work without every config being updated.
@@ -979,9 +991,14 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.devices[i].drm_render_minor = 128 + i;
       result.devices[i].unique_id = result.device.unique_id + i;
     }
-    for (uint32_t i = 1; i < result.num_gpus; ++i)
+    for (uint32_t i = 1; i < result.num_gpus; ++i) {
       result.extra_gpu_builds.push_back(
           build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
+      if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
+        soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+          cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+        });
+    }
   }
 
   return result;
@@ -1074,6 +1091,11 @@ ExecutionThreadSettings load_execution_thread_settings(const std::string &json_p
                                                        const std::string &schema_text) {
   return with_parsed_simulation_config_json(read_config_file(json_path), schema_text,
                                             execution_thread_settings);
+}
+
+ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
+                                                                   const std::string &schema_text) {
+  return with_parsed_simulation_config_json(json, schema_text, execution_thread_settings);
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,

@@ -93,7 +93,7 @@ private:
         {
             const auto agent_id = backend_t::make_agent_id(gpu_agent->handle);
 
-            auto supported_ids = query_supported_counters(agent_id);
+            auto const supported_ids = query_supported_counters(agent_id);
             LOG_INFO("Agent {} (device {}): {} supported counters", gpu_agent->name,
                      gpu_agent->device_id, supported_ids.size());
             if(supported_ids.empty())
@@ -140,8 +140,11 @@ private:
                     auto* configs = static_cast<std::unordered_map<
                         std::uint64_t, typename backend_t::counter_config_id_t>*>(
                         user_data);
-                    auto iter = configs->find(agent_cb.handle);
-                    if(iter != configs->end()) set_config(ctx, iter->second);
+                    auto const iter = configs->find(agent_cb.handle);
+                    if(iter != configs->end())
+                    {
+                        set_config(ctx, iter->second);
+                    }
                 },
                 &m_profile_configs);
             if(status != backend_t::status_success)
@@ -196,9 +199,14 @@ private:
         for(const auto& counter_id : supported)
         {
             auto details = m_backend_api->query_counter_details(counter_id);
-            if(details.empty()) continue;
-            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            if(details.empty())
+            {
                 continue;
+            }
+            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            {
+                continue;
+            }
             ids.push_back(counter_id);
             meta.insert(meta.end(), std::make_move_iterator(details.begin()),
                         std::make_move_iterator(details.end()));

@@ -16,6 +16,7 @@ set(common_sources
     pool.cpp
     regex.cpp
     sha256.cpp
+    static_object.cpp
     string_entry.cpp
     uuid_v7.cpp)
 

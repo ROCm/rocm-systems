@@ -395,6 +395,8 @@ class ThunkLoader {
                                       uint64_t* Frequency);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HSAint32* fd);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetPersistingCacheSize))(HSAuint32 NodeId, \
+                                      HSAuint64 CacheSize);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -444,7 +446,7 @@ class ThunkLoader {
     /// @brief Bind the thunk API table, either to a loaded shared thunk or to
     /// the statically linked one.
     ///
-    /// @retval true Every entry point in the table is callable. The five
+    /// @retval true Every entry point in the table is callable. The six
     /// marked "Optional" below are the ones a shared thunk is allowed not to
     /// export; an unresolved one is bound to a stub returning
     /// HSAKMT_STATUS_NOT_SUPPORTED rather than left null, so no call site has
@@ -476,9 +478,14 @@ class ThunkLoader {
     /// never got as far as creating an instance. Idempotent.
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
-    bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
-    bool IsWinDxg() const { return is_win_dxg_; }
-    bool IsWslDxg() const { return is_wsl_dxg_; }
+    bool IsDXG() const { return is_dxg_; }
+    // On Linux, DXG is only present under WSL2.
+    // On Windows, DXG is the native driver (not WSL).
+#if defined(__linux__)
+    bool IsWslDxg() const { return is_dxg_; }
+#else
+    bool IsWslDxg() const { return false; }
+#endif
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
@@ -618,6 +625,10 @@ class ThunkLoader {
         HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = nullptr;
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr) * HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = nullptr;
     HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd) * HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = nullptr;
+    /// Optional, on the same terms as hsaKmtSetSigbusDelay above: the DXG
+    /// thunk does not export it. AMD::KfdDriver::SetPersistingCacheSize() is
+    /// the only caller and maps the status.
+    HSAKMT_DEF(hsaKmtSetPersistingCacheSize) * HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = nullptr;
     HSAKMT_DEF(hsaKmtMemoryCpuMap) * HSAKMT_PFN(hsaKmtMemoryCpuMap) = nullptr;
     HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency) *
         HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = nullptr;
@@ -638,8 +649,7 @@ class ThunkLoader {
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
-    bool is_win_dxg_;
-    bool is_wsl_dxg_;
+    bool is_dxg_;
     bool is_dtif_;
     bool is_loaded_;
     /// The instance this loader owns, held as the means of giving it back

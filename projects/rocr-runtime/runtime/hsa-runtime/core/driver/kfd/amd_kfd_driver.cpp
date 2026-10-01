@@ -471,7 +471,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
@@ -835,7 +835,6 @@ hsa_status_t KfdDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t si
 
   return HSA_STATUS_SUCCESS;
 }
-
 hsa_status_t KfdDriver::OpenSMI(uint32_t node_id, int* fd) const {
   if (HSAKMT_CALL(hsaKmtOpenSMI(node_id, fd)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -1137,6 +1136,13 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
     *ready = false;
   }
 
+  return HSA_STATUS_SUCCESS;
+}
+
+
+hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 

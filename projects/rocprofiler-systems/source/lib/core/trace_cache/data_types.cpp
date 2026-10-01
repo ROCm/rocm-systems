@@ -22,7 +22,10 @@ filter_formats(const std::vector<format_t>& src, Predicate&& pred)
     kept.reserve(src.size());
     for(const auto& fmt : src)
     {
-        if(fmt.enabled && pred(fmt)) kept.push_back(fmt);
+        if(fmt.enabled && pred(fmt))
+        {
+            kept.push_back(fmt);
+        }
     }
     return enabled_formats_t{ std::move(kept) };
 }
@@ -34,8 +37,14 @@ join_names(const std::vector<format_t>& formats, Predicate&& pred)
     std::string out;
     for(const auto& fmt : formats)
     {
-        if(!fmt.enabled || !pred(fmt)) continue;
-        if(!out.empty()) out += ", ";
+        if(!fmt.enabled || !pred(fmt))
+        {
+            continue;
+        }
+        if(!out.empty())
+        {
+            out += ", ";
+        }
         out += fmt.name;
     }
     return out;
@@ -47,10 +56,18 @@ constexpr auto sequential_pred = [](const format_t& f) { return !f.process_paral
 }  // namespace
 
 enabled_formats_t::enabled_formats_t()
-: formats{ { format_kind::rocpd, true, get_use_rocpd(), "rocpd" },
-           { format_kind::perfetto, true, get_caching_perfetto(), "perfetto" },
-           { format_kind::unified_memory, false, get_use_unified_memory_profiling(),
-             "unified_memory" } }
+: formats{ { .kind             = format_kind::rocpd,
+             .process_parallel = true,
+             .enabled          = get_use_rocpd(),
+             .name             = "rocpd" },
+           { .kind             = format_kind::perfetto,
+             .process_parallel = true,
+             .enabled          = get_caching_perfetto(),
+             .name             = "perfetto" },
+           { .kind             = format_kind::unified_memory,
+             .process_parallel = false,
+             .enabled          = get_use_unified_memory_profiling(),
+             .name             = "unified_memory" } }
 {}
 
 enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept
@@ -60,35 +77,40 @@ enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept
 void
 enabled_formats_t::print() const
 {
-    if(std::none_of(formats.begin(), formats.end(),
-                    [](const auto& f) { return f.enabled; }))
+    if(std::ranges::none_of(formats, [](const auto& f) { return f.enabled; }))
+    {
         return;
+    }
 
     LOG_INFO("Generating [{}] format(s) with collected data from trace cache. "
              "This may take a while..",
              names().c_str());
 
     if(has_parallel_formats())
+    {
         LOG_INFO("  - Using parallel processing for: {}",
                  join_names(formats, parallel_pred));
+    }
 
     if(has_sequential_formats())
+    {
         LOG_INFO("  - Using sequential processing for: {}",
                  join_names(formats, sequential_pred));
+    }
 }
 
 bool
 enabled_formats_t::has_parallel_formats() const
 {
-    return std::any_of(formats.begin(), formats.end(),
-                       [](const auto& f) { return f.enabled && f.process_parallel; });
+    return std::ranges::any_of(
+        formats, [](const auto& f) { return f.enabled && f.process_parallel; });
 }
 
 bool
 enabled_formats_t::has_sequential_formats() const
 {
-    return std::any_of(formats.begin(), formats.end(),
-                       [](const auto& f) { return f.enabled && !f.process_parallel; });
+    return std::ranges::any_of(
+        formats, [](const auto& f) { return f.enabled && !f.process_parallel; });
 }
 
 enabled_formats_t
@@ -106,25 +128,24 @@ enabled_formats_t::get_sequential_formats() const
 bool
 enabled_formats_t::is_rocpd_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::rocpd; });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::rocpd; });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_perfetto_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::perfetto; });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::perfetto; });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_unified_memory_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
-        return f.kind == format_kind::unified_memory;
-    });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::unified_memory; });
     return it != formats.end() && it->enabled;
 }
 

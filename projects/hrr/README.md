@@ -10,6 +10,9 @@ The information presented in this document is for informational purposes only an
 
 © 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 
+## Note
+HRR Capture is now disabled by default on AMD platforms. The feature will be securely re-enabled in a future release
+
 ## Capture
 
 ```bash
@@ -159,7 +162,13 @@ the next event, so the divergence is confined to the launch under examination.
 | `HIP_HRR_REPLAY_NO_RESCAN` | off | Disable suballoc pointer rescan at replay |
 | `HIP_HRR_PTR_RELAX` | off | Disable replay-side stale-pointer guard (debug only) |
 | `HIP_HRR_REPLAY_FORCE_EXT_CIJK` | off | Force external Cijk kernel binding workaround (debug) |
-| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map at event ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
+| `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
+| `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |
+| `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
 
 ### D2H validation
 
@@ -179,6 +188,7 @@ capture.hrr/
   pid-<pid>/
     events.bin
     blobs/
+    code_objects/
     regions/          (optional)
     manifest.json
 ```
@@ -188,7 +198,15 @@ capture.hrr/
   dispatch table never saw. Written by code outside the runtime, never by
   capture itself
 - **blobs/** — host payloads referenced by the trace
+- **code_objects/** — code objects, content-addressed by hash (device images
+  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  records the hash so kernels sharing a name (Triton emits many `triton_`)
+  still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
+
+Code objects read back from the runtime must start with `\x7fELF`,
+`__CLANG_OFFLOAD_BUNDLE__` or `CCOB`; capture warns and records none rather
+than storing an image that fails only at replay with HIP error 200.
 
 Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-format notes).
 

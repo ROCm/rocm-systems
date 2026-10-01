@@ -10,8 +10,10 @@
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -24,6 +26,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/diagnostic.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -1169,6 +1172,153 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
 }
 
+TEST(EffectiveConfigTest, ReplacesTheBudgetAndLeavesEveryOtherFieldAsWritten) {
+  const std::string json = R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 32,
+  "num_threads": 2
+})";
+
+  FailureOr<std::string> rewritten = config::json_with_cpu_thread_budget(json, 4);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 4,
+  "num_threads": 2
+})");
+}
+
+TEST(EffectiveConfigTest, AddsTheBudgetToConfigsThatDoNotAskForOne) {
+  FailureOr<std::string> inserted = config::json_with_cpu_thread_budget("{}", 8);
+  ASSERT_TRUE(inserted.succeeded());
+  EXPECT_EQ(inserted.value(), R"({"cpu_thread_budget": 8})");
+
+  FailureOr<std::string> prefixed = config::json_with_cpu_thread_budget(R"({"num_threads": 2})", 8);
+  ASSERT_TRUE(prefixed.succeeded());
+  EXPECT_EQ(prefixed.value(), R"({"cpu_thread_budget": 8,"num_threads": 2})");
+}
+
+// The nested name is an unknown field the config parser discards, so only the scanner
+// can tell the two apart -- and picking the wrong one would silently launch under the
+// config's own budget instead of the requested one.
+TEST(EffectiveConfigTest, SetsTheTopLevelBudgetAndNotANestedFieldOfTheSameName) {
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget(R"({"vm": {"cpu_thread_budget": 1}})", 6);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), R"({"cpu_thread_budget": 6,"vm": {"cpu_thread_budget": 1}})");
+}
+
+TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget("{\n  // ceiling\n  cpu_thread_budget: 32\n}", 2);
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_EQ(rewritten.value(), "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
+}
+
+TEST(EffectiveConfigTest, PreservesCommentsAdjacentToScalarValues) {
+  FailureOr<std::string> block_comment =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budget":32/*,}*/})", 4);
+  ASSERT_TRUE(block_comment.succeeded());
+  EXPECT_EQ(block_comment.value(), R"({"cpu_thread_budget":4/*,}*/})");
+
+  FailureOr<std::string> line_comment =
+      config::json_with_cpu_thread_budget("{\"cpu_thread_budget\":32// ceiling\n}", 4);
+  ASSERT_TRUE(line_comment.succeeded());
+  EXPECT_EQ(line_comment.value(), "{\"cpu_thread_budget\":4// ceiling\n}");
+}
+
+TEST(EffectiveConfigTest, MatchesSingleQuotedAndEscapedQuotedFieldNames) {
+  FailureOr<std::string> single_quoted =
+      config::json_with_cpu_thread_budget(R"({'cpu_thread_budget':32})", 4);
+  ASSERT_TRUE(single_quoted.succeeded());
+  EXPECT_EQ(single_quoted.value(), R"({'cpu_thread_budget':4})");
+
+  FailureOr<std::string> escaped =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budge\u0074":32})", 4);
+  ASSERT_TRUE(escaped.succeeded());
+  EXPECT_EQ(escaped.value(), R"({"cpu_thread_budge\u0074":4})");
+}
+
+TEST(EffectiveConfigTest, ReportsAnUnknownFieldNameEscape) {
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget(R"({"cpu_thread_budget\q": 1})", 4, diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_EQ(diagnostic.message(), "unknown escape code in string constant");
+}
+
+TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> rewritten =
+      config::json_with_cpu_thread_budget("[1]", 1, diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_EQ(diagnostic.message(), "simulation config must be a JSON object");
+}
+
+TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  const std::string source = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source);
+
+  FailureOr<std::string> copy = config::write_effective_config(source, 12, getpid());
+  ASSERT_TRUE(copy.succeeded());
+
+  EXPECT_EQ(copy.value(),
+            rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
+  EXPECT_EQ(config::read_config_file(source), source_before);
+  EXPECT_EQ(config::load_execution_thread_settings(copy.value(), rocjitsu::kEmbeddedSchema)
+                .request.budget,
+            12u);
+}
+
+TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-write-failure-");
+  const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked_root) << "not a directory";
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+
+  util::StringDiagnostic diagnostic;
+  FailureOr<std::string> written = config::write_effective_config(
+      test::config_path("gfx942_cdna3.json"), 12, getpid(), diagnostic.emitter());
+  EXPECT_TRUE(written.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("cannot create runtime directory"));
+}
+
+// This case is registered as a native CLI test because it expects the launcher
+// to have created the invocation handoff before this child process starts.
+TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
+  const char *invocation_dir = std::getenv(rocjitsu::kRpcInvocationDirEnv);
+  ASSERT_NE(invocation_dir, nullptr);
+  ASSERT_NE(*invocation_dir, '\0');
+
+  const std::filesystem::path invocation_path(invocation_dir);
+  std::ifstream handoff(invocation_path / "config_path");
+  ASSERT_TRUE(handoff.is_open());
+
+  std::string effective_path;
+  ASSERT_TRUE(std::getline(handoff, effective_path));
+  ASSERT_FALSE(effective_path.empty());
+
+  EXPECT_EQ(
+      std::filesystem::absolute(effective_path).lexically_normal(),
+      std::filesystem::absolute(invocation_path / config::kEffectiveConfigName).lexically_normal());
+  ASSERT_TRUE(std::filesystem::exists(effective_path));
+
+  const std::string source_path = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source_path);
+  const auto source_settings =
+      config::load_execution_thread_settings(source_path, rocjitsu::kEmbeddedSchema);
+  // Default config json does not specify a budget, so 0 is the pre-launch value.
+  EXPECT_EQ(source_settings.request.budget, 0u);
+
+  const auto effective_settings =
+      config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(effective_settings.request.budget, 4u);
+  EXPECT_EQ(config::read_config_file(source_path), source_before);
+}
+
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
@@ -1609,6 +1759,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_NE(legacy_config, nullptr);
   EXPECT_FALSE(
       flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_SCRATCH_SLOTS_PER_CU));
   ASSERT_NE(checkpoint->compute_units(), nullptr);
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
@@ -1617,6 +1769,52 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  EXPECT_EQ(cu->scratch_slots_per_cu(), cu->num_wf_slots());
+}
+
+TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema, 48);
+  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
+  auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
+  ASSERT_EQ(source_cu->num_wf_slots(), 64u);
+  ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
+  ASSERT_EQ(source_cu->scratch_scoreboard_base(), 480u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-scratch-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads, /*cpu_thread_budget=*/48,
+                          source.thread_allocations, source.legacy_auto_dispatch,
+                          source.async_helper_threads);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored_cu = fb::GetSimulationCheckpoint(bytes.data())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine()
+                              ->compute_unit();
+  ASSERT_NE(stored_cu, nullptr);
+  EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
+  EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
+  restored.apply_cpu_dispatch_threads();
+  EXPECT_EQ(restored.soc()->dispatch_threads(), 33u);
+  ASSERT_EQ(restored.soc()->num_xcds(), 8u);
+  for (auto *xcd : restored.soc()->xcds()) {
+    auto *cp = xcd->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), 32u);
+    for (const auto *cu : cus) {
+      EXPECT_EQ(cu->num_wf_slots(), 64u);
+      EXPECT_EQ(cu->scratch_slots_per_cu(), 32u);
+    }
+    EXPECT_EQ(cus[15]->scratch_scoreboard_base(), 480u);
+    EXPECT_EQ(cus[16]->scratch_scoreboard_base(), 0u);
+  }
 }
 
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
@@ -2306,6 +2504,10 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   };
 
   run_case(/*configured=*/7, /*expected=*/7);
+  // Two seven-CU XCDs give inclusive shared width 1 + 2 * (7 - 1) = 13.
+  // The shared pool must be wider than either individual XCD when requested.
+  run_case(/*configured=*/11, /*expected=*/11);
+  run_case(/*configured=*/99, /*expected=*/13);
   const auto loaded = config::load_config_from_string(functional_dispatch_threads_config(0),
                                                       rocjitsu::kEmbeddedSchema);
   run_case(/*configured=*/0, /*expected=*/loaded.execution_threads.dispatch.front());
@@ -2511,9 +2713,10 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   std::string json = functional_dispatch_threads_config(/*threads=*/0);
   json.replace(json.find("\"num_threads\":1"), std::string("\"num_threads\":1").size(),
                "\"num_threads\":0");
-  json.insert(json.find('{') + 1, R"("cpu_thread_budget":8,"thread_allocations":[
+  // Two seven-CU XCDs can share a pool wider than either XCD alone.
+  json.insert(json.find('{') + 1, R"("cpu_thread_budget":12,"thread_allocations":[
     {"num_threads":1,"cpu_dispatch_threads":1},
-    {"num_threads":2,"cpu_dispatch_threads":7}],)");
+    {"num_threads":2,"cpu_dispatch_threads":11}],)");
   rj_vm_t *raw_source = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
             ROCJITSU_STATUS_SUCCESS);
@@ -2521,7 +2724,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
   ASSERT_EQ(source->loaded.cpu_dispatch_threads, 0u);
   const uint32_t effective_threads = source->soc->dispatch_threads();
-  ASSERT_EQ(effective_threads, 7u);
+  ASSERT_EQ(effective_threads, 11u);
   ASSERT_EQ(source->engine_config.num_threads, 2u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-auto-dispatch-checkpoint-");
@@ -2535,7 +2738,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   EXPECT_TRUE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                           fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
   EXPECT_EQ(checkpoint->config()->cpu_dispatch_threads(), 0u);
-  EXPECT_EQ(checkpoint->config()->cpu_thread_budget(), 8u);
+  EXPECT_EQ(checkpoint->config()->cpu_thread_budget(), 12u);
   EXPECT_EQ(checkpoint->config()->num_threads(), 0u);
   ASSERT_NE(checkpoint->config()->thread_allocations(), nullptr);
   EXPECT_EQ(checkpoint->config()->thread_allocations()->size(), 2u);
@@ -2572,7 +2775,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
 TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {
   const char *json = R"({
     "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
-    "cpu_dispatch_threads":3,
+    "cpu_dispatch_threads":5,
     "vm":{"arch":"cdna3"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
@@ -2598,7 +2801,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {
   ASSERT_NE(raw_source, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
 
-  EXPECT_EQ(source->soc->dispatch_threads(), 3u);
+  EXPECT_EQ(source->soc->dispatch_threads(), 5u);
   EXPECT_EQ(source->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
             37u);
 
@@ -2612,7 +2815,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {
   ASSERT_NE(raw_restored, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
 
-  EXPECT_EQ(restored->soc->dispatch_threads(), 3u);
+  EXPECT_EQ(restored->soc->dispatch_threads(), 5u);
   EXPECT_EQ(restored->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
             37u);
 }
