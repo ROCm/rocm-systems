@@ -25,6 +25,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 
+#include <algorithm>
 #include <timemory/data/atomic_ring_buffer.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -62,12 +63,12 @@ auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIO
 auto speedup_dist      = []() {
     const size_t               _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
-    std::generate(_v.begin(), _v.end(),
-                       [_value = 0]() mutable { return (_value += speedup_divisions); });
+    std::ranges::generate(
+        _v, [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
     const size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
-    std::sort(_v.begin(), _v.end());
+    std::ranges::sort(_v);
     if(_v.back() > 100)
     {
         throw std::runtime_error(
@@ -90,7 +91,7 @@ template <typename ContextT>
 auto&
 get_engine()
 {
-    static auto _seed = []() -> hash_value_t {
+    static auto const _seed = []() -> hash_value_t {
         auto _seed_v = config::get_setting_value<std::uint64_t>(
                            std::string{ env_vars::CAUSAL_RANDOM_SEED })
                            .value_or(0);
@@ -122,7 +123,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     auto _filters = std::vector<binary::scope_filter>{};
 
     // exclude internal libraries used by rocprof-sys
-    if(_scopes.count(sf::BINARY_FILTER) > 0)
+    if(_scopes.contains(sf::BINARY_FILTER))
     {
         _filters.emplace_back(sf{ .mode  = sf::FILTER_EXCLUDE,
                                   .scope = sf::BINARY_FILTER,
@@ -135,7 +136,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::function &&
-       _scopes.count(sf::FUNCTION_FILTER) > 0)
+       _scopes.contains(sf::FUNCTION_FILTER))
     {
         _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
                                   .scope      = sf::FUNCTION_FILTER,
@@ -147,7 +148,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE_DEFAULTS })
             .value_or(true);
 
-    if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
+    if(_use_default_excludes && _scopes.contains(sf::FUNCTION_FILTER))
     {
         // symbols starting with leading underscore are generally system functions
         _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
@@ -167,7 +168,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // "make main function" faster since it contains everything
     // that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::function &&
-       _scopes.count(sf::FUNCTION_FILTER) > 0)
+       _scopes.contains(sf::FUNCTION_FILTER))
     {
         _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
                                   .scope      = sf::FUNCTION_FILTER,
@@ -176,7 +177,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
 
     using utility::get_regex_or;
 
-    auto _source_end_converter = [](const std::string& _v) { return _v + "$"; };
+    auto const _source_end_converter = [](const std::string& _v) { return _v + "$"; };
 
     // include handling
     {
@@ -185,7 +186,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             get_regex_or(config::get_causal_source_scope(), _source_end_converter, "");
         auto _function_include = get_regex_or(config::get_causal_function_scope(), "");
 
-        auto _current_include =
+        auto const _current_include =
             std::make_tuple(_binary_include, _source_include, _function_include);
         static auto _former_include = decltype(_current_include){};
 
@@ -206,21 +207,21 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             _former_include = _current_include;
         }
 
-        if(!_binary_include.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        if(!_binary_include.empty() && _scopes.contains(sf::BINARY_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
                                       .scope      = sf::BINARY_FILTER,
                                       .expression = _binary_include });
         }
 
-        if(!_source_include.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        if(!_source_include.empty() && _scopes.contains(sf::SOURCE_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
                                       .scope      = sf::SOURCE_FILTER,
                                       .expression = _source_include });
         }
 
-        if(!_function_include.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        if(!_function_include.empty() && _scopes.contains(sf::FUNCTION_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_INCLUDE,
                                       .scope      = sf::FUNCTION_FILTER,
@@ -235,7 +236,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             get_regex_or(config::get_causal_source_exclude(), _source_end_converter, "");
         auto _function_exclude = get_regex_or(config::get_causal_function_exclude(), "");
 
-        auto _current_exclude =
+        auto const _current_exclude =
             std::make_tuple(_binary_exclude, _source_exclude, _function_exclude);
         static auto _former_exclude = decltype(_current_exclude){};
 
@@ -256,21 +257,21 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
             _former_exclude = _current_exclude;
         }
 
-        if(!_binary_exclude.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        if(!_binary_exclude.empty() && _scopes.contains(sf::BINARY_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
                                       .scope      = sf::BINARY_FILTER,
                                       .expression = _binary_exclude });
         }
 
-        if(!_source_exclude.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        if(!_source_exclude.empty() && _scopes.contains(sf::SOURCE_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
                                       .scope      = sf::SOURCE_FILTER,
                                       .expression = _source_exclude });
         }
 
-        if(!_function_exclude.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        if(!_function_exclude.empty() && _scopes.contains(sf::FUNCTION_FILTER))
         {
             _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
                                       .scope      = sf::FUNCTION_FILTER,
@@ -287,16 +288,16 @@ get_cached_binary_info()
 {
     static auto _v = []() {
         // get the linked binaries for the exe (excluding ones from librocprof-sys)
-        auto _link_map = binary::get_link_map();
-        auto _files    = std::vector<std::string>{};
+        auto const _link_map = binary::get_link_map();
+        auto       _files    = std::vector<std::string>{};
         _files.reserve(_link_map.size());
         for(const auto& itr : _link_map)
         {
             _files.emplace_back(itr.real());
         }
 
-        auto _discarded = std::vector<binary::binary_info>{};
-        auto _requested = binary::get_binary_info(_files, get_filters());
+        auto const _discarded = std::vector<binary::binary_info>{};
+        auto const _requested = binary::get_binary_info(_files, get_filters());
         return std::make_pair(_requested, _discarded);
     }();
     return _v;
@@ -306,7 +307,7 @@ bool
 satisfies_filter(const binary::scope_filter::filter_scope& _scope,
                  const std::string&                        _value)
 {
-    static auto _filters = get_filters();
+    static auto const _filters = get_filters();
     return binary::scope_filter::satisfies_filter(_filters, _scope, _value);
 }
 
@@ -315,7 +316,7 @@ compute_eligible_lines_impl()
 {
     const auto& _binary_info = get_cached_binary_info().first;
     auto&       _scoped_info = get_cached_binary_info().second;
-    auto        _filters     = get_filters();
+    auto const  _filters     = get_filters();
 
     for(const auto& litr : _binary_info)
     {
@@ -362,7 +363,7 @@ compute_eligible_lines_impl()
             _eligible_ar += ditr.ipaddr();
         }
 
-        for(auto ditr : litr.ranges)
+        for(auto const ditr : litr.ranges)
         {
             _eligible_ar += ditr;
         }
@@ -391,9 +392,9 @@ compute_eligible_lines_impl()
 void
 save_maps_info_impl(std::ostream& _ofs)
 {
-    auto _maps_file = fmt::format("/proc/{}/maps", process::get_id());
-    auto _ifs       = std::ifstream{ _maps_file };
-    auto _maps      = std::stringstream{};
+    auto const _maps_file = fmt::format("/proc/{}/maps", process::get_id());
+    auto       _ifs       = std::ifstream{ _maps_file };
+    auto       _maps      = std::stringstream{};
     if(_ifs)
     {
         _maps << _maps_file << "\n";
@@ -415,7 +416,7 @@ save_line_info_impl(std::ostream&                           _ofs,
                     const std::vector<binary::binary_info>& _binary_data,
                     const std::array<bool, 3>&              _info = { true, true, true })
 {
-    auto _write_impl = [&_ofs, &_info](const binary::binary_info& _data) {
+    auto const _write_impl = [&_ofs, &_info](const binary::binary_info& _data) {
         for(const auto& itr : _data.mappings)
         {
             _ofs << itr.pathname << " [" << fmt::format("0x{:X}", itr.load_address)
@@ -425,8 +426,8 @@ save_line_info_impl(std::ostream&                           _ofs,
         auto _emitted_dwarf_addresses = std::set<uintptr_t>{};
         for(const auto& itr : _data.symbols)
         {
-            auto _addr     = itr.address;
-            auto _addr_off = itr.address + itr.load_address;
+            auto const _addr     = itr.address;
+            auto const _addr_off = itr.address + itr.load_address;
             _ofs << "    " << _addr_off.as_hex() << " [" << _addr.as_hex()
                  << "] :: " << itr.file;
             if(itr.line > 0)
@@ -468,7 +469,7 @@ save_line_info_impl(std::ostream&                           _ofs,
         {
             for(const auto& itr : _data.debug_info)
             {
-                if(_emitted_dwarf_addresses.count(itr.address.low) > 0)
+                if(_emitted_dwarf_addresses.contains(itr.address.low))
                 {
                     continue;
                 }
@@ -563,12 +564,12 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         std::this_thread::sleep_for(std::chrono::duration<double>{ _delay_sec });
     }
 
-    auto _impl_count        = 0;
-    auto _start_time        = clock_type::now();
-    auto _exceeded_duration = [&]() {
+    auto       _impl_count        = 0;
+    auto       _start_time        = clock_type::now();
+    auto const _exceeded_duration = [&]() {
         if(_duration_sec > 1.0e-3)
         {
-            auto _elapsed = clock_type::now() - _start_time;
+            auto const _elapsed = clock_type::now() - _start_time;
             if(_elapsed >= duration_nsec)
             {
                 LOG_DEBUG("[causal] stopping experimentation after {} seconds "
@@ -584,8 +585,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
     while(state::process::get() < state::process::Finalized)
     {
-        auto _impl_no = _impl_count++;
-        auto _experim = experiment{};
+        auto const _impl_no = _impl_count++;
+        auto       _experim = experiment{};
 
         // loop until started or finalized
         while(!_experim.start())
@@ -627,9 +628,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                     _eligible_pc_hist.emplace_back(std::make_pair(itr.first, itr.second));
                 }
 
-                std::sort(
-                    _eligible_pc_hist.begin(), _eligible_pc_hist.end(),
-                    [](auto&& _lhs, auto&& _rhs) { return _lhs.second > _rhs.second; });
+                std::ranges::sort(_eligible_pc_hist, [](auto&& _lhs, auto&& _rhs) {
+                    return _lhs.second > _rhs.second;
+                });
 
                 for(const auto& itr : _eligible_pc_hist)
                 {
@@ -644,17 +645,17 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 }
 
                 // sort by most samples
-                std::sort(_samples.begin(), _samples.end(),
-                          [](const auto& _lhs, const auto& _rhs) {
-                              return _lhs.second > _rhs.second;
-                          });
+                std::ranges::sort(_samples, [](const auto& _lhs, const auto& _rhs) {
+                    return _lhs.second > _rhs.second;
+                });
 
                 for(const auto& itr : _samples)
                 {
                     if(itr.second > 0)
                     {
-                        auto _is_eligible = is_eligible_address(itr.first) &&
-                                            !get_line_info(itr.first, false).empty();
+                        auto const _is_eligible =
+                            is_eligible_address(itr.first) &&
+                            !get_line_info(itr.first, false).empty();
                         auto _linfo = binary::lookup_ipaddr_entry<true>(itr.first);
                         if(_linfo)
                         {
@@ -690,7 +691,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
-                auto _omni_causal_launcher =
+                auto const _omni_causal_launcher =
                     get_env<std::string>(env_vars::LAUNCHER, "") == "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
@@ -773,8 +774,8 @@ is_eligible_address(uintptr_t _v)
 void
 save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
 {
-    auto _write = [_verbose](const std::string& ofname, const auto& _data,
-                             const std::array<bool, 3>& _info) {
+    auto const _write = [_verbose](const std::string& ofname, const auto& _data,
+                                   const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
         if(path::create_parent_dirs_and_open_ofstream(_ofs, ofname))
         {
@@ -805,7 +806,7 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
 size_t
 set_current_selection(unwind_addr_t _stack)
 {
-    for(auto itr : _stack)
+    for(auto const itr : _stack)
     {
         if(itr == 0)
         {
@@ -814,7 +815,7 @@ set_current_selection(unwind_addr_t _stack)
         ++eligible_pc_candidates;
         if(is_eligible_address(itr))
         {
-            auto _idx = eligible_pc_idx++ % latest_eligible_pc.size();
+            auto const _idx = eligible_pc_idx++ % latest_eligible_pc.size();
             latest_eligible_pc.at(_idx)->store(itr);
         }
     }
@@ -825,7 +826,7 @@ set_current_selection(unwind_addr_t _stack)
 size_t
 set_current_selection(container::c_array<std::uint64_t> _stack)
 {
-    for(auto itr : _stack)
+    for(auto const itr : _stack)
     {
         if(itr == 0)
         {
@@ -834,7 +835,7 @@ set_current_selection(container::c_array<std::uint64_t> _stack)
         ++eligible_pc_candidates;
         if(is_eligible_address(itr))
         {
-            auto _idx = eligible_pc_idx++ % latest_eligible_pc.size();
+            auto const _idx = eligible_pc_idx++ % latest_eligible_pc.size();
             latest_eligible_pc.at(_idx)->store(itr);
         }
     }
@@ -859,9 +860,9 @@ reset_sample_selection()
 selected_entry
 sample_selection(size_t _nitr, size_t _wait_ns)
 {
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _select_address = [&](auto& _address_vec) {
+    auto const _select_address = [&](auto& _address_vec) {
         // this isn't necessary bc of check before calling this lambda but
         // kept because of size() - 1 in distribution range
         if(ROCPROFSYS_UNLIKELY(_address_vec.empty()))
@@ -875,12 +876,12 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             // randomly select an address
             auto _dist =
                 std::uniform_int_distribution<size_t>{ 0, _address_vec.size() - 1 };
-            auto _idx = _dist(get_engine<selected_entry>());
+            auto const _idx = _dist(get_engine<selected_entry>());
 
-            uintptr_t _addr        = _address_vec.at(_idx);
-            uintptr_t _sym_addr    = 0;
-            uintptr_t _lookup_addr = _addr;
-            auto      _dl_info     = unwind::dlinfo::construct(_addr);
+            uintptr_t  _addr        = _address_vec.at(_idx);
+            uintptr_t  _sym_addr    = 0;
+            uintptr_t  _lookup_addr = _addr;
+            auto const _dl_info     = unwind::dlinfo::construct(_addr);
 
             _address_vec.erase(_address_vec.begin() + _idx);
 
@@ -902,7 +903,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
-                auto _location =
+                auto const _location =
                     _dl_info.location
                         ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
@@ -922,7 +923,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 }
             }
 
-            auto& _linfo_v =
+            auto const& _linfo_v =
                 (config::get_causal_mode() == state::process::CausalMode::function)
                     ? linfo.front()
                     : linfo.back();
@@ -973,10 +974,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 std::deque<binary::symbol>
 get_line_info(uintptr_t _addr, bool _include_discarded)
 {
-    static auto _glob_filters  = get_filters({ sf::BINARY_FILTER });
-    static auto _scope_filters = get_filters();
-    auto        _data          = std::deque<binary::symbol>{};
-    auto        _get_line_info = [&](const auto& _info, const auto& _filters) {
+    static auto const _glob_filters  = get_filters({ sf::BINARY_FILTER });
+    static auto const _scope_filters = get_filters();
+    auto              _data          = std::deque<binary::symbol>{};
+    auto const        _get_line_info = [&](const auto& _info, const auto& _filters) {
         // search for exact matches first
         for(const binary::binary_info& litr : _info)
         {
@@ -1005,7 +1006,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     continue;
                 }
                 // compute the symbols ip address range
-                auto _ipaddr = ditr.ipaddr();
+                auto const _ipaddr = ditr.ipaddr();
                 // if the lower bound of the ip address range is greater than the address,
                 // all following symbols are not worth searching since they are at higher
                 // addresses than this symbol (sorted by address)
@@ -1086,8 +1087,8 @@ push_progress_point(std::string_view _name)
 
     ++num_progress_points;
 
-    auto  _hash = tim::add_hash_id(_name);
-    auto& _data = get_progress_bundles();
+    auto const _hash = tim::add_hash_id(_name);
+    auto&      _data = get_progress_bundles();
     if(ROCPROFSYS_LIKELY(_data != nullptr))
     {
         auto* _bundle = _data->construct(_hash);
@@ -1118,7 +1119,7 @@ pop_progress_point(std::string_view _name)
         return;
     }
 
-    auto _hash = tim::add_hash_id(_name);
+    auto const _hash = tim::add_hash_id(_name);
     for(auto itr = _data->rbegin(); itr != _data->rend(); ++itr)
     {
         if((*itr)->get_hash() == _hash)
@@ -1141,8 +1142,8 @@ mark_progress_point(std::string_view _name, bool _force)
 
     ++num_progress_points;
 
-    auto  _hash = tim::add_hash_id(_name);
-    auto& _data = get_progress_bundles();
+    auto const _hash = tim::add_hash_id(_name);
+    auto&      _data = get_progress_bundles();
     if(ROCPROFSYS_LIKELY(_data != nullptr))
     {
         auto* _bundle = _data->construct(_hash);
@@ -1175,9 +1176,9 @@ sample_virtual_speedup()
 void
 start_experimenting()
 {
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _user_speedup_dist = config::get_causal_fixed_speedup();
+    auto const _user_speedup_dist = config::get_causal_fixed_speedup();
     if(!_user_speedup_dist.empty())
     {
         speedup_dist.clear();
@@ -1199,7 +1200,7 @@ start_experimenting()
     if(state::process::get() < state::process::Finalized)
     {
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        auto _promise = std::make_shared<std::promise<void>>();
+        auto const _promise = std::make_shared<std::promise<void>>();
         std::thread{ perform_experiment_impl, _promise }.detach();
         _promise->get_future().wait_for(std::chrono::seconds{ 2 });
     }

@@ -85,10 +85,16 @@ VMID/PASID as lifetime identity.
 
 An address-space slot generation changes when a slot is destroyed and reused.
 Its translation epoch changes when a root is replaced or invalidated. A
-`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
-one lock for the duration of an operation. This prevents a multi-page access
-from combining an old root with a replacement backing and provides
-`VmCacheNamespace` for virtually indexed clean caches. Access results are
+`GpuVmAccess` selects an immutable translator/backing generation under the
+registry lock. Ordinary snapshots share its retirement state; each pinned
+snapshot has independent retirement state and survives root replacement.
+Invalidation and unregistration revoke both kinds. Access methods hold a shared
+revocation lease, allowing an in-flight access to finish without combining an
+old root with a replacement backing. The captured handle and epoch provide
+`VmCacheNamespace` for virtually indexed clean caches. Functional instruction
+fetch reuses an ordinary snapshot within a quantum and checks `is_current()`
+before reuse; the access method still takes a lease and checks for retirement.
+Access results are
 typed as complete, temporarily unavailable, faulted, or malformed; transport
 availability is not encoded as a fake mapping in `GpuMemory`.
 

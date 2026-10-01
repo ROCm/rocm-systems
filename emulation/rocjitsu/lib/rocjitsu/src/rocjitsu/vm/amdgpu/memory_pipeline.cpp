@@ -504,62 +504,6 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
 
 namespace {
 
-/// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
-template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
-  using S = std::make_signed_t<T>;
-  switch (op) {
-  case AtomicOp::SWAP:
-    return src_val;
-  case AtomicOp::CONDXCHG32: {
-    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
-    T result = old_val;
-    for (uint32_t shift = 0; shift < sizeof(T) * 8; shift += 32) {
-      const T half_mask = T{0xffffffffu} << shift;
-      const T store_mask = T{0x7fffffffu} << shift;
-      if ((src_val >> shift) & 0x80000000u)
-        result = (result & ~half_mask) | (src_val & store_mask);
-    }
-    return result;
-  }
-  case AtomicOp::CMPSWAP:
-    return (old_val == cmp_val) ? src_val : old_val;
-  case AtomicOp::MSKOR:
-    return (old_val & ~src_val) | cmp_val;
-  case AtomicOp::ADD:
-    return old_val + src_val;
-  case AtomicOp::SUB:
-    return old_val - src_val;
-  case AtomicOp::SUB_CLAMP:
-    return old_val >= src_val ? old_val - src_val : T{0};
-  case AtomicOp::COND_SUB:
-    return old_val >= src_val ? old_val - src_val : old_val;
-  case AtomicOp::WRAP:
-    return old_val >= src_val ? old_val - src_val : old_val + cmp_val;
-  case AtomicOp::RSUB:
-    return src_val - old_val;
-  case AtomicOp::SMIN:
-    return static_cast<T>(std::min(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMIN:
-    return std::min(old_val, src_val);
-  case AtomicOp::SMAX:
-    return static_cast<T>(std::max(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMAX:
-    return std::max(old_val, src_val);
-  case AtomicOp::AND:
-    return old_val & src_val;
-  case AtomicOp::OR:
-    return old_val | src_val;
-  case AtomicOp::XOR:
-    return old_val ^ src_val;
-  case AtomicOp::INC:
-    return (old_val >= src_val) ? T{0} : old_val + 1;
-  case AtomicOp::DEC:
-    return (old_val == 0 || old_val > src_val) ? src_val : old_val - 1;
-  default:
-    return old_val;
-  }
-}
-
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
@@ -836,15 +780,23 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
-  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+  if (d.lane_mask == 0)
+    return VmAccessOutcome::Complete;
+  // A retry keeps completed lanes but must not reuse a retired VM generation.
+  const auto vm_access = l2->snapshot_atomic_access(vmid);
+  DeviceCacheCoherence::AtomicBoundary boundary = l2->coherence_domain()->acquire_atomic_boundary();
+  if (boundary.outcome() != VmAccessOutcome::Complete)
+    return boundary.outcome();
+
+  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
     uint64_t ea = d.per_lane_addr[lane];
 
-    // Perform the atomic RMW under L2's atomic lock.
+    // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
     const VmAccessOutcome outcome = l2->atomic_rmw(
-        ea, esz,
+        boundary, ea, esz,
         [&](uint8_t *line_data, uint32_t offset) {
           if (esz == 4) {
             uint32_t old_val;
@@ -898,9 +850,12 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
             std::memcpy(&d.response_data[lane * 8], &old_val, 8);
           }
         },
-        vmid);
-    if (outcome != VmAccessOutcome::Complete)
+        vmid, vm_access);
+    if (outcome != VmAccessOutcome::Complete) {
+      d.translated.atomic_lane = lane;
       return outcome;
+    }
+    d.translated.atomic_lane = lane + 1;
   }
   return VmAccessOutcome::Complete;
 }

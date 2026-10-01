@@ -433,8 +433,8 @@ namespace hip {
     }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
-    /// Set last captured graph node
-    void SetLastCapturedNode(hip::GraphNode* graphNode) { lastCapturedNodes_ = {graphNode}; }
+    /// Set last captured graph node; copies stream priority onto kernel nodes.
+    void SetLastCapturedNode(hip::GraphNode* graphNode);
     /// Returns dependencies removed during capture
     const std::vector<hip::GraphNode*>& GetRemovedDependencies() const {
       return removedDependencies_;

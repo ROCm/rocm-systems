@@ -7,9 +7,9 @@
 // Setup shared by more than one AIE test binary: the runtime and agent fixture, agent discovery,
 // and the queue-error-callback plumbing.
 //
-// Only what more than one file uses belongs here. Pool discovery differs between dispatch.cc and
-// memory.cc, and each fixture beyond the common base is specific to its binary, so those live
-// with the tests that use them.
+// Only what more than one file uses belongs here. Pool discovery differs between test_dispatch.cc
+// and test_memory.cc, and each fixture beyond the common base is specific to its binary, so those
+// live with the tests that use them.
 //
 // This header depends on gtest, so it is for the test suite only. The aie-performance benchmarks
 // repeat some of the same discovery, but they are plain main() programs that do not link gtest.
@@ -62,9 +62,9 @@ hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
 // Runtime lifetime and AIE agent discovery, per test. Derive from this and add whatever else the
 // binary needs; the pools each one wants are not the same.
 //
-// What to do when there is no NPU is left to the derived fixture: the dispatch and memory tests
-// treat a missing agent as a failure, ErrorCallback skips. Both did that already, and the
-// difference is not this header's to settle.
+// What to do when there is no NPU is left to the derived fixture: the dispatch tests treat a
+// missing agent as a failure, while ErrorCallback and the memory tests, which need no kernel
+// artifacts and so are built everywhere, skip.
 //
 // TearDown shuts the runtime down even when SetUp or the test failed partway, which the
 // hand-written per-test versions did not: an ASSERT in the middle of a test returned before its
