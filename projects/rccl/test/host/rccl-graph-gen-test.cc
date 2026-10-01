@@ -408,6 +408,24 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_MoreChannelsThanWaleckiProvides_WritesA
   EXPECT_TRUE(rings.AllChannelsAreHamiltonianRings());
 }
 
+// The edge-usage cost is what spreads load over the links; without it a few
+// links carry nearly every ring.
+TEST_F(GraphGenGreedyTest, GreedyRingGen_ManyChannels_KeepEveryLinkWithinTwiceItsFairShare) {
+  constexpr int kChannels = 3 * kGreedyNodes;
+  RingBuffer rings(kChannels, kGreedyNodes);
+
+  ASSERT_EQ(greedyRingGen(kGreedyNodes, kChannels, rings.data()), ncclSuccess);
+
+  std::vector<int> linkUse(kGreedyNodes * kGreedyNodes, 0);
+  for (int c = 0; c < kChannels; ++c) {
+    const int* ring = rings.channel(c);
+    for (int i = 0; i < kGreedyNodes; ++i) linkUse[ring[i] * kGreedyNodes + ring[(i + 1) % kGreedyNodes]]++;
+  }
+  constexpr int kDirectedLinks = kGreedyNodes * (kGreedyNodes - 1);
+  constexpr int kFairShare = (kChannels * kGreedyNodes + kDirectedLinks - 1) / kDirectedLinks;
+  EXPECT_LE(*std::max_element(linkUse.begin(), linkUse.end()), 2 * kFairShare);
+}
+
 TEST_F(GraphGenGreedyTest, GreedyRingGen_FirstHalfOfChannels_ComeFromTheWaleckiConstruction) {
   constexpr int kChannels = kGreedyNodes;
   RingBuffer rings(kChannels, kGreedyNodes);
@@ -434,8 +452,31 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_GreedyChannels_StartFromConsecutiveNode
   }
 }
 
-bool WasFreed(void* ptr) {
-  return std::find(g_freedPointers.begin(), g_freedPointers.end(), ptr) != g_freedPointers.end();
+// Order-insensitive, but a double free or a stray free still shows up.
+std::vector<void*> FreedSet() {
+  std::vector<void*> freed = g_freedPointers;
+  std::sort(freed.begin(), freed.end());
+  return freed;
+}
+
+TEST_F(GraphGenGreedyTest, GreedyRingGen_Success_FreesBothAllocationsExactlyOnce) {
+  RingBuffer rings(kGreedyNodes, kGreedyNodes);
+  void* edgeUsage = nullptr;
+  void* visited = nullptr;
+  ScopedHook callocHook(g_calloc, [&](size_t nmemb, size_t size) {
+    edgeUsage = std::calloc(nmemb, size);
+    return edgeUsage;
+  });
+  ScopedHook mallocHook(g_malloc, [&](size_t size) {
+    visited = std::malloc(size);
+    return visited;
+  });
+
+  ASSERT_EQ(greedyRingGen(kGreedyNodes, kGreedyNodes, rings.data()), ncclSuccess);
+
+  std::vector<void*> expected = {edgeUsage, visited};
+  std::sort(expected.begin(), expected.end());
+  EXPECT_EQ(FreedSet(), expected);
 }
 
 TEST_F(GraphGenGreedyTest, GreedyRingGen_EdgeUsageAllocationFails_FreesTheVisitedSetAndReportsInternalError) {
@@ -450,7 +491,7 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_EdgeUsageAllocationFails_FreesTheVisite
   EXPECT_EQ(greedyRingGen(kGreedyNodes, kGreedyNodes, rings.data()), ncclInternalError);
 
   ASSERT_NE(visited, nullptr) << "the visited-set allocation was meant to succeed";
-  EXPECT_TRUE(WasFreed(visited)) << "the visited set was leaked on the failure path";
+  EXPECT_EQ(FreedSet(), std::vector<void*>{visited});
 }
 
 TEST_F(GraphGenGreedyTest, GreedyRingGen_VisitedSetAllocationFails_FreesTheEdgeUsageMatrixAndReportsInternalError) {
@@ -465,7 +506,7 @@ TEST_F(GraphGenGreedyTest, GreedyRingGen_VisitedSetAllocationFails_FreesTheEdgeU
   EXPECT_EQ(greedyRingGen(kGreedyNodes, kGreedyNodes, rings.data()), ncclInternalError);
 
   ASSERT_NE(edgeUsage, nullptr) << "the edge-usage allocation was meant to succeed";
-  EXPECT_TRUE(WasFreed(edgeUsage)) << "the edge-usage matrix was leaked on the failure path";
+  EXPECT_EQ(FreedSet(), std::vector<void*>{edgeUsage});
 }
 
 TEST_F(GraphGenGreedyTest, GreedyRingGen_AllocationFails_LeavesTheRingBufferUntouched) {
@@ -654,20 +695,38 @@ TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_VariedRings_BalanceExitsAndEnt
   EXPECT_LE(spread(entryCounts), 1) << "entries are not balanced across the nodes";
 }
 
-TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_CutAtTheLastPosition_WrapsTheEntryToTheRingHead) {
+// The penalty is quadratic so two nodes at 2 beat one node at 3; a linear
+// penalty scores those equal and lets node 3 take three exits here.
+TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_CompetingLoads_NoNodeExceedsTheFairShare) {
   constexpr int kNodes = 4;
-  // Four copies force the fourth channel onto the last position.
-  const std::vector<int> ring = {2, 0, 3, 1};
-  const std::vector<int> flattened = RepeatRing(ring, kNodes);
+  constexpr int kChannels = 5;
+  const std::vector<int> flattened = {0, 3, 2, 1,  3, 0, 1, 2,  1, 3, 2, 0,  3, 2, 0, 1,  3, 1, 0, 2};
+  std::vector<int> cutIndices(kChannels, kCanary);
+
+  findRingCutIndices(kChannels, kNodes, flattened.data(), cutIndices.data());
+
+  std::vector<int> exitCounts(kNodes, 0);
+  std::vector<int> entryCounts(kNodes, 0);
+  for (int c = 0; c < kChannels; ++c) {
+    const int* ring = &flattened[c * kNodes];
+    exitCounts[ring[cutIndices[c]]]++;
+    entryCounts[ring[(cutIndices[c] + 1) % kNodes]]++;
+  }
+  constexpr int kFairShare = (kChannels + kNodes - 1) / kNodes;
+  EXPECT_LE(*std::max_element(exitCounts.begin(), exitCounts.end()), kFairShare);
+  EXPECT_LE(*std::max_element(entryCounts.begin(), entryCounts.end()), kFairShare);
+}
+
+// Reaching the last position depends on the entry wrapping to the ring head.
+TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_OneIdenticalRingPerNode_CutsEveryPositionOnce) {
+  constexpr int kNodes = 4;
+  const std::vector<int> flattened = RepeatRing({2, 0, 3, 1}, kNodes);
   std::vector<int> cutIndices(kNodes, kCanary);
 
   findRingCutIndices(kNodes, kNodes, flattened.data(), cutIndices.data());
 
-  const int lastPositionChannel =
-      static_cast<int>(std::find(cutIndices.begin(), cutIndices.end(), kNodes - 1) - cutIndices.begin());
-  ASSERT_LT(lastPositionChannel, kNodes) << "no channel was cut at the last position";
-  const int entry = ring[(cutIndices[lastPositionChannel] + 1) % kNodes];
-  EXPECT_EQ(entry, ring[0]);
+  std::sort(cutIndices.begin(), cutIndices.end());
+  EXPECT_EQ(cutIndices, std::vector<int>({0, 1, 2, 3}));
 }
 
 TEST_F(GraphGenCutIndicesTest, FindRingCutIndices_SingleNodeRings_CutAtTheOnlyPosition) {

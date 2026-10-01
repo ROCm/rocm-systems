@@ -25,7 +25,7 @@
 // Not seamed here: getopt_long, and the str*/snprintf family. Their behaviour
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
-
+//
 // malloc/calloc/free are seamed so a unit's out-of-memory arm is reachable on
 // demand; their defaults call real libc, so installing the seam without driving
 // it changes nothing. free() is seamed too so a test can assert the failing
