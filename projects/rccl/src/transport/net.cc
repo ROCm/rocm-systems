@@ -2324,9 +2324,8 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
             regRecord->netHandleHead = netHandle;
             outHandle[p] = handle;
             *outRegBufFlag = 1;
-            // RCCL: adds the full registration size (regSize) and its segment count.
-            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld regSize %ld numSegments %d",
-                 comm->rank, userbuff, handle, buffSize, regRecord->endAddr - regRecord->begAddr, numSegments);
+            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld", comm->rank, userbuff, handle,
+                 buffSize);
           } else {
             goto fail;
           }
@@ -2339,9 +2338,6 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
   }
 
 exit:
-  // First-peer NET_REG_COMPLETE stays set on a later-peer failure so cleanup
-  // still frees those handles. This bit is only the all-peers success.
-  if (regRecord != NULL && *outRegBufFlag) regRecord->state |= NET_REG_ALL_PEERS;
   return ret;
 fail:
   *outRegBufFlag = 0;
@@ -2368,8 +2364,7 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
                                       numSegments),
                     ret, fail);
-      // Cache only after every peer registered; a later-peer failure is staging.
-      if (*outRegBufFlag) regRecord->netNSegments = numSegments;
+      if (*outRegBufFlag) rcclNetRegCommit(comm, regRecord, numSegments);
     }
   }
 
