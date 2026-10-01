@@ -216,27 +216,45 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
     return end_bytepos - begin_bytepos + reduce_count;
 }
 
-void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
-    int offset = 0; // byte offset
-    int payload_type;
-    int payload_size;
+ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
+    size_t offset = 0; // byte offset
+    // Accumulated in size_t so that a long run of ff_bytes cannot wrap the running total before
+    // it is range checked below.
+    size_t payload_type;
+    size_t payload_size;
 
+    // SEI is supplemental and does not affect the decode, so a message running past the end of
+    // the NAL unit stops the parse here and keeps whatever was read cleanly. The result is
+    // reported for the record; the callers log it and carry on with the picture.
     do {
         payload_type = 0;
-        while (nalu[offset] == 0xFF) {
+        while (offset < size && nalu[offset] == 0xFF) {
             payload_type += 255;  // ff_byte
             offset++;
+        }
+        if (offset >= size) {
+            ErrorLog(g_rocdec_logger, "SEI payload type extends past the end of the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
         }
         payload_type += nalu[offset];  // last_payload_type_byte
         offset++;
 
         payload_size = 0;
-        while (nalu[offset] == 0xFF) {
+        while (offset < size && nalu[offset] == 0xFF) {
             payload_size += 255;  // ff_byte
             offset++;
         }
+        if (offset >= size) {
+            ErrorLog(g_rocdec_logger, "SEI payload size extends past the end of the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
+        }
         payload_size += nalu[offset];  // last_payload_size_byte
         offset++;
+
+        if (payload_size > size - offset) {
+            ErrorLog(g_rocdec_logger, "SEI payload size (" + ROCDEC_TOSTR(payload_size) + ") exceeds the " + ROCDEC_TOSTR(size - offset) + " bytes left in the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
+        }
 
         // We start with INIT_SEI_MESSAGE_COUNT. Should be enough for normal use cases. If not, resize.
         if((sei_message_count_ + 1) > sei_message_list_.size()) {
@@ -247,7 +265,10 @@ void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         if (sei_payload_buf_) {
             if ((payload_size + sei_payload_size_) > sei_payload_buf_size_) {
-                uint8_t *tmp_ptr = new uint8_t [payload_size + sei_payload_size_];
+                // Record the new size: leaving sei_payload_buf_size_ at the old value made every
+                // later message compare against a stale bound and reallocate again.
+                sei_payload_buf_size_ = sei_payload_size_ + payload_size;
+                uint8_t *tmp_ptr = new uint8_t [sei_payload_buf_size_];
                 memcpy(tmp_ptr, sei_payload_buf_, sei_payload_size_); // save the existing payload
                 delete [] sei_payload_buf_;
                 sei_payload_buf_ = tmp_ptr;
@@ -265,4 +286,5 @@ void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         offset += payload_size;
     } while (offset < size && nalu[offset] != 0x80);
+    return PARSER_OK;
 }

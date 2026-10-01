@@ -231,12 +231,15 @@ protected:
      */
     size_t EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos);
 
-    /*! \brief Function to parse Sei Message Info
+    /*! \brief Function to parse Sei Message Info. Stops at the first message that runs past the
+     *         end of the NAL unit, keeping the messages read before it. SEI does not affect the
+     *         decode, so callers are expected to note the result and carry on with the picture
+     *         rather than treat it as a picture level failure.
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseSeiMessage(uint8_t *nalu, size_t size);
+    ParserResult ParseSeiMessage(uint8_t *nalu, size_t size);
 
     /*! \brief Function to initialize the decoded buffer pool
      */
