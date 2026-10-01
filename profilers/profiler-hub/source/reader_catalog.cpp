@@ -300,6 +300,11 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         {
             track_ptr->end_ts = row.max_end.value();
         }
+        if(row.min_value.has_value() && row.max_value.has_value())
+        {
+            track_ptr->value_range = reader_types::value_range_t{ row.min_value.value(),
+                                                                  row.max_value.value() };
+        }
 
         if(const auto node_it = node_utility.find(row.nid); node_it != node_utility.end())
         {

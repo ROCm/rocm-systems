@@ -357,6 +357,8 @@ struct pmc_track_result
     size_t                count{};
     std::optional<size_t> min_start;
     std::optional<size_t> max_end;
+    std::optional<double> min_value;
+    std::optional<double> max_value;
 };
 
 struct read_statements
@@ -1120,7 +1122,9 @@ private:
                         "PI.name",
                         "COUNT(*) AS count",
                         "MIN(S.timestamp) AS min_start",
-                        "MAX(S.timestamp) AS max_end")
+                        "MAX(S.timestamp) AS max_end",
+                        "MIN(PE.value) AS min_value",
+                        "MAX(PE.value) AS max_value")
                 .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
                 .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
                 .inner_join("rocpd_sample", "S", "S.event_id = PE.event_id")
@@ -1137,7 +1141,9 @@ private:
                 &pmc_track_result::name,
                 &pmc_track_result::count,
                 &pmc_track_result::min_start,
-                &pmc_track_result::max_end);
+                &pmc_track_result::max_end,
+                &pmc_track_result::min_value,
+                &pmc_track_result::max_value);
     }
 
     void initialize_pmc_sample_statements()

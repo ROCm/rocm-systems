@@ -160,7 +160,7 @@ static void
 print_tracks(const ph_track_list_t* tracks)
 {
     printf("\n=== Tracks (%d) ===\n", tracks->list_size);
-    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %s\n",
+    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %-16s %-16s %s\n",
            "id",
            "nid",
            "pid",
@@ -172,11 +172,21 @@ print_tracks(const ph_track_list_t* tracks)
            "stream",
            "start",
            "end",
+           "min_value",
+           "max_value",
            "name");
     for(uint32_t i = 0; i < tracks->list_size; ++i)
     {
-        const ph_track_t* track = &tracks->tracks[i];
-        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %-20llu %-20llu %s\n",
+        const ph_track_t* track        = &tracks->tracks[i];
+        char              min_text[32] = "-";
+        char              max_text[32] = "-";
+        if(track->value_range.is_valid)
+        {
+            snprintf(min_text, sizeof(min_text), "%.6g", track->value_range.min);
+            snprintf(max_text, sizeof(max_text), "%.6g", track->value_range.max);
+        }
+        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %-20llu %-20llu %-16s "
+               "%-16s %s\n",
                track->id,
                track->nid,
                track->pid,
@@ -188,6 +198,8 @@ print_tracks(const ph_track_list_t* tracks)
                track->stream_id,
                (unsigned long long) track->start_ts,
                (unsigned long long) track->end_ts,
+               min_text,
+               max_text,
                track->track_name);
     }
 }
