@@ -1573,7 +1573,11 @@ class TestDerivePseudoScalarUnary:
         assert 'if (exec != 0)' not in cpp
         assert 'for (uint32_t lane = 0' not in cpp
         assert 'write_scalar' in cpp
-        assert 'amdgpu::pseudo_scalar::execute_' in cpp
+        assert (
+            'amdgpu::transcendental::execute_pseudo_f16'
+            if name.endswith('_F16')
+            else 'amdgpu::pseudo_scalar::execute_f32'
+        ) in cpp
         assert 'wf.fp_round_mode_' in cpp
         assert 'wf.fp_denorm_mode_' in cpp
 

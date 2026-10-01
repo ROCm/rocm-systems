@@ -22,6 +22,11 @@ Execution semantics are provided by ``SemanticsSpec`` from
 """
 
 import cgen
+
+from amdisa.codegen.execute.floating_policy import (
+    FLUSH_NEAREST_F32_OPS,
+    ROUNDED_F16_OPS,
+)
 import textwrap
 import re
 import os
@@ -992,6 +997,12 @@ class CodeGenerator:
         )
 
     @staticmethod
+    def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
+        if sem and sem.name in FLUSH_NEAREST_F32_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        return ''
+
+    @staticmethod
     def _sdwa_result_format(sem: InstructionSemantics | None) -> str:
         """Return the C++ result format for numerical SDWA output modifiers.
 
@@ -1024,11 +1035,14 @@ class CodeGenerator:
         return f'amdgpu::sdwa::ResultFormat::{suffix}'
 
     @staticmethod
-    def _apply_sdwa_f16_omod(body: str, instruction: str) -> str:
+    def _apply_sdwa_f16_omod(
+        body: str, instruction: str, *, rounded_result: bool = False
+    ) -> str:
         """Apply SDWA OMOD at the F16 producer, before result narrowing."""
+        helper = 'finish_rounded_f16' if rounded_result else 'round_f16_result'
         body = body.replace(
             'util::f32_to_f16_mode(',
-            f'amdgpu::sdwa::round_f16_result({instruction}, wf, ',
+            f'amdgpu::sdwa::{helper}({instruction}, wf, ',
         )
         body = body.replace(
             'amdgpu::fp_mode::finish_arithmetic_f16(',
@@ -12505,15 +12519,18 @@ class CodeGenerator:
                                         '  }\n'
                                     )
                         _result_format = self._sdwa_result_format(sem)
+                        _output_policy = self._sdwa_output_policy(sem)
                         _local_body = body
                         if _result_format == 'amdgpu::sdwa::ResultFormat::F16':
                             _local_body = self._apply_sdwa_f16_omod(
-                                _local_body, '*this'
+                                _local_body,
+                                '*this',
+                                rounded_result=sem.name in ROUNDED_F16_OPS,
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane<{_result_format}>'
+                            rf'amdgpu::sdwa::write_lane<{_result_format}{_output_policy}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
@@ -13925,7 +13942,11 @@ class CodeGenerator:
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
             if self._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::F16':
-                prefixed_body = self._apply_sdwa_f16_omod(prefixed_body, 'inst')
+                prefixed_body = self._apply_sdwa_f16_omod(
+                    prefixed_body,
+                    'inst',
+                    rounded_result=sem.name in ROUNDED_F16_OPS,
+                )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):
                     helper = (
@@ -13943,10 +13964,12 @@ class CodeGenerator:
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
             result_format = self._sdwa_result_format(sem)
+            output_policy = self._sdwa_output_policy(sem)
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane<{result_format}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane<{result_format}{output_policy}>'
+                r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = _re.sub(
@@ -14097,6 +14120,11 @@ class CodeGenerator:
                 true16_vop3=is_true16_vop3,
                 result_writer='commit_result' if uses_result_writer else None,
             )
+            if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
+                # These mappings ignore guest rounding. Keep output scaling and clamp
+                # under the saved environment too: OMOD can overflow or touch
+                # signaling NaNs, and SIMD clamp compares NaN results.
+                lines.append('  fp_mode::ScopedEnvironment environment(0);')
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
                 'v_mul_f32_vop3': 'classify_mul_f32_vop3',
