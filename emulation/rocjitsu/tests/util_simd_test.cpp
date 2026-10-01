@@ -76,6 +76,129 @@ struct FallbackSimd {
   static constexpr std::size_t size() { return mask_type::size(); }
 };
 
+#if __has_include(<experimental/simd>)
+class HeldSimdFloatingEnvironment {
+public:
+  HeldSimdFloatingEnvironment() : valid_(std::feholdexcept(&saved_) == 0) {}
+  ~HeldSimdFloatingEnvironment() {
+    if (valid_)
+      std::fesetenv(&saved_);
+  }
+  bool valid() const { return valid_; }
+
+private:
+  std::fenv_t saved_{};
+  bool valid_;
+};
+
+// Keep the operation behind a real call so constant folding cannot hide the
+// host exception side effects of an integer SIMD lowering.
+template <typename Operation>
+[[gnu::noinline]] std::array<uint32_t, kW>
+run_integer_simd_conversion(const std::array<uint32_t, kW> &input, Operation operation) {
+  using U = util::native<uint32_t>;
+  std::array<uint32_t, kW> output{};
+  operation(U(input.data(), util::stdx::element_aligned))
+      .copy_to(output.data(), util::stdx::element_aligned);
+  return output;
+}
+
+template <bool Left>
+[[gnu::noinline]] std::array<uint32_t, kW>
+run_u32_variable_shift(const std::array<uint32_t, kW> &input,
+                       const std::array<uint32_t, kW> &counts) {
+  using U = util::native<uint32_t>;
+  const U values(input.data(), util::stdx::element_aligned);
+  const U shifts(counts.data(), util::stdx::element_aligned);
+  const U result = Left ? util::detail::shift_left_u32_simd(values, shifts)
+                        : util::detail::shift_right_u32_simd(values, shifts);
+  std::array<uint32_t, kW> output{};
+  result.copy_to(output.data(), util::stdx::element_aligned);
+  return output;
+}
+
+TEST(UtilSimd, U32VariableShiftsAreBitExactAndPreserveHostExceptions) {
+  HeldSimdFloatingEnvironment environment;
+  ASSERT_TRUE(environment.valid());
+  constexpr uint32_t values[] = {0u, 1u, 0x8000'0000u, 0x7fff'ffffu, 0xffff'ffffu, 0xdead'beefu};
+  for (int sticky : {0, FE_DIVBYZERO})
+    for (uint32_t base = 0; base < 32u; ++base) {
+      std::array<uint32_t, kW> input{}, counts{};
+      for (size_t lane = 0; lane < kW; ++lane) {
+        input[lane] = values[(base + lane) % std::size(values)];
+        counts[lane] = (base + lane) % 32u;
+      }
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      ASSERT_EQ(std::feraiseexcept(sticky), 0);
+      const auto left = run_u32_variable_shift<true>(input, counts);
+      const int left_flags = std::fetestexcept(FE_ALL_EXCEPT);
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      ASSERT_EQ(std::feraiseexcept(sticky), 0);
+      const auto right = run_u32_variable_shift<false>(input, counts);
+      const int right_flags = std::fetestexcept(FE_ALL_EXCEPT);
+      EXPECT_EQ(left_flags, sticky);
+      EXPECT_EQ(right_flags, sticky);
+      for (size_t lane = 0; lane < kW; ++lane) {
+        EXPECT_EQ(left[lane], input[lane] << counts[lane]);
+        EXPECT_EQ(right[lane], input[lane] >> counts[lane]);
+      }
+    }
+}
+
+TEST(UtilSimd, F16WideningPreservesHostFloatingPointExceptions) {
+  HeldSimdFloatingEnvironment environment;
+  ASSERT_TRUE(environment.valid());
+  for (uint32_t base = 0; base < 65536u; base += kW) {
+    std::array<uint32_t, kW> input{};
+    for (size_t lane = 0; lane < kW; ++lane)
+      input[lane] = base + lane;
+    ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+    const auto output = run_integer_simd_conversion(input, [](util::native<uint32_t> raw) {
+      return std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(raw));
+    });
+    const int flags = std::fetestexcept(FE_ALL_EXCEPT);
+    ASSERT_EQ(flags, 0) << "half base=" << base;
+    for (size_t lane = 0; lane < kW; ++lane)
+      ASSERT_EQ(output[lane], std::bit_cast<uint32_t>(util::f16_to_f32(input[lane])));
+  }
+}
+
+template <typename Operation, typename ScalarOperation>
+void expect_finite_integer_conversion_preserves_host_exceptions(Operation operation,
+                                                                ScalarOperation scalar_operation) {
+  HeldSimdFloatingEnvironment environment;
+  ASSERT_TRUE(environment.valid());
+  // Every finite exponent, both signs, and mantissas exposing normal and
+  // denormal rounding. Include 0.25/0.5, whose discarded half shifts were 1/0.
+  constexpr uint32_t mantissas[] = {0u, 1u, 0x400000u, 0x7fffffu};
+  for (uint32_t exponent = 0; exponent < 255u; ++exponent)
+    for (uint32_t mantissa : mantissas) {
+      std::array<uint32_t, kW> input{};
+      for (size_t lane = 0; lane < kW; ++lane)
+        input[lane] = (uint32_t(lane & 1u) << 31) | (exponent << 23) | mantissa;
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      const auto output = run_integer_simd_conversion(input, operation);
+      const int flags = std::fetestexcept(FE_ALL_EXCEPT);
+      ASSERT_EQ(flags, 0) << "exponent=" << exponent << " mantissa=" << mantissa;
+      for (size_t lane = 0; lane < kW; ++lane)
+        ASSERT_EQ(output[lane], scalar_operation(std::bit_cast<float>(input[lane])));
+    }
+}
+
+TEST(UtilSimd, F16NarrowingPreservesHostFloatingPointExceptions) {
+  expect_finite_integer_conversion_preserves_host_exceptions(
+      [](util::native<uint32_t> raw) {
+        return util::f32_to_f16_simd(std::bit_cast<util::native<float>>(raw));
+      },
+      util::f32_to_f16);
+  expect_finite_integer_conversion_preserves_host_exceptions(
+      [](util::native<uint32_t> raw) {
+        return util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(raw));
+      },
+      util::f32_to_f16_rtz);
+}
+#endif
+
 TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
   SKIP_IF_NO_SIMD();
   using U = util::native<uint32_t>;

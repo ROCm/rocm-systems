@@ -145,6 +145,40 @@ template <class T> using native = stdx::native_simd<T>;
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
 
+namespace detail {
+
+/// Per-lane uint32 shifts, with every count in [0,31]. On pre-AVX2 x86,
+/// libstdc++ can emulate variable shifts with float-to-int conversions that
+/// raise host FP exceptions for valid counts. Fixed shifts and integer blends
+/// keep these operations independent of the host floating-point state.
+inline native<uint32_t> shift_right_u32_simd(native<uint32_t> value, native<uint32_t> counts) {
+#if (defined(__x86_64__) || defined(__i386__)) && !defined(__AVX2__)
+  stdx::where((counts & 1u) != 0u, value) = value >> 1;
+  stdx::where((counts & 2u) != 0u, value) = value >> 2;
+  stdx::where((counts & 4u) != 0u, value) = value >> 4;
+  stdx::where((counts & 8u) != 0u, value) = value >> 8;
+  stdx::where((counts & 16u) != 0u, value) = value >> 16;
+  return value;
+#else
+  return value >> counts;
+#endif
+}
+
+inline native<uint32_t> shift_left_u32_simd(native<uint32_t> value, native<uint32_t> counts) {
+#if (defined(__x86_64__) || defined(__i386__)) && !defined(__AVX2__)
+  stdx::where((counts & 1u) != 0u, value) = value << 1;
+  stdx::where((counts & 2u) != 0u, value) = value << 2;
+  stdx::where((counts & 4u) != 0u, value) = value << 4;
+  stdx::where((counts & 8u) != 0u, value) = value << 8;
+  stdx::where((counts & 16u) != 0u, value) = value << 16;
+  return value;
+#else
+  return value << counts;
+#endif
+}
+
+} // namespace detail
+
 /// Fused multiply-add for native f32 SIMD. GCC's experimental::simd FMA
 /// customization point does not inline on AVX-512 and otherwise emits a call
 /// plus a ZMM spill/reload. Keep that toolchain workaround in the shared SIMD
@@ -618,8 +652,12 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   U p = (std::bit_cast<U>(mf) >> 23) - 127u;
   stdx::where(mant == 0u, p) = 0u;
   // Scalar k = 10 - p shifts; exp_final = 1 - k = p - 9; exp field = p + 103.
-  const U dn = sign31 | ((p + 103u) << 23) | (((mant << (10u - p)) & 0x3FFu) << 13);
-  stdx::where(exp == 0u && mant != 0u, bits) = dn;
+  const auto denormal = exp == 0u && mant != 0u;
+  U shift(1u);
+  stdx::where(denormal, shift) = 10u - p;
+  const U dn =
+      sign31 | ((p + 103u) << 23) | ((detail::shift_left_u32_simd(mant, shift) & 0x3FFu) << 13);
+  stdx::where(denormal, bits) = dn;
 
   return std::bit_cast<native<float>>(bits);
 }
@@ -694,11 +732,11 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   // so both sh and sh-1 are valid, including discarded normal/special lanes.
   U sh = 126u - fe;
   stdx::where(fe < 102u || fe > 112u, sh) = 14u;
-  const U drb = (mm >> (sh - 1u)) & 1u;
-  const U mask_lo = (1u << (sh - 1u)) - 1u;
+  const U drb = detail::shift_right_u32_simd(mm, sh - 1u) & 1u;
+  const U mask_lo = detail::shift_left_u32_simd(U(1u), sh - 1u) - 1u;
   U dsticky(0u);
   stdx::where((mm & mask_lo) != 0u, dsticky) = 1u;
-  U r = mm >> sh;
+  U r = detail::shift_right_u32_simd(mm, sh);
   r = r + (drb & (dsticky | (r & 1u)));
   stdx::where(fe <= 112u, out) = sign | r;
 
@@ -746,7 +784,7 @@ inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
   const U mm = fm | 0x800000u;
   U sh = 126u - fe;
   stdx::where(fe < 102u || fe > 112u, sh) = 14u;
-  stdx::where(fe <= 112u, out) = sign | (mm >> sh);
+  stdx::where(fe <= 112u, out) = sign | detail::shift_right_u32_simd(mm, sh);
 
   stdx::where(fe < 102u, out) = sign;
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
@@ -1169,16 +1207,17 @@ inline native<uint32_t> f32_to_finite_mx_simd(native<float> val, native<uint32_t
   U shift(1u);
   stdx::where(active_sub, shift) = U(151u - MantBits - static_cast<uint32_t>(Bias)) - fe;
   const U full_mant = fm | U(0x800000u);
-  U sub_result = full_mant >> shift;
-  const U sub_limit = U(1u) << shift;
+  U sub_result = shift_right_u32_simd(full_mant, shift);
+  const U sub_limit = shift_left_u32_simd(U(1u), shift);
   if constexpr (Stochastic) {
     const U trunc = full_mant & (sub_limit - U(1u));
-    const U random_add = seed >> (U(32u) - shift);
+    const U random_add = shift_right_u32_simd(seed, U(32u) - shift);
     stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
   } else {
-    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    const U round_bit = shift_right_u32_simd(full_mant, shift - U(1u)) & U(1u);
     U sticky(0u);
-    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    stdx::where((full_mant & (shift_left_u32_simd(U(1u), shift - U(1u)) - U(1u))) != 0u, sticky) =
+        U(1u);
     sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
   }
   U sub_out = sign | (sub_result & U(kMantMask));
@@ -1226,16 +1265,17 @@ inline native<uint32_t> f32_to_fp8_e4m3_simd(native<float> val, native<uint32_t>
   U shift(1u);
   stdx::where(active_sub, shift) = U(141u) - fe;
   const U full_mant = fm | U(0x800000u);
-  U sub_result = full_mant >> shift;
-  const U sub_limit = U(1u) << shift;
+  U sub_result = shift_right_u32_simd(full_mant, shift);
+  const U sub_limit = shift_left_u32_simd(U(1u), shift);
   if constexpr (Stochastic) {
     const U trunc = full_mant & (sub_limit - U(1u));
-    const U random_add = seed >> (U(32u) - shift);
+    const U random_add = shift_right_u32_simd(seed, U(32u) - shift);
     stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
   } else {
-    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    const U round_bit = shift_right_u32_simd(full_mant, shift - U(1u)) & U(1u);
     U sticky(0u);
-    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    stdx::where((full_mant & (shift_left_u32_simd(U(1u), shift - U(1u)) - U(1u))) != 0u, sticky) =
+        U(1u);
     sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
   }
   U sub_out = sign | (sub_result & U(0x7u));
@@ -1280,16 +1320,17 @@ inline native<uint32_t> f32_to_bf8_e5m2_simd(native<float> val, native<uint32_t>
   U shift(1u);
   stdx::where(active_sub, shift) = U(134u) - fe;
   const U full_mant = fm | U(0x800000u);
-  U sub_result = full_mant >> shift;
-  const U sub_limit = U(1u) << shift;
+  U sub_result = shift_right_u32_simd(full_mant, shift);
+  const U sub_limit = shift_left_u32_simd(U(1u), shift);
   if constexpr (Stochastic) {
     const U trunc = full_mant & (sub_limit - U(1u));
-    const U random_add = seed >> (U(32u) - shift);
+    const U random_add = shift_right_u32_simd(seed, U(32u) - shift);
     stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
   } else {
-    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    const U round_bit = shift_right_u32_simd(full_mant, shift - U(1u)) & U(1u);
     U sticky(0u);
-    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    stdx::where((full_mant & (shift_left_u32_simd(U(1u), shift - U(1u)) - U(1u))) != 0u, sticky) =
+        U(1u);
     sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
   }
   U sub_out = sign | (sub_result & U(0x3u));
