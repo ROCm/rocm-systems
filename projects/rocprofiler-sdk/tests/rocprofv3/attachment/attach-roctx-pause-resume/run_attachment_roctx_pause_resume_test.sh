@@ -63,6 +63,25 @@ wait_for_profiler_attached() {
     return 1
 }
 
+wait_for_phase_complete() {
+    local marker_file=$1
+    local max_wait=30
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if [ -f "${marker_file}" ]; then
+            return 0
+        fi
+        if ! kill -0 "${APP_PID}" 2>/dev/null; then
+            echo "Test application exited before creating ${marker_file}"
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out waiting for phase marker: ${marker_file}"
+    return 1
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
@@ -74,15 +93,23 @@ export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-roctx-${MODE}-output"
 TRIGGER_FILE="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/start-workload"
+READY_FILE="${TRIGGER_FILE}-ready"
+COMPLETE_FILE="${TRIGGER_FILE}-complete"
 ROCPROF_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3.log"
 APP_PID=""
 APP_OUTPUT_PID=""
 ROCPROF_PID=""
+DETACH_PIPE=""
 
 cleanup() {
     if [ -n "${ROCPROF_PID}" ]; then
-        kill "${ROCPROF_PID}" 2>/dev/null || true
+        kill -2 "${ROCPROF_PID}" 2>/dev/null || true
         wait "${ROCPROF_PID}" 2>/dev/null || true
+    fi
+
+    { exec 3>&-; } 2>/dev/null || true
+    if [ -n "${DETACH_PIPE}" ]; then
+        rm -f "${DETACH_PIPE}"
     fi
 
     if [ -n "${APP_PID}" ]; then
@@ -122,6 +149,7 @@ APP_PID=$!
 APP_OUTPUT_PID=$APP_PID
 
 wait_for_attach_ready "${APP_PID}"
+wait_for_phase_complete "${READY_FILE}"
 
 if ! kill -0 "${APP_PID}" 2>/dev/null; then
     echo "Test application failed to start or exited early"
@@ -133,25 +161,35 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
+DETACH_PIPE="${ROCPROF_LOG}.stdin"
+rm -f "${DETACH_PIPE}"
+mkfifo "${DETACH_PIPE}"
+exec 3<>"${DETACH_PIPE}"
+
 echo "Attaching profiler to PID $APP_PID in ${MODE} mode..."
 PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
-    --attach-duration-msec 8000 \
     "${ROCPROFV3_FLAGS[@]}" \
     -f json --attach-sync-output \
     -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
-    --log-level "${LOG_LEVEL}" >"${ROCPROF_LOG}" 2>&1 &
+    --log-level "${LOG_LEVEL}" <"${DETACH_PIPE}" >"${ROCPROF_LOG}" 2>&1 &
 ROCPROF_PID=$!
 
 if ! wait_for_profiler_attached "${APP_PID}" "${ROCPROF_LOG}"; then
     echo "rocprofv3 output:"
     cat "${ROCPROF_LOG}" 2>/dev/null || true
+    kill -2 "${ROCPROF_PID}" 2>/dev/null || true
     wait "${ROCPROF_PID}" 2>/dev/null || true
     ROCPROF_PID=""
+    exec 3>&-
+    rm -f "${DETACH_PIPE}"
+    DETACH_PIPE=""
     exit 1
 fi
 
 touch "${TRIGGER_FILE}"
+wait_for_phase_complete "${COMPLETE_FILE}"
 
+printf '\n' >&3
 if wait "${ROCPROF_PID}"; then
     ROCPROF_PID=""
 else
@@ -160,6 +198,10 @@ else
     echo "rocprofv3 attach test failed with exit code $ROCPROF_EXIT_CODE"
     exit 1
 fi
+
+exec 3>&-
+rm -f "${DETACH_PIPE}"
+DETACH_PIPE=""
 
 echo "Profiler detached successfully"
 
