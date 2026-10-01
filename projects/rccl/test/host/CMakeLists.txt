@@ -897,6 +897,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
     TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
 
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroTransportGeneric -- src/transport/generic.cc. Its own binary:
+# the shared fakes define generic.cc's connect functions and abort in
+# ncclTransportP2pConnect, so the test TU supplies its own transport seams.
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroTransportGeneric
+  SOURCES transport-generic-test.cc ../common/main_altrsmi.cpp
+  EXTRA_DEFS ${_MICRO_MODE_DEFS} GENERIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/generic.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport_generic.yaml")
+
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
 # =====================================================================
