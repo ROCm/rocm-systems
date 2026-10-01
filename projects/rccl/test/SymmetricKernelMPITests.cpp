@@ -579,9 +579,11 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
                           [rank, &value](size_t i) { return value(rank, i); }));
         ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(recvSym.ptr, recvCount));
 
-        // Only the first count may skip on ncclInvalidUsage; agree on it collectively so diverging verdicts cannot hang.
+        // Only the first count may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
         ncclResult_t res = ncclReduceScatter(sendSym.ptr, recvSym.ptr, recvCount, ncclFloat, ncclSum,
                                              getActiveCommunicator(), getActiveStream());
+        // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters and frees.
+        hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
         const std::string ineligible
             = mpiCoordinatedSkipReason(res == ncclInvalidUsage && recvCount == counts.front(),
                                        "ReduceScatter_LL symmetric kernel not eligible on this topology");
@@ -590,7 +592,7 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
             GTEST_SKIP() << ineligible;
         }
         ASSERT_MPI_EQ(ncclSuccess, res);
-        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, syncErr);
 
         size_t base     = static_cast<size_t>(rank) * recvCount;
         auto   expected = [nRanks, base, &value](size_t j) {
