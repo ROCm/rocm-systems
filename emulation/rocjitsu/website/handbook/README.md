@@ -48,14 +48,27 @@ theme and hook APIs; review compatibility before changing them.
 3. From `emulation/rocjitsu/website/handbook/`, using the environment configured
    in [Build and preview](#build-and-preview), run:
 
-   ```bash
-   .venv/bin/python -m mkdocs build --strict -f mkdocs.yml
-   ```
+    ```bash
+    .venv/bin/python -m mkdocs build --strict -f mkdocs.yml
+    ```
 
 MkDocs discovers Markdown files automatically, but sidebar placement is explicit.
 A regular guide missing from `nav` fails the strict build in both CI and
 publication. Preview the site and check the guide's sidebar placement and links
 before submitting the change.
+
+Use Markdown that renders consistently on GitHub and in MkDocs:
+
+- Leave a blank line between introductory prose and a list.
+- Indent nested lists by four spaces per level, including bullets inside a
+  numbered step. Align continuation lines with the nested item's text.
+- Indent paragraphs and fenced code blocks within a list item by four spaces
+  after a blank line so they remain part of that item.
+- Put C++ template names in backticks, such as `Clocked<Base>`, instead of
+  escaping angle brackets.
+
+Check the rendered page to confirm that list nesting, numbering, and template
+names appear as intended.
 
 Blog posts under `docs/blog/posts/` are registered by the blog plugin and do not
 need individual `nav` entries. `docs/sphinx/` is excluded from this handbook.
