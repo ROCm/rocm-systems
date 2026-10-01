@@ -126,9 +126,9 @@ Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ 
 
 | Transition | Behavior |
 | ---------- | -------- |
-| pre-7.14 (pip-era) → 7.14+ package | The old package's prerm still `pip uninstall`s the legacy module and removes its `.pth`; the new package owns the site-packages files. |
-| 7.14+ → 7.14+ | Plain file replacement by the package manager. |
-| 7.14+ → pre-7.14 (downgrade) | The old package re-adds the pip install; a user-installed bundled-library wheel in `/usr/local` or `~/.local` still wins and survives. |
+| pre-10.1 (pip-era) → 10.1+ package | The old package's prerm still `pip uninstall`s the legacy module and removes its `.pth`; the new package owns the site-packages files. |
+| 10.1+ → 10.1+ | Plain file replacement by the package manager. |
+| 10.1+ → pre-10.1 (downgrade) | The old package re-adds the pip install; a user-installed bundled-library wheel in `/usr/local` or `~/.local` still wins and survives. |
 | package removed, then bundled-library wheel | Package removal deletes only its own files; the wheel includes its own `.so` and disables fallback. |
 | package removed, then legacy PyPI wrapper | The wrapper still requires a matching native library; installing it alone does not replace the removed library. |
 
