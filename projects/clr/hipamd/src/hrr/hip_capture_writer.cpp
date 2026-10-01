@@ -897,25 +897,43 @@ bool open(const char* output_dir) {
     const bool fast = try_load_writer_state(state_path, existing_size,
                                             &next_seq, &ev_count, &bl_count);
 
+    // Without the scan a trailer is not stripped and the counters can restart,
+    // so an archive that cannot be scanned is not resumed.
     ScanResult scan{};
+    bool scanned = false;
+    int scan_err = 0;
 #ifdef _WIN32
     if (FILE* rf = fopen(events_path.c_str(), "rb")) {
       scan = scan_events_for_resume(rf, existing_size);
       fclose(rf);
+      scanned = true;
+    } else {
+      scan_err = errno;
     }
 #else
     // Reuse the already-validated events descriptor so a pathname swap cannot
     // make the scan follow a different file than open_events_file accepted.
     const int scan_fd = ::fcntl(g_events_fd, F_DUPFD_CLOEXEC, 0);
-    if (scan_fd >= 0) {
-      if (FILE* rf = ::fdopen(scan_fd, "rb")) {
-        scan = scan_events_for_resume(rf, existing_size);
-        fclose(rf);
-      } else {
-        ::close(scan_fd);
-      }
+    if (scan_fd < 0) {
+      scan_err = errno;
+    } else if (FILE* rf = ::fdopen(scan_fd, "rb")) {
+      scan = scan_events_for_resume(rf, existing_size);
+      fclose(rf);
+      scanned = true;
+    } else {
+      scan_err = errno;
+      ::close(scan_fd);
     }
 #endif
+    if (!scanned) {
+      LogPrintfError("[HRR capture] Cannot read %s to resume it: %s", events_path.c_str(),
+                     strerror(scan_err));
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot read %s to resume it (%s).\n",
+              events_path.c_str(), strerror(scan_err));
+      HRR_CLOSE(g_events_fd);
+      g_events_fd = -1;
+      return open_failed(created_pid_dir);
+    }
     if (!fast) {
       next_seq = (scan.count > 0) ? (scan.max_seq + 1) : 0;
       ev_count = scan.count;

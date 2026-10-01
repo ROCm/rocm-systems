@@ -40,12 +40,26 @@ Create `regions/` with mode 0700 and the files in it with 0600 so the archive
 stays private.
 
 **Checking whether capture is active** reduces to checking that the archive's
-`events.bin` exists. There is no symbol to resolve and nothing to `dlopen`:
+`events.bin` is there and is a file the writer would open: a regular file of
+this user with one name, reached through no link. There is no symbol to resolve
+and nothing to `dlopen`:
 
 ```python
-active = "HIP_HRR_CAPTURE_OUTPUT" in os.environ and os.path.isfile(
-    os.path.join(os.environ["HIP_HRR_CAPTURE_OUTPUT"], f"pid-{os.getpid()}",
-                 "events.bin"))
+import os, stat
+
+def capture_active():
+    root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
+    if not root:
+        return False
+    d = os.path.join(root, f"pid-{os.getpid()}")
+    try:
+        ds = os.lstat(d)
+        fs = os.lstat(os.path.join(d, "events.bin"))
+    except OSError:
+        return False
+    return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
+            and stat.S_ISREG(fs.st_mode) and fs.st_uid == os.geteuid()
+            and fs.st_nlink == 1)
 ```
 
 The directory alone is not enough: one that was already there stays when the
