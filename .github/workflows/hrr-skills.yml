@@ -62,12 +62,18 @@ jobs:
             exit 1
           fi
           printf 'Found %s\n' "${suites[@]}"
-          # Collected by directory rather than by naming every file: the list is
-          # only there to fail the empty case, and an argv that grows with the
-          # number of skills eventually hits the command-line limit.
-          # importlib mode: each suite puts its own skill's scripts/ on sys.path,
-          # and two skills are free to name a test file or a module the same.
-          python -m pytest projects/hrr/skills -q -rs --import-mode=importlib
+          # One pytest process per skill: each suite puts its own skill's
+          # scripts/ on sys.path, and a module one suite imports stays in
+          # sys.modules, so two skills naming a script the same would otherwise
+          # test the first one's copy. importlib mode lets test files share a name.
+          mapfile -t skills < <(printf '%s\n' "${suites[@]}" | cut -d/ -f1-4 | sort -u)
+          rc=0
+          for skill in "${skills[@]}"; do
+            echo "::group::$skill"
+            python -m pytest "$skill" -q -rs --import-mode=importlib || rc=1
+            echo "::endgroup::"
+          done
+          exit "$rc"
 
   script-syntax:
     name: "HRR skills: scripts parse"
@@ -129,7 +135,11 @@ jobs:
             .github/workflows
           persist-credentials: false
 
+      # The action pins itself, not the uv it installs, which is otherwise
+      # whatever is latest on the day.
       - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          version: '0.12.21'
 
       - name: Check there is something to check
         run: |
