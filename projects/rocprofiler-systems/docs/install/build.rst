@@ -80,7 +80,6 @@ Required third-party packages
 * `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation.
   Dyninst uses the following required and optional components.
 
-  * `TBB <https://github.com/oneapi-src/oneTBB>`_ (required)
   * `Elfutils <https://sourceware.org/elfutils/>`_ (required)
   * `Libiberty <https://github.com/gcc-mirror/gcc/tree/master/libiberty>`_ (required)
   * `OpenMP <https://www.openmp.org/>`_ (optional)
@@ -95,7 +94,7 @@ Required third-party packages
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
 the application that requires the package (for example, ROCm Systems Profiler requires Dyninst
-while Dyninst requires TBB), and the CMake option to build the package alongside ROCm Systems Profiler:
+while Dyninst requires Libiberty), and the CMake option to build the package alongside ROCm Systems Profiler:
 
 .. csv-table::
    :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
@@ -104,12 +103,11 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
    "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
-   "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
 
-The CMake presets described later on this page turn on in-tree Dyninst, TBB, Elfutils, and
+The CMake presets described later on this page turn on in-tree Dyninst, Elfutils, and
 LibIberty builds even though the CMake defaults for those options are ``OFF``.
 
 ROCm dependencies
@@ -170,7 +168,7 @@ Configure and build with CMake presets
 The project ships configure presets for common developer and CI layouts. All visible
 presets inherit a hidden ``default`` preset that selects the Ninja generator, the
 ``gcc``/``g++`` compilers, install prefix ``/opt/rocprofiler-systems``, Python support,
-and in-tree builds of Dyninst, TBB, Elfutils, and LibIberty.
+and in-tree builds of Dyninst, Elfutils, and LibIberty.
 
 List the available presets, then configure, build, and install. The file defines
 configure presets only, so pass the build directory (not ``--preset``) to
