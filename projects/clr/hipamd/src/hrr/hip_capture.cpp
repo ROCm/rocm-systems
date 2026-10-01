@@ -1658,9 +1658,6 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
 // blob. Keyed off srcMemoryType/dstMemoryType (no single "kind" field).
 // ---------------------------------------------------------------------------
 
-// Defined with the hipMemcpy2D helpers below: pitch*(height-1)+width.
-static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height);
-
 // Byte footprint of the host side of a driver-style copy, measured from the host
 // base pointer (srcHost / dstHost).
 //
@@ -1680,26 +1677,51 @@ static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height
 // the copy into a buffer laid out the same way and compare exactly the copied
 // rows. An older archive holds the flat volume there, which replay tells apart
 // by its size.
+//
+// Every step is checked, as replay's hrr_host_rect is: a wrapped footprint would
+// size the blob below the rows then copied into it.
 struct HostRect {
   size_t row, slice, first, bytes;  // bytes == 0: nothing is copied
+  bool ok;                          // false: the footprint does not fit in size_t
 };
+
+// a*b + c, refusing to wrap.
+static bool size_mad(size_t a, size_t b, size_t c, size_t* out) {
+  if (a != 0 && b > (SIZE_MAX - c) / a) return false;
+  *out = a * b + c;
+  return true;
+}
 
 static HostRect host_rect(size_t pitch, size_t pitch_height, size_t x, size_t y, size_t z,
                           size_t width, size_t height, size_t depth) {
-  if (width == 0 || height == 0 || depth == 0) return {0, 0, 0, 0};
-  size_t row = (pitch != 0) ? pitch : width;
-  if (row < width) row = width;  // defensive: degenerate pitch
-  size_t slice = pitch * pitch_height;
-  if (slice < row * height) slice = row * height;  // 0 => runtime default
-  size_t first = z * slice + y * row + x;          // offset of the first byte
-  return {row, slice, first,
-          first + (depth - 1) * slice + memcpy2d_host_byte_count(row, width, height)};
+  HostRect r{0, 0, 0, 0, false};
+  if (width == 0 || height == 0 || depth == 0) {
+    r.ok = true;
+    return r;
+  }
+  r.row = (pitch != 0) ? pitch : width;
+  if (r.row < width) r.row = width;  // defensive: degenerate pitch
+  size_t dense = 0, yx = 0, last = 0;
+  if (!size_mad(r.row, height, 0, &dense) || !size_mad(pitch, pitch_height, 0, &r.slice))
+    return r;
+  if (r.slice < dense) r.slice = dense;  // 0 => runtime default
+  // first = z*slice + y*row + x, the offset of the first byte; bytes = first +
+  // (depth-1)*slice + (height-1)*row + width.
+  if (!size_mad(y, r.row, x, &yx) || !size_mad(z, r.slice, yx, &r.first) ||
+      !size_mad(height - 1, r.row, width, &last) ||
+      !size_mad(depth - 1, r.slice, last, &last) || !size_mad(1, last, r.first, &r.bytes))
+    return r;
+  r.ok = true;
+  return r;
 }
 
+// SIZE_MAX for a footprint that overflows, so the caller still reaches
+// write_host_rect_blob, which records the loss.
 static size_t drvmemcpy_host_byte_count(size_t pitch, size_t pitch_height,
                                         size_t x, size_t y, size_t z,
                                         size_t width, size_t height, size_t depth) {
-  return host_rect(pitch, pitch_height, x, y, z, width, height, depth).bytes;
+  const HostRect r = host_rect(pitch, pitch_height, x, y, z, width, height, depth);
+  return r.ok ? r.bytes : SIZE_MAX;
 }
 
 // Blob of a host rect's footprint. The footprint also spans bytes the copy never
@@ -1714,6 +1736,12 @@ static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
                                              size_t z, size_t width, size_t height,
                                              size_t depth) {
   const HostRect r = host_rect(pitch, pitch_height, x, y, z, width, height, depth);
+  if (!r.ok) {
+    LogPrintfWarning("[HRR capture] host copy rect %zux%zux%zu at pitch %zu overflows size_t",
+                     width, height, depth, pitch);
+    hrr_cap::writer::mark_incomplete("pitched host copy not recorded");
+    return {0, 0};
+  }
   if (r.bytes == 0) return {0, 0};
   if (r.first == 0 && r.row == width && (depth == 1 || r.slice == width * height)) {
     return hrr_cap::writer::write_blob(base, r.bytes);  // dense: no gaps to leave out
@@ -1890,10 +1918,12 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
 // (capture-time, untranslatable) host VA, and validate D2H output.
 // ---------------------------------------------------------------------------
 
+// SIZE_MAX when the extent overflows, as drvmemcpy_host_byte_count.
 static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height) {
   if (height == 0 || width == 0) return 0;
   if (pitch < width) pitch = width;  // defensive: degenerate pitch
-  return pitch * (height - 1) + width;
+  size_t n = 0;
+  return size_mad(pitch, height - 1, width, &n) ? n : SIZE_MAX;
 }
 
 // Shared blob logic for both 2D variants. Writes the H2D source blob or the D2H
