@@ -253,11 +253,12 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     if manifest is not None:
         # A damaged manifest is reported, not raised on: any field can be any
         # JSON value, and `"event_count": "100"` crashed the first comparison.
-        # bool is an int to Python, so it is excluded from the counts.
+        # bool is an int to Python, so it is excluded from the counts. The
+        # writer never writes null, so an explicit null is damage as well.
         def typed(source: dict, key: str, kind: type):
-            value = source.get(key)
-            if value is None:
+            if key not in source:
                 return None
+            value = source[key]
             if isinstance(value, kind) and (kind is bool or not isinstance(value, bool)):
                 return value
             proc.manifest_bad_fields.append(f"{key}: {type(value).__name__}")
@@ -287,7 +288,11 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
 
 
 def _resolve(archive: Path) -> tuple[Path, list[Path]]:
-    """Return (root, pid directories). Accepts a root or a single pid dir."""
+    """Return (root, pid directories). Accepts a root or a single pid dir.
+
+    A single pid dir is its own root: it is what gets sent, and the parent's
+    manifest lists processes that were not passed.
+    """
     # A pid-* directory with no events.bin is a leftover the reader skips
     # (playback/hrr_playback.cpp), not a process that recorded nothing.
     pid_dirs = sorted(
@@ -296,7 +301,7 @@ def _resolve(archive: Path) -> tuple[Path, list[Path]]:
     if pid_dirs:
         return archive, pid_dirs
     if (archive / "events.bin").is_file():
-        return archive.parent, [archive]
+        return archive, [archive]
     return archive, []
 
 
@@ -445,7 +450,10 @@ def inspect(
     root, pid_dirs = _resolve(archive)
     report = ArchiveReport(root=root)
 
-    manifest, error = _read_manifest(root / "manifest.json")
+    # In a single pid dir, manifest.json is the process's own, read below.
+    manifest, error = None, None
+    if pid_dirs != [root]:
+        manifest, error = _read_manifest(root / "manifest.json")
     report.root_manifest = manifest
     report.root_manifest_error = error
     if error:
@@ -456,13 +464,9 @@ def inspect(
         )
 
     for pid_dir in pid_dirs:
-        proc = _load_process(pid_dir)
-        report.processes.append(proc)
-        report.total_bytes += proc.total_bytes
-    # An archive root is sent whole, its own manifest included. A single pid-*
-    # directory passed on its own is sent alone, and its root is only the parent.
-    if root == archive:
-        _, report.total_bytes = _dir_stats(root)
+        report.processes.append(_load_process(pid_dir))
+    # What is sent is the root whole, its own manifest included.
+    _, report.total_bytes = _dir_stats(root)
 
     if manifest and isinstance(manifest.get("processes"), list):
         by_pid = {p.pid: p for p in report.processes if p.pid is not None}

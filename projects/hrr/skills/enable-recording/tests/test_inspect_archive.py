@@ -105,6 +105,22 @@ def test_a_pid_directory_can_be_passed_directly(tmp_path):
     assert [p.pid for p in report.processes] == [7]
 
 
+def test_a_pid_directory_passed_alone_is_its_own_archive(tmp_path):
+    """The parent's manifest lists the other processes, which were not passed,
+    so reading it warned that their real directories were missing.
+    """
+    pid_dir = make_process(tmp_path, 49)
+    make_process(tmp_path, 50)
+    make_root(tmp_path, [{"pid": 49, "event_count": 100}, {"pid": 50, "event_count": 100}])
+
+    report = inspect_archive.inspect(pid_dir, use_playback=False)
+
+    assert report.root == pid_dir
+    assert report.root_manifest is None and report.root_manifest_error is None
+    assert report.warnings == []
+    assert inspect_archive.render(report).startswith(f"Archive: {pid_dir}")
+
+
 def test_archive_with_no_process_directories_is_empty(tmp_path):
     report = inspect_archive.inspect(tmp_path, use_playback=False)
 
@@ -268,6 +284,23 @@ def test_an_empty_or_partial_manifest_is_damaged_not_missing(tmp_path, content):
     report = inspect_archive.inspect(tmp_path, use_playback=False)
 
     assert any("complete: missing" in w for w in report.warnings)
+    assert not any("died before finalizing" in w for w in report.warnings)
+    assert "state: unknown (manifest damaged)" in inspect_archive.render(report)
+
+
+def test_a_null_manifest_field_is_damaged_not_missing(tmp_path):
+    """`{"complete": null}` read as no manifest at all, and the process as one
+    that died before finalizing, although the file was there.
+    """
+    pid_dir = make_process(tmp_path, 59)
+    (pid_dir / "manifest.json").write_text(
+        json.dumps({"pid": 59, "complete": None, "event_count": None})
+    )
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    warning = next(w for w in report.warnings if "wrong type" in w)
+    assert "complete: NoneType" in warning and "event_count: NoneType" in warning
     assert not any("died before finalizing" in w for w in report.warnings)
     assert "state: unknown (manifest damaged)" in inspect_archive.render(report)
 

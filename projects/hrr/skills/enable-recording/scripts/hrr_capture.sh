@@ -634,13 +634,18 @@ case "$VERB" in
     set +e
     # Job control on for the launch only, which is what gives the job its own
     # group. It also stops stdin defaulting to /dev/null for a background job,
-    # so that is now explicit: a workload reading the terminal from outside
-    # the foreground group would be stopped, and the wait below with it.
+    # so a workload fed from a pipe or a file still reads it. Only a terminal
+    # is replaced: a workload reading it from outside the foreground group
+    # would be stopped, and the wait below with it.
     # A background job starts with SIGINT and SIGQUIT ignored, and the workload
     # would inherit that, so neither a Ctrl-C nor the INT forwarded above would
     # ever reach it. Put them back to what this script was started with.
     set -m
-    ( trap - INT QUIT; export HIP_HRR_CAPTURE_OUTPUT="$OUTPUT"; exec "${CMD[@]}" ) </dev/null &
+    (
+      trap - INT QUIT
+      export HIP_HRR_CAPTURE_OUTPUT="$OUTPUT"
+      if [[ -t 0 ]]; then exec "${CMD[@]}" </dev/null; else exec "${CMD[@]}"; fi
+    ) &
     workload_pid=$!
     set +m
     # A trapped signal cuts `wait` short while the workload may still be
