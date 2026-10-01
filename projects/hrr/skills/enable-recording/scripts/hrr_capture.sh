@@ -106,9 +106,19 @@ workload_interpreter() {
       '#!'*python*)
         shebang="${shebang#\#!}"
         set -- $shebang
-        # `#!/usr/bin/env python3` names the interpreter in the second word.
-        [[ "${1##*/}" == "env" ]] && shift
-        [[ -n "${1:-}" ]] && { echo "$1"; return 0; }
+        # `#!/usr/bin/env python3` names the interpreter in the second word,
+        # and `#!/usr/bin/env -S python3 -u` in the third, possibly after
+        # assignments. Any other option is not an interpreter.
+        if [[ "${1##*/}" == "env" ]]; then
+          shift
+          case "${1:-}" in
+            -S|--split-string) shift ;;
+            --split-string=*) set -- "${1#--split-string=}" "${@:2}" ;;
+            -S?*) set -- "${1#-S}" "${@:2}" ;;
+          esac
+          while [[ "${1:-}" == *=* ]]; do shift; done
+        fi
+        [[ -n "${1:-}" && "$1" != -* ]] && { echo "$1"; return 0; }
         ;;
     esac
   fi

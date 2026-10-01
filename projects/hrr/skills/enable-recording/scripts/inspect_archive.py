@@ -249,7 +249,8 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
 
     manifest, error = _read_manifest(pid_dir / "manifest.json")
     proc.manifest_error = error
-    if manifest:
+    # `{}` is a manifest too, and a damaged one, not a missing one.
+    if manifest is not None:
         # A damaged manifest is reported, not raised on: any field can be any
         # JSON value, and `"event_count": "100"` crashed the first comparison.
         # bool is an int to Python, so it is excluded from the counts.
@@ -267,6 +268,8 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         proc.complete = typed(manifest, "complete", bool)
         proc.event_count = typed(manifest, "event_count", int)
         proc.blob_count = typed(manifest, "blob_count", int)
+        if "complete" not in manifest:
+            proc.manifest_bad_fields.append("complete: missing")
         metadata = manifest.get("metadata")
         runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
         if isinstance(runtime, dict):
@@ -285,10 +288,14 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
 
 def _resolve(archive: Path) -> tuple[Path, list[Path]]:
     """Return (root, pid directories). Accepts a root or a single pid dir."""
-    pid_dirs = sorted(d for d in archive.glob("pid-*") if d.is_dir())
+    # A pid-* directory with no events.bin is a leftover the reader skips
+    # (playback/hrr_playback.cpp), not a process that recorded nothing.
+    pid_dirs = sorted(
+        d for d in archive.glob("pid-*") if d.is_dir() and (d / "events.bin").is_file()
+    )
     if pid_dirs:
         return archive, pid_dirs
-    if (archive / "events.bin").is_file() or archive.name.startswith("pid-"):
+    if (archive / "events.bin").is_file():
         return archive.parent, [archive]
     return archive, []
 
@@ -441,6 +448,12 @@ def inspect(
     manifest, error = _read_manifest(root / "manifest.json")
     report.root_manifest = manifest
     report.root_manifest_error = error
+    if error:
+        # A warning, so --json carries it as the text report does.
+        report.warnings.append(
+            f"root manifest.json is unreadable ({error}); each process's own manifest "
+            "is what this reports"
+        )
 
     for pid_dir in pid_dirs:
         proc = _load_process(pid_dir)
@@ -482,7 +495,7 @@ def inspect(
     for proc in report.processes:
         if proc.manifest_bad_fields:
             report.warnings.append(
-                f"{proc.path.name}: manifest.json has fields of the wrong type "
+                f"{proc.path.name}: manifest.json has fields missing or of the wrong type "
                 f"({', '.join(proc.manifest_bad_fields)}), read as unknown"
             )
         if proc.manifest_error:
@@ -630,10 +643,8 @@ def verdict(report: ArchiveReport) -> str:
 def render(report: ArchiveReport) -> str:
     lines = [f"Archive: {report.root}"]
 
-    if report.root_manifest_error:
-        lines.append(f"Root manifest unreadable: {report.root_manifest_error}")
-
     if not report.processes:
+        lines.extend(f"Warning: {w}" for w in report.warnings)
         lines.append("")
         lines.append(
             "The usual cause is that the runtime the workload loaded has no capture "
@@ -740,6 +751,7 @@ def to_dict(report: ArchiveReport) -> dict:
             }
             for p in report.processes
         ],
+        "root_manifest_error": report.root_manifest_error,
         "warnings": report.warnings,
         "playback_info": report.playback_info,
         "playback_error": report.playback_error,
@@ -771,6 +783,7 @@ def missing_archive(archive: Path) -> tuple[str, dict]:
         "total_bytes": 0,
         "recorded": False,
         "processes": [],
+        "root_manifest_error": None,
         "warnings": [],
         "playback_info": None,
         "playback_error": None,

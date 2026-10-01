@@ -257,6 +257,48 @@ def test_manifest_fields_of_the_wrong_type_are_unknown_not_fatal(tmp_path):
     assert "state: unknown (manifest damaged)" in rendered
 
 
+@pytest.mark.parametrize("content", ["{}", '{"pid": 58}'])
+def test_an_empty_or_partial_manifest_is_damaged_not_missing(tmp_path, content):
+    """`{}` was skipped as if the file did not exist, and the process read as
+    one killed before it could finalize.
+    """
+    pid_dir = make_process(tmp_path, 58)
+    (pid_dir / "manifest.json").write_text(content)
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    assert any("complete: missing" in w for w in report.warnings)
+    assert not any("died before finalizing" in w for w in report.warnings)
+    assert "state: unknown (manifest damaged)" in inspect_archive.render(report)
+
+
+def test_a_pid_directory_without_events_is_a_leftover_not_a_capture(tmp_path):
+    """The reader skips a pid-* directory with no events.bin, so the verdict
+    has to as well: an output holding only one captured nothing.
+    """
+    stale = tmp_path / "pid-123"
+    stale.mkdir()
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+    assert report.processes == []
+    assert inspect_archive.verdict(report) == "nothing captured"
+
+    direct = inspect_archive.inspect(stale, use_playback=False)
+    assert direct.processes == []
+    assert inspect_archive.verdict(direct) == "nothing captured"
+
+
+def test_the_json_report_carries_an_unreadable_root_manifest(tmp_path, capsys):
+    make_process(tmp_path, 59)
+    (tmp_path / "manifest.json").write_text("{not json")
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["root_manifest_error"]
+    assert any("root manifest.json is unreadable" in w for w in payload["warnings"])
+
+
 def test_size_on_disk_counts_the_root_manifest_but_not_the_parent(tmp_path):
     """The whole archive directory is what gets sent; a single pid-* directory
     passed on its own is sent alone.
@@ -969,6 +1011,43 @@ def _strip_launchers(command: str) -> str:
 )
 def test_the_workload_is_found_behind_its_launcher(command, expected):
     assert _strip_launchers(command) == expected
+
+
+@pytest.mark.parametrize(
+    "shebang, expected",
+    [
+        ("#!/venv/bin/python3", "/venv/bin/python3"),
+        ("#!/usr/bin/env python3", "python3"),
+        # -S used to come back as the interpreter, and the package scan ran it.
+        ("#!/usr/bin/env -S python3 -u", "python3"),
+        ("#!/usr/bin/env -Spython3", "python3"),
+        ("#!/usr/bin/env --split-string=python3 -u", "python3"),
+        ("#!/usr/bin/env -S PYTHONUNBUFFERED=1 python3", "python3"),
+        # An option we do not model is not a binary: fall back to the PATH's.
+        ("#!/usr/bin/env -i python3", "FALLBACK"),
+    ],
+)
+def test_the_interpreter_is_read_off_the_shebang(tmp_path, shebang, expected):
+    function = re.search(
+        r"^workload_interpreter\(\).*?^\}", SCRIPT.read_text(encoding="utf-8"), re.M | re.S
+    )
+    assert function, "workload_interpreter is gone from the script"
+    script = tmp_path / "console-script"
+    script.write_text(f"{shebang}\nimport sys\n")
+    # The PATH's python3 is what the fallback answers, so make it recognisable.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fallback = bindir / "python3"
+    fallback.write_text("#!/bin/sh\n")
+    fallback.chmod(0o755)
+    result = subprocess.run(
+        ["/bin/bash", "-c", f"{function.group(0)}\nworkload_interpreter"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "WORKLOAD_BIN": str(script), "PATH": str(bindir)},
+        check=True,
+    )
+    assert result.stdout.strip() == (str(fallback) if expected == "FALLBACK" else expected)
 
 
 def test_preflight_resolves_with_the_launchers_environment():
