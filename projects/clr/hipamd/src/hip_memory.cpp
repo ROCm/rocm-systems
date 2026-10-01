@@ -3453,12 +3453,22 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
   }
   CHECK_STREAM_DETACHED_API(stream);
 
+  // Not supported while the stream is capturing.
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+    hip_stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+  }
+  if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+    HIP_RETURN(hipErrorStreamCaptureInvalidated);
+  }
+
   // The Ext API does not expose failIdx; the shared implementation still
   // supports it for the legacy hipMemcpyBatchAsync path, so pass nullptr here.
   HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, sizesDst,
                              waits, signals, count,
                              attrs, attrsIdxs, numAttrs,
-                             *hip::getStream(stream), true, /*failIdx=*/nullptr));
+                             *hip_stream, true, /*failIdx=*/nullptr));
 }
 
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
