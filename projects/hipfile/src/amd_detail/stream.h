@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
@@ -15,23 +16,27 @@ template <typename T> class PassKey;
 
 namespace hipFile {
 
+class AsyncOp;
+
 class IStream {
 public:
     virtual ~IStream() = default;
 
-    virtual hipStream_t                  getHipStream() const           = 0;
-    virtual hipDevice_t                  getHipDevice() const           = 0;
-    virtual bool                         fixedBufferOffset() const      = 0;
-    virtual bool                         fixedFileOffset() const        = 0;
-    virtual bool                         fixedIOSize() const            = 0;
-    virtual bool                         pageAligned() const            = 0;
-    virtual std::unique_lock<std::mutex> getLock()                      = 0;
-    virtual bool                         canUseStreamWaitValue() const  = 0;
-    virtual hipStream_t                  copyStream() const             = 0;
-    virtual uint64_t                    *signalSlot() const             = 0;
-    virtual uint64_t                     nextSignalTarget()             = 0;
-    virtual hipEvent_t                   acquireEvent()                 = 0;
-    virtual void                         releaseEvent(hipEvent_t event) = 0;
+    virtual hipStream_t                  getHipStream() const                     = 0;
+    virtual hipDevice_t                  getHipDevice() const                     = 0;
+    virtual bool                         fixedBufferOffset() const                = 0;
+    virtual bool                         fixedFileOffset() const                  = 0;
+    virtual bool                         fixedIOSize() const                      = 0;
+    virtual bool                         pageAligned() const                      = 0;
+    virtual std::unique_lock<std::mutex> getLock()                                = 0;
+    virtual bool                         canUseStreamWaitValue() const            = 0;
+    virtual hipStream_t                  copyStream() const                       = 0;
+    virtual uint64_t                    *signalSlot() const                       = 0;
+    virtual uint64_t                     nextSignalTarget()                       = 0;
+    virtual hipEvent_t                   acquireEvent()                           = 0;
+    virtual void                         releaseEvent(hipEvent_t event)           = 0;
+    virtual bool                         pushPending(std::shared_ptr<AsyncOp> op) = 0;
+    virtual std::shared_ptr<AsyncOp>     popPendingOrDeactivate()                 = 0;
 };
 
 class StreamMap;
@@ -53,6 +58,8 @@ public:
     virtual uint64_t                     nextSignalTarget() override;
     virtual hipEvent_t                   acquireEvent() override;
     virtual void                         releaseEvent(hipEvent_t event) override;
+    virtual bool                         pushPending(std::shared_ptr<AsyncOp> op) override;
+    virtual std::shared_ptr<AsyncOp>     popPendingOrDeactivate() override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -77,6 +84,10 @@ private:
 
     std::mutex              event_mutex;
     std::vector<hipEvent_t> event_pool;
+
+    std::mutex                           pending_mutex;
+    std::deque<std::shared_ptr<AsyncOp>> pending;
+    bool                                 drainer_active{false};
 };
 
 class StreamMap {
