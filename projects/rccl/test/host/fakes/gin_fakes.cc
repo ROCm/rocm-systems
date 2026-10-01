@@ -13,14 +13,13 @@ ncclResult_t g_ncclGinInitResult = ncclSuccess;
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 
-// src/gin/gin_host.cc — omitted when the target compiles the real TU.
+// src/gin/gin_host.cc. rccl-UnitTestsMicroGinHost compiles the real TU and does
+// not link this file, so the fake is not guarded.
 bool g_ginHasError = false;
-#ifndef RCCL_GIN_FAKES_OMIT_ncclGinQueryLastError
 ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
   if (hasError) *hasError = g_ginHasError;
   return ncclSuccess;
 }
-#endif
 
 void ResetGinFakes() {
   g_ncclGinInitResult = ncclSuccess;

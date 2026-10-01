@@ -400,9 +400,9 @@ __global__ void alltoallKernel(
 
 class GinMPIDeviceTests : public MPITestBase {
  protected:
-  // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1.
-  // Used by the Invalid_*Pool tests to confirm comm bring-up + the GIN
-  // data path still work after the runtime clamps an oversized pool.
+  // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1 on the
+  // caller's comm and stream. Contains ASSERT_MPI_*, so it must be the
+  // caller's last statement.
   void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream) {
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank);
@@ -505,6 +505,32 @@ class GinMPIDeviceTests : public MPITestBase {
   void runWaitCounterAndSignal(int nContexts);
   void runVASignalPut(int nContexts);
   void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence);
+
+  // Same clamp as ncclGinConnectOnce: default 1, values <= 1 stay 1, cap at
+  // NCCL_GIN_MAX_CONNECTIONS.
+  int expectedProxyNthreads() const {
+    int n = 1;
+    if (const char* e = std::getenv("NCCL_GIN_PROXY_NTHREADS")) {
+      char* end = nullptr;
+      long v = std::strtol(e, &end, 10);
+      if (end != e && *end == '\0' && v > 1) n = static_cast<int>(v);
+    }
+    if (n > NCCL_GIN_MAX_CONNECTIONS) n = NCCL_GIN_MAX_CONNECTIONS;
+    return n;
+  }
+
+  // PROXY backend and exactly two ranks. Coordinated: a skip on one rank skips all.
+  std::string proxyNthreadsTwoRankSkipReason() {
+    auto localSkip = proxyNthreadsSkipReason();
+    if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
+      return reason;
+    if (auto reason = mpiCoordinatedSkipReason(
+            !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
+            "Requires exactly 2 ranks");
+        !reason.empty())
+      return reason;
+    return {};
+  }
 };
 
 // Context-aware producer/consumer for Put_BasicAndOffsets: one block per GIN
@@ -6193,24 +6219,25 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
 
 // GIN_CONNECTION_NONE DevComm then PROXY put: must complete (no thread-start hang).
 TEST_F(GinMPIDeviceTests, Recycle_NonGinThenProxyPut) {
-  auto localSkip = proxyNthreadsSkipReason();
-  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = mpiCoordinatedSkipReason(
-          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
-          "Requires exactly 2 ranks");
-      !reason.empty())
-    GTEST_SKIP() << reason;
+  if (auto reason = proxyNthreadsTwoRankSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
+  ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
 
   ncclDevCommRequirements none = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   none.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
   ncclDevComm skipped{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &none, &skipped));
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &skipped));
+  ncclResult_t skippedSt = ncclDevCommCreate(comm, &none, &skipped);
+  bool skippedLive = (skippedSt == ncclSuccess);
+  auto skippedCleanup = makeScopeGuard([&]() {
+    if (skippedLive) (void)ncclDevCommDestroy(comm, &skipped);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, skippedSt);
+  ncclResult_t skippedDestroySt = ncclDevCommDestroy(comm, &skipped);
+  skippedLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, skippedDestroySt);
   MPI_Barrier(MPI_COMM_WORLD);
 
   runPutWaitRoundTrip(comm, getActiveStream());
@@ -6218,25 +6245,26 @@ TEST_F(GinMPIDeviceTests, Recycle_NonGinThenProxyPut) {
 
 // Destroy a PROXY DevComm, create another: put/waitSignal still succeeds.
 TEST_F(GinMPIDeviceTests, Recycle_DestroyThenProxyPut) {
-  auto localSkip = proxyNthreadsSkipReason();
-  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = mpiCoordinatedSkipReason(
-          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
-          "Requires exactly 2 ranks");
-      !reason.empty())
-    GTEST_SKIP() << reason;
+  if (auto reason = proxyNthreadsTwoRankSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
+  ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount = 1;
   ncclDevComm first{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &first));
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &first));
+  ncclResult_t firstSt = ncclDevCommCreate(comm, &reqs, &first);
+  bool firstLive = (firstSt == ncclSuccess);
+  auto firstCleanup = makeScopeGuard([&]() {
+    if (firstLive) (void)ncclDevCommDestroy(comm, &first);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, firstSt);
+  ncclResult_t firstDestroySt = ncclDevCommDestroy(comm, &first);
+  firstLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, firstDestroySt);
   MPI_Barrier(MPI_COMM_WORLD);
 
   runPutWaitRoundTrip(comm, getActiveStream());
@@ -6273,18 +6301,12 @@ class GinProxyNthreadsSplitTests : public GinMPIDeviceTests {
 
 // splitShare=1 child shares ginState; put on the child's DevComm succeeds.
 TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
-  auto localSkip = proxyNthreadsSkipReason();
-  if (auto reason = mpiCoordinatedSkipReason(!localSkip.empty(), localSkip.c_str()); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = mpiCoordinatedSkipReason(
-          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2),
-          "Requires exactly 2 ranks");
-      !reason.empty())
-    GTEST_SKIP() << reason;
+  if (auto reason = proxyNthreadsTwoRankSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t parent = getActiveCommunicator();
+  ASSERT_MPI_EQ(expectedProxyNthreads(), parent->sharedRes->ginState.proxyNthreads);
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -6296,10 +6318,10 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   ncclComm_t child = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(parent, 0, getTestMpiRank(), &child, nullptr));
   ASSERT_MPI_TRUE(child != nullptr);
-  ASSERT_MPI_EQ(parent->sharedRes, child->sharedRes);
   auto childCleanup = makeScopeGuard([&]() {
     if (child) (void)ncclCommDestroy(child);
   });
+  ASSERT_MPI_EQ(parent->sharedRes, child->sharedRes);
 
   MPI_Barrier(MPI_COMM_WORLD);
   runPutWaitRoundTrip(child, getActiveStream());

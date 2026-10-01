@@ -19,7 +19,4 @@ extern bool g_ginHasError;
 
 void ResetGinFakes();
 
-// When a target compiles real src/gin/gin_host.cc, define
-// RCCL_GIN_FAKES_OMIT_ncclGinQueryLastError so this fake is not linked.
-
 #endif  // RCCL_TEST_HOST_GIN_FAKES_H_

@@ -25,6 +25,7 @@
 #include <new>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "nccl.h"
@@ -83,7 +84,13 @@ int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) {
   return comm->rank + (rank - team.rank) * team.stride;
 }
 
-int ncclOsCpuCount(const ncclAffinity&) { return 0; }
+// Counts entries into ncclGinProgress. The progress loop itself has no counter
+// while writePending is set, so tests use this to prove a worker started.
+std::atomic<int> g_progressEntries{0};
+int ncclOsCpuCount(const ncclAffinity&) {
+  g_progressEntries.fetch_add(1, std::memory_order_relaxed);
+  return 0;
+}
 ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { return ncclSuccess; }
 void ncclSetThreadName(std::thread&, const char*, ...) {}
 
@@ -218,6 +225,7 @@ class GinHostTest : public ::testing::Test {
     g_nLocalGinDevs = 1;
     g_peerGinCommCount = -1;
     g_paramGinType = -1;
+    g_progressEntries.store(0);
     nthreadsParam_ = 1;
     nconnParam_ = -2;
 
@@ -317,6 +325,29 @@ class GinHostTest : public ::testing::Test {
 
 void stopProgress(ncclGinState* gs) { gs->proxyThreadStopSignal.store(true); }
 
+// Joins every spawned worker on scope exit, including a fatal ASSERT return.
+// Destroying a still-joinable std::thread calls std::terminate().
+class JoinProgressThreads {
+ public:
+  explicit JoinProgressThreads(ncclGinState* gs) : gs_(gs) {}
+  ~JoinProgressThreads() {
+    stopProgress(gs_);
+    for (auto& t : threads_) {
+      if (t.joinable()) t.join();
+    }
+  }
+  template <class Fn>
+  void spawn(Fn&& fn) {
+    threads_.emplace_back(std::forward<Fn>(fn));
+  }
+  JoinProgressThreads(const JoinProgressThreads&) = delete;
+  JoinProgressThreads& operator=(const JoinProgressThreads&) = delete;
+
+ private:
+  ncclGinState* gs_;
+  std::vector<std::thread> threads_;
+};
+
 // Unset GIN_PROXY_NTHREADS → proxyNthreads and ginCommCount stay 1.
 TEST_F(GinHostTest, DefaultNthreadsIsOne) {
   g_loadParam = [](const char* env, int64_t deft) -> int64_t {
@@ -370,31 +401,27 @@ TEST_F(GinHostTest, NthreadsWinsOverGinNconnections) {
 TEST_F(GinHostTest, RoundRobinOwnership) {
   attachProgressList(/*ginCommCount=*/4, /*proxyNthreads=*/2, {1, 1, 1, 1});
   auto* gs = gin();
-  std::thread t0([gs] { ncclGinProgress(gs, 0); });
-  std::thread t1([gs] { ncclGinProgress(gs, 1); });
-  ASSERT_TRUE(waitUntil([&] {
-    return fake_.slots[0]->progressCalls.load() > 0 && fake_.slots[1]->progressCalls.load() > 0 &&
-           fake_.slots[2]->progressCalls.load() > 0 && fake_.slots[3]->progressCalls.load() > 0;
-  }));
-  stopProgress(gs);
-  t0.join();
-  t1.join();
-
-  EXPECT_GT(fake_.slots[0]->progressCalls.load(), 0);
-  EXPECT_GT(fake_.slots[1]->progressCalls.load(), 0);
-  EXPECT_GT(fake_.slots[2]->progressCalls.load(), 0);
-  EXPECT_GT(fake_.slots[3]->progressCalls.load(), 0);
+  {
+    JoinProgressThreads workers(gs);
+    workers.spawn([gs] { ncclGinProgress(gs, 0); });
+    workers.spawn([gs] { ncclGinProgress(gs, 1); });
+    ASSERT_TRUE(waitUntil([&] {
+      return fake_.slots[0]->progressCalls.load() > 0 && fake_.slots[1]->progressCalls.load() > 0 &&
+             fake_.slots[2]->progressCalls.load() > 0 && fake_.slots[3]->progressCalls.load() > 0;
+    }));
+  }
 
   // Sequential check of the stride formula: thread 0 never owns odd connections.
   for (auto& s : fake_.slots) s->progressCalls.store(0);
   fake_.totalProgressCalls.store(0);
   gs->proxyThreadStopSignal.store(false);
-  std::thread only0([gs] {
-    ncclGinProgress(gs, 0);
-  });
-  ASSERT_TRUE(waitUntil([&] { return fake_.slots[0]->progressCalls.load() > 0 && fake_.slots[2]->progressCalls.load() > 0; }));
-  stopProgress(gs);
-  only0.join();
+  {
+    JoinProgressThreads only0(gs);
+    only0.spawn([gs] { ncclGinProgress(gs, 0); });
+    ASSERT_TRUE(waitUntil([&] {
+      return fake_.slots[0]->progressCalls.load() > 0 && fake_.slots[2]->progressCalls.load() > 0;
+    }));
+  }
   EXPECT_EQ(0, fake_.slots[1]->progressCalls.load());
   EXPECT_EQ(0, fake_.slots[3]->progressCalls.load());
   freeProgressList();
@@ -404,10 +431,11 @@ TEST_F(GinHostTest, RoundRobinOwnership) {
 TEST_F(GinHostTest, SkipsConnectionsThatDoNotNeedProxyProgress) {
   attachProgressList(2, 1, {1, 0});
   auto* gs = gin();
-  std::thread t([gs] { ncclGinProgress(gs, 0); });
-  ASSERT_TRUE(waitUntil([&] { return fake_.slots[0]->progressCalls.load() > 0; }));
-  stopProgress(gs);
-  t.join();
+  {
+    JoinProgressThreads worker(gs);
+    worker.spawn([gs] { ncclGinProgress(gs, 0); });
+    ASSERT_TRUE(waitUntil([&] { return fake_.slots[0]->progressCalls.load() > 0; }));
+  }
   EXPECT_EQ(0, fake_.slots[1]->progressCalls.load());
   freeProgressList();
 }
@@ -417,13 +445,19 @@ TEST_F(GinHostTest, WritePendingBacksOffReaders) {
   attachProgressList(1, 1, {1});
   auto* gs = gin();
   gs->writePending.store(true);
-  std::thread t([gs] { ncclGinProgress(gs, 0); });
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_EQ(0, fake_.totalProgressCalls.load());
-  gs->writePending.store(false);
-  ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > 0; }));
-  stopProgress(gs);
-  t.join();
+  g_progressEntries.store(0);
+  {
+    JoinProgressThreads worker(gs);
+    worker.spawn([gs] { ncclGinProgress(gs, 0); });
+    // Entry is the positive control: the 50 ms window starts only after the
+    // worker has reached ncclGinProgress, so an ignored writePending cannot pass as 0 == 0.
+    ASSERT_TRUE(waitUntil([&] { return g_progressEntries.load() > 0; }))
+        << "progress thread never entered ncclGinProgress";
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(0, fake_.totalProgressCalls.load());
+    gs->writePending.store(false);
+    ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > 0; }));
+  }
   freeProgressList();
 }
 
@@ -432,7 +466,14 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
   attachProgressList(1, 1, {1});
   fake_.slots[0]->progressResult = ncclSystemError;
   auto* gs = gin();
-  ncclGinProgress(gs, 0);
+  {
+    // On the test thread a missed error return spins in while(1) until the
+    // whole binary's timeout. A worker plus waitUntil fails this case instead.
+    JoinProgressThreads worker(gs);
+    worker.spawn([gs] { ncclGinProgress(gs, 0); });
+    ASSERT_TRUE(waitUntil([&] { return gs->asyncResult == ncclSystemError; }))
+        << "ginProgress error did not stop the worker";
+  }
   EXPECT_EQ(ncclSystemError, gs->asyncResult);
   freeProgressList();
 }
@@ -487,7 +528,8 @@ TEST_F(GinHostTest, FreeUnlinksAndStopsProgressingDestroyedCtx) {
   ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &drop, NCCL_VERSION_CODE));
   ASSERT_EQ(2u, fake_.slots.size());
   FakeSlot* dropSlot = fake_.slots.back().get();
-  const int callsBefore = dropSlot->progressCalls.load();
+  ASSERT_TRUE(waitUntil([&] { return dropSlot->progressCalls.load() > 0; }))
+      << "dropped ctx was never progressed";
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &drop));
   EXPECT_GE(fake_.destroyCalls.load(), 1);
 
@@ -495,7 +537,6 @@ TEST_F(GinHostTest, FreeUnlinksAndStopsProgressingDestroyedCtx) {
   ASSERT_TRUE(waitUntil([&] { return fake_.slots.front()->progressCalls.load() > 0; }));
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   EXPECT_EQ(afterFree, dropSlot->progressCalls.load()) << "freed ctx kept receiving ginProgress";
-  EXPECT_GE(dropSlot->progressCalls.load(), callsBefore);
 
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &keep));
 }
@@ -511,11 +552,20 @@ TEST_F(GinHostTest, FinalizeJoinsAllProgressThreads) {
   ASSERT_TRUE(gin()->thread[0].joinable());
   ASSERT_TRUE(gin()->thread[1].joinable());
 
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm));
+  // Leave the DevComm linked so a missed join keeps ginProgress running.
+  ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > 0; }));
+  const int moving = fake_.totalProgressCalls.load();
+  ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > moving; }));
+  struct ncclGinStateDevComm* dc = gin()->devComms;
   gin()->connected = true;
   ASSERT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
+  const int afterJoin = fake_.totalProgressCalls.load();
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  EXPECT_EQ(afterJoin, fake_.totalProgressCalls.load())
+      << "progress continued after HostFinalize joined the workers";
   // HostFinalize memsets ginState (production). Restore C++ lifetime before TearDown.
   new (gin()) ncclGinState{};
+  std::free(dc);
 }
 
 // nthreads=4 but AllGather ginCommCount=2: threads 2 and 3 never call ginProgress.
@@ -529,13 +579,16 @@ TEST_F(GinHostTest, IdleExtraThreadsNeverCallGinProgress) {
 
   attachProgressList(gin()->backends[0].ginCommCount, gin()->proxyNthreads, {1, 1});
   auto* gs = gin();
-  std::thread idle2([gs] { ncclGinProgress(gs, 2); });
-  std::thread idle3([gs] { ncclGinProgress(gs, 3); });
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_EQ(0, fake_.totalProgressCalls.load());
-  stopProgress(gs);
-  idle2.join();
-  idle3.join();
+  g_progressEntries.store(0);
+  {
+    JoinProgressThreads idle(gs);
+    idle.spawn([gs] { ncclGinProgress(gs, 2); });
+    idle.spawn([gs] { ncclGinProgress(gs, 3); });
+    ASSERT_TRUE(waitUntil([&] { return g_progressEntries.load() >= 2; }))
+        << "idle progress threads never entered ncclGinProgress";
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(0, fake_.totalProgressCalls.load());
+  }
   freeProgressList();
 }
 

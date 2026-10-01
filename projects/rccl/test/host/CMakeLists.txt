@@ -783,7 +783,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
-    RCCL_GIN_FAKES_OMIT_ncclGinQueryLastError
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
 # sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS

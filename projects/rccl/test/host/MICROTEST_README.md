@@ -42,11 +42,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
-  - `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from `gin-host-test.cc` in
-    `rccl-UnitTestsMicroGinHost`); suite `GinHostTest.*`. NVIDIA/nccl#2279
-    `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Own binary because
-    `gin-plugin-init-test.cc` already defines `ncclParamGinEnable` in
-    `rccl-UnitTestsMicro`.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
     `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
@@ -196,6 +191,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 
+- **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
+  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
+  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
+  `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 
@@ -337,7 +338,7 @@ symbol.
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
-| `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real host file) | `fakes/gin_fakes.cc` (`RCCL_GIN_FAKES_OMIT_ncclGinQueryLastError` when compiling real `gin_host.cc`) |
+| `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |

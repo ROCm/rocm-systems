@@ -4399,7 +4399,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (includes Recycle_* and GinProxyNthreadsSplitTests)",
-          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinProxyNthreadsSplitTests.*",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
           "timeout": 600
         },
         {
