@@ -143,7 +143,7 @@ struct alignas(16) ncclCeCollArgs {
   void* ceCollProfHandle;    // CE collective profiler event handle
   uint64_t userTag;          // Per-call profiler annotation (0 == untagged)
   bool useDda;
-  bool allReduceFastPath;    // agreed during launch preparation, before comm launch
+  bool allReduceFastPath;    // set during launch preparation, before comm launch
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
