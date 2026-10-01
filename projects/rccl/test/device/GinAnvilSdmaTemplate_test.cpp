@@ -23,6 +23,7 @@ __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -925,6 +926,109 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalResolvesQueu
   uint64_t landed = 0;
   std::memcpy(&landed, got.data(), sizeof(landed));
   EXPECT_EQ(landed, kVal);
+}
+
+static void setStubRecordOnly(bool on) {
+  sdma_anvil::SdmaStubLog log{};
+  log.recordOnly = on;
+  HIP_EXPECT(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubLog), &log, sizeof(log)));
+}
+
+namespace {
+
+// Clears record-only on every scope exit so no early return can leave later Puts in this process skipping their copies.
+class StubRecordOnlyScope {
+ public:
+  StubRecordOnlyScope() {
+    setStubRecordOnly(true);
+  }
+  ~StubRecordOnlyScope() {
+    setStubRecordOnly(false);
+  }
+  StubRecordOnlyScope(const StubRecordOnlyScope&) = delete;
+  StubRecordOnlyScope& operator=(const StubRecordOnlyScope&) = delete;
+};
+
+}  // namespace
+
+static sdma_anvil::SdmaStubLog readStubLog() {
+  sdma_anvil::SdmaStubLog log{};
+  HIP_EXPECT(hipMemcpyFromSymbol(&log, HIP_SYMBOL(sdma_anvil::g_sdmaStubLog), sizeof(log)));
+  return log;
+}
+
+__global__ void kernelSdmaIsOss7(int* out) {
+  if (threadIdx.x != 0) {
+    return;
+  }
+  out[0] = SDMA_IS_OSS7;
+}
+
+// H25: Puts above kGinPutSegBytes split at the cap (stub logs only); fusedSdmaSignal=0 runs unfused on any arch.
+TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentSplitsAtSegCap) {
+  constexpr size_t kSeg = gin_sdma::kGinPutSegBytes;
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<uint64_t> d_signals(2);
+  DeviceBuffer<uintptr_t> d_sigAddrs(2);
+  std::vector<uintptr_t> sigAddrs = {0, reinterpret_cast<uintptr_t>(d_signals.ptr)};
+  d_sigAddrs.copyFrom(sigAddrs);
+  DeviceBuffer<int> d_oss7(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.nSignals = 2;
+  host.ctx.signal_remote_addrs = d_sigAddrs.ptr;
+  mapIpcToTwo(&host, &d_entry, &d_dst, 1, &d_signals, 2 * sizeof(uint64_t));
+  kernelSdmaIsOss7<<<1, 1>>>(d_oss7.ptr);
+  syncAndCheck();
+  const bool oss7 = d_oss7.download() != 0;
+  const uintptr_t dst = reinterpret_cast<uintptr_t>(d_dst.ptr);
+  const uintptr_t src = reinterpret_cast<uintptr_t>(d_src.ptr);
+
+  struct SegCase {
+    size_t bytes;
+    unsigned nSeg;
+  };
+  for (const uint32_t fusedFlag : {1u, 0u}) {
+    host.ctx.fusedSdmaSignal = fusedFlag;
+    d_h.upload(host);
+    const bool fused = oss7 && fusedFlag != 0;
+    for (const SegCase& c : {SegCase{kSeg, 1}, SegCase{kSeg + 1, 2}, SegCase{2 * kSeg, 2}}) {
+      SCOPED_TRACE(::testing::Message() << "oss7=" << oss7 << " fusedSdmaSignal=" << fusedFlag << " bytes=" << c.bytes);
+      d_signals.zero();
+      resetQuietCount();
+      sdma_anvil::SdmaStubLog log{};
+      {
+        StubRecordOnlyScope recordOnly;
+        kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/true, c.bytes);
+        syncAndCheck();
+        log = readStubLog();
+      }
+      ASSERT_EQ(log.count, fused ? c.nSeg : c.nSeg + 1);
+      for (unsigned i = 0; i < c.nSeg; ++i) {
+        const size_t off = i * kSeg;
+        const bool last = i + 1 == c.nSeg;
+        EXPECT_EQ(log.calls[i].op, (last && fused) ? sdma_anvil::kSdmaStubPutSignal : sdma_anvil::kSdmaStubPut) << i;
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(log.calls[i].dst), dst + off) << i;
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(log.calls[i].src), src + off) << i;
+        EXPECT_EQ(log.calls[i].size, std::min(kSeg, c.bytes - off)) << i;
+        EXPECT_EQ(log.calls[i].signal, (last && fused) ? d_signals.ptr : nullptr) << i;
+      }
+      if (fused) {
+        EXPECT_EQ(readQuietCount(), 0ULL);
+        EXPECT_EQ(d_signals.download(), 0ULL);
+      } else {
+        EXPECT_EQ(log.calls[c.nSeg].op, sdma_anvil::kSdmaStubQuiet);
+        EXPECT_EQ(readQuietCount(), 1ULL);
+        EXPECT_EQ(d_signals.download(), 1ULL);
+      }
+    }
+  }
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
