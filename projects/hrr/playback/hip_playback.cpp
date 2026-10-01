@@ -3817,11 +3817,20 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     return hipMemcpy3D(&parms);
 }
 
-hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+// hipStreamPerThread is a token rather than a stream capture saw created, so
+// translate_stream would send it, and the null stream of an _spt call, to the
+// legacy null stream. Both mean this thread's default stream.
+static hipStream_t memcpy3d_async_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
+    if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
+        return hipStreamPerThread;
+    return ctx.translate_stream(rec);
+}
+
+static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl, bool spt) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
-    hipStream_t stream = ctx.translate_stream(a->stream);
+    hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3DAsync", a->blob_hash_lo, a->blob_hash_hi,
@@ -3853,6 +3862,10 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3DAsync(&parms, stream);
+}
+
+hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    return replay_memcpy3d_async(ctx, pl, /*spt=*/false);
 }
 
 // ---------------------------------------------------------------------------
@@ -4230,7 +4243,9 @@ hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipMemcpy3DAsync_spt(PlaybackContext& ctx, const uint8_t* pl) {
-    return playback_hipMemcpy3DAsync(ctx, pl);
+    static_assert(sizeof(hrr_args_hipMemcpy3DAsync_spt) == sizeof(hrr_args_hipMemcpy3DAsync),
+                  "the _spt payload is replayed as the plain one");
+    return replay_memcpy3d_async(ctx, pl, /*spt=*/true);
 }
 
 // ---------------------------------------------------------------------------

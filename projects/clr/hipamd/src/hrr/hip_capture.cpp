@@ -1644,7 +1644,10 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
-  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p, stream, true);
+  // The null stream of an _spt call is this thread's default stream, and that
+  // is the one the D2H blob has to wait for.
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p,
+                        stream ? stream : hipStreamPerThread, true);
   return r;
 }
 
