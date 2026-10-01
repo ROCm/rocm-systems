@@ -75,11 +75,11 @@ per-API notes on why each gap exists.
        tags: [<domain>]
    ```
 
-   This is **required, not optional**. `HIP_TEST_CASE(name)` expands through
-   `GET_TAGS(name)` → `SECOND_ARG(name)`, which needs a `name` macro that the
-   build **generates from this YAML** into `hip_test_config.hh`. A test-case name
+   This is **required, not optional**. `HIP_TEST_CASE(name)` expands to
+   `TEST_CASE(#name, name)`, which needs a `name` macro that the build
+   **generates from this YAML** into `hip_test_config.hh`. A test-case name
    with no YAML entry fails to compile with
-   *"too few arguments to function-like macro SECOND_ARG"*. After editing the
+   *"use of undeclared identifier '<name>'"*. After editing the
    YAML you must re-run CMake configure so the header regenerates.
 
 6. **Regenerate the test plan and update the docs**: run

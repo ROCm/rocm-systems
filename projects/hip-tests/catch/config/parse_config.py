@@ -103,7 +103,7 @@ def create_test_definition(
     for entry in skip_targets:
         tags_str += f"[exclude_{entry}]"
 
-    return f'#define {case_name} "{case_name}", "{tags_str}"'
+    return f'#define {case_name} "{tags_str}"'
 
 
 def generate_parameter_header(cmd_options, output_path):
