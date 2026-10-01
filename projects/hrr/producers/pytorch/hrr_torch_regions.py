@@ -96,18 +96,55 @@ def _private_dir(path):
     return stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
 
 
-def _open_private(path):
-    """Open path for append with mode 0600, refusing a link or a file not ours."""
+def _open_private_dir(path):
+    """Create path if needed and return a descriptor on it, set to mode 0700.
+
+    None if it is a link or not a directory of ours. The mode is set through the
+    descriptor because mkdir's is filtered by the umask, and a umask such as 0277
+    would leave a directory this process cannot create its file in.
+    """
+    try:
+        os.mkdir(path, 0o700)
+    except OSError:
+        pass  # already there, or the open below says why not
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+            raise OSError("not a directory of this user")
+        if stat.S_IMODE(st.st_mode) != 0o700:
+            os.fchmod(fd, 0o700)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def _open_private(path, dir_fd=None):
+    """Open path for append with mode 0600, refusing a link or a file not ours.
+
+    O_NONBLOCK so that a FIFO planted at path cannot block the open before the
+    type check refuses it; it changes nothing for a regular file.
+    """
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
     flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o600)
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600, dir_fd=dir_fd)
     if os.name != "nt":
-        st = os.fstat(fd)
-        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                or st.st_nlink != 1):
+        try:
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_nlink != 1):
+                raise OSError("%s is not a private file of this user" % path)
+            if stat.S_IMODE(st.st_mode) != 0o600:
+                os.fchmod(fd, 0o600)  # the umask filters a new file's mode too
+        except OSError:
             os.close(fd)
-            raise OSError("%s is not a private file of this user" % path)
+            raise
     return os.fdopen(fd, "ab", buffering=0)
 
 
@@ -133,19 +170,30 @@ class _Stream:
         if self._fh is None or self._pid != os.getpid():
             self.close()
             regions = os.path.join(d, "regions")
-            try:
-                os.mkdir(regions, 0o700)
-            except FileExistsError:
-                pass
-            # Private as the README asks, and never through a planted link.
-            if not _private_dir(regions):
+            # Private as the README asks, and never through a planted link. The
+            # file is opened relative to the directory checked, so the
+            # directory cannot be swapped for a link in between.
+            if os.name == "nt":
+                try:
+                    os.mkdir(regions, 0o700)
+                except FileExistsError:
+                    pass
+                dfd, name = None, os.path.join(regions, "pytorch.hrrr")
+                ok = _private_dir(regions)
+            else:
+                dfd, name = _open_private_dir(regions), "pytorch.hrrr"
+                ok = dfd is not None
+            if not ok:
                 _log("%s is not a private directory; not writing" % regions)
                 return False
             try:
-                self._fh = _open_private(os.path.join(regions, "pytorch.hrrr"))
+                self._fh = _open_private(name, dir_fd=dfd)
             except OSError as e:
                 _log("cannot open the region file: %s" % e)
                 return False
+            finally:
+                if dfd is not None:
+                    os.close(dfd)
             self._pid = os.getpid()
             # Only on a fresh file. The stream is opened for append, and DESIGN.md
             # explicitly supports a process re-opening its own writer on resume, so
