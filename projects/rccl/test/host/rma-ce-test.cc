@@ -168,6 +168,9 @@ protected:
   // for the hook to publish values the function then reads back.
   struct ExchangeEntry {
     hipIpcMemHandle_t handle;
+    uint64_t cuMemHandle;
+    size_t allocSize;
+    int isCuMem;
     uint64_t hostHash;
     uint64_t pidHash;
     size_t userOffset;
