@@ -5007,6 +5007,27 @@ TEST(CommandProcessorAqlTest, ImmediateAndDelayedPm4FaultsRemoveTheParent) {
   }
 }
 
+TEST(CommandProcessorAqlTest, UnsupportedReleaseMemInterruptFaultsBeforeWritingMemory) {
+  for (uint32_t interrupt_selection : {5u, 6u, 7u}) {
+    SCOPED_TRACE(interrupt_selection);
+    VmFixture fixture("rdna4");
+    constexpr uint64_t ib = 0x4000, output = 0x6000, signal = 0x7100;
+    init_completion_signal(fixture.mem(), signal);
+    const std::array<uint32_t, 8> commands{
+        0xc0064900, 0, (2u << 29) | (interrupt_selection << 24), uint32_t(output), 0, 0x1234,
+        0,          17};
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(commands.data()), sizeof(commands),
+                              ib);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(test::make_pm4_ib_packet(ib, commands.size(), signal));
+    fixture.engine->run();
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    EXPECT_EQ(fixture.mem()->read64(output), 0u);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+  }
+}
+
 TEST(CommandProcessorAqlTest, InvalidPm4ChildFaultsItsParentAndSuppressesCompletion) {
   VmFixture fixture("rdna4");
   constexpr uint64_t ib = 0x4000, signal = 0x7100;

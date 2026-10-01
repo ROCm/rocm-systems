@@ -12,10 +12,9 @@
 /// per-event waiter list matching the kernel's wait_queue model — when an event
 /// fires, only threads registered on that specific event are woken.
 ///
-/// Event age semantics follow the real ROCR ↔ KFD protocol: ROCR passes
-/// last_event_age=1 on every WAIT_EVENTS call. set_event/interrupt sets
-/// event_age to 1; auto-reset clears it to 0. The wait predicate checks
-/// event_age >= last_event_age for signal events only.
+/// Signal events maintain a monotonic age independent of their mailbox slot.
+/// A nonzero last_event_age enables age comparison; zero uses waiter activation.
+/// GPU mailbox entries are acknowledged back to the unsignaled sentinel.
 
 #include <atomic>
 #include <condition_variable>
@@ -69,14 +68,13 @@ public:
 
   /// @brief Handle KFD SET_EVENT ioctl.
   /// @param arg Pointer to kfd_ioctl_set_event_args.
-  /// @details Sets event_age to 1, writes to the event page slot, and wakes
-  ///          all registered waiters.
+  /// @details Advances the event age and activates all registered waiters.
   /// @returns 0 on success, -EINVAL if event_id not found.
   int set_event(void *arg);
 
   /// @brief Handle KFD RESET_EVENT ioctl.
   /// @param arg Pointer to kfd_ioctl_reset_event_args.
-  /// @details Clears event_age to 0.
+  /// @details Clears the signaled state without changing the event age.
   /// @returns 0 on success, -EINVAL if event_id not found.
   int reset_event(void *arg);
 
@@ -99,9 +97,9 @@ public:
   [[nodiscard]] bool release_page(void *ptr);
 
   /// @brief Signal event(s) from the CP's interrupt callback.
-  /// @details When event_id is non-zero, signals that specific event. When
-  ///          event_id is zero, broadcasts to all type-0 events — matching
-  ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
+  /// @details A usable nonzero event ID signals that specific signal event.
+  ///          Otherwise, scan posted GPU mailbox slots, matching KFD's
+  ///          kfd_signal_event_interrupt(pasid, 0, 0) fallback path.
   void signal_interrupt(uint32_t event_id);
 
   /// @brief Deliver a memory violation to this process's memory-exception event.
@@ -169,6 +167,11 @@ private:
   void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
   size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
 
+  struct EventWaiter {
+    std::condition_variable *cv = nullptr;
+    bool activated = false;
+  };
+
   /// @brief Internal event representation.
   struct GpuEvent {
     uint32_t event_id = 0;   ///< KFD event ID (1-based, matches slot index).
@@ -178,8 +181,11 @@ private:
     uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
     /// Payload for the most recent violation on a memory-exception event.
     MemoryFault fault;
-    std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
+    std::vector<EventWaiter *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
+
+  // Caller holds mutex_; activation survives auto-reset and subsequent RESET_EVENT.
+  void signal_event(GpuEvent &event);
 
   mutable std::mutex mutex_;                      ///< Protects all mutable event state.
   std::unordered_map<uint32_t, GpuEvent> events_; ///< Event table keyed by event_id.

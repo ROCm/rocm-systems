@@ -1500,6 +1500,95 @@ TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
   EXPECT_EQ(drv->close(), 0);
 }
 
+TEST(EventStateTest, MailboxScanAcknowledgesOnlyPostedSlotsAndRestoresIncompleteWaitAll) {
+  rocjitsu::EventState state;
+  std::array<uint64_t, 64> page{};
+  state.adopt_page(page.data(), sizeof(page));
+  std::array<kfd_ioctl_create_event_args, 2> events{};
+  std::array<kfd_event_data, 2> data{};
+  for (uint32_t event_index = 0; event_index < 2; ++event_index) {
+    events[event_index].auto_reset = 1;
+    ASSERT_EQ(state.create_event(&events[event_index], 0), 0);
+    data[event_index].event_id = events[event_index].event_id;
+    EXPECT_EQ(page[events[event_index].event_id], ~uint64_t{0});
+  }
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(data.data());
+  wait.num_events = 2;
+  wait.wait_for_all = 1;
+  state.signal_interrupt(0);
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+
+  page[events[0].event_id] = events[0].event_id;
+  state.signal_interrupt(0);
+  EXPECT_EQ(page[events[0].event_id], ~uint64_t{0});
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  EXPECT_EQ(data[0].signal_event_data.last_event_age, 0u);
+  // The failed WAIT_ALL restores the first auto-reset event for a subsequent wait.
+  wait.num_events = 1;
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(data[0].signal_event_data.last_event_age, 0u);
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+
+  // CPU signaling changes driver state, not a GPU-owned mailbox entry.
+  page[events[0].event_id] = 0x1234;
+  kfd_ioctl_set_event_args set{};
+  set.event_id = events[0].event_id;
+  ASSERT_EQ(state.set_event(&set), 0);
+  EXPECT_EQ(page[events[0].event_id], 0x1234u);
+  data[0].signal_event_data.last_event_age = 1;
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_GT(data[0].signal_event_data.last_event_age, 1u);
+  ASSERT_EQ(state.wait_events(&wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  EXPECT_TRUE(state.release_page(page.data()));
+}
+
+TEST(EventStateTest, InterruptActivatesEveryRegisteredLegacyAutoResetWaiter) {
+  rocjitsu::EventState state;
+  kfd_ioctl_create_event_args create{};
+  create.auto_reset = 1;
+  ASSERT_EQ(state.create_event(&create, 0), 0);
+  std::array<int, 2> results{-1, -1};
+  std::array<uint32_t, 2> statuses{};
+  std::array<std::jthread, 2> threads;
+  for (uint32_t waiter_index = 0; waiter_index < 2; ++waiter_index) {
+    threads[waiter_index] = std::jthread([&, waiter_index] {
+      kfd_event_data event{};
+      event.event_id = create.event_id;
+      kfd_ioctl_wait_events_args wait{};
+      wait.events_ptr = reinterpret_cast<uint64_t>(&event);
+      wait.num_events = 1;
+      wait.timeout = 2000;
+      results[waiter_index] = state.wait_events(&wait);
+      statuses[waiter_index] = wait.wait_result;
+    });
+  }
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (state.waiter_count(create.event_id) != 2 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_EQ(state.waiter_count(create.event_id), 2u);
+  state.signal_interrupt(create.event_id);
+  for (auto &thread : threads)
+    thread.join();
+  for (uint32_t waiter_index = 0; waiter_index < 2; ++waiter_index) {
+    EXPECT_EQ(results[waiter_index], 0);
+    EXPECT_EQ(statuses[waiter_index], KFD_IOC_WAIT_RESULT_COMPLETE);
+  }
+  kfd_event_data event{};
+  event.event_id = create.event_id;
+  kfd_ioctl_wait_events_args poll{};
+  poll.events_ptr = reinterpret_cast<uint64_t>(&event);
+  poll.num_events = 1;
+  ASSERT_EQ(state.wait_events(&poll), 0);
+  EXPECT_EQ(poll.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+}
+
 TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
@@ -1514,8 +1603,7 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   std::vector<uint64_t> page(kSlots, 0);
   proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
 
-  // Create a signal event and signal it, so its page slot holds a real (non-zero,
-  // non-sentinel) age.
+  // CPU signaling leaves the GPU mailbox sentinel intact.
   kfd_ioctl_create_event_args create{};
   create.event_type = 0; // signal event
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
@@ -1552,12 +1640,13 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   EXPECT_EQ(drv->close(), 0);
 }
 
-// An AUTO-RESET event that was signaled while a waiter was parked is the state the
-// old speculative-shutdown design lost: signaling advances and publishes the age but
-// deliberately leaves signaled == false, so a rollback that rebuilt the page from
-// `signaled` events alone replaced a real pending completion with the unsignaled
-// sentinel. The wake must therefore leave the page alone even in this state. There is
-// no rollback any more, but the property is what makes that safe, so pin it.
+// An AUTO-RESET event signaled while a waiter is parked deliberately leaves
+// signaled == false: its notification belongs to the activated waiter. The old
+// speculative-shutdown rollback rebuilt mailbox slots from signaled events alone
+// and lost pending completions in this state. Event age now lives independently
+// of the GPU mailbox, which only GPU writes and interrupt acknowledgement change.
+// There is no rollback any more; pin the requirement that the shutdown wake leaves
+// the mailbox untouched while the auto-reset waiter collects its notification.
 TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
@@ -1577,7 +1666,7 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
 
   // Register a waiter deterministically: poll the event's waiter count rather than
   // sleeping, so the SET_EVENT below is guaranteed to take the "waiters present"
-  // auto-reset path (which advances and publishes the age while deliberately
+  // auto-reset path (which advances the age and activates the waiter while
   // leaving signaled == false).
   std::atomic<int> wait_rc{-1};
   std::atomic<uint32_t> wait_result{0};

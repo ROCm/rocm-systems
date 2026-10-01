@@ -3531,6 +3531,12 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       }
       case Pm4Opcode::ReleaseMem: {
         require(7);
+        const uint32_t interrupt_selection = (words[1] >> 24) & 7;
+        if (interrupt_selection > 4) {
+          util::Logger::warn("unsupported RELEASE_MEM conditional interrupt");
+          fail_pm4_queue(queue, qs);
+          return;
+        }
         flush_gpu_caches();
         const uint32_t selection = words[1] >> 29;
         uint64_t value = address(4);
@@ -3542,6 +3548,9 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
                                                 bytes}) != VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 RELEASE_MEM failed");
+        // PAL: int_sel 1/2/4 deliver an interrupt; 3 only confirms the data write.
+        if (interrupt_selection == 1 || interrupt_selection == 2 || interrupt_selection == 4)
+          queue.interrupt_sink.deliver(queue.process_id, words[6]);
         break;
       }
       case Pm4Opcode::CopyData: {
