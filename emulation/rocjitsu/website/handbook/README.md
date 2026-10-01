@@ -90,7 +90,8 @@ or a specific execution path.
 ## Verification and publishing
 
 The `rocjitsu-handbook` CI workflow runs a strict build and regression tests
-on handbook and canonical docs changes in pull requests and `develop` pushes.
+on Rocjitsu changes in pull requests and `develop` pushes, including source files
+linked from the canonical docs.
 Sphinx-only changes do not trigger it. Tests verify that canonical edits reach
 the site, source links resolve, Sphinx is excluded, and builds do not write back
 into `docs/`. Before submitting a change, run these checks and inspect affected
@@ -102,9 +103,11 @@ last published source revision, then builds and publishes only affected sites:
 - Handbook: `rocjitsu/`
 - Dashboard: `rocjitsu-dashboard/`
 
-Changes in `docs/`, the root Rocjitsu README, or `website/handbook/` select the
-handbook. Changes in `website/dashboard/` select the dashboard. Sphinx-only
-changes are excluded. A publishing-workflow change or a manual run selects both.
+Changes anywhere in `emulation/rocjitsu/` select the handbook, since canonical
+documentation can link to source files outside `docs/` and link resolution checks
+whether those targets exist. Changes in `website/dashboard/` also select the
+dashboard. Sphinx-only changes are excluded. A publishing-workflow change or a
+manual run selects both.
 Handbook-only runs do not install dashboard dependencies or update its Pages files.
 Each published directory contains a `.source-revision` marker. Missing markers
 trigger an initial build. Comparing against publication rather than the latest
@@ -112,6 +115,11 @@ push also catches changes from failed or superseded pending runs. Delayed runs
 check out current `develop` so they cannot roll a site back to an older event.
 If a history rewrite makes a recorded revision unavailable, a manual run rebuilds
 both sites and refreshes their markers without using the old revisions.
+
+Each selected site passes its verification suite before a publishing token is
+created. The dashboard runs `npm run verify`, including production-hosting tests;
+the handbook runs its strict build and Python/Node regression tests against the
+same checkout that is published.
 
 Both destinations use the same publishing workflow and concurrency group. Each
 destination is replaced independently; files elsewhere on `gh-pages` are preserved.

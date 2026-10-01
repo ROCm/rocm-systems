@@ -140,8 +140,23 @@ class CanonicalBuildTests(unittest.TestCase):
                 shutil.copytree(HANDBOOK / directory, handbook / directory)
             shutil.copy2(HANDBOOK / 'hooks.py', handbook / 'hooks.py')
             config = yaml.safe_load((HANDBOOK / 'mkdocs.yml').read_text())
-            config['nav'] = [{'Overview': 'index.md'}, {'Building': 'building.md'}]
-            config['plugins'] = ['search']
+            config['nav'] = [
+                {'Overview': 'index.md'},
+                {'Building': 'building.md'},
+                {'Blog': 'blog/index.md'},
+            ]
+            (docs / 'blog' / 'posts' / 'nested').mkdir(parents=True)
+            (docs / 'blog' / 'index.md').write_text('# Blog\n')
+            for name, relative in (
+                ('first', '../../../'),
+                ('nested/second', '../../../../'),
+            ):
+                (docs / 'blog' / 'posts' / f'{name}.md').write_text(
+                    f'---\ndate: 2025-01-01\n---\n\n# {Path(name).name}\n\n'
+                    f'[Source]({relative}CMakeLists.txt?plain=1#L1)\n\n'
+                    f'[Home]({relative}README.md#supported-architectures)\n\n'
+                    '<!-- more -->\n\nFull post body.\n'
+                )
             (handbook / 'mkdocs.yml').write_text(yaml.safe_dump(config))
 
             for marker in ('CANONICAL_FIRST_REVISION', 'CANONICAL_SECOND_REVISION'):
@@ -197,6 +212,24 @@ class CanonicalBuildTests(unittest.TestCase):
                     search = (site / 'search' / 'search_index.json').read_text()
                     self.assertIn(marker, search)
                     self.assertNotIn('SPHINX_ONLY_MARKER', search)
+                    for output, home, count in (
+                        ('blog/index.html', '../#supported-architectures', 2),
+                        ('blog/first/index.html', '../../#supported-architectures', 1),
+                        ('blog/second/index.html', '../../#supported-architectures', 1),
+                    ):
+                        rendered = (site / output).read_text()
+                        self.assertEqual(
+                            rendered.count(
+                                'href="https://github.com/ROCm/rocm-systems/blob/develop/'
+                                'emulation/rocjitsu/CMakeLists.txt?plain=1#L1"'
+                            ),
+                            count,
+                            output,
+                        )
+                        self.assertEqual(
+                            rendered.count(f'href="{home}">Home</a>'), count, output
+                        )
+                        self.assertNotIn('href="../../../', rendered, output)
                     self.assertFalse((site / 'sphinx').exists())
                     self.assertEqual(
                         (site / 'assets' / 'handbook.css').read_bytes(),

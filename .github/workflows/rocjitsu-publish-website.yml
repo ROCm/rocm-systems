@@ -8,10 +8,8 @@ on:
     branches:
       - develop
     paths:
-      - "emulation/rocjitsu/website/dashboard/**"
-      - "emulation/rocjitsu/website/handbook/**"
-      - "emulation/rocjitsu/docs/**"
-      - "emulation/rocjitsu/README.md"
+      # Handbook source links can target any file within Rocjitsu.
+      - "emulation/rocjitsu/**"
       - "!emulation/rocjitsu/docs/sphinx/**"
       - ".github/workflows/rocjitsu-publish-website.yml"
   workflow_dispatch:
@@ -82,7 +80,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             changed:
-              - '{emulation/rocjitsu/website/handbook/**,emulation/rocjitsu/docs/**,emulation/rocjitsu/README.md,.github/workflows/rocjitsu-publish-website.yml}'
+              - '{emulation/rocjitsu/**,.github/workflows/rocjitsu-publish-website.yml}'
               - '!emulation/rocjitsu/docs/sphinx/**'
 
       - name: Select websites to publish
