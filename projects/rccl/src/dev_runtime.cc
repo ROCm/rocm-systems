@@ -482,20 +482,34 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                 ret, fail);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // Reject mixed host/device owners of one segment. Scan maxSegments so a rank
-  // with fewer local segments fails with its peers instead of hanging on the barrier.
+  // TODO(ROCM-29810): Remove when the runtime preserves imported VMM location metadata.
+  // HIP reports an imported host VMM handle as device memory, so only the owner of a
+  // host segment reports host. Propagate that one owner's type; two or more host
+  // owners beside a device owner is a genuine mix. Scan maxSegments so a rank with
+  // fewer local segments fails with its peers instead of hanging on the barrier.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < maxSegments; segment++) {
       int nHost = 0, nDevice = 0;
+      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_DEVICE;
       for (int r = 0; r < devr->lsaSize; r++) {
         if (segment >= segmentCounts[r]) continue;
-        if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) nHost++;
-        else nDevice++;
+        CUmemLocationType type = messages[r * maxSegments + segment].type;
+        if (ncclSymIsHostSegment(type)) {
+          nHost++;
+          hostType = type;
+        } else {
+          nDevice++;
+        }
       }
-      if (nHost > 0 && nDevice > 0) {
+      if (nHost > 1 && nDevice > 0) {
         WARN("Symmetric LSA segment %d mixes host and device owners", segment);
         ret = ncclInvalidUsage;
         goto fail;
+      }
+      if (nHost == 1) {
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment < segmentCounts[r]) messages[r * maxSegments + segment].type = hostType;
+        }
       }
     }
   }
