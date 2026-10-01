@@ -1617,4 +1617,177 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
   queues.ExpectUnchanged();
 }
 
+// Wait<PROXY>: gate on cis[peer], flush to ctx.rank only if gets are pending, then publish; timeouts make hangs fail.
+
+// Block 0 runs Wait; an optional block 1 plays the proxy and consumes one GFD on consumerPe by advancing cis, bounded.
+__global__ void kernelProxyWait(ncclGinCtx ctx, ncclGinRequest_t request, int consumerPe, uint64_t timeoutCycles,
+                                ncclResult_t* outResult) {
+  if (threadIdx.x != 0) {
+    return;
+  }
+  if (blockIdx.x == 0) {
+    *outResult = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false,
+                                                                  /*descriptor=*/nullptr, cuda::memory_order_acquire,
+                                                                  /*abortFlag=*/nullptr, timeoutCycles);
+    return;
+  }
+  ncclGinProxyGpuCtx_t* proxyCtx = &static_cast<ncclGinProxyGpuCtx_t*>(ctx.handle)[ctx.contextId];
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[consumerPe]);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[consumerPe]);
+  const uint32_t consumed = ci.load(cuda::memory_order_relaxed);
+  const uint64_t startCycle = clock64();
+  while (pi.load(cuda::memory_order_acquire) == consumed) {
+    if (clock64() - startCycle >= timeoutCycles) {
+      return;
+    }
+  }
+  ci.store(pi.load(cuda::memory_order_relaxed), cuda::memory_order_release);
+}
+
+// One proxy context with ctx.rank != peer, so a flush posted to the wrong queue shows up in pis.
+class GinProxyWaitTest : public GinDeviceTest {
+ protected:
+  static constexpr int kNranks = 3;
+  static constexpr uint32_t kQueueSize = 4;
+  static constexpr int kRank = 2;
+  static constexpr int kPeer = 1;
+  static constexpr uint64_t kFailFastCycles = 1ULL << 20;
+  static constexpr uint64_t kConsumerCycles = 1ULL << 30;
+
+  GinProxyWaitTest()
+      : d_queues_(kNranks * kQueueSize),
+        d_pis_(kNranks),
+        d_cis_(kNranks),
+        d_lastIssuedGet_(kNranks),
+        d_lastVisibleGet_(kNranks),
+        d_proxyCtx_(1),
+        d_result_(1),
+        pis_(kNranks),
+        cis_(kNranks),
+        lastIssuedGet_(kNranks),
+        lastVisibleGet_(kNranks) {}
+
+  // Distinct per-peer counters; every queue stays drained (ci == pi) so postGfd never blocks, even on a wrong queue.
+  void SetUp() override {
+    GinDeviceTest::SetUp();
+    for (int p = 0; p < kNranks; p++) {
+      pis_[p] = 0x2001u + 0x10u * p;
+      lastIssuedGet_[p] = 0x5000u + 0x10u * p;
+    }
+    cis_ = pis_;
+    lastVisibleGet_ = lastIssuedGet_;
+  }
+
+  void Upload() {
+    d_queues_.zero();
+    d_pis_.copyFrom(pis_);
+    d_cis_.copyFrom(cis_);
+    d_lastIssuedGet_.copyFrom(lastIssuedGet_);
+    d_lastVisibleGet_.copyFrom(lastVisibleGet_);
+    ncclGinProxyGpuCtx_t hostCtx{};
+    hostCtx.nranks = kNranks;
+    hostCtx.queueSize = kQueueSize;
+    hostCtx.queues = d_queues_.ptr;
+    hostCtx.pis = d_pis_.ptr;
+    hostCtx.cis = d_cis_.ptr;
+    hostCtx.lastIssuedGet = d_lastIssuedGet_.ptr;
+    hostCtx.lastVisibleGet = d_lastVisibleGet_.ptr;
+    d_proxyCtx_.upload(hostCtx);
+    d_result_.upload(ncclInternalError);
+  }
+
+  ncclGinCtx MakeCtx() const {
+    ncclGinCtx ctx{};
+    ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+    ctx.rank = kRank;
+    ctx.nRanks = kNranks;
+    ctx.handle = d_proxyCtx_.ptr;
+    ctx.contextId = 0;
+    return ctx;
+  }
+
+  static ncclGinRequest_t MakeWaitRequest(int peer, uint32_t nextGfdIdx, uint32_t lastIssuedGet) {
+    ncclGinCpuProxyRequest req{peer, nextGfdIdx, lastIssuedGet};
+    ncclGinRequest_t request{};
+    std::memcpy(&request, &req, sizeof(req));
+    return request;
+  }
+
+  // True when no slot of any queue was written.
+  bool QueuesUntouched() const {
+    for (const ncclGinProxyGfd_t& gfd : d_queues_.copyTo()) {
+      for (int q = 0; q < ncclGinProxyGfdQwords; q++) {
+        if (gfd.qword[q].raw != 0) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues_;
+  DeviceBuffer<uint32_t> d_pis_;
+  DeviceBuffer<uint32_t> d_cis_;
+  DeviceBuffer<uint32_t> d_lastIssuedGet_;
+  DeviceBuffer<uint32_t> d_lastVisibleGet_;
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx_;
+  DeviceBuffer<ncclResult_t> d_result_;
+  std::vector<uint32_t> pis_;
+  std::vector<uint32_t> cis_;
+  std::vector<uint32_t> lastIssuedGet_;
+  std::vector<uint32_t> lastVisibleGet_;
+};
+
+TEST_F(GinProxyWaitTest, ProxyWait_SkipsFlushWhenGetsAlreadyVisible) {
+  struct Case {
+    const char* name;
+    uint32_t visible;
+    uint32_t issued;
+  };
+  // The wrap case is visible ahead of issued under rolling order but behind it under plain unsigned order.
+  const Case cases[] = {
+      {"equal", 0x5010u, 0x5010u},
+      {"visible ahead", 0x5011u, 0x5010u},
+      {"visible ahead across wrap", 0x00000001u, 0xFFFFFFFFu},
+  };
+  // The gate is also satisfied across wrap: ci 0x1 is past nextGfdIdx 0xFFFFFFFE.
+  constexpr uint32_t kNextGfdIdx = 0xFFFFFFFEu;
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    cis_[kPeer] = 0x00000001u;
+    pis_[kPeer] = cis_[kPeer];
+    lastVisibleGet_[kPeer] = c.visible;
+    Upload();
+
+    kernelProxyWait<<<1, 1>>>(MakeCtx(), MakeWaitRequest(kPeer, kNextGfdIdx, c.issued), kRank, kFailFastCycles,
+                              d_result_.ptr);
+    syncAndCheck();
+
+    EXPECT_EQ(d_result_.download(), ncclSuccess) << "no flush is needed, so nothing can time out";
+    EXPECT_EQ(d_pis_.copyTo(), pis_) << "Wait must not post a flush GFD when all gets are visible";
+    EXPECT_TRUE(QueuesUntouched());
+    EXPECT_EQ(d_lastVisibleGet_.copyTo(), lastVisibleGet_) << "lastVisibleGet must not move backward";
+  }
+}
+
+
+TEST_F(GinProxyWaitTest, ProxyWait_PublishesLastIssuedGetOnceFlushConsumed) {
+  constexpr uint32_t kIssued = 0x00000002u;
+  lastVisibleGet_[kPeer] = 0xFFFFFFFEu;
+  Upload();
+
+  kernelProxyWait<<<2, 1>>>(MakeCtx(), MakeWaitRequest(kPeer, cis_[kPeer], kIssued), kRank, kConsumerCycles,
+                            d_result_.ptr);
+  syncAndCheck();
+
+  EXPECT_EQ(d_result_.download(), ncclSuccess) << "the fake proxy consumed the flush, so Wait must succeed";
+  std::vector<uint32_t> expectedPis = pis_;
+  expectedPis[kRank] += 1;
+  EXPECT_EQ(d_pis_.copyTo(), expectedPis);
+  EXPECT_EQ(d_cis_.copyTo(), expectedPis) << "the fake proxy must have drained the ctx.rank queue";
+  std::vector<uint32_t> expectedVisible = lastVisibleGet_;
+  expectedVisible[kPeer] = kIssued;
+  EXPECT_EQ(d_lastVisibleGet_.copyTo(), expectedVisible) << "Wait must publish req.lastIssuedGet for req.peer only";
+}
+
 } // namespace RcclUnitTesting
