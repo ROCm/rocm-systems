@@ -2111,8 +2111,8 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
   return HSA_STATUS_SUCCESS;
 }
 
-/// @brief Destroys the queue's current hardware context, if any, and creates a fresh one from
-/// @p kmq_metadata's present configuration (mode, PDI cache, CU tiles).
+/// @brief Destroys the queue's current hardware context, if any, and creates a fresh one with
+/// @p num_cols columns from @p kmq_metadata's present configuration (mode, PDI cache).
 ///
 /// Callers decide *whether* a rebuild is needed and prepare @p kmq_metadata for it (e.g.
 /// truncating the PDI cache for a full-ELF context); this only does the mechanical destroy+create.
@@ -2122,8 +2122,10 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
 /// while applications are running.
 ///
 /// @param[in] fd driver file descriptor
-/// @param[in,out] kmq_metadata KMQ metadata to rebuild the hardware context for
-static hsa_status_t RebuildHwContext(int fd, KmqMetadata* kmq_metadata) {
+/// @param[in,out] kmq_metadata KMQ metadata to rebuild the hardware context for. Its column count
+/// is @p num_cols only if the rebuild succeeds.
+/// @param[in] num_cols columns to give the new hardware context
+static hsa_status_t RebuildHwContext(int fd, KmqMetadata* kmq_metadata, uint32_t num_cols) {
   if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
     const hsa_status_t err = DestroyHwCtx(fd, kmq_metadata->hw_ctx_handle);
     if (err != HSA_STATUS_SUCCESS) {
@@ -2134,8 +2136,14 @@ static hsa_status_t RebuildHwContext(int fd, KmqMetadata* kmq_metadata) {
     kmq_metadata->syncobj_handle = 0;
   }
 
+  // CreateHwCtx sizes the context from the metadata, so the count goes in first. A failure puts
+  // the old one back: the next batch must not be sized for a context that was never created, or
+  // one failed grow would make every later batch in this mode ask for it again.
+  const uint32_t prev_num_cols = kmq_metadata->num_cols;
+  kmq_metadata->num_cols = num_cols;
   const hsa_status_t err = CreateHwCtx(fd, kmq_metadata);
   if (err != HSA_STATUS_SUCCESS) {
+    kmq_metadata->num_cols = prev_num_cols;
     assert(false && "Failed to configure hardware context for queue.");
     return err;
   }
@@ -2341,8 +2349,7 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
     // finds it empty and re-adds each PDI, which is what forces the reconfigure that restores the
     // CU config.
     kmq_metadata->pdi_cache.Truncate(0);
-    kmq_metadata->num_cols = num_cols;
-    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
+    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata, num_cols);
     if (err != HSA_STATUS_SUCCESS) return err;
   }
 
@@ -2420,8 +2427,7 @@ static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_pack
   const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
   const uint32_t num_cols = RequiredNumCols(*kmq_metadata, mode_changed, batch_num_cols);
   if (mode_changed || reconfigure_queue || no_context || num_cols > kmq_metadata->num_cols) {
-    kmq_metadata->num_cols = num_cols;
-    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
+    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata, num_cols);
     if (err != HSA_STATUS_SUCCESS) return err;
   }
 
