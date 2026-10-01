@@ -389,6 +389,44 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
     check_build(build);
 }
 
+TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
+  for (const char *filename : {"gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json"}) {
+    SCOPED_TRACE(filename);
+    std::ifstream input(CONFIG_DIR_PATH + "/" + filename);
+    ASSERT_TRUE(input.is_open());
+    const std::string original((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    for (const auto &[from, to] : {std::pair{R"("num_cu_per_sh": 8)", R"("num_cu_per_sh": 4)"},
+                                   std::pair{R"("num_shader_arrays_per_engine": 2)",
+                                             R"("num_shader_arrays_per_engine": 1)"}}) {
+      SCOPED_TRACE(to);
+      std::string json = original;
+      ASSERT_TRUE(replace_exactly_once(json, from, to));
+      auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+      auto check_build = [](const config::TopologyBuildResult &build) {
+        for (auto *xcd : build.xcds) {
+          for (auto *se : xcd->shader_engines()) {
+            ASSERT_EQ(se->num_compute_units(), 16u);
+            for (auto *cu : se->compute_units()) {
+              auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+              ASSERT_NE(wf, nullptr);
+              uint32_t value = 0xFFFFFFFFu;
+              constexpr uint16_t kWgpId = 23 | (10 << 6) | (3 << 11);
+              EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value),
+                        amdgpu::HwregAccessResult::Unsupported);
+              EXPECT_EQ(value, 0u);
+              wf->halt();
+            }
+          }
+        }
+      };
+      check_build(loaded.build_result);
+      for (const auto &build : loaded.extra_gpu_builds)
+        check_build(build);
+    }
+  }
+}
+
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   auto loaded =
       config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);

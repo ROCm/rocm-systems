@@ -283,6 +283,11 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
+gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width of 1–16 and
+per-engine CU counts matching `num_shader_arrays_per_engine * num_cu_per_sh`
+from `vm.gpu.device`. If the geometry disagrees with the component hierarchy,
+the loader leaves the shader-array width unknown and reads return `Unsupported`.
+
 ### Memory wait diagnostics
 
 With memory wait diagnostics enabled, compute units warn when an instruction reads
