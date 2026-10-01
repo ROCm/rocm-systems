@@ -125,7 +125,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         // Parse the NAL unit
         if (nal_unit_size_ >= 4) {
             // start code + NAL unit header = 4 bytes
-            int ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
+            uint32_t ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
 
             nal_unit_header_ = ParseNalUnitHeader(pic_data_buffer_ptr_[curr_start_code_offset_ + 3]);
             switch (nal_unit_header_.nal_unit_type) {
@@ -252,7 +252,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                 case kAvcNalTypeSEI_Info: {
                     if (pfn_get_sei_message_cb_) {
-                        int sei_ebsp_size = nal_unit_size_ - 4; // copy the entire NAL unit
+                        uint32_t sei_ebsp_size = nal_unit_size_ - 4; // copy the entire NAL unit
                         if (sei_rbsp_buf_) {
                             if (sei_ebsp_size > sei_rbsp_buf_size_) {
                                 delete [] sei_rbsp_buf_;

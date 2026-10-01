@@ -158,6 +158,15 @@ ParserResult RocVideoParser::GetNalUnit() {
         // No NAL unit in the frame data
         return PARSER_NOT_FOUND;
     }
+    // The subtractions below are unsigned, so an end offset below the start would yield a huge
+    // size rather than a negative one, and the nal_unit_size_ floor the callers apply before
+    // copying out of the NAL unit would not catch it. Check the ordering here instead.
+    if (curr_start_code_offset_ > pic_data_size_ ||
+        (start_code_found && next_start_code_offset_ < curr_start_code_offset_)) {
+        ErrorLog(g_rocdec_logger, "Start code offsets are out of order for the current picture.");
+        nal_unit_size_ = 0;
+        return PARSER_NOT_FOUND;
+    }
     if (start_code_found) {
         nal_unit_size_ = next_start_code_offset_ - curr_start_code_offset_;
         return PARSER_OK;

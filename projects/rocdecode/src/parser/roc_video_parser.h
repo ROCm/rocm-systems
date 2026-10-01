@@ -184,9 +184,12 @@ protected:
 
     // NAL unit info
     int start_code_num_;              // number of start codes found so far
-    int curr_start_code_offset_;
-    int next_start_code_offset_;
-    int nal_unit_size_;
+    // Unsigned to match pic_data_size_ and curr_byte_offset_, so that none of the arithmetic
+    // between them converts signedness. GetNalUnit() range checks the two offsets before it
+    // derives nal_unit_size_ from them.
+    uint32_t curr_start_code_offset_;
+    uint32_t next_start_code_offset_;
+    uint32_t nal_unit_size_;
 
     int                 rbsp_size_;
     uint8_t             rbsp_buf_[RBSP_BUF_SIZE]; // to store parameter set or slice header RBSP
