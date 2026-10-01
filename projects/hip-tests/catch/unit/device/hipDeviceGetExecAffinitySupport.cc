@@ -16,8 +16,9 @@
  *    `CU_EXEC_AFFINITY_TYPE_SM_COUNT`; CU masking is available on all AMD GPUs so this is
  *    always supported.
  *  - `hipExtExecAffinityTypeGranularityCU` / `hipExtExecAffinityTypeGranularityWGP` report the
- *    device's CU-mask granularity. Exactly one is supported per device: per-CU on GCN/CDNA
- *    (gfx9) and gfx12.5+, per-WGP (2-CU pairs) on RDNA gfx10-gfx12.4.
+ *    granularity the runtime will actually apply to a CU mask, so exactly one is supported
+ *    per device. It is an effective runtime property, not a fixed hardware one: per-WGP
+ *    (2-CU pairs) on RDNA gfx10-gfx12.4 unless `GPU_ENABLE_WGP_MODE=0` is set
  */
 
 /**
