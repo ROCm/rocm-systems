@@ -178,7 +178,8 @@ static size_t       g_metadata_json_len = 0;
 static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
-// Atomic because emergency_finalize() uses it without taking g_file_mu.
+// flush() sets it under g_blob_mu as well as g_file_mu. Atomic because
+// emergency_finalize() uses it without taking either.
 static std::atomic<bool> g_trailer_written{false};
 
 // Set when an event could not be serialized losslessly and had to be dropped
@@ -213,6 +214,7 @@ static std::atomic<uint64_t> g_blob_count{0};
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
 // Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
+// flush() takes g_blob_mu while it holds g_file_mu, so never take them the other way round.
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
@@ -771,6 +773,10 @@ void flush(const char* /*output_dir*/) {
       buffer_append_locked(&rec, sizeof(rec));
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
+      // Blob and code object writers count a file under g_blob_mu, before they write
+      // it and only while this flag is clear, so the manifest below counts every file
+      // they go on to write, including one still being written.
+      std::lock_guard<std::mutex> blk(g_blob_mu);
       g_trailer_written = true;
     } else if (g_events_fd >= 0 && incomplete) {
       // Still flush buffered events so nothing is lost, just no trailer.
@@ -968,7 +974,10 @@ Hash128 write_blob(const void* data, size_t len) {
 
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
+    // The check at entry ran before hashing; flush() sets the flag under this lock.
+    if (g_trailer_written) return {};
     if (!g_written_blobs.insert(key).second) return h;  // already written
+    g_blob_count.fetch_add(1, std::memory_order_relaxed);
   }
 
   // blobs/<2-char-prefix>/<fullhash>.blob
@@ -976,13 +985,12 @@ Hash128 write_blob(const void* data, size_t len) {
   ensure_dir(subdir);
   std::string path = subdir + "/" + key + ".blob";
 
-  if (atomic_write_file(path, data, len)) {
-    g_blob_count.fetch_add(1, std::memory_order_relaxed);
-  } else {
+  if (!atomic_write_file(path, data, len)) {
     // Write failed — remove from set so a later call can retry.
     LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
+    g_blob_count.fetch_sub(1, std::memory_order_relaxed);
   }
   return h;
 }
@@ -1004,16 +1012,17 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
+    if (g_trailer_written) return {};  // as in write_blob()
     if (!g_written_blobs.insert(key).second) return h;  // already written
+    g_blob_count.fetch_add(1, std::memory_order_relaxed);
   }
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
-  if (atomic_write_file(path, image, image_size)) {
-    g_blob_count.fetch_add(1, std::memory_order_relaxed);
-  } else {
+  if (!atomic_write_file(path, image, image_size)) {
     LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
+    g_blob_count.fetch_sub(1, std::memory_order_relaxed);
   }
   return h;
 }
