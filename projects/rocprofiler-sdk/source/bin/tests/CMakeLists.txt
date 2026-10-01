@@ -35,6 +35,7 @@ rocprofiler_sdk_pytest_discover_tests(
     PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
     EXTRA_ARGS --rocprof-attach-path
                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach
+               --rocprofv3-path ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
     PROPERTIES
     LABELS "unittests"
     TIMEOUT 45)
