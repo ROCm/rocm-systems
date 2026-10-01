@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -128,6 +129,27 @@ struct ScopedBlobEdit {
     std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
     f.seekp(static_cast<std::streamoff>(offset));
     f.put(original);
+  }
+};
+
+// Cuts the last byte off a blob file for the lifetime of the object, leaving it
+// short of the rect the way an archive captured before rect-shaped D2H blobs is.
+struct ScopedBlobCut {
+  fs::path path;
+  char last = 0;
+
+  explicit ScopedBlobCut(fs::path p) : path(std::move(p)) {
+    {
+      std::ifstream in(path, std::ios::binary);
+      in.seekg(-1, std::ios::end);
+      in.get(last);
+      REQUIRE(in.good());
+    }
+    fs::resize_file(path, fs::file_size(path) - 1);
+  }
+  ~ScopedBlobCut() {
+    std::ofstream out(path, std::ios::binary | std::ios::app);
+    out.put(last);
   }
 };
 
@@ -326,6 +348,53 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
   SECTION("hipMemcpy2D") {
     check_blob_edits(cap.path, d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D), 0,
                      kLastRow2D, kExtent2D);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_PitchedD2H_Direct, then cut the last byte off expected
+ *     blobs, so they are short of the rect the way blobs captured before
+ *     rect-shaped D2H blobs are, and replay with HIP_HRR_D2H_EXACT=1.
+ *   - With one blob short, that check is counted as skipped and the other six
+ *     pass.
+ *   - With all seven short, every check is skipped and the replay fails rather
+ *     than passing as an archive with no validation blobs.
+ */
+HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
+#ifdef _WIN32
+  HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
+#endif
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_pitched_d2h_short"};
+  hrr_capture_direct("Unit_HRR_PitchedD2H_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const std::vector<fs::path> blobs = {
+      d2h_blob<hrr_args_hipDrvMemcpy3D>(arc, HRR_API_HIPDRVMEMCPY3D),
+      d2h_blob<hrr_args_hipDrvMemcpy3DAsync>(arc, HRR_API_HIPDRVMEMCPY3DASYNC),
+      d2h_blob<hrr_args_hipDrvMemcpy2DUnaligned>(arc, HRR_API_HIPDRVMEMCPY2DUNALIGNED),
+      d2h_blob<hrr_args_hipMemcpy3D>(arc, HRR_API_HIPMEMCPY3D),
+      d2h_blob<hrr_args_hipMemcpy3DAsync>(arc, HRR_API_HIPMEMCPY3DASYNC),
+      d2h_blob<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D),
+      d2h_blob<hrr_args_hipMemcpy2DAsync>(arc, HRR_API_HIPMEMCPY2DASYNC)};
+  {
+    ScopedBlobCut cut(blobs[3]);
+    const auto [ret, out] = exact_replay(cap.path);
+    INFO("Playback stdout:\n" << out);
+    int pass = 0, fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+    CHECK(pass == kPitchedCopies - 1);
+    CHECK(out.find(", 0 fail, 1 skipped") != std::string::npos);
+    CHECK(ret == 0);
+  }
+  {
+    std::vector<std::unique_ptr<ScopedBlobCut>> cuts;
+    for (const auto& b : blobs) cuts.push_back(std::make_unique<ScopedBlobCut>(b));
+    const auto [ret, out] = exact_replay(cap.path);
+    INFO("Playback stdout:\n" << out);
+    CHECK(out.find(", 0 fail, 7 skipped") != std::string::npos);
+    CHECK(ret == 1);
   }
 }
 

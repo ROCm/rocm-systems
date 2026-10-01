@@ -3645,12 +3645,16 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
                                      uint64_t hash_lo, uint64_t hash_hi,
                                      hipStream_t stream, bool is_async,
                                      Issue&& issue) {
-    if (!dst.ok) {
-        fprintf(stderr, "[HRR] %s D2H: recorded host rect overflows size_t, skipped\n", api);
-        return hipSuccess;
-    }
     // A copy that failed at capture wrote nothing, so its blob is no output.
     const bool validate = ctx.validate_d2h && (hash_lo || hash_hi) && recorded_ret == 0;
+    // From here every check that was expected is counted in d2h_attempted, the
+    // skipped ones included, so an archive whose every check is skipped fails the
+    // summary instead of passing as one with no validation blobs.
+    if (!dst.ok) {
+        fprintf(stderr, "[HRR] %s D2H: recorded host rect overflows size_t, skipped\n", api);
+        if (validate) ctx.d2h_attempted++;
+        return hipSuccess;
+    }
     std::vector<uint8_t> host(dst.extent ? dst.extent : 1);
     hipError_t r = issue(host.data());
     // A recorded default stream translates to nullptr, and that is still the
@@ -3670,6 +3674,7 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     }
     if (!validate) return hipSuccess;  // no expected blob: just execute
 
+    ctx.d2h_attempted++;
     size_t blob_sz = 0;
     const auto* expected =
         static_cast<const uint8_t*>(ctx.load_blob(hash_lo, hash_hi, &blob_sz));
@@ -3686,7 +3691,6 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
                 api, blob_sz, dst.extent);
         return hipSuccess;
     }
-    ctx.d2h_attempted++;
     if (!expected) {
         fprintf(stderr, "[HRR] %s D2H validate FAIL: expected blob not found in archive\n", api);
         ctx.note_d2h_fail(hrr_dispatch_seq);
