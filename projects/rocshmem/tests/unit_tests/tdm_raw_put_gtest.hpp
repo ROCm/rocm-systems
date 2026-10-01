@@ -27,10 +27,12 @@
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 #include <cassert>
+#include <cstddef>
 #include <vector>
 
 #include "rocshmem/rocshmem.hpp"
 #include "../src/atomic.hpp"
+#include "../src/constmem.hpp"
 #include "../src/ipc_policy.hpp"
 #include "../src/memory/notifier.hpp"
 #include "../src/memory/symmetric_heap.hpp"
@@ -40,6 +42,9 @@
 namespace rocshmem {
 
 static constexpr uint32_t TDM_RAW_SIGNAL_OFFSET = 67108864u;  // 64 MB
+
+// Fixed TDM tile size for these tests
+static constexpr uint32_t TEST_TDM_TILE_BYTES = 16384;
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -103,6 +108,11 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
+    // Force a known tile size so the parameterized byte counts below
+    // actually land on the tile boundaries their comments claim.
+    uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
+                                offsetof(constmem_t, tdm_tile_bytes)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));

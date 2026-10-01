@@ -605,23 +605,32 @@ constexpr int TdmStorePolicy = tdm::make_cache_policy(
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
                                                                 size_t size) {
-#if defined(USE_TDM) && defined(__gfx1250__)
+#if defined(USE_TDM) && defined(__gfx1250__) && HIP_HAVE_TDM_INTRINSICS
   const tdm::LdsRegistration reg = tdm::get_lds();
   // A minimum of 16 bytes (2 x 8-byte element, for double buffering) is
   // required for one usable TDM tile; anything less isn't worth staging.
   if (reg.ptr != nullptr && reg.bytes >= 16) {
-    const uint32_t tile_bytes = static_cast<uint32_t>(
+    constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
+    uint32_t tile_bytes = static_cast<uint32_t>(
         min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));
-    if (is_thread_zero_in_block()) {
-      tdm::copy_region<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr, tile_bytes,
-                                          /*double_buffered=*/true);
+    // constmem.tdm_tile_bytes may come from an unaligned ROCSHMEM_TDM_TILE_BYTES
+    // override, and reg.bytes/2 depends on the caller's own lds_bytes argument
+    // to rocshmem_set_tdm_lds(); round down to a whole element so the per-tile
+    // address stride (tile_bytes) never outruns what tile_dim0 actually
+    // transfers, which would otherwise leave uncopied gaps between tiles.
+    tile_bytes -= tile_bytes % element_bytes;
+    if (tile_bytes > 0) {
+      if (is_thread_zero_in_block()) {
+        tdm::copy_region<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr, tile_bytes,
+                                            /*double_buffered=*/true);
+      }
+      const size_t covered = tdm::covered_bytes(size, tile_bytes);
+      if (covered < size) {
+        memcpy_wg<Kind>(static_cast<char*>(dst) + covered,
+                        static_cast<char*>(src) + covered, size - covered);
+      }
+      return;
     }
-    const size_t covered = tdm::covered_bytes(size, tile_bytes);
-    if (covered < size) {
-      memcpy_wg<Kind>(static_cast<char*>(dst) + covered,
-                      static_cast<char*>(src) + covered, size - covered);
-    }
-    return;
   }
 #endif
   memcpy_wg<Kind>(dst, src, size);

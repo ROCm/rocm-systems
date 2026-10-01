@@ -846,20 +846,20 @@ __device__ size_t rocshmem_query_tdm_lds_bytes();
 
 /**
  * @brief Register the LDS buffer this thread block lets rocSHMEM use for
- * its TDM (Tensor Data Mover) fast path. Collective over the calling
- * thread block: call once, with identical arguments from every thread
- * (only thread 0's copy is used), before any rocshmem_*_wg put/get in
- * this kernel that should use TDM -- the call publishes the registration
- * to the rest of the block via an internal barrier before returning. If
- * never called, work-group put/get simply never uses TDM and always
- * takes the plain copy path; this is always safe (there is no way to
- * "forget" into corruption).
+ * its TDM (Tensor Data Mover) fast path.
+ * The call publishes the registration to the rest of the block via an
+ * internal barrier before returning. rocshmem_wg_ctx_create() resets this
+ * work-group's registration to "unregistered" as part of creating the
+ * default context, so a work-group that never calls this function simply
+ * never uses TDM and always takes the plain copy path. Creating an
+ * additional (non-default) context via rocshmem_wg_team_create_ctx() does
+ * not reset the registration, so it's safe to call this once per kernel.
  *
  * @param[in] lds        Pointer to a workgroup-shared LDS buffer at least
  *                       lds_bytes long (the caller's own extern __shared__
  *                       array, or a sub-region of it). Must be at least
  *                       8-byte aligned; 256-byte alignment is recommended
- *                       for peak TDM throughput (see tdm.md).
+ *                       for peak TDM throughput.
  * @param[in] lds_bytes  Size of \p lds in bytes. rocshmem_query_tdm_lds_bytes()
  *                       reports rocSHMEM's current default/preferred size;
  *                       passing less is fine (a smaller internal tile is
