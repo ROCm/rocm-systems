@@ -499,10 +499,11 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
     testing::internal::CaptureStderr();
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     const std::string warning = testing::internal::GetCapturedStderr();
-    if (num_cus == 4)
+    if (num_cus == 4) {
       EXPECT_TRUE(warning.empty());
-    else
+    } else {
       EXPECT_THAT(warning, testing::HasSubstr("soc.xcd0 has 3 compute units; expected 4"));
+    }
     ASSERT_EQ(loaded.build_result.xcds.size(), 1u);
     auto *cp = loaded.build_result.xcds[0]->command_processor();
     ASSERT_NE(cp, nullptr);

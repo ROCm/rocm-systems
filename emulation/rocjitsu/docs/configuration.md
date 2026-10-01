@@ -291,10 +291,19 @@ loader warns once per GPU and leaves the shader-array width unknown. Reads
 with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
 write zero.
 
+Omitted geometry fields inherit defaults selected by `gfx_target_version`.
+For a smaller topology, set both `num_cu_per_sh` and
+`num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
+of two CUs match a four-CU group. The topology need not grow to the generation's
+default size to support WGP-ID reads.
+
 The topology has no shader-array level. Within each shader engine, the first
 `num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
 The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
-KFD CU masks use the same order. Direct-CU groups follow their CU child order.
+For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
+by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
+CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
+does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 ### Memory wait diagnostics
 
