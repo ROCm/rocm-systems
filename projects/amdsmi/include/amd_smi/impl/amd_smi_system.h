@@ -52,6 +52,14 @@ class AMDSmiSystem {
 
   const auto& get_ai_nic_info() const;
 
+  // Library-local test seam: registers/unregisters a synthetic processor into
+  // the set matching processor->get_processor_type(), bypassing real hardware
+  // discovery. Excluded from libamd_smi.so (mangled names don't match the
+  // version script's "amdsmi_*" glob); only the RAII guard in
+  // amd_smi_test_overrides.h should call these -- never call them bare.
+  void register_processor_for_testing(AMDSmiProcessor* processor);
+  void unregister_processor_for_testing(AMDSmiProcessor* processor);
+
  private:
   AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
 
@@ -65,6 +73,8 @@ class AMDSmiSystem {
   amdsmi_status_t populate_amd_ainic_devices();
   amdsmi_status_t populate_brcm_nic_devices();
   amdsmi_status_t populate_brcm_switch_devices();
+  // Backing storage lookup for register/unregister_processor_for_testing().
+  std::set<AMDSmiProcessor*>& set_for_type_for_testing(amdsmi_processor_type_t type);
   uint64_t init_flag_;
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_;
