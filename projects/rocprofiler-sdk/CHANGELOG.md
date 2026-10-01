@@ -22,6 +22,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Fixed `rocprofv3 --attach` replacing the attach tool library with its own through the forwarded `ROCP_TOOL_LIBRARIES` environment variable.
   - Fixed attaching with a colon-delimited list of tool libraries in `-t`/`--attach-tool-library` or `ROCPROF_ATTACH_TOOL_LIBRARY`. Every library in the list is checked, and attachment fails if any of them is not found.
   - Fixed the last library of a colon-delimited `ROCP_TOOL_LIBRARIES` list not being loaded.
+  - Fixed the application aborting when a library in `ROCP_TOOL_LIBRARIES` could not be loaded. An error is logged, none of the listed libraries are used, and an attach to the process reports failure.
+  - `rocprofiler_attach` and `rocprofiler_detach` return the attach and detach status instead of always reporting success. A tool without `tool_attach` succeeds only on the attach that loaded it, and a warning is logged for each tool that does not support attach or detach.
 
 ### Known issues
 
