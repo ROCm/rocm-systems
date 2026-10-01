@@ -504,7 +504,7 @@ jobs:
           echo "Corpus CPU plan: pytest-workers: ${WORKERS}, rocjitsu-cpu-budget: ${ROCJITSU_CPU_BUDGET}"
           corpus_test_flags=(
             --workers "${WORKERS}"
-            --cpu-budget "${ROCJITSU_CPU_BUDGET}"
+            --cpu-thread-budget "${ROCJITSU_CPU_BUDGET}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}

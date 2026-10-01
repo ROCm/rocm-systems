@@ -11,7 +11,7 @@
 #
 # Options:
 #   --workers N          Number of pytest-xdist workers (default: 8)
-#   --cpu-budget N       ROCjitsu execution-thread budget per process (default: 8)
+#   --cpu-thread-budget N  ROCjitsu execution-thread budget per process (default: 8)
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
@@ -43,7 +43,7 @@ warn_perf=false
 sanitizer_mode=none
 
 usage() {
-  echo "Usage: $0 [--workers N] [--cpu-budget N] [--soft-timeout N]" \
+  echo "Usage: $0 [--workers N] [--cpu-thread-budget N] [--soft-timeout N]" \
     "[--hard-timeout N] [--rerun-timeout N]" \
     "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
 }
@@ -67,9 +67,9 @@ while (( $# )); do
       worker_count="$2"
       shift 2
       ;;
-    --cpu-budget)
+    --cpu-thread-budget)
       if (( $# < 2 )); then
-        echo "--cpu-budget requires a value" >&2
+        echo "--cpu-thread-budget requires a value" >&2
         usage
         exit 1
       fi
@@ -136,7 +136,7 @@ done
 
 numeric_options=(
   "worker_count:--workers"
-  "rocjitsu_cpu_budget:--cpu-budget"
+  "rocjitsu_cpu_budget:--cpu-thread-budget"
   "soft_timeout_seconds:--soft-timeout"
   "hard_timeout_seconds:--hard-timeout"
   "rerun_timeout_seconds:--rerun-timeout"
