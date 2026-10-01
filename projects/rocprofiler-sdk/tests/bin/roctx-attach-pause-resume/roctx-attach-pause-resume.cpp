@@ -36,10 +36,10 @@ namespace
 volatile std::sig_atomic_t sigint_received = 0;
 }
 
-// This target is used by the rocprofv3 attach test to keep the process alive
-// before issuing ROCTx profiler-control calls. The trigger file is created
-// after rocprofv3 attaches, so the Pause/Resume calls below are observed by
-// the attached tool instead of being lost before attachment.
+// This target is used by the rocprofv3 attach test to keep the process alive before issuing ROCTx
+// profiler-control calls. The target creates a readiness marker after initialization and any
+// intentional pre-attach call. The driver creates the trigger file after rocprofv3 attaches, so
+// the remaining Pause/Resume calls are observed by the attached tool.
 
 extern "C" void
 roctx_attach_pause_resume_signal_handler(int signum)
@@ -118,6 +118,18 @@ wait_for_trigger(const std::string& trigger_file)
     return false;
 }
 
+void
+signal_phase_complete(const std::string& marker_file)
+{
+    auto marker = std::ofstream{marker_file};
+    marker << "complete\n";
+    if(!marker.good())
+    {
+        std::cerr << "Failed to write phase marker: " << marker_file << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+}
+
 template <typename KernelT>
 void
 launch_kernel(const char* name, KernelT kernel, float* data)
@@ -181,6 +193,7 @@ main(int argc, char** argv)
         roctxProfilerPause(0);
     }
 
+    signal_phase_complete(trigger_file + "-ready");
     std::cout << "ROCTx attach pause/resume target ready in mode: " << mode << "\n";
     if(!wait_for_trigger(trigger_file))
     {
@@ -202,6 +215,8 @@ main(int argc, char** argv)
         HIP_ASSERT(hipFree(data));
         return EXIT_FAILURE;
     }
+
+    signal_phase_complete(trigger_file + "-complete");
 
     // Keep the target alive until the test driver detaches rocprofv3 and
     // signals that output collection is complete.
