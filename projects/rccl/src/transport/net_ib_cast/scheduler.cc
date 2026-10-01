@@ -467,6 +467,15 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   return ncclSuccess;
 }
 
+// ncclIbCastGetOptRecvCompletion — read commBase.optRecvCompletion from a
+// connected send or recv comm (both start with ncclIbNetCommBase).
+extern "C" ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out) {
+  if (!comm || !out) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *out = base->optRecvCompletion ? 1 : 0;
+  return ncclSuccess;
+}
+
 // ncclIbCastSetTokens — force-initialize the WRR token table for testing.
 // Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
 // qpTokens must have nqps entries; totTokens is computed as their sum.

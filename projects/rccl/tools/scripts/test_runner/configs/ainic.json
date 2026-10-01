@@ -408,6 +408,43 @@
       ]
     },
 
+    "b13_opt_recv_completion": {
+      "extends": "b_base",
+      "timeout": 600,
+      "description": "B13: Optional recv completion with CTS offload on (AINIC auto-enable path). QP sched off. Allreduce pins NCCL_PROTO so net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall with optional recv completion enabled (P2P/CTS-offload comms)." },
+        { "name": "B13_allreduce_optRecvCompletion_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." },
+        { "name": "B13_allreduce_optRecvCompletion_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." }
+      ]
+    },
+
+    "b14_opt_recv_completion_no_cts": {
+      "extends": "b_base",
+      "timeout": 600,
+      "description": "B14: Optional recv completion with CTS offload off: the combination this PR newly makes reachable (control param on, not equivalent to useCtsOffload).",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        { "name": "B14_alltoall_optRecvCompletion_noCts", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall optional recv completion with software CTS (offload off)." },
+        { "name": "B14_allreduce_optRecvCompletion_noCts_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL with optional recv completion and CTS offload off." },
+        { "name": "B14_allreduce_optRecvCompletion_noCts_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128 with optional recv completion and CTS offload off." }
+      ]
+    },
+
     "b_large_alltoall_repro": {
       "extends": "b_base",
       "command_args": "-b 1K -e 16G -f 2 -g 1",
@@ -461,6 +498,8 @@
     { "name": "B10. ROCM-IB / no CTS offload",       "config": "b8_no_cts_offload", "enabled": true },
     { "name": "B11. CTS force-override (PR#4657)",   "config": "b9_cts_force_override", "enabled": true },
     { "name": "B12. alltoall full-range guard",      "config": "b_large_alltoall_repro", "enabled": true },
+    { "name": "B13. Optional recv completion",       "config": "b13_opt_recv_completion", "enabled": true },
+    { "name": "B14. Optional recv completion (no CTS)", "config": "b14_opt_recv_completion_no_cts", "enabled": true },
 
     { "name": "C1. IONIC counter validation",        "config": "c_counters",        "enabled": true }
   ]
