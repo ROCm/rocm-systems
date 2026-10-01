@@ -1220,12 +1220,12 @@ class Common:
             raise unittest.SkipTest(msg)
         return
 
-    def _build_call_msg(self, func_name, i, j, params):
+    def _build_call_msg(self, func_name, i, j, params, label="gpu"):
         msg = f"\t### {func_name}("
         if i is not None:
-            msg += f"gpu={i}"
+            msg += f"{label}={i}"
         if j is not None:
-            msg += f", gpu={j}"
+            msg += f", {label}={j}"
         for param_name, param_value in params.items():
             if isinstance(param_value, list):
                 msg += f", {param_name}={{value}}"
@@ -1342,24 +1342,42 @@ class Common:
             raise raise_exception
         return
 
-    def _Test_API_Per_Handles(self, handles, **kwargs):
+    def _cpu_socket_handles(self):
+        """CPU socket handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def _cpu_core_handles(self):
+        """CPU core handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpucore_handles()
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def _Test_API_Per_Handles(self, handles, label, **kwargs):
         params = kwargs
         iterator = iter(params.items())
         func_name, func = next(iterator)
         del params[func_name]
+
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
 
         raise_exception = None
         for i in range(len(handles) + 1):
             cond = self.PASS
             if i < len(handles):
                 handle = handles[i]
-                self.print_device_header(i)
             else:
                 handle = self.bad_gpu
                 i = "invalid"
                 cond = self.FAIL
 
-            msg = self._build_call_msg(func_name, i, None, params)
+            msg = self._build_call_msg(func_name, i, None, params, label=label)
             try:
                 data = func(handle, *[value for value in params.values()])
                 self.print(msg, data)
@@ -1373,14 +1391,18 @@ class Common:
         return
 
     def Test_API_Per_CPU(self, **kwargs):
-        """Tests an API against every CPU socket handle and one invalid handle."""
-        cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
-        return self._Test_API_Per_Handles(cpu_handles, **kwargs)
+        """Tests an API against every CPU socket handle and one invalid handle.
+
+        Skips the calling test when the library was initialized without CPUs.
+        """
+        return self._Test_API_Per_Handles(self._cpu_socket_handles(), "cpu", **kwargs)
 
     def Test_API_Per_CPU_Core(self, **kwargs):
-        """Tests an API against every CPU-core handle and one invalid handle."""
-        core_handles = amdsmi.amdsmi_get_cpucore_handles()
-        return self._Test_API_Per_Handles(core_handles, **kwargs)
+        """Tests an API against every CPU-core handle and one invalid handle.
+
+        Skips the calling test when the library was initialized without CPUs.
+        """
+        return self._Test_API_Per_Handles(self._cpu_core_handles(), "core", **kwargs)
 
     def Test_Per_GPU_With_One_Enum(self, **kwargs):
         """
