@@ -113,6 +113,12 @@ fi
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
 FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
+# -o is checked too: a finding named into the archive writes there as surely
+# as a work directory inside it does. /dev/stdout is the caller's own stream.
+if [[ -n "$OUTPUT" ]] && ! [[ "$FINDING" -ef /dev/stdout ]] && in_archive "$FINDING"; then
+  echo "error: --output is inside the archive: $OUTPUT" >&2
+  exit 1
+fi
 
 pick_replay_mode() {
   if [[ "$REPLAY_MODE" != "auto" ]]; then echo "$REPLAY_MODE"; return; fi
@@ -155,11 +161,16 @@ setup_library_path() {
   # Assembled a component at a time. An empty component, which is what
   # "${built}:..." leaves when nothing was found, means the current directory
   # to the loader, and this script is run from inside customer archives: a
-  # shared object sitting in one would be loaded ahead of ROCm.
-  local joined=""
+  # shared object sitting in one would be loaded ahead of ROCm. The caller's
+  # value can hold empty components of its own (/mine: or a::b), so it is
+  # split too.
+  local joined="" part parts=()
   for p in "$built" "${LD_LIBRARY_PATH:-}" "${ROCM_PATH:+$ROCM_PATH/lib}"; do
-    [[ -n "$p" ]] || continue
-    joined="${joined:+$joined:}$p"
+    IFS=: read -r -a parts <<< "$p"
+    for part in ${parts[@]+"${parts[@]}"}; do
+      [[ -n "$part" ]] || continue
+      joined="${joined:+$joined:}$part"
+    done
   done
   if [[ -n "$joined" ]]; then
     export LD_LIBRARY_PATH="$joined"

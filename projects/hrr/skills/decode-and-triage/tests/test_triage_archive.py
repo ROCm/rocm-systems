@@ -308,6 +308,14 @@ class WorkdirDefaultTests(unittest.TestCase):
         self.assertIn("inside the archive", proc.stderr)
         self.assertEqual(inside, ["pid-1", "pid-1/events.bin"])
 
+    def test_an_output_inside_the_archive_is_refused(self):
+        for output in ("finding.md", "../finding.md"):
+            with self.subTest(output=output):
+                proc, inside = self._run_in_archive({}, ["-o", output])
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("--output is inside the archive", proc.stderr)
+                self.assertEqual(inside, ["pid-1", "pid-1/events.bin"])
+
     def test_stdout_redirected_to_a_file_keeps_its_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "finding.md"
@@ -369,6 +377,14 @@ class LibraryPathSafetyTests(unittest.TestCase):
     def test_the_callers_value_keeps_its_place(self):
         path = self._resulting_path({"ROCM_PATH": "/opt/rocm", "LD_LIBRARY_PATH": "/mine"})
         self.assertEqual(path, "/mine:/opt/rocm/lib")
+
+    def test_empty_components_in_the_callers_value_are_dropped(self):
+        for inherited in ("/mine:", ":/mine", "/mine::/theirs", ":"):
+            with self.subTest(inherited=inherited):
+                path = self._resulting_path({"ROCM_PATH": "/opt/rocm", "LD_LIBRARY_PATH": inherited})
+                self.assertNotIn("::", path)
+                self.assertFalse(path.startswith(":") or path.endswith(":"), path)
+                self.assertTrue(path.endswith("/opt/rocm/lib"), path)
 
     def test_a_build_tree_playback_with_no_lib_dir_beside_it(self):
         """`ensure_playback.sh --build` leaves the binary in build/playback/.

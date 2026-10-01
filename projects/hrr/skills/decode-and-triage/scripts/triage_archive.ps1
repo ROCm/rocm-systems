@@ -157,16 +157,25 @@ $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-
 # directory or a parent of it that is a link into the capture is inside it.
 $ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
 $ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
-$WorkdirFull = Resolve-LinkedPath $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Workdir)
-if (-not $ArchiveRoot -or -not $WorkdirFull) {
-    Write-Host "error: a symbolic link loop in the archive or work directory path: $Workdir" -ForegroundColor Red
+function Test-InArchive([string]$Path) {
+    $full = Resolve-LinkedPath $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    if (-not $ArchiveRoot -or -not $full) {
+        Write-Host "error: a symbolic link loop in the archive path or in: $Path" -ForegroundColor Red
+        exit 1
+    }
+    $root = $ArchiveRoot.TrimEnd('\', '/')
+    $full = $full.TrimEnd('\', '/')
+    return ($full -ieq $root -or
+            $full.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+}
+if (Test-InArchive $Workdir) {
+    Write-Host "error: the triage work directory is inside the archive: $Workdir; set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
     exit 1
 }
-$ArchiveRoot = $ArchiveRoot.TrimEnd('\', '/')
-$WorkdirFull = $WorkdirFull.TrimEnd('\', '/')
-if ($WorkdirFull -ieq $ArchiveRoot -or
-    $WorkdirFull.StartsWith($ArchiveRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    Write-Host "error: the triage work directory is inside the archive: $Workdir; set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
+# -o is checked too: a finding named into the archive writes there as surely
+# as a work directory inside it does.
+if ($Output -and (Test-InArchive $Output)) {
+    Write-Host "error: --output is inside the archive: $Output" -ForegroundColor Red
     exit 1
 }
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
