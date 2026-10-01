@@ -194,7 +194,9 @@ ParserResult Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t c
         if (num_frames > frame_sizes_.size()) {
             frame_sizes_.resize(num_frames);
         }
-        int offset = chunk_data_size - size_index + 1;
+        // chunk_data_size is uint32_t, so keep the index in size_t: narrowing it to int would
+        // wrap to a negative value for a chunk larger than INT_MAX.
+        size_t offset = chunk_data_size - size_index + 1;
         uint64_t total_frame_size = 0;
         for (int i = 0; i < num_frames; i++) {
             uint32_t frame_size = 0;
