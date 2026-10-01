@@ -104,12 +104,13 @@ jobs:
             echo "No PowerShell scripts found under projects/hrr/skills."
             exit 0
           fi
+          # The path goes in as data, so a quote in a file name cannot end the string.
           for script in "${scripts[@]}"; do
-            pwsh -NoProfile -Command "
-              \$errors = \$null
-              [void][System.Management.Automation.Language.Parser]::ParseFile('$script', [ref]\$null, [ref]\$errors)
-              if (\$errors) { \$errors | ForEach-Object { Write-Host \$_ }; exit 1 }
-            "
+            HRR_PS1="$script" pwsh -NoProfile -Command '
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($env:HRR_PS1, [ref]$null, [ref]$errors)
+              if ($errors) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }
+            '
           done
           echo "${#scripts[@]} PowerShell script(s) parse."
 
