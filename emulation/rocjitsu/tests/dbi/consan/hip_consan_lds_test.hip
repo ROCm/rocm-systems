@@ -369,6 +369,7 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
   uint32_t scalar_after_hi = 0;
   uint32_t vector_after_three = 0;
   uint32_t vector_after_five = 0;
+  uint32_t descriptor_pressure;
   const uint32_t value = 0x51A7C0DEu;
   asm volatile("" : : "v"(&lds[0]) : "memory");
   asm volatile(
@@ -387,9 +388,10 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
       "v_mov_b32 %[vector_after_five], v5\n\t"
       : [scalar_before_lo] "=&v"(scalar_before_lo), [scalar_before_hi] "=&v"(scalar_before_hi),
         [scalar_after_lo] "=&v"(scalar_after_lo), [scalar_after_hi] "=&v"(scalar_after_hi),
-        [vector_after_three] "=&v"(vector_after_three), [vector_after_five] "=&v"(vector_after_five)
+        [vector_after_three] "=&v"(vector_after_three), [vector_after_five] "=&v"(vector_after_five),
+        [descriptor_pressure] "={v255}"(descriptor_pressure)
       : [value] "v"(value)
-      : "s14", "s15", "v0", "v1", "v3", "v5", "v255", "memory");
+      : "s14", "s15", "v0", "v1", "v3", "v5", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;
@@ -416,6 +418,7 @@ __launch_bounds__(64) void padded_dynamic_stack_full_pressure_flat_lds_store_pre
   uint32_t scalar_after_hi = 0;
   uint32_t vector_after_three = 0;
   uint32_t vector_after_five = 0;
+  uint32_t descriptor_pressure;
   uint32_t vcc_survived = 0;
   uint32_t scc_survived = 0;
   const uint32_t value = 0x51A7C0DEu;
@@ -444,10 +447,11 @@ __launch_bounds__(64) void padded_dynamic_stack_full_pressure_flat_lds_store_pre
       : [scalar_before_lo] "=&v"(scalar_before_lo), [scalar_before_hi] "=&v"(scalar_before_hi),
         [scalar_after_lo] "=&v"(scalar_after_lo), [scalar_after_hi] "=&v"(scalar_after_hi),
         [vector_after_three] "=&v"(vector_after_three),
-        [vector_after_five] "=&v"(vector_after_five), [vcc_survived] "+v"(vcc_survived),
+        [vector_after_five] "=&v"(vector_after_five),
+        [descriptor_pressure] "={v255}"(descriptor_pressure), [vcc_survived] "+v"(vcc_survived),
         [scc_survived] "+v"(scc_survived)
       : [value] "v"(value)
-      : "s14", "s15", "v0", "v1", "v3", "v5", "v255", "vcc", "memory");
+      : "s14", "s15", "v0", "v1", "v3", "v5", "vcc", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;
@@ -508,7 +512,8 @@ __global__ __launch_bounds__(128) void padded_cross_wave_flat_lds_store(uint32_t
   asm volatile("" : : "v"(&lds[0]) : "memory");
   // Keep the descriptor full so the regression exercises the spill-backed
   // resource plan instead of relying on target-specific unused high VGPRs.
-  asm volatile("v_mov_b32 v255, 0" ::: "v255");
+  uint32_t descriptor_pressure;
+  asm volatile("v_mov_b32 %0, %0" : "={v255}"(descriptor_pressure));
   padded_flat_lds_store(kStoredValue);
   __syncthreads();
   if (tid == 0)
