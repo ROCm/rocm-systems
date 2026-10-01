@@ -1594,8 +1594,9 @@ static void capture_memcpy3d_impl(
     // The blob spans dstPtr.ptr through the last copied byte, laid out with the
     // recorded pitch and position, so replay can compare exactly the copied
     // rows. A rejected copy is skipped: nothing validated its rect, and that
-    // span can reach past the caller's buffer.
-    if (is_async && stream) {
+    // span can reach past the caller's buffer. The null stream is synchronised
+    // too, as in the driver 3D path below.
+    if (is_async) {
       hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
       if (sync_r != hipSuccess) {
         LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 3D blob skipped",
@@ -1777,7 +1778,8 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
 }
 
 template <typename T>
-static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy2D* p) {
+static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy2D* p,
+                                     bool dst_ready = true) {
   if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
   std::memcpy(a.drv2d_bytes, p, sizeof(hip_Memcpy2D));
   // hip_Memcpy2D is widened to a HIP_MEMCPY3D by the runtime with Depth == 1,
@@ -1793,7 +1795,7 @@ static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy
                                     p->srcY, /*z=*/0, p->WidthInBytes, p->Height, /*depth=*/1);
       a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
     }
-  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
+  } else if (dst_ready && p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
              p->srcMemoryType != hipMemoryTypeArray) {
     size_t pitch = p->dstPitch ? p->dstPitch : p->dstXInBytes + p->WidthInBytes;
     size_t n = drvmemcpy_host_byte_count(pitch, /*pitch_height=*/0, p->dstXInBytes,
@@ -1860,10 +1862,18 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
   a.ret = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
   // A D2H blob taken before the copy lands would record a stale expected
-  // output, the same reason the async 3D spelling synchronises first.
-  if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost && stream)
-    (void)g_real_table.hipStreamSynchronize_fn(stream);
-  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy);
+  // output, the same reason the async 3D spelling synchronises first. The null
+  // stream is asynchronous too, and a failed sync leaves no blob to take.
+  bool dst_ready = true;
+  if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost) {
+    hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+    if (sync_r != hipSuccess) {
+      LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H param 2D blob skipped",
+                       sync_r);
+      dst_ready = false;
+    }
+  }
+  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy, dst_ready);
   return r;
 }
 
@@ -1901,7 +1911,7 @@ static void capture_memcpy2d_impl(
   } else if (kind == hipMemcpyDeviceToHost && dst) {
     size_t n = memcpy2d_host_byte_count(dpitch, width, height);
     if (n > 0) {
-      if (is_async && stream) {
+      if (is_async) {
         hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 2D blob skipped",
