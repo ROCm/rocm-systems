@@ -3,7 +3,7 @@
 
 #include "rocjitsu/vm/soc.h"
 
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
 
 #include "simdojo/sim/simulation.h"
@@ -232,8 +232,8 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_or
   // must therefore stay on its selected owner: fanning it out would execute on
   // XCDs the guest did not size resources such as scratch for. The simulated
   // KFD path enables fan-out separately when it publishes every XCD.
-  return amdgpu::ComputeQueueBindingPlan{.factory = amdgpu::make_aql_queue_binding_factory(*owner),
-                                         .xcd_fanout = false};
+  return amdgpu::ComputeQueueBindingPlan{
+      .factory = amdgpu::make_compute_queue_binding_factory(*owner), .xcd_fanout = false};
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_ordinal*/,
@@ -258,11 +258,16 @@ void SoC::set_dispatch_threads(uint32_t threads) {
 }
 
 void SoC::apply_dispatch_threads() {
-  size_t max_cp_cus = 1;
-  for_each_cp(
-      [&max_cp_cus](auto *cp) { max_cp_cus = std::max(max_cp_cus, cp->compute_units().size()); });
+  // Each XCD caller uses at most CUs-1 workers. Concurrent callers share the
+  // SoC pool, so its capacity is not limited to the largest individual XCD.
+  // Fewer engine partitions can leave some of this maximum capacity unused.
+  size_t capacity = 1;
+  for_each_cp([&capacity](auto *cp) {
+    if (!cp->compute_units().empty())
+      capacity += cp->compute_units().size() - 1;
+  });
   uint32_t effective_threads =
-      static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, max_cp_cus));
+      static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, capacity));
   if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
     effective_threads = 1;
 
