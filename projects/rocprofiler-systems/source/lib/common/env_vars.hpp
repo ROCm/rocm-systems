@@ -350,7 +350,7 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
+    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
         if(lhs.size() != rhs.size())
         {
             return false;
