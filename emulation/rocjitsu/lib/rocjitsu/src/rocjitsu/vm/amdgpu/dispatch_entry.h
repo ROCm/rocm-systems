@@ -92,6 +92,8 @@ struct ComputeQueueConfig {
   /// DRM supplies command buffers directly rather than a user-mode ring.
   bool submission_queue = false;
   uint32_t scheduling_percentage = 100;
+  /// Byte size of the GFX12.5 companion ring following the AQL ring; zero disables it.
+  uint32_t metadata_ring_size = 0;
 };
 
 struct WorkgroupCoord {
@@ -350,6 +352,8 @@ struct DispatchEntry {
   /// the dispatched wavefront.
   uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
+  /// Kernarg preload captured at admission; authoritative even if the source changes.
+  std::optional<std::array<uint32_t, 32>> metadata_kernargs = std::nullopt;
   uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
@@ -403,6 +407,8 @@ struct DispatchEntry {
   uint32_t completed_wgs = 0;
 
   uint64_t completion_signal = 0;
+  /// Captured companion event ID; absent for queues that read it from the signal.
+  std::optional<uint32_t> metadata_event_id = std::nullopt;
   /// @brief HSA-system-clock tick captured when the CP accepted this dispatch.
   ///
   /// @details ROCR's `hsa_amd_profiling_get_dispatch_time` reads dispatch
@@ -756,6 +762,8 @@ struct ComputeQueueRecord : ComputeQueueConfig {
     GpuVmAccess access;
     uint64_t address;
     uint32_t header;
+    uint64_t metadata_address = 0;
+    uint32_t metadata_block = 0;
   };
   std::optional<AqlSlotRelease> aql_slot_release;
   /// Set on the replicas that xcd_fanout creates. A replica never reads the ring

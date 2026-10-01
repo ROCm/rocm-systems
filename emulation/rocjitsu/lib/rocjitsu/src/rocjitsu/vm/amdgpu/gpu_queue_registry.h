@@ -120,6 +120,7 @@ struct QueueRingLayout {
   uint32_t size_bytes = 0;
   uint64_t consumer_pointer_address = 0;
   uint64_t producer_pointer_address = 0;
+  uint32_t metadata_size_bytes = 0;
 };
 
 /// @brief Doorbell mapping used by host-polled and explicitly notified queues.

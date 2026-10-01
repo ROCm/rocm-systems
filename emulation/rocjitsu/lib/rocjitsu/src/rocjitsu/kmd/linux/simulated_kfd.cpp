@@ -2749,6 +2749,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!ring_size)
     return -EINVAL;
   args->ring_size = *ring_size;
+  if (args->metadata_ring_size && (!is_aql_compute || args->metadata_ring_size < 256 ||
+                                   (args->metadata_ring_size & (args->metadata_ring_size - 1))))
+    return -EINVAL;
 
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
@@ -2783,7 +2786,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
     if (!daemon_mode_) {
       map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-                 args->ring_size, amdgpu::Mtype::UC);
+                 uint64_t{args->ring_size} + args->metadata_ring_size, amdgpu::Mtype::UC);
       map_to_gpu(proc, args->read_pointer_address,
                  reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
                  amdgpu::Mtype::UC);
@@ -2836,7 +2839,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     queue_request.ring = {.base_address = args->ring_base_address,
                           .size_bytes = args->ring_size,
                           .consumer_pointer_address = args->read_pointer_address,
-                          .producer_pointer_address = args->write_pointer_address};
+                          .producer_pointer_address = args->write_pointer_address,
+                          .metadata_size_bytes = args->metadata_ring_size};
     queue_request.binding_factory =
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
                 : amdgpu::make_compute_queue_binding_factory(*target_cp);

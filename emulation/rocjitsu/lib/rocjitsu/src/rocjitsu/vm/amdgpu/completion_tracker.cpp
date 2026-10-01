@@ -399,11 +399,14 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
     }
 
     case CompletionPublicationPhase::ReadEventId: {
-      const VmAccessOutcome outcome =
-          read_gpu(*state.access, entry.completion_signal + kEventIdOffset, &state.event_id,
-                   sizeof(state.event_id));
-      if (outcome != VmAccessOutcome::Complete)
-        return outcome;
+      if (entry.metadata_event_id) {
+        state.event_id = *entry.metadata_event_id;
+      } else {
+        const auto outcome = read_gpu(*state.access, entry.completion_signal + kEventIdOffset,
+                                      &state.event_id, sizeof(state.event_id));
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+      }
       state.phase = CompletionPublicationPhase::StoreStartTimestamp;
       continue;
     }

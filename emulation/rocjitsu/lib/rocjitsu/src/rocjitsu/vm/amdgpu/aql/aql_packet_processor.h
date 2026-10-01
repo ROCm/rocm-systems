@@ -98,6 +98,9 @@ struct AqlPacketProcessRequest {
   /// Whether the queue currently has at least one eligible compute unit.
   /// Non-kernel packets remain processable while kernel admission is disabled.
   bool kernel_admission_enabled = true;
+  /// Version 0.0 companion, captured by the ring owner in the same VM transaction.
+  /// Empty when disabled; otherwise 64 dwords comprising four 64-byte blocks.
+  std::span<const uint32_t> metadata{};
 };
 
 struct AqlPacketProcessResult {
