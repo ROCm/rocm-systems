@@ -68,8 +68,15 @@ test_categories:
       - "RmaProxyReadyTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/tuning.cc
+      - "TuningMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
+      - "ReclaimPlannerStateTest.*"
+      - "AsyncLaunchTest.*"
+      - "GroupJobAbortTest.*"
+      - "GroupApiWrapperTest.*"
+      - "ArgsGlobalCheckTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"

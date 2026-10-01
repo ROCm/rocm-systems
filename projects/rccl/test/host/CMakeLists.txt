@@ -77,6 +77,7 @@ function(rccl_define_micro_source_lists)
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     client-support-test.cc               # src/ras/client_support.cc
+    tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     ras-client-test.cc
     group-test.cc
@@ -726,6 +727,10 @@ endif()
 # Shared micro-test binary definitions (identical for BOTH build paths).
 # =====================================================================
 rccl_define_micro_source_lists()
+# rocshmem.hpp is only on the include path under ENABLE_ROCSHMEM.
+if(ENABLE_ROCSHMEM)
+  list(APPEND TEST_MICRO_INIT_SOURCE_FILES fakes/rocshmem_fakes.cc)
+endif()
 
 # Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
 # The property is directory-scoped and idempotent, so one call up front covers
@@ -746,6 +751,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
+    # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
+    TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"

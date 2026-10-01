@@ -241,8 +241,8 @@ TEST_F(perfetto_engine_backend_policy_test,
 {
     EXPECT_CALL(*g_mock_perfetto_backend, start_cached_session(::testing::_)).Times(0);
 
-    for(auto backend : { rocprofsys::core::engine_config::backend_t::system,
-                         rocprofsys::core::engine_config::backend_t::all })
+    for(auto const backend : { rocprofsys::core::engine_config::backend_t::system,
+                               rocprofsys::core::engine_config::backend_t::all })
     {
         auto cfg    = make_test_config();
         cfg.backend = backend;
