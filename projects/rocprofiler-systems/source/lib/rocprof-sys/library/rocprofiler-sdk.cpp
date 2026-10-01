@@ -41,6 +41,7 @@
 #include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
 
+#include <algorithm>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -625,7 +626,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto missing_counters = std::vector<std::string>{};
         for(const auto& counter : counters)
         {
-            if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
+            if(std::ranges::find(found_v, counter) == found_v.end())
             {
                 missing_counters.emplace_back(counter);
             }
@@ -2419,8 +2420,9 @@ flush_counter_storage_outputs()
         }
     }
 
-    std::sort(_cleanup_keys.begin(), _cleanup_keys.end(),
-              [](const auto& lhs, const auto& rhs) { return *lhs.second < *rhs.second; });
+    std::ranges::sort(_cleanup_keys, [](const auto& lhs, const auto& rhs) {
+        return *lhs.second < *rhs.second;
+    });
 
     for(const auto& [cleanup_key, storage] : _cleanup_keys)
     {
@@ -2597,15 +2599,13 @@ stop_context(rocprofiler_context_id_t ctx)
 void
 start_context(const client_data::context_id_vec_t& ctxs)
 {
-    std::for_each(std::begin(ctxs), std::end(ctxs),
-                  [](const auto& ctx) { start_context(ctx); });
+    std::ranges::for_each(ctxs, [](const auto& ctx) { start_context(ctx); });
 }
 
 void
 stop_context(const client_data::context_id_vec_t& ctxs)
 {
-    std::for_each(std::begin(ctxs), std::end(ctxs),
-                  [](const auto& ctx) { stop_context(ctx); });
+    std::ranges::for_each(ctxs, [](const auto& ctx) { stop_context(ctx); });
 }
 
 void

@@ -8,6 +8,7 @@
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <fmt/format.h>
@@ -168,8 +169,7 @@ post_process()
         }
     }
 
-    std::sort(_coverage_data.begin(), _coverage_data.end(),
-              std::greater<coverage_data>{});
+    std::ranges::sort(_coverage_data, std::greater<coverage_data>{});
 
     {
         auto       _tmp_map     = coverage_data_map{};
@@ -207,8 +207,7 @@ post_process()
     LOG_INFO("module coverage :: {:.2f}%", _coverage(code_coverage::MODULE) * 100.0);
     LOG_INFO("function coverage :: {:.2f}%", _coverage(code_coverage::FUNCTION) * 100.0);
 
-    std::sort(_coverage_data.begin(), _coverage_data.end(),
-              std::greater<coverage_data>{});
+    std::ranges::sort(_coverage_data, std::greater<coverage_data>{});
 
     auto const _get_setting = [](const std::string& _v) {
         auto&& _b = config::get_setting_value<bool>(_v);

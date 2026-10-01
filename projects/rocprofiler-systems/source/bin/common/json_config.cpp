@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include "common/env_vars.hpp"
@@ -585,8 +586,8 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "hipfile", "hipfile_api" },
     } };
 
-    auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                           [&](const entry& e) { return e.first == shorthand; });
+    auto it = std::ranges::find_if(shortcuts,
+                                   [&](const entry& e) { return e.first == shorthand; });
     if(it != shortcuts.end())
     {
         return std::string{ it->second };
@@ -642,8 +643,8 @@ expand_parallel_runtimes(const std::string& runtimes_str)
 
     for(const auto& token : split_csv_lowercase(runtimes_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(it != shortcuts.end())
         {
             result[std::string{ it->second }] = "true";
@@ -671,8 +672,8 @@ expand_gpu_metrics(const std::string& metrics_str)
     std::string result;
     for(const auto& token : split_csv_lowercase(metrics_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(!result.empty())
         {
             result += ',';
