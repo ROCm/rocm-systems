@@ -37,7 +37,7 @@ using metrics = std::vector<counter_value>;
 
 struct counter_definition
 {
-    std::string name{};
+    std::string name;
     size_t      device_index{ 0 };
 
     [[nodiscard]] std::string to_string() const
@@ -84,7 +84,7 @@ struct enabled_metrics
 
     [[nodiscard]] bool is_counter_enabled(const counter_definition& def) const
     {
-        return m_counters.count(def) > 0;
+        return m_counters.contains(def);
     }
 
 private:

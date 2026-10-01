@@ -175,6 +175,14 @@ static hipError_t DefaultHipMalloc(void** ptr, std::size_t)
 }
 std::function<hipError_t(void**, std::size_t)> g_hipMalloc = DefaultHipMalloc;
 
+static hipError_t DefaultHipMallocManaged(void** ptr, std::size_t, unsigned)
+{
+    if (ptr) *ptr = nullptr;
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipMallocManaged = DefaultHipMallocManaged;
+
 static hipError_t DefaultHipFree(void* ptr)
 {
     std::free(ptr);
@@ -562,6 +570,7 @@ void ResetHipFakes()
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipMalloc                     = DefaultHipMalloc;
+    g_hipMallocManaged              = DefaultHipMallocManaged;
     g_hipFree                       = DefaultHipFree;
     g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
@@ -901,6 +910,10 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 
 hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
 hipError_t hipMalloc(void** p, size_t size) { return g_hipMalloc(p, size); }
+hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
+{
+    return g_hipMallocManaged(p, size, flags);
+}
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }

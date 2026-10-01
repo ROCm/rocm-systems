@@ -59,6 +59,6 @@ struct backtrace : comp::empty_base
     data_t                  get_data() const { return m_data; }
 
 private:
-    data_t m_data = {};
+    data_t m_data;
 };
 }  // namespace rocprofsys::component

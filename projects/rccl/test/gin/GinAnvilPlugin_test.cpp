@@ -555,7 +555,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
@@ -584,7 +584,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
 TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
   ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
   mockComm_.get()->devrState.lsaSize = 2;
   void* ictx = nullptr;
   initCtx(&ictx);
@@ -776,7 +776,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_VerifyMissingAbortsBind) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   void* ictx = nullptr;
   void* coll = nullptr;
@@ -825,7 +825,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   void* ictx = nullptr;
   void* coll = nullptr;
