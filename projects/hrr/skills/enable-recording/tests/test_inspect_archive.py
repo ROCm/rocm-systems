@@ -569,6 +569,19 @@ def test_a_process_killed_before_its_manifest_is_still_a_recording(tmp_path):
     assert len(report.recorded_processes) == 1
 
 
+def test_a_damaged_root_entry_does_not_hide_the_processes(tmp_path):
+    """The root manifest is rewritten best-effort, so it can be valid JSON with
+    a `processes` entry that is not an object. The pid directories still count.
+    """
+    make_process(tmp_path, 79)
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": 4, "processes": [None]}))
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    assert len(report.recorded_processes) == 1
+    assert any("not an object: NoneType" in w for w in report.warnings)
+
+
 def test_a_torn_first_event_header_is_not_a_recording(tmp_path):
     """A process killed mid-write can leave a header cut in half, and half a
     header is not an event. Nor is one whose declared length cannot fit.

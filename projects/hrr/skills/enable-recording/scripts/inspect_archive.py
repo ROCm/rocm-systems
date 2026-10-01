@@ -415,6 +415,12 @@ def inspect(
     if manifest and isinstance(manifest.get("processes"), list):
         by_pid = {p.pid: p for p in report.processes if p.pid is not None}
         for entry in manifest["processes"]:
+            if not isinstance(entry, dict):
+                report.warnings.append(
+                    f"root manifest has a processes entry that is not an object: "
+                    f"{type(entry).__name__}"
+                )
+                continue
             pid = entry.get("pid")
             proc = by_pid.get(pid)
             if proc is None:
