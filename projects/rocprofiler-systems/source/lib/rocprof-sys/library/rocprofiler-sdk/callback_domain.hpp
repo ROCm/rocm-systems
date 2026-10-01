@@ -29,9 +29,10 @@ public:
         const auto kind =
             static_cast<SdkBackend::callback_tracing_kind_t>(m_definition.meta.id);
 
+        auto*      ops_data  = m_operations.empty() ? nullptr : m_operations.data();
+        const auto ops_count = m_operations.size();
         SdkBackend::configure_callback_tracing_service(
-            m_context, kind, m_operations.data(), m_operations.size(),
-            m_definition.on_record, nullptr);
+            m_context, kind, ops_data, ops_count, m_definition.on_record, nullptr);
     }
 
     [[nodiscard]] std::string_view name() const noexcept
