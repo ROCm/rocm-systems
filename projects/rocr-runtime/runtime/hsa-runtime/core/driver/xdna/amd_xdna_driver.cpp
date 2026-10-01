@@ -1904,12 +1904,10 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
     desc.pdi_dev_addr.store(pdi_dev_addr, std::memory_order_relaxed);
   }
   // Write it where the ELF asked. Unlike the argument sites this is a plain store, not an additive
-  // fold, but it still goes into the fresh copy rather than the pristine one.
-  const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFFu);
-  const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_dev_addr >> 32);
-  auto* pdi_site = static_cast<uint8_t*>(ctrl.ptr()) + desc.pdi_patch_offset;
-  std::memcpy(pdi_site, &pdi_addr_lo, sizeof(pdi_addr_lo));
-  std::memcpy(pdi_site + sizeof(pdi_addr_lo), &pdi_addr_hi, sizeof(pdi_addr_hi));
+  // fold, but it still goes into the fresh copy rather than the pristine one. The site is the low
+  // dword then the high dword, which on a little-endian host is the address's own bytes.
+  std::memcpy(static_cast<uint8_t*>(ctrl.ptr()) + desc.pdi_patch_offset, &pdi_dev_addr,
+              sizeof(pdi_dev_addr));
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc.arg_sites.size(); ++arg) {
