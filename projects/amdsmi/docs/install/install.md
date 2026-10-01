@@ -248,7 +248,7 @@ including Ubuntu 22.04, suffix the helper name with `3`:
 ```shell
 if command -v register-python-argcomplete >/dev/null 2>&1; then
     eval "$(register-python-argcomplete amd-smi)"
-else
+elif command -v register-python-argcomplete3 >/dev/null 2>&1; then
     eval "$(register-python-argcomplete3 amd-smi)"
 fi
 ```
