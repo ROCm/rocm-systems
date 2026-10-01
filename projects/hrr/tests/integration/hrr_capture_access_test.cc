@@ -293,8 +293,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
     CHECK(fs::is_empty(victim_dir));
-    CHECK(run.output.find("[HRR capture] Archive marked INCOMPLETE: a blob directory "
-                          "could not be used") != std::string::npos);
+    // The manifest, not stderr: the INCOMPLETE breadcrumb may go through
+    // AMD_LOG_LEVEL, which the workload leaves at its default.
     const std::vector<fs::path> archives = hrr_process_archives(base);
     REQUIRE(archives.size() == 1);
     CHECK(read_text_file(archives.front() / "manifest.json").find("\"complete\": false") !=
