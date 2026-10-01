@@ -198,10 +198,7 @@ void IbCastLogSched(struct ncclIbSendComm* comm) {
 
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase* base, int nreqs, int size) {
   if (base->recvMatchingScheme == BY_ORDER) return;
-  if (!base->schedParmsInit) {
-    base->schedParms = castGlobalQpSchedParms;
-    base->schedParmsInit = true;
-  }
+  IbCastCommBaseInitSchedParms(base);
   if (base->stagedParmsConEpoch < stagedSchedParms.prodEpoch) {
     bool collTypeChanged = false, msgSzChanged = false;
     ncclFunc_t collType;
@@ -375,6 +372,8 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int* startQpIndex
   *wrrSched = false;
 
   if (!parms->enable) {
+    // Scheduler off: use the static QP selection, bypassing WRR.
+    nqps = IbCastCommBaseGetDefaultNqpsPerRequest(req->base);
     qpIndex = req->id % req->base->nqps;
     goto exit;
   }
