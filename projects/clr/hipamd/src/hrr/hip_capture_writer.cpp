@@ -632,7 +632,7 @@ static std::atomic<uint64_t> g_file_block_bytes{kFileBlockDefault};
 // Events and blobs both count here. Protected by g_file_mu.
 static uint64_t g_bytes_since_space_check = 0;
 // Bytes already accepted by reserve_space and not yet finished writing. Concurrent
-// blob writers all count against the free-space check until they release.
+// writers all count against the free-space check until they release.
 static std::atomic<uint64_t> g_bytes_reserved{0};
 static std::atomic<bool>     g_out_of_space{false};
 
@@ -708,8 +708,14 @@ static bool space_check_due_locked(uint64_t len) {
 }
 
 // Read free space and return false, having stopped the capture, if `pending` more
-// bytes would eat into the reserve. Must not be called with g_file_mu held.
+// bytes, on top of the events still buffered, would eat into the reserve. Must not
+// be called with g_file_mu held.
 static bool check_space(uint64_t pending) {
+  {
+    // Read before the free space, so a flush in between is counted twice, not missed.
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    pending += g_buf_len;
+  }
   uint64_t avail = 0, total = 0;
   if (!fs_space(g_output_dir, &avail, &total)) return true;
   if (avail >= g_keep_free && avail - g_keep_free >= pending) return true;
@@ -1077,6 +1083,18 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   hdr->payload_length = payload_len;
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
+  // A record of at least the check interval is checked before it is written, as a
+  // blob is, so no single record goes into the reserve unchecked.
+  const bool preflight = g_keep_free != 0 && payload_len >= g_space_check_bytes;
+  if (preflight) {
+    {
+      std::lock_guard<std::mutex> lk(g_file_mu);
+      if (g_events_fd < 0) return;
+    }
+    if (!reserve_space(payload_len)) return;
+  }
+  const SpaceReservation reservation{preflight ? payload_len : 0};
+
   // Acquire once: assign sequence_id and buffer the record atomically so IDs are
   // only consumed for events that are actually written. A full record is always
   // appended under the lock, so the buffer never holds a torn record — which is
@@ -1100,7 +1118,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
       HRR_FSYNC(g_events_fd);
       g_events_since_ckpt = 0;
     }
-    space_due = g_keep_free != 0 && space_check_due_locked(payload_len);
+    space_due = g_keep_free != 0 && !preflight && space_check_due_locked(payload_len);
   }
   // After the event is buffered, and outside g_file_mu since check_space may take it
   // to stop the capture: a stop applies from the next event.
