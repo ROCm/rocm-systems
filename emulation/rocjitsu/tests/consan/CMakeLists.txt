@@ -3770,6 +3770,7 @@ function(rj_add_consan_hip_tests)
                 hip_consan_lds_gfx1100_test
                 ARCH gfx1100
                 SOURCE dbi/consan/hip_consan_lds_test.hip
+                COMPILE_OPTIONS -Werror=inline-asm
         )
         rj_add_hip_test(
                 hip_consan_gfx1100_test
