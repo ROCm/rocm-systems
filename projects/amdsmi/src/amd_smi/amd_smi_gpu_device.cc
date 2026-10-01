@@ -174,7 +174,10 @@ struct ComputeProcessCache {
 };
 
 std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
-std::unordered_map<uint32_t, std::unique_ptr<ComputeProcessCache>> compute_process_cache_map;
+// Never destroyed: a thread can still be inside get_compute_process_list_impl()
+// while the library's static destructors run at exit.
+auto& compute_process_cache_map =
+    *new std::unordered_map<uint32_t, std::unique_ptr<ComputeProcessCache>>();
 std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
