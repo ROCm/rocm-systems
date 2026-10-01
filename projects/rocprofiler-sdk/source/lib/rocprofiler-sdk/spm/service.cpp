@@ -37,12 +37,18 @@
 
 namespace
 {
-constexpr uint32_t gfx1250_target_version = 120500;
-
+// gfx1200, gfx1201, and gfx1250 (MI450).
 bool
 is_refclk_supported(const rocprofiler_agent_t& agent)
 {
-    return agent.gfx_target_version == gfx1250_target_version;
+    switch(agent.gfx_target_version)
+    {
+        case 120000:  // gfx1200
+        case 120001:  // gfx1201
+        case 120500:  // gfx1250
+            return true;
+        default: return false;
+    }
 }
 }  // namespace
 
@@ -104,6 +110,8 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
     for(size_t i = 0; i < parameters_count; i++)
     {
         const auto* parameter = CHECK_NOTNULL(parameters[i]);
+        // Fail before the profile is built. rocprofv3 then stops instead of
+        // programming SAMPLE_MODE_REFCLK on an agent that does not support it.
         if(parameter->type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES &&
            !is_refclk_supported(*agent))
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -336,6 +344,10 @@ rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t               
 
     spm_config_vec_t configs_supported{};
     auto status = sym->spm_query_agent_configurations(*aql_agent, query_cb, &configs_supported);
+    // aqlprofile reports a reference-clock interval for some agents that cannot
+    // program SAMPLE_MODE_REFCLK. Drop that entry unless the agent is gfx1200,
+    // gfx1201, or gfx1250, so rocprofv3-avail does not advertise refclk_cycles
+    // there. The shader-clock interval stays.
     if(!is_refclk_supported(*agent))
         configs_supported.erase(
             std::remove_if(configs_supported.begin(),
