@@ -2472,11 +2472,12 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   return hsa_vmem_handle.handle;
 }
 
-bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* location_type,
+bool Device::getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
                              int* device_id, size_t* size) const {
-  if (location_type == nullptr || device_id == nullptr || size == nullptr || hsa_handle == 0) {
-    return false;
-  }
+  if (location_type == nullptr || device_id == nullptr || size == nullptr) return false;
+
+  const uint64_t hsa_handle = amd_mem_obj.getUserData().hsa_handle;
+  if (hsa_handle == 0) return false;
 
   // Enhancement entry point: an older ROCr does not export it. Report failure so
   // the caller keeps its legacy device/size-zero behaviour.
