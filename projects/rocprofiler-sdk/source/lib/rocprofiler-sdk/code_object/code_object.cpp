@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1145,6 +1146,9 @@ executable_destroy_internal(hsa_executable_t executable)
     {
         return;
     }
+
+    // Before any bookkeeping: an open range may hold packets pointing at the code being unloaded.
+    ::rocprofiler::range_replay::note_code_object_unload();
 
     auto _unloaded = shutdown(executable);
 
