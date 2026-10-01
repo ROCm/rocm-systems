@@ -1306,6 +1306,19 @@ function(rj_add_consan_device_conformance_cases)
                     PASS_REGEX
                     "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
                 )
+            elseif(
+                _mode_value STREQUAL "default"
+                AND _workload_name STREQUAL "IndependentWorkgroups"
+            )
+                # The designated single-workgroup phase makes the diagnostic
+                # independent of which workgroups win the bounded windows.
+                # Require its concrete same-workgroup witness so relaxing the
+                # process-exit diagnostic guard cannot make this test pass.
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX
+                    "ConSan conflict .*workgroup=\\(0,0,0\\)"
+                )
             endif()
 
             # HIP does not expose its stream-to-HSA-queue mapping to this
