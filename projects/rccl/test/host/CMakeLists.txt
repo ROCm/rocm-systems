@@ -32,6 +32,12 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
+# cost-model-test.cc defines ncclFuncStr itself (src/init.cc is not on the micro
+# link line) and parseList() indexes it as its prefix table, so a rename in
+# production must not leave the test parsing NCCL_ALGO against stale names.
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
+  "cost-model-test.cc: ncclFuncStr")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -66,6 +72,7 @@ function(rccl_define_micro_source_lists)
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     tuning-general-test.cc
+    cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc
@@ -737,6 +744,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
+    ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
