@@ -3512,9 +3512,12 @@ TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
            std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     if (got == 0) {
+      // One hang is the failure. Waiting out every later child as well would
+      // run past the roundtrip case's own timeout.
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);
       ++hung;
+      break;
     } else if (got != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
       ++failed;
     }
@@ -3526,8 +3529,8 @@ TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
 
   INFO("forked " << forked << ", hung " << hung << ", failed " << failed);
   REQUIRE(recorder_ok);
-  REQUIRE(forked == kHrrForkWhileRecordingForks);
   REQUIRE(hung == 0);
+  REQUIRE(forked == kHrrForkWhileRecordingForks);
   REQUIRE(failed == 0);
 }
 #endif  // !_WIN32
