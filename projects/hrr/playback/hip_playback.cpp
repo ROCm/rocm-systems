@@ -35,6 +35,8 @@
 #include <cstring>
 #include <cstdint>
 #include <future>
+#include <memory>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
@@ -3659,8 +3661,18 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
         if (validate) ctx.d2h_attempted++;
         return hipSuccess;
     }
-    std::vector<uint8_t> host(dst.extent ? dst.extent : 1);
-    hipError_t r = issue(host.data());
+    // The extent comes from the archive and can be far larger than the rows the
+    // copy writes. Left uninitialized, the scratch commits only the pages the
+    // copy and the comparison touch; one that cannot be had at all is a skipped
+    // check, not a terminated replay.
+    std::unique_ptr<uint8_t[]> host(new (std::nothrow) uint8_t[dst.extent ? dst.extent : 1]);
+    if (!host) {
+        fprintf(stderr, "[HRR] %s D2H: no %zu-byte scratch buffer for the recorded host rect, "
+                "skipped\n", api, dst.extent);
+        if (validate) ctx.d2h_attempted++;
+        return hipSuccess;
+    }
+    hipError_t r = issue(host.get());
     // A recorded default stream translates to nullptr, and that is still the
     // stream the copy was issued on, so sync unconditionally or the comparison
     // below races the copy. Propagating the sync failure keeps a dead device
@@ -3705,14 +3717,14 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     // the scratch buffer: only its expected rows take a buffer of their own.
     const size_t n = dst.width * dst.height * dst.depth;
     if (hrr_host_rect_dense(dst)) {
-        hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.data() + dst.first,
+        hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.get() + dst.first,
                          expected + dst.first, n);
         return hipSuccess;
     }
-    hrr_host_rect_pack(dst, host.data(), host.data());
+    hrr_host_rect_pack(dst, host.get(), host.get());
     std::vector<uint8_t> want(n);
     hrr_host_rect_pack(dst, expected, want.data());
-    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.data(), want.data(), n);
+    hrr_d2h_validate(ctx, api, hrr_dispatch_seq, host.get(), want.data(), n);
     return hipSuccess;
 }
 
