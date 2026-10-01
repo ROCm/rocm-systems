@@ -731,7 +731,10 @@ bool open(const char* output_dir) {
     return true;
   }
 
-  // Fresh per-process archive.
+  // Fresh per-process archive. Incomplete belongs to the archive, as in
+  // atfork_child: a failure recorded against one closed earlier in this
+  // process must not cost this one its trailer. A resumed archive keeps it.
+  g_capture_incomplete.store(false, std::memory_order_relaxed);
   g_seq_id.store(0, std::memory_order_relaxed);
   g_event_count.store(0, std::memory_order_relaxed);
   g_blob_count.store(0, std::memory_order_relaxed);
