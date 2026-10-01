@@ -7,7 +7,8 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME ConSanCheckedRunnerUnitTest
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
+    COMMAND
+        ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
 )
 
 set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
@@ -195,7 +196,9 @@ function(rj_add_consan_hip_case)
     if(
         RJ_ENABLE_ASAN
         AND _case_CONFIG
-        AND _case_NAME MATCHES "(DenseBranchOnlyPressure|ManyOwnerPressure|Gfx950LargeLdsPipeline)"
+        AND _case_NAME
+            MATCHES
+            "(DenseBranchOnlyPressure|ManyOwnerPressure|Gfx950LargeLdsPipeline)"
         AND _case_TIMEOUT LESS 300
     )
         # These spill/large-LDS stress cases take up to 107 seconds in ASan
@@ -469,10 +472,20 @@ function(rj_add_consan_device_conformance_cases)
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
-    foreach(_epoch_case IN ITEMS BeforeTagWrapOrdered BeforeTagWrapRace
-            RaceRetainedAcrossTagWrap AcrossTagWrapOrdered AfterTagWrapOrdered
-            AfterTagWrapRace OldEvidenceAtMatchingTagIsOrdered Beyond16BitsOrdered
-            Beyond16BitsRace)
+    foreach(
+        _epoch_case
+        IN
+        ITEMS
+            BeforeTagWrapOrdered
+            BeforeTagWrapRace
+            RaceRetainedAcrossTagWrap
+            AcrossTagWrapOrdered
+            AfterTagWrapOrdered
+            AfterTagWrapRace
+            OldEvidenceAtMatchingTagIsOrdered
+            Beyond16BitsOrdered
+            Beyond16BitsRace
+    )
         set(_epoch_race 0)
         if(_epoch_case MATCHES "Race")
             set(_epoch_race 1)
@@ -1520,7 +1533,9 @@ function(rj_add_consan_device_conformance_cases)
         )
         set(_atomic_order_evidence_regex "visible_sync=[1-9][0-9]*")
         if(_device_TARGET STREQUAL "gfx950")
-            set(_atomic_order_evidence_regex "ordered_publication_pairs=[1-9][0-9]*")
+            set(_atomic_order_evidence_regex
+                "ordered_publication_pairs=[1-9][0-9]*"
+            )
         endif()
         set(_atomic_order_correct_test_name
             "${_device_PREFIX}.GlobalAtomicOrder.Correct"
@@ -3771,6 +3786,7 @@ function(rj_add_consan_hip_tests)
             CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1100_w7900.json"
         )
         if(HAS_GFX1100_GPU AND GFX1100_GPU_UUID)
+            set(_rj_consan_physical_target gfx1100)
             set(_rj_consan_gfx1100_device
                 "ROCR_VISIBLE_DEVICES=${GFX1100_GPU_UUID}"
             )
@@ -3866,6 +3882,7 @@ function(rj_add_consan_hip_tests)
             )
             unset(_rj_consan_gfx1100_clean)
             unset(_rj_consan_gfx1100_device)
+            unset(_rj_consan_physical_target)
         elseif(HAS_GFX1100_GPU)
             message(
                 WARNING
