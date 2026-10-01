@@ -371,3 +371,20 @@ rocprofiler_add_integration_execute_test(
         "Test PASSED: attach failed gracefully without crashing target"
     FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"
     )
+
+# Test that a tool library the target cannot load fails the attach without bringing down
+# the target
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-tool-library-test-execute
+    TARGET rocattach-without-env-test
+    ARGS $<TARGET_FILE:attachment-test> attach-missing-tool
+         $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    LABELS "attachment"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: attach failed gracefully without crashing target"
+    FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"
+    )

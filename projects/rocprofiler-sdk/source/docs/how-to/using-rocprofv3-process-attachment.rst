@@ -228,7 +228,7 @@ The profiling tool library is loaded into the target process, where it runs with
 
 When attaching to a process tree, the selection is made once for the target PID and used for every process in the tree.
 
-To attach a specific tool library instead, set ``ROCPROF_ATTACH_TOOL_LIBRARY``, or pass ``-t``/``--attach-tool-library`` to ``rocprof-attach``. The value is a colon-delimited list, is used exactly as given, and is interpreted in the target's filesystem. Attachment fails if any library in the list cannot be found. ``ROCP_TOOL_LIBRARIES`` is ignored in attach mode, with a warning.
+To attach a specific tool library instead, set ``ROCPROF_ATTACH_TOOL_LIBRARY``, or pass ``-t``/``--attach-tool-library`` to ``rocprof-attach``. The value is a colon-delimited list, is used exactly as given, and is interpreted in the target's filesystem. Attachment fails if any library in the list cannot be found or loaded, and the target keeps running without profiling. ``ROCP_TOOL_LIBRARIES`` is ignored in attach mode, with a warning.
 
 **Option support across versions**
 

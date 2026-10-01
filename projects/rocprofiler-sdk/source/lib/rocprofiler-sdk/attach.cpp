@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,8 +36,10 @@ rocprofiler_detach(void) ROCPROFILER_API;
 rocprofiler_status_t
 rocprofiler_attach(void)
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    // Only a tool library which could not be loaded fails the attach. Other statuses, such as no
+    // client providing tool_attach, are not reported to the attacher.
+    auto status = rocprofiler::registration::attach();
+    return (status == ROCPROFILER_STATUS_ERROR) ? status : ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
