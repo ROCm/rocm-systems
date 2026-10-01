@@ -349,7 +349,9 @@ static bool claim_private_dir(const std::string& path) {
 // Open this process's events.bin and report how many bytes it already holds.
 // On POSIX an existing file is reused only if it is a regular file with a single
 // link owned by the effective user, and a new one is created exclusively, so
-// nothing planted at that path is ever truncated or appended to.
+// nothing planted at that path is ever truncated or appended to. O_NONBLOCK keeps
+// a planted FIFO or device from blocking the open; it changes nothing for the
+// regular file that is kept.
 static int open_events_file(const std::string& path, std::int64_t* existing_size) {
   *existing_size = 0;
 #ifdef _WIN32
@@ -360,9 +362,9 @@ static int open_events_file(const std::string& path, std::int64_t* existing_size
   }
   return HRR_OPEN(path.c_str());
 #else
-  int fd = ::open(path.c_str(), O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+  int fd = ::open(path.c_str(), O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0 && errno == ENOENT)
-    fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
   if (fd < 0) return -1;
   struct stat st{};
   int err = 0;
