@@ -1367,9 +1367,10 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
 }
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
-// A 2-rank host/device split must reject; nHost==1 used to skip the check.
+// ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
+// beside device peers is the owner's segment imported everywhere else; it maps.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
-TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
+TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
   });
@@ -1389,18 +1390,23 @@ TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
                       return ncclSuccess;
                     });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclInvalidUsage);
-  EXPECT_EQ(barrier.calls, 0);
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+  // The peer now reads as host, so it reuses the local system-memory handle.
+  EXPECT_EQ(import.calls, 0);
 }
 
-// Same reject must fire on a segment index this rank does not own, otherwise
-// the wider ranks fail while this one waits at the closing barrier.
+// Two host owners beside a device owner is a genuine mix. The reject must fire on
+// a segment index this rank does not own, otherwise the wider ranks fail while
+// this one waits at the closing barrier.
 TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage) {
-  lsaRankList.assign({0, 1, 2});
+  lsaRankList.assign({0, 1, 2, 3});
   comm->devrState.lsaRankList = lsaRankList.data();
-  comm->devrState.lsaSize = 3;
-  lsaNumSegments.assign({1, 2, 2});
+  comm->devrState.lsaSize = 4;
+  lsaNumSegments.assign({1, 2, 2, 2});
   mem.lsaNumSegments = lsaNumSegments.data();
   mem.numSegments = 1;
 
@@ -1413,8 +1419,10 @@ TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage
                       const int maxSegments = 2;
                       msgs[1 * maxSegments + 1].type = kLocHost;
                       msgs[1 * maxSegments + 1].segmentSize = 4096;
-                      msgs[2 * maxSegments + 1].type = hipMemLocationTypeDevice;
+                      msgs[2 * maxSegments + 1].type = kLocHost;
                       msgs[2 * maxSegments + 1].segmentSize = 4096;
+                      msgs[3 * maxSegments + 1].type = hipMemLocationTypeDevice;
+                      msgs[3 * maxSegments + 1].segmentSize = 4096;
                       return ncclSuccess;
                     });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
