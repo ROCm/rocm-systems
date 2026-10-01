@@ -36,7 +36,6 @@ namespace c10
 {
 struct alignas(torch_abi::kIValueAlignment) IValue
 {
-    void visit(const std::function<bool(const IValue&)>& visitor) const;
     bool isTensorList() const;
 
     std::byte     payload[8];
@@ -853,46 +852,65 @@ void append_tensor(BoundedArgumentBuffer& output, const c10::IValue& value)
     }
 }
 
+std::optional<InputArrayView> tensor_list_view(const c10::IValue& value)
+{
+    const std::byte* list = nullptr;
+    std::memcpy(&list, value.payload, sizeof(list));
+    if (list == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    const c10::IValue* begin = nullptr;
+    const c10::IValue* end   = nullptr;
+    std::memcpy(&begin, list + torch_abi::kListImplElementsBeginOff, sizeof(begin));
+    std::memcpy(&end, list + torch_abi::kListImplElementsEndOff, sizeof(end));
+    const auto begin_address = reinterpret_cast<std::uintptr_t>(begin);
+    const auto end_address   = reinterpret_cast<std::uintptr_t>(end);
+    if ((begin == nullptr && end != nullptr) || end_address < begin_address)
+    {
+        return std::nullopt;
+    }
+    if (begin_address % alignof(c10::IValue) != 0 ||
+        (end_address - begin_address) % sizeof(c10::IValue) != 0)
+    {
+        return std::nullopt;
+    }
+    return InputArrayView{begin, (end_address - begin_address) / sizeof(c10::IValue)};
+}
+
 void append_tensor_list(BoundedArgumentBuffer& output, const c10::IValue& value)
 {
-    struct RenderState
+    const auto elements = tensor_list_view(value);
+    if (!elements)
     {
-        BoundedArgumentBuffer* output;
-        std::size_t            index = 0;
-        bool                   root  = true;
-    } state{&output};
-
-    output += '[';
-    if (output.truncated())
-    {
+        warn_capture_failure_once();
+        output += '?';
         return;
     }
-    value.visit(
-        [&state](const c10::IValue& element)
+
+    output += '[';
+    const std::size_t count = std::min(elements->size, kMaxNestedArgItems);
+    for (std::size_t i = 0; i < count && !output.truncated(); ++i)
+    {
+        if (i > 0)
         {
-            if (state.root)
-            {
-                state.root = false;
-                return false;
-            }
-            if (state.index < kMaxNestedArgItems && !state.output->truncated())
-            {
-                if (state.index > 0)
-                {
-                    *state.output += ", ";
-                }
-                if (element.tag == torch_abi::kIValueTensorTag)
-                {
-                    append_tensor(*state.output, element);
-                }
-                else
-                {
-                    append_tag_name(*state.output, element);
-                }
-            }
-            ++state.index;
-            return true;
-        });
+            output += ", ";
+        }
+        if (output.truncated())
+        {
+            return;
+        }
+        const auto& element = elements->data[i];
+        if (element.tag == torch_abi::kIValueTensorTag)
+        {
+            append_tensor(output, element);
+        }
+        else
+        {
+            append_tag_name(output, element);
+        }
+    }
     output += ']';
 }
 

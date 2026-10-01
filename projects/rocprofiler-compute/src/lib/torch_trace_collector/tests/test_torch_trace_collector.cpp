@@ -215,6 +215,35 @@ TEST(TorchAbiLayout, IValueTensorPayloadAndTagMatchRealTensor)
               tensor.unsafeGetTensorImpl());
 }
 
+TEST(TorchAbiLayout, TensorListElementOffsetsMatchRealStorage)
+{
+    const auto tensor        = at::empty({2, 3});
+    const auto check_storage = [](const c10::IValue& value)
+    {
+        ASSERT_TRUE(value.isTensorList());
+        const auto* impl = static_cast<const c10::detail::ListImpl*>(value.internalToPointer());
+        ASSERT_NE(impl, nullptr);
+        EXPECT_EQ(read_at_offset<const void*>(value, torch_abi::kIValuePayloadOff), impl);
+        const auto elements = value.toListRef();
+        const auto* begin = read_at_offset<const c10::IValue*>(*impl,
+                                                               torch_abi::kListImplElementsBeginOff);
+        const auto* end = read_at_offset<const c10::IValue*>(*impl, torch_abi::kListImplElementsEndOff);
+        EXPECT_EQ(begin, elements.data());
+        EXPECT_EQ(end, elements.empty() ? elements.data() : &elements.back() + 1);
+    };
+    for (const std::size_t size : {0, 1, 9})
+    {
+        SCOPED_TRACE(size);
+        check_storage(c10::IValue(std::vector<at::Tensor>(size, tensor)));
+    }
+    check_storage(c10::IValue(std::vector<at::Tensor>{tensor, at::Tensor{}, tensor}));
+    c10::List<at::Tensor> reserved;
+    reserved.reserve(8);
+    const c10::IValue reserved_value(reserved);
+    ASSERT_NE(reserved_value.toListRef().data(), nullptr);
+    check_storage(reserved_value);
+}
+
 TEST_F(TorchTraceCollectorTest, ConcurrentInstallationKeepsOneCallback)
 {
     std::atomic<int>         failures{0};
@@ -495,14 +524,35 @@ TEST_F(TorchTraceCollectorTest, RealForwardBackwardDispatchCapturesArgumentsAndB
 
 TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelItemsRespectBounds)
 {
-    const auto                    tensor = at::empty({2}, at::TensorOptions().dtype(at::kHalf));
-    const std::vector<at::Tensor> tensors(10, tensor);
-    std::string                   expected = "([";
-    for (int index = 0; index < 8; ++index)
-        expected += (index == 0 ? "" : ", ") + std::string{"float16[2]"};
-    expected += "])";
-    EXPECT_EQ(captured_arguments({c10::IValue(tensors)}), expected);
-    EXPECT_EQ(captured_arguments({c10::IValue(std::vector<at::Tensor>{})}), "([])");
+    const auto                 tensor = at::empty({2}, at::TensorOptions().dtype(at::kHalf));
+    constexpr std::string_view seven_elements =
+        "([float16[2], float16[2], float16[2], float16[2], float16[2], float16[2], float16[2]])";
+    constexpr std::string_view eight_elements = "([float16[2], float16[2], float16[2], float16[2], "
+                                                "float16[2], float16[2], float16[2], float16[2]])";
+    constexpr std::array<std::pair<std::size_t, std::string_view>, 6> cases = {{
+        {0, "([])"},
+        {1, "([float16[2]])"},
+        {7, seven_elements},
+        {8, eight_elements},
+        {9, eight_elements},
+        {1048577, eight_elements},
+    }};
+    for (const auto& [size, expected] : cases)
+    {
+        SCOPED_TRACE(size);
+        EXPECT_EQ(captured_arguments({c10::IValue(std::vector<at::Tensor>(size, tensor))}), expected);
+    }
+    c10::List<at::Tensor> reserved;
+    reserved.reserve(8);
+    EXPECT_EQ(captured_arguments({c10::IValue(reserved)}), "([])");
+    EXPECT_EQ(captured_arguments({c10::IValue(std::vector<at::Tensor>{at::Tensor{}})}), "([None])");
+    const auto matrix = at::empty({3, 4});
+    const auto scalar = at::empty({}, at::TensorOptions().dtype(at::kLong));
+    const auto empty  = at::empty({0, 7}, at::TensorOptions().dtype(at::kBFloat16));
+    const std::vector<at::Tensor>
+        mixed{at::Tensor{}, tensor, matrix, at::Tensor{}, scalar, empty, tensor, at::Tensor{}, matrix};
+    EXPECT_EQ(captured_arguments({c10::IValue(mixed)}),
+              "([None, float16[2], float32[3x4], None, int64[], bfloat16[0x7], float16[2], None])");
     const std::vector<c10::IValue> inputs(33, true);
     const auto                     arguments = captured_arguments(inputs);
     EXPECT_EQ(std::count(arguments.begin(), arguments.end(), ','), 31);
@@ -517,6 +567,25 @@ TEST_F(TorchTraceCollectorTest, LongArgumentOutputIsBoundedAndTerminated)
     const auto                      arguments = captured_arguments(inputs);
     EXPECT_EQ(arguments.size(), torch_trace_collector::detail::kMaxArgsLength + 4);
     EXPECT_EQ(arguments.substr(arguments.size() - 4), "...)");
+
+    std::string tensor_text = "float32[1";
+    for (std::size_t index = 1; index < dimensions.size(); ++index)
+        tensor_text += "x1";
+    tensor_text += ']';
+    std::string list_text = "[";
+    for (int index = 0; index < 8; ++index)
+        list_text += (index == 0 ? "" : ", ") + tensor_text;
+    list_text += ']';
+    const c10::IValue list(std::vector<at::Tensor>(100000, tensor));
+    const auto        truncate = [](std::string expected)
+    {
+        expected.resize(torch_trace_collector::detail::kMaxArgsLength);
+        return expected + "...)";
+    };
+    EXPECT_EQ(captured_arguments({list}), truncate("(" + list_text + ")"));
+    EXPECT_EQ(captured_arguments({tensor, tensor, tensor, list}),
+              truncate("(" + tensor_text + ", " + tensor_text + ", " + tensor_text + ", " +
+                       list_text + ")"));
 
     at::RecordFunction record(at::RecordScope::FUNCTION);
     record.before("small-output", &inputs);
