@@ -140,8 +140,13 @@ TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 # Write results outside the repo tree (default: $HOME) so they do not clutter
 # `git status`. Override the base dir with ROCDECODE_VALIDATION_RESULTS_DIR.
 RESULTS_BASE="${ROCDECODE_VALIDATION_RESULTS_DIR:-$HOME/rocDecode_validation_results}"
-RESULTS_DIR="$RESULTS_BASE/$TIMESTAMP"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$RESULTS_BASE"
+# The timestamp is only second resolution and mkdir -p is happy with a directory that already
+# exists, so two runs started in the same second would share this directory and everything
+# derived from it: the CTest log, the per codec output files and the per codec directories
+# handed to the conformance script. Let mktemp pick the name so it is unique by construction.
+# The timestamp stays in it for readability.
+RESULTS_DIR=$(mktemp -d "$RESULTS_BASE/${TIMESTAMP}.XXXXXX") || exit 1
 
 # ANSI colors
 GREEN='\033[0;32m'
