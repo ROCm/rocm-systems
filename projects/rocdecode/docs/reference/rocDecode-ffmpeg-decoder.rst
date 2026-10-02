@@ -40,4 +40,4 @@ For information about using the FFMpeg decoder, see :doc:`Understanding the rocD
 
 
 .. |rocdecode| replace:: ``utils/rocvideodecode/roc_video_dec.h``
-.. _rocdecode: ttps://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/rocvideodecode/roc_video_dec.h
+.. _rocdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/rocvideodecode/roc_video_dec.h
