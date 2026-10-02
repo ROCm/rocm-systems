@@ -1,0 +1,305 @@
+{
+  "system_configurations": {
+    "name": "RCCL-MI350P-PCIe-8GPU-Perf",
+    "description": "Single-node 8x MI350P PCIe performance. Records algbw and busbw for the results dashboard (--emit-results). Compare later runs on the same host; this file does not hard-code a bandwidth golden value. Correctness failures in the paired func config are the hard gate."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "WARN",
+    "NCCL_IGNORE_CPU_AFFINITY": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "-t",
+      "--enable-mpi-tests",
+      "--no_clean"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBITCODE_LIB_ARCH=gfx950",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--gpu_targets",
+      "gfx950"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build}",
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "allreduce_perf": {
+      "is_gtest": false,
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1800,
+      "command_args": "-b 1M -e 1G -f 2 -g 1 -n 50 -w 10",
+      "tests": [
+        {
+          "name": "AllReduce_auto",
+          "description": "AllReduce with RCCL's own algorithm, protocol, transport, and channel choice",
+          "env_variables": {}
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch4",
+          "description": "AllReduce performance: Simple + SHM + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch32",
+          "description": "AllReduce performance: Simple + SHM + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Tree_ch4",
+          "description": "AllReduce performance: Simple + SHM + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Tree_ch32",
+          "description": "AllReduce performance: Simple + SHM + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch4",
+          "description": "AllReduce performance: Simple + IPC + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch32",
+          "description": "AllReduce performance: Simple + IPC + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Tree_ch4",
+          "description": "AllReduce performance: Simple + IPC + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Tree_ch32",
+          "description": "AllReduce performance: Simple + IPC + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch4",
+          "description": "AllReduce performance: LL + SHM + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch32",
+          "description": "AllReduce performance: LL + SHM + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch4",
+          "description": "AllReduce performance: LL + SHM + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch32",
+          "description": "AllReduce performance: LL + SHM + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch4",
+          "description": "AllReduce performance: LL + IPC + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch32",
+          "description": "AllReduce performance: LL + IPC + Ring with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Ring",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch4",
+          "description": "AllReduce performance: LL + IPC + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch32",
+          "description": "AllReduce performance: LL + IPC + Tree with NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_ALGO": "Tree",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0"
+          }
+        }
+      ]
+    },
+    "all_gather_perf": {
+      "is_gtest": false,
+      "binary": "all_gather_perf",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1800,
+      "command_args": "-b 1M -e 1G -f 2 -g 1 -n 20 -w 5",
+      "tests": [
+        {
+          "name": "AllGather_auto",
+          "description": "AllGather with RCCL defaults",
+          "env_variables": {}
+        }
+      ]
+    },
+    "reduce_scatter_perf": {
+      "is_gtest": false,
+      "binary": "reduce_scatter_perf",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1800,
+      "command_args": "-b 1M -e 1G -f 2 -g 1 -n 20 -w 5",
+      "tests": [
+        {
+          "name": "ReduceScatter_auto",
+          "description": "ReduceScatter with RCCL defaults",
+          "env_variables": {}
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "MI350P AllReduce performance",
+      "description": "Auto plus the sweep at 4 and 32 channels",
+      "config": "allreduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "MI350P AllGather performance",
+      "description": "Default AllGather bandwidth",
+      "config": "all_gather_perf",
+      "enabled": true
+    },
+    {
+      "name": "MI350P ReduceScatter performance",
+      "description": "Default ReduceScatter bandwidth",
+      "config": "reduce_scatter_perf",
+      "enabled": true
+    }
+  ]
+}

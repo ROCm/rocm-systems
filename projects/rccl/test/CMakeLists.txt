@@ -765,6 +765,7 @@ if(BUILD_TESTS)
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
+      graph/Mi350pPcieTopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
