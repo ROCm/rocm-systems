@@ -8,8 +8,8 @@
 
 #include <numeric>
 
-#include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
 

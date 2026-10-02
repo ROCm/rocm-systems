@@ -17,11 +17,13 @@
 
 // Helper function to run __hip_atomic_exchange tests with WAVEFRONT scope
 template <typename TestType> static void runHipAtomicExchangeWavefrontTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::builtin,
                                              __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
@@ -43,11 +45,13 @@ template <typename TestType> static void runHipAtomicExchangeWavefrontTest() {
 
 // Helper function to run __hip_atomic_exchange tests with WORKGROUP scope
 template <typename TestType> static void runHipAtomicExchangeWorkgroupTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::builtin,
                                              __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
