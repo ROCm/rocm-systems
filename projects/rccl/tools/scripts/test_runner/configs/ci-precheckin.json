@@ -107,7 +107,15 @@
         {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero", "description": "Pin: ncclGinInboxA2ACreateRequirement(nRanks=1) divides by zero (SIGFPE), contained by ProcessIsolatedTestRunner", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero"},
         {"name": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula", "description": "ncclLsaBarrierCreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula"},
         {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"},
-        {"name": "Diagnostics", "description": "NCCL_RUN_DIAGNOSTICS report and P2P check at communicator init", "test_filter": "Diagnostics.*", "timeout": 600}
+        {"name": "Diagnostics.DisabledByDefault", "description": "NCCL_RUN_DIAGNOSTICS unset or 0 prints no report", "test_filter": "Diagnostics.DisabledByDefault", "timeout": 300},
+        {"name": "Diagnostics.AllDirectedEdgesVerified", "description": "NCCL_RUN_DIAGNOSTICS verifies every directed P2P edge", "test_filter": "Diagnostics.AllDirectedEdgesVerified", "timeout": 240},
+        {"name": "Diagnostics.EdgeCountFollowsCommSize", "description": "NCCL_RUN_DIAGNOSTICS edge count for 2 and 4 GPUs", "test_filter": "Diagnostics.EdgeCountFollowsCommSize", "timeout": 300},
+        {"name": "Diagnostics.CommUsableAfterDiagnostics", "description": "AllReduce after a diagnosed init", "test_filter": "Diagnostics.CommUsableAfterDiagnostics", "timeout": 240},
+        {"name": "Diagnostics.RunsAtEveryCommInit", "description": "NCCL_RUN_DIAGNOSTICS report after re-init and ncclCommSplit", "test_filter": "Diagnostics.RunsAtEveryCommInit", "timeout": 300},
+        {"name": "Diagnostics.P2pDisabledReportsNoEdges", "description": "NCCL_RUN_DIAGNOSTICS with NCCL_P2P_DISABLE=1", "test_filter": "Diagnostics.P2pDisabledReportsNoEdges", "timeout": 240},
+        {"name": "Diagnostics.ReportOnStdoutOnly", "description": "NCCL_RUN_DIAGNOSTICS report goes to stdout only", "test_filter": "Diagnostics.ReportOnStdoutOnly", "timeout": 240},
+        {"name": "Diagnostics.SingleProcessPeerAccessNotice", "description": "NCCL_RUN_DIAGNOSTICS peer-access notice in one process", "test_filter": "Diagnostics.SingleProcessPeerAccessNotice", "timeout": 240},
+        {"name": "Diagnostics.ReportParserOnFixedCapture", "description": "Diagnostics report parser on a fixed capture (no GPU)", "test_filter": "Diagnostics.ReportParserOnFixedCapture", "timeout": 60}
       ]
     },
     "unit_tests_fixtures": {

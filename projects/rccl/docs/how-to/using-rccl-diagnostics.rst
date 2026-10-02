@@ -116,9 +116,17 @@ This is expected and is not an error:
 In this message, "CUDA" refers to the HIP runtime. Do not issue HIP work on
 these devices from other threads while the communicator is being initialized.
 
-The line is not printed when cuMem is enabled, because access is then limited
-to the test buffers, or when peer access between the devices was already
+The line is not printed when peer access between the devices was already
 enabled. A missing line does not mean that the check did not run.
+
+.. note::
+
+   On ROCm the check cannot map the buffers of other devices of the same
+   process through cuMem. With cuMem enabled, a single process that drives
+   several GPUs therefore reports every edge between its devices as
+   ``peer-memory import failed ... handle=DIRECT reason=import``. cuMem is
+   enabled by default on gfx1250. Run such jobs with ``NCCL_CUMEM_ENABLE=0``
+   when you use the check.
 
 When each GPU is driven by its own process, peer memory is shared through HIP
 IPC handles, or through HIP virtual-memory handles when cuMem is enabled, and

@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <functional>
+#include <iostream>
 #include <numeric>
 #include <regex>
 #include <sstream>
@@ -31,8 +32,10 @@
 namespace RcclUnitTesting
 {
 
-// Covers HIP init, ncclCommInitAll on up to 8 GPUs, and the diagnostics exchange itself.
-static constexpr int kDiagTimeoutSeconds = 180;
+// Covers HIP init, ncclCommInitAll on up to 8 GPUs, and the diagnostics exchange itself (about 25 s per case
+// on 8x MI355X). The pre-checkin CI entries (ci-precheckin.json) allow 240 s for a TEST_F with one case and
+// 300 s for one with two cases, so this must stay at 120 s or below.
+static constexpr int kDiagTimeoutSeconds = 120;
 static constexpr int kMaxGpus            = 8;
 static constexpr size_t kAllReduceElems  = 1 << 20;
 
@@ -137,8 +140,13 @@ static bool xgmiFullMesh(const std::vector<int>& devices)
                 continue;
             uint32_t linkType = 0;
             uint32_t hops     = 0;
-            if(hipExtGetLinkTypeAndHopCount(a, b, &linkType, &hops) != hipSuccess
-               || linkType != HSA_AMD_LINK_INFO_TYPE_XGMI || hops != 1)
+            const hipError_t err = hipExtGetLinkTypeAndHopCount(a, b, &linkType, &hops);
+            if(err != hipSuccess)
+            {
+                ADD_FAILURE() << "hipExtGetLinkTypeAndHopCount(" << a << ", " << b << "): " << hipGetErrorString(err);
+                return false;
+            }
+            if(linkType != HSA_AMD_LINK_INFO_TYPE_XGMI || hops != 1)
                 return false;
         }
     return true;
@@ -147,7 +155,7 @@ static bool xgmiFullMesh(const std::vector<int>& devices)
 // Checks the p2p summary lines of a report covering one communicator per device group (groups of equal size).
 // On a full XGMI mesh each communicator verifies all of its N * (N - 1) directed pairs. Elsewhere only the tested
 // edges are known: each summary must still be [OK] and bounded by the pair count, and a communicator without
-// eligible pairs prints no summary.
+// eligible pairs prints no summary. A report with no summary at all tested nothing, so the case is skipped.
 static void expectEdgeSummaries(const DiagReport& report, const std::vector<std::vector<int>>& groups)
 {
     const int nRanks  = static_cast<int>(groups.front().size());
@@ -160,6 +168,8 @@ static void expectEdgeSummaries(const DiagReport& report, const std::vector<std:
         << report.dump();
     if(full)
         ASSERT_EQ(report.count(kDiagSummary), nGroups) << report.dump();
+    else if(report.count(kDiagSummary) == 0)
+        GTEST_SKIP() << "no P2P-eligible pair outside a full XGMI mesh, nothing tested:\n" << report.dump();
     else
         EXPECT_LE(report.count(kDiagSummary), nGroups) << report.dump();
     for(const auto& l : report.lines)
@@ -240,10 +250,11 @@ static void checkAllReduce(const std::vector<ncclComm_t>& comms)
     }
 
     ASSERT_EQ(ncclGroupStart(), ncclSuccess);
-    for(int i = 0; i < n; ++i)
-        ASSERT_EQ(ncclAllReduce(send[i], recv[i], kAllReduceElems, ncclFloat, ncclSum, comms[i], streams[i]),
-                  ncclSuccess);
+    ncclResult_t collRes = ncclSuccess;
+    for(int i = 0; i < n && collRes == ncclSuccess; ++i)
+        collRes = ncclAllReduce(send[i], recv[i], kAllReduceElems, ncclFloat, ncclSum, comms[i], streams[i]);
     ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+    ASSERT_EQ(collRes, ncclSuccess) << "ncclAllReduce: " << ncclGetErrorString(collRes);
 
     const float expected = static_cast<float>(n * (n + 1) / 2);
     std::vector<float> host(kAllReduceElems);
@@ -257,11 +268,38 @@ static void checkAllReduce(const std::vector<ncclComm_t>& comms)
     }
 }
 
-static ProcessIsolatedTestRunner::TestConfig diagCase(const char* name, std::function<void()> body)
+struct DiagCase
 {
-    return ProcessIsolatedTestRunner::TestConfig(name, std::move(body))
-        .withNumGpus(kMaxGpus)
-        .withTimeout(std::chrono::seconds(kDiagTimeoutSeconds));
+    const char* name;
+    int minGpus;
+    std::function<void()> body;
+};
+
+// Runs, each in its own process, the cases that fit the visible GPU count. The GPU count is checked here in the
+// parent: RUN_ISOLATED_TESTS-style runs end in EXPECT_TRUE(), so a GTEST_SKIP() inside an isolated case is reported
+// as a pass. When no case fits, gtest reports a real skip.
+static void runDiagCases(const std::vector<DiagCase>& cases)
+{
+    const int nGpus = usableGpus();
+    std::string notRun;
+    int registered = 0;
+    for(const DiagCase& c : cases)
+    {
+        if(nGpus < c.minGpus)
+        {
+            notRun += std::string(" ") + c.name + " (>= " + std::to_string(c.minGpus) + " GPUs)";
+            continue;
+        }
+        ProcessIsolatedTestRunner::registerTest(ProcessIsolatedTestRunner::TestConfig(c.name, c.body)
+                                                    .withNumGpus(kMaxGpus)
+                                                    .withTimeout(std::chrono::seconds(kDiagTimeoutSeconds)));
+        ++registered;
+    }
+    if(registered == 0)
+        GTEST_SKIP() << nGpus << " usable GPUs, not run:" << notRun;
+    if(!notRun.empty())
+        std::cout << "[ INFO     ] " << nGpus << " usable GPUs, not run:" << notRun << std::endl;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests()) << "One or more isolated tests failed";
 }
 
 class Diagnostics : public ::testing::Test
@@ -278,8 +316,6 @@ TEST_F(Diagnostics, DisabledByDefault)
             if(value != nullptr)
                 setenv("NCCL_RUN_DIAGNOSTICS", value, 1);
             const int nGpus = usableGpus();
-            if(nGpus < 2)
-                GTEST_SKIP() << "Requires >= 2 GPUs";
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
@@ -288,19 +324,17 @@ TEST_F(Diagnostics, DisabledByDefault)
             EXPECT_TRUE(report.lines.empty()) << "unexpected report lines:\n" << report.dump();
         };
     };
-    RUN_ISOLATED_TESTS(diagCase("Unset", body(nullptr)), diagCase("Zero", body("0")));
+    runDiagCases({{"Unset", 2, body(nullptr)}, {"Zero", 2, body("0")}});
 }
 
 // Full single-node communicator: one header, an [OK] summary covering every eligible directed pair
 // (all of them on a full XGMI mesh), one completion line naming the rank count, and no failure lines.
 TEST_F(Diagnostics, AllDirectedEdgesVerified)
 {
-    RUN_ISOLATED_TESTS(diagCase("AllDirectedEdgesVerified", []() {
+    runDiagCases({{"AllDirectedEdgesVerified", 2, []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
 
         std::vector<ncclComm_t> comms;
         std::string out;
@@ -314,7 +348,7 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
         EXPECT_EQ(report.count(done), 1) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << "failure lines:\n" << report.dump();
-    }));
+    }}});
 }
 
 // Edge count follows the communicator size (N * (N - 1) directed edges for N local GPUs on a full XGMI mesh).
@@ -324,37 +358,34 @@ TEST_F(Diagnostics, EdgeCountFollowsCommSize)
         return [nWanted]() {
             clearDiagEnv();
             setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
-            if(usableGpus() < nWanted)
-                GTEST_SKIP() << "Requires >= " << nWanted << " GPUs";
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nWanted, out));
             const auto commGuards   = guardComms(comms);
             const DiagReport report = parseDiagReport(out);
+            EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
             expectEdgeSummaries(report, {firstDevices(nWanted)});
             EXPECT_TRUE(report.failures().empty()) << report.dump();
         };
     };
-    RUN_ISOLATED_TESTS(diagCase("TwoGpus", body(2)), diagCase("FourGpus", body(4)));
+    runDiagCases({{"TwoGpus", 2, body(2)}, {"FourGpus", 4, body(4)}});
 }
 
 // Diagnostics are informational and leave the communicator usable: collectives issued after a
 // diagnosed init produce correct results.
 TEST_F(Diagnostics, CommUsableAfterDiagnostics)
 {
-    RUN_ISOLATED_TESTS(diagCase("CommUsableAfterDiagnostics", []() {
+    runDiagCases({{"CommUsableAfterDiagnostics", 2, []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
         const auto commGuards = guardComms(comms);
         EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1);
         checkAllReduce(comms);
-    }));
+    }}});
 }
 
 // The report is produced at every communicator initialization: a re-created communicator and the
@@ -365,24 +396,25 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
         for(int round = 0; round < 2; ++round)
         {
+            SCOPED_TRACE("round " + std::to_string(round));
             std::vector<ncclComm_t> comms;
             std::string out;
             ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
-            const auto commGuards = guardComms(comms);
-            EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1) << "round " << round;
+            const auto commGuards   = guardComms(comms);
+            const DiagReport report = parseDiagReport(out);
+            EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
+            expectEdgeSummaries(report, {firstDevices(nGpus)});
+            EXPECT_TRUE(report.failures().empty()) << report.dump();
         }
     };
 
+    // Splits an even number of GPUs into two equal halves.
     auto split = []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
-        const int nGpus = usableGpus();
-        if(nGpus < 4 || nGpus % 2 != 0)
-            GTEST_SKIP() << "Requires an even GPU count >= 4";
+        const int nGpus = usableGpus() & ~1;
 
         std::vector<ncclComm_t> parents;
         std::string out;
@@ -412,20 +444,18 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
         EXPECT_TRUE(report.failures().empty()) << report.dump();
     };
 
-    RUN_ISOLATED_TESTS(diagCase("ReinitSameProcess", reinit), diagCase("CommSplit", split));
+    runDiagCases({{"ReinitSameProcess", 2, reinit}, {"CommSplit", 4, split}});
 }
 
 // With P2P disabled there are no topology-eligible P2P edges. The run still completes and reports
 // no failures; it prints no p2p summary line because nothing was tested.
 TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
 {
-    RUN_ISOLATED_TESTS(diagCase("P2pDisabledReportsNoEdges", []() {
+    runDiagCases({{"P2pDisabledReportsNoEdges", 2, []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         setenv("NCCL_P2P_DISABLE", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
@@ -436,18 +466,16 @@ TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
         EXPECT_EQ(report.count("directed GPU P2P edges verified"), 0) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         checkAllReduce(comms);
-    }));
+    }}});
 }
 
 // The report goes to stdout only; stderr carries no "NCCL DIAG" lines.
 TEST_F(Diagnostics, ReportOnStdoutOnly)
 {
-    RUN_ISOLATED_TESTS(diagCase("ReportOnStdoutOnly", []() {
+    runDiagCases({{"ReportOnStdoutOnly", 2, []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
         std::vector<int> devices(nGpus);
         std::iota(devices.begin(), devices.end(), 0);
         std::vector<ncclComm_t> comms(nGpus, nullptr);
@@ -460,26 +488,25 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
         const auto commGuards = guardComms(comms);
         EXPECT_EQ(parseDiagReport(out).count(kDiagHeader), 1);
         EXPECT_TRUE(parseDiagReport(err).lines.empty()) << parseDiagReport(err).dump();
-    }));
+    }}});
 }
 
 // One process driving several GPUs on the legacy (non-cuMem) path: a rank that newly enables context-wide
-// peer access to a peer prints one informational notice (src/diagnostics/p2p.cc); with cuMem the access is
-// mapping-scoped and no notice is printed. The check runs before transport setup (src/init.cc), so in a fresh
-// process on a full XGMI mesh every rank enables access and prints the notice. The notice is not a failure.
+// peer access to a peer prints one informational notice (src/diagnostics/p2p.cc). The check runs before
+// transport setup (src/init.cc), so in a fresh process on a full XGMI mesh every rank enables access and prints
+// the notice. The notice is not a failure.
 TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 {
-    RUN_ISOLATED_TESTS(diagCase("SingleProcessPeerAccessNotice", []() {
+    runDiagCases({{"SingleProcessPeerAccessNotice", 2, []() {
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        if(nGpus < 2)
-            GTEST_SKIP() << "Requires >= 2 GPUs";
         std::vector<ncclComm_t> comms;
         std::string out;
         ASSERT_NO_FATAL_FAILURE(initAllCaptured(comms, nGpus, out));
         const auto commGuards   = guardComms(comms);
         const DiagReport report = parseDiagReport(out);
+        EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
 
         const std::vector<int> devices = firstDevices(nGpus);
         const bool full                = xgmiFullMesh(devices);
@@ -495,7 +522,32 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
         }
         expectEdgeSummaries(report, {devices});
         EXPECT_TRUE(report.failures().empty()) << report.dump();
-    }));
+    }}});
+}
+
+// The report parser and the line constants on a fixed capture, so a parser fault does not hide behind the GPU
+// cases skipping on a host without enough GPUs. The lines follow src/diagnostics.cc and src/diagnostics/p2p.cc.
+TEST_F(Diagnostics, ReportParserOnFixedCapture)
+{
+    const std::string captured = "application output before init\n"
+                                 "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
+                                 "node01:4242 NCCL DIAG [OK]   p2p: all 56 directed GPU P2P edges verified\n"
+                                 "NCCL INFO unrelated log line\n"
+                                 "node01:4242 NCCL DIAG [INFO] p2p: 3/12 directed GPU P2P edges verified\n"
+                                 "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1\n"
+                                 "node01:4242 NCCL DIAG NCCL diagnostics completed in 37.1 ms across 8 ranks\n";
+    const DiagReport report = parseDiagReport(captured);
+
+    ASSERT_EQ(report.lines.size(), 5u) << report.dump();
+    EXPECT_EQ(report.lines.front(), kDiagHeader);
+    EXPECT_EQ(report.count(kDiagHeader), 1);
+    EXPECT_EQ(report.count(kDiagSummary), 1);
+    EXPECT_EQ(report.count("directed GPU P2P edges verified"), 2);
+    EXPECT_EQ(okEdgeCount(report.lines[1]), 56);
+    EXPECT_EQ(okEdgeCount(report.lines[2]), -1);
+    ASSERT_EQ(report.failures().size(), 1u) << report.dump();
+    EXPECT_NE(report.failures().front().find("p2p: write mismatch"), std::string::npos);
+    EXPECT_TRUE(parseDiagReport("no report here\n").lines.empty());
 }
 
 } // namespace RcclUnitTesting
