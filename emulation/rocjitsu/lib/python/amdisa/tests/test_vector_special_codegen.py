@@ -610,7 +610,9 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
     assert ('std::fabs' in cpp) == has_abs
     for source in (0, 1):
         assert f'if (inst_.neg & (1u << {source})) s{source} = -s{source};' in cpp
-        assert cpp.index(f's{source} = -s{source}') < cpp.index('util::f32_to_f16_rtz')
+        assert cpp.index(f'source_modifier::apply_to_float(s{source},') < cpp.index(
+            'util::f32_to_f16_rtz'
+        )
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
@@ -626,13 +628,15 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
         is_vop3=True,
         has_abs=has_abs,
     )
-    assert ('std::fabs(s0)' in cpp) == has_abs
-    assert ('std::fabs(s1)' in cpp) == has_abs
-    assert 'if (inst_.neg & (1u << 0)) s0 = -s0;' in cpp
-    assert 'if (inst_.neg & (1u << 1)) s1 = -s1;' in cpp
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    for source in (0, 1):
+        assert (
+            f'source_modifier::apply_to_float(s{source}, {source}, '
+            f'{abs_field}, inst_.neg)'
+        ) in cpp
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f)' in cpp
     for source in (0, 1):
-        negation = cpp.index(f's{source} = -s{source}')
+        negation = cpp.index(f'source_modifier::apply_to_float(s{source},')
         assert negation < cpp.index('util::rndne_scalar')
         if has_abs:
             assert cpp.index(f'std::fabs(s{source})') < negation

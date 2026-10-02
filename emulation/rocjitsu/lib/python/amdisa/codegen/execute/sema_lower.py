@@ -2163,11 +2163,9 @@ def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_src_mod CALL to inline VOP3 NEG/ABS code.
+    """Lower apply_src_mod through the shared ABS/NEG helper.
 
-    VOP3 modifiers always interpret bits as float. The lambda bit_casts
-    the input to float, applies abs/neg, and returns float (or double
-    for F64 operations).
+    Preserve the existing source decoding and promotion before applying modifiers.
 
     CALL children: [ID('apply_src_mod'), src_expr, LIT(src_idx),
                      LIT(has_neg), LIT(has_abs)]
@@ -2202,13 +2200,13 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
         init = f'std::bit_cast<{fp_type}>({src_expr})'
     else:
         init = src_expr
-    parts = [f'[&]() {{ {fp_type} sv = {init};']
-    if has_abs:
-        parts.append(f' if (inst_.abs & (1u << {src_idx})) sv = std::fabs(sv);')
-    if has_neg:
-        parts.append(f' if (inst_.neg & (1u << {src_idx})) sv = -sv;')
-    parts.append(' return sv; }()')
-    return ''.join(parts)
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    neg_field = 'inst_.neg' if has_neg else '0u'
+    return (
+        f'[&]() {{ {fp_type} sv = {init};'
+        f' return amdgpu::source_modifier::apply_to_float(sv, {src_idx}, '
+        f'{abs_field}, {neg_field}); }}()'
+    )
 
 
 def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:

@@ -13,64 +13,20 @@ from amdisa.codegen.execute.vop3_modifiers import (
 
 
 class TestVop3SrcMod:
-    """Tests for vop3_src_mod (input modifier: abs then neg)."""
+    """The generator forwards each encoding's modifier fields to the shared helper."""
 
-    def test_has_abs_true_includes_abs_line(self):
-        lines = vop3_src_mod('s', 0, has_abs=True)
-        assert any('std::fabs' in line and '1u << 0' in line for line in lines)
-
-    def test_has_abs_false_omits_abs_line(self):
-        lines = vop3_src_mod('s', 0, has_abs=False)
-        assert not any('std::fabs' in line for line in lines)
-
-    def test_always_includes_neg_line(self):
-        for has_abs in (True, False):
-            lines = vop3_src_mod('s', 0, has_abs=has_abs)
-            assert any('inst_.neg' in line and '= -s' in line for line in lines)
-
-    def test_src_idx_zero(self):
-        lines = vop3_src_mod('x', 0, has_abs=True)
-        assert any('1u << 0' in line for line in lines)
-        assert any('1u << 0' in line and 'inst_.neg' in line for line in lines)
-
-    def test_src_idx_one(self):
-        lines = vop3_src_mod('x', 1, has_abs=True)
-        assert any('1u << 1' in line for line in lines)
-        assert any('1u << 1' in line and 'inst_.neg' in line for line in lines)
-
-    def test_src_idx_two(self):
-        lines = vop3_src_mod('x', 2, has_abs=True)
-        assert any('1u << 2' in line for line in lines)
-        assert any('1u << 2' in line and 'inst_.neg' in line for line in lines)
-
-    def test_varname_appears_in_lines(self):
-        lines = vop3_src_mod('myvar', 0, has_abs=True)
-        assert all('myvar' in line for line in lines)
-
-    def test_has_abs_true_returns_two_lines(self):
-        lines = vop3_src_mod('s', 0, has_abs=True)
-        assert len(lines) == 2
-
-    def test_has_abs_false_returns_one_line(self):
-        lines = vop3_src_mod('s', 0, has_abs=False)
-        assert len(lines) == 1
-
-    def test_default_indent(self):
-        lines = vop3_src_mod('s', 0, has_abs=True)
-        assert all(line.startswith('    ') for line in lines)
+    @pytest.mark.parametrize('has_abs', [False, True])
+    @pytest.mark.parametrize('src_idx', [0, 1, 2])
+    def test_forwards_source_index_and_available_fields(self, has_abs, src_idx):
+        abs_field = 'inst_.abs' if has_abs else '0u'
+        assert vop3_src_mod('source', src_idx, has_abs) == [
+            '    source = amdgpu::source_modifier::apply_to_float('
+            f'source, {src_idx}, {abs_field}, inst_.neg);'
+        ]
 
     def test_custom_indent(self):
-        lines = vop3_src_mod('s', 0, has_abs=True, indent='  ')
-        assert all(line.startswith('  ') for line in lines)
-
-    def test_works_for_float_varname(self):
-        lines = vop3_src_mod('sv0', 0, has_abs=True)
-        assert any('sv0' in line and 'std::fabs' in line for line in lines)
-
-    def test_works_for_double_varname(self):
-        # vop3_src_mod is type-generic (uses std::fabs and unary negation)
-        lines = vop3_src_mod('d', 0, has_abs=True)
-        assert any('d' in line and 'std::fabs' in line for line in lines)
+        lines = vop3_src_mod('source', 0, has_abs=True, indent='  ')
+        assert lines[0].startswith('  source = ')
 
 
 class TestVop3DstMod:
