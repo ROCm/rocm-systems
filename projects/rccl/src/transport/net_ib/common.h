@@ -574,8 +574,8 @@ struct ncclIbSendComm {
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // Side table immediately after ctsFifo so one covering MR registers both.
-  // Receiver RDMA-writes this whenever the peer advertised NCCL_IB_CAP_MULTISEG,
-  // including nSegments==1, so the sender can wait on idx.
+  // Receiver RDMA-writes a slot here only when that CTS slot has a
+  // multi-segment receive (NCCL_IB_CTS_NREQS_SIDE_TABLE set in its nreqs).
   struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
@@ -620,7 +620,8 @@ static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-
 static inline bool ncclIbCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
   const volatile struct ncclIbSendFifo* cts = &comm->ctsFifo[slot][r];
   const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
-  return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && side->idx == cts->idx && side->nSegments > 1;
+  return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && ncclIbCtsHasSideTable(cts->nreqs) && side->idx == cts->idx &&
+         side->nSegments > 1;
 }
 
 struct ncclIbGpuFlush {

@@ -10,6 +10,10 @@
 #include "p2p.h"
 #include "gin.h"
 #include "p2p_resiliency.h"
+#include "transport.h"
+
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata and CTS MR.
+static bool ncclIbAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -981,9 +985,10 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO + multi-seg side table (one covering MR).
+    // Prepare my CTS FIFO, plus the multi-seg side table when we advertise it
+    // (one covering MR).
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
-                                  sizeof(comm->ctsFifo) + sizeof(comm->segLayoutFifo),
+                                  sizeof(comm->ctsFifo) + (ncclIbAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1050,7 +1055,7 @@ ib_recv_dev_list:
   meta.remSpeedBufAddr = comm->remoteSpeedMr ? (uint64_t)&comm->remoteSpeedBuf : 0;
   meta.remSpeedBufRkey = comm->remoteSpeedMr ? comm->remoteSpeedMr->rkey : 0;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (ncclIbAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1704,10 +1709,12 @@ ib_recv:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
-                                  sizeof(rComm->remSegLayout.elems),
-                                  IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
-                  ret, fail);
+    // Local source of the side-table write; only used for a peer with the cap.
+    if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
+                                    sizeof(rComm->remSegLayout.elems), IBV_ACCESS_LOCAL_WRITE),
+                    ret, fail);
+    }
 
     // Register completion records
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->cmplsRecordsMr, rCommDev->base.pd, &rComm->cmplsRecords,
@@ -1862,7 +1869,7 @@ ib_recv:
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (ncclIbAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;

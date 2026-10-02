@@ -92,7 +92,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
   volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
-  int nreqs = slots[0].nreqs;
+  int nreqs = ncclIbCtsNreqs(slots[0].nreqs);
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
   int nqps = 0;
@@ -362,7 +362,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
-  int nreqs = slots[0].nreqs;
+  int nreqs = ncclIbCtsNreqs(slots[0].nreqs);
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
   // Multi-segment: if any request's local or remote buffer spans
@@ -612,14 +612,14 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     *request = NULL;
     return ncclSuccess;
   }
-  nreqs = slots[0].nreqs;
+  nreqs = ncclIbCtsNreqs(slots[0].nreqs);
   // Wait until all data has arrived
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
   // Side table and CTS are separate RDMA writes. Wait for the matching idx so
   // a late side table is not treated as single-segment.
-  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+  if ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) && ncclIbCtsHasSideTable(slots[0].nreqs)) {
     volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
     for (int r = 0; r < nreqs; r++)
       while (side[r].idx != idx);
@@ -784,9 +784,9 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
-  // Always publish the side table when the peer understands it, including
-  // nSegments==1, so the sender can wait on idx without hanging.
-  bool postSide = (comm->peerCaps & NCCL_IB_CAP_MULTISEG);
+  // irecv flags the slot only when the peer understands the side table and
+  // some receive in it is multi-segment; the sender waits on idx only then.
+  bool postSide = (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && ncclIbCtsHasSideTable(localElem[0].nreqs);
 
   struct ibv_sge sgeSide;
   struct ibv_send_wr wrSide;
@@ -847,6 +847,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   ncclIbQp* qps[NCCL_IB_MAX_QPS];
   int qpIndexes[NCCL_IB_MAX_QPS];
   struct ncclIbSendFifo* localElem = nullptr;
+  bool anyMultiSeg = false;
   if (comm->base.ready == 0) {
     WARN("NET/IB: ncclIbIrecv() called when comm->base.ready == 0");
     *request = NULL;
@@ -952,11 +953,12 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].tag = tags[i];
     localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
 
-    // Multi-segment layout goes on the side table, never in CTS. Always store
-    // idx when the peer has the cap so the sender can wait for this slot.
+    // Multi-segment layout goes on the side table, never in CTS. Every entry of
+    // a flagged slot carries idx so the sender can wait for the whole slot.
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
     if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
       if (mhandleWrapper->nSegments > 1) {
+        anyMultiSeg = true;
         sideElem[i].nSegments = mhandleWrapper->nSegments;
         for (int s = 0; s < mhandleWrapper->nSegments; s++) {
           sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
@@ -977,6 +979,9 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       sideElem[i].nSegments = 0;
       sideElem[i].idx = 0;
     }
+  }
+  if (anyMultiSeg) {
+    for (int i = 0; i < n; i++) localElem[i].nreqs |= NCCL_IB_CTS_NREQS_SIDE_TABLE;
   }
 
   // Post to FIFO to notify sender
