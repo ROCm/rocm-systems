@@ -62,24 +62,20 @@ struct Hip {
     virtual void        hipStreamSynchronize(hipStream_t stream) const;
     virtual hipStream_t hipStreamCreateWithFlags(unsigned int flags) const;
     virtual void        hipStreamDestroy(hipStream_t stream) const;
-    virtual void       hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
-                                            uint64_t mask) const;
-    virtual hipEvent_t hipEventCreateWithFlags(unsigned int flags) const;
-    virtual void       hipEventRecord(hipEvent_t event, hipStream_t stream) const;
-    virtual void       hipEventSynchronize(hipEvent_t event) const;
-    virtual void       hipEventDestroy(hipEvent_t event) const;
-    virtual void      *hipHostMalloc(size_t size, unsigned int flags) const;
-    virtual void       hipHostFree(void *ptr) const;
-    virtual void      *hipExtMallocWithFlags(size_t size, unsigned int flags) const;
-    virtual void       hipFree(void *ptr) const;
-    virtual void      *hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const;
-    virtual int        hipRuntimeGetVersion() const;
-    virtual void      *hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
-                                         hipDriverProcAddressQueryResult *symbolStatus) const;
-    virtual uint64_t   hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size,
-                                      int64_t file_offset) const;
-    virtual uint64_t   hipAmdFileWrite(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size,
-                                       int64_t file_offset) const;
+    virtual void     hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
+                                          uint64_t mask) const;
+    virtual void    *hipHostMalloc(size_t size, unsigned int flags) const;
+    virtual void     hipHostFree(void *ptr) const;
+    virtual void    *hipExtMallocWithFlags(size_t size, unsigned int flags) const;
+    virtual void     hipFree(void *ptr) const;
+    virtual void    *hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const;
+    virtual int      hipRuntimeGetVersion() const;
+    virtual void    *hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
+                                       hipDriverProcAddressQueryResult *symbolStatus) const;
+    virtual uint64_t hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size,
+                                    int64_t file_offset) const;
+    virtual uint64_t hipAmdFileWrite(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size,
+                                     int64_t file_offset) const;
     virtual HipMemAddressRange hipMemGetAddressRange(hipDeviceptr_t dptr) const;
     virtual void               hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void *user_data) const;
     virtual void hipLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args,
