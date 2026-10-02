@@ -1,6 +1,6 @@
 name: rocJITsu hip-tests and rocrtst PoC
 
-# Standalone CPU run of a hip-tests smoke slice and one rocrtst case.
+# Standalone CPU run of the normal hip-tests and rocrtst quick selections.
 # It does not call TheRock reusable workflows and it does not change
 # production test workflows.
 #
@@ -11,9 +11,8 @@ name: rocJITsu hip-tests and rocrtst PoC
 # rocJITsu is built from this checkout, in local non-kmd mode. The CPU
 # runner cannot grant CAP_SYS_PTRACE, so --daemon is not used.
 #
-# Defaults are one Catch binary's [smoke] cases and rocrtst.Test_Example.
-# Widen them with the workflow_dispatch inputs. The rocrtst quick list used
-# by TheRock is the tests in test/therock/test_rocrtst.py.
+# hip-tests quick is the installed Catch2 smoke label. rocrtst quick is the
+# QUICK_TESTS filter in test/therock/test_rocrtst.py.
 
 on:
   pull_request:
@@ -25,18 +24,14 @@ on:
       - "emulation/rocjitsu/**"
   workflow_dispatch:
     inputs:
-      hip_binary:
-        description: "Catch executable under share/hip/catch_tests. Empty skips hip-tests."
+      hip_ctest_label:
+        description: "CTest label for hip-tests. Empty skips hip-tests."
         type: string
-        default: "DeviceTest"
-      hip_spec:
-        description: "Catch test spec. Default is the smoke tag."
-        type: string
-        default: "[smoke]"
+        default: "^smoke$"
       rocrtst_filter:
         description: "rocrtst gtest filter. Empty skips rocrtst."
         type: string
-        default: "rocrtst.Test_Example"
+        default: "rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test"
       rocm_version:
         description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
         type: string
@@ -118,11 +113,9 @@ jobs:
       image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      # Pull requests use the small defaults. workflow_dispatch can clear a
-      # suite input to skip that suite.
-      HIP_BINARY: ${{ github.event_name == 'workflow_dispatch' && inputs.hip_binary || github.event_name != 'workflow_dispatch' && 'DeviceTest' || '' }}
-      HIP_SPEC: ${{ github.event_name == 'workflow_dispatch' && inputs.hip_spec || github.event_name != 'workflow_dispatch' && '[smoke]' || '' }}
-      ROCRTST_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.rocrtst_filter || github.event_name != 'workflow_dispatch' && 'rocrtst.Test_Example' || '' }}
+      # workflow_dispatch can clear a suite input to skip that suite.
+      HIP_CTEST_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.hip_ctest_label || github.event_name != 'workflow_dispatch' && '^smoke$' || '' }}
+      ROCRTST_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.rocrtst_filter || github.event_name != 'workflow_dispatch' && 'rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test' || '' }}
       THEROCK_REF: 7440cb8578f4daae0d85a428fadd6645dc5464a0
     steps:
       - name: Install build tools
@@ -161,16 +154,19 @@ jobs:
             "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
           tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
           tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
-          if [ -n "${HIP_BINARY}" ]; then
-            test -x "$root/share/hip/catch_tests/${HIP_BINARY}"
+          if [ -n "${HIP_CTEST_LABEL}" ]; then
+            test -f "$root/share/hip/catch_tests/CTestTestfile.cmake"
           fi
           if [ -n "${ROCRTST_FILTER}" ]; then
             test -x "$root/bin/rocrtst64"
           fi
           echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
 
-      - name: Run hip-tests smoke slice under rocJITsu
-        if: env.HIP_BINARY != ''
+      - name: Run hip-tests quick tests under rocJITsu
+        if: env.HIP_CTEST_LABEL != ''
+        env:
+          DEBUG_HIP_GRAPH_MIN_OVERLAP: "0"
+          THEROCK_REQUIRE_HIP_YAML_ENTRIES: "1"
         run: |
           set -uo pipefail
           unset GTEST_FILTER || true
@@ -178,13 +174,19 @@ jobs:
           python3 .github/scripts/rocjitsu_suite_runner.py \
             --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
             --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json" \
-            --name "$HIP_BINARY" \
+            --name hip-tests-quick \
             --cwd "$ROCM_ROOT/share/hip/catch_tests" \
-            --timeout-seconds 3600 \
+            --timeout-seconds 9000 \
             --log logs/hip-tests.log \
             -- \
-            "$ROCM_ROOT/share/hip/catch_tests/$HIP_BINARY" \
-            "$HIP_SPEC"
+            ctest \
+            --test-dir "$ROCM_ROOT/share/hip/catch_tests" \
+            -L "$HIP_CTEST_LABEL" \
+            --exclude-regex 'Unit_NonHost_Printf_(loop|multiple_Threads|BufferAvailability)' \
+            --output-on-failure \
+            --parallel 1 \
+            --timeout 3600 \
+            -V
           echo $? > logs/hip-tests.exit
 
       - name: Run rocrtst under rocJITsu
@@ -198,7 +200,7 @@ jobs:
             --name rocrtst64 \
             --cwd "$ROCM_ROOT/bin" \
             --gtest-filter "$ROCRTST_FILTER" \
-            --timeout-seconds 3600 \
+            --timeout-seconds 7200 \
             --log logs/rocrtst.log \
             -- \
             "$ROCM_ROOT/bin/rocrtst64" \
