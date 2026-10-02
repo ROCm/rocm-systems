@@ -127,6 +127,16 @@ function(
             ERROR_QUIET
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
+        # Per-target compiler-rt installations use unsuffixed library names in
+        # a target-specific directory. Ask this compiler (including ARG1) for
+        # that directory instead of globbing across potentially foreign targets.
+        execute_process(
+            COMMAND ${_compiler_command} --print-runtime-dir
+            RESULT_VARIABLE _runtime_dir_result
+            OUTPUT_VARIABLE _runtime_dir
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
     endif()
 
     foreach(_sanitizer IN LISTS RJ_SANI_LIB_SANITIZERS)
@@ -155,6 +165,24 @@ function(
             continue()
         endif()
 
+        set(_runtime_library "")
+        if(
+            RJ_SANI_LIB_COMPILER_ID MATCHES "Clang"
+            AND _runtime_dir_result EQUAL 0
+            AND IS_ABSOLUTE "${_runtime_dir}"
+        )
+            string(
+                REPLACE "-${_sanitizer_arch}.so" ".so"
+                _per_target_runtime_name "${_runtime_name}"
+            )
+            if(EXISTS "${_runtime_dir}/${_per_target_runtime_name}")
+                set(
+                    _runtime_library
+                    "${_runtime_dir}/${_per_target_runtime_name}"
+                )
+            endif()
+        endif()
+
         execute_process(
             COMMAND ${_compiler_command} --print-file-name=${_runtime_name}
             RESULT_VARIABLE _runtime_result
@@ -162,9 +190,9 @@ function(
             ERROR_QUIET
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-        set(_runtime_library "")
         if(
-            _runtime_result EQUAL 0
+            NOT _runtime_library
+            AND _runtime_result EQUAL 0
             AND IS_ABSOLUTE "${_runtime_output}"
             AND EXISTS "${_runtime_output}"
         )

@@ -24,6 +24,10 @@ on:
         type: boolean
         description: "Build host-ASAN runtime stages only, then run HIP smoke and ROCr quick suites under rocJITsu on CPU"
         default: false
+      rocjitsu_artifacts_run_id:
+        type: string
+        description: "With run_rocjitsu, reuse this repository's host-ASAN runtime artifacts and skip rebuilding"
+        default: ""
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
@@ -61,6 +65,7 @@ concurrency:
 
 jobs:
   setup:
+    if: ${{ !(inputs.run_rocjitsu && inputs.rocjitsu_artifacts_run_id != '') }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
     with:
       build_variant: ${{ inputs.run_rocjitsu && 'host-asan' || 'asan' }}
@@ -110,11 +115,21 @@ jobs:
 
   rocjitsu_tests:
     needs: [setup, linux_build_and_test]
-    if: ${{ inputs.run_rocjitsu && needs.setup.outputs.enable_build_jobs == 'true' }}
+    if: >-
+      ${{
+        always() && !cancelled() && inputs.run_rocjitsu &&
+        (
+          (inputs.rocjitsu_artifacts_run_id != '' &&
+           needs.setup.result == 'skipped' && needs.linux_build_and_test.result == 'skipped') ||
+          (inputs.rocjitsu_artifacts_run_id == '' &&
+           needs.setup.result == 'success' && needs.linux_build_and_test.result == 'success' &&
+           needs.setup.outputs.enable_build_jobs == 'true')
+        )
+      }}
     uses: ./.github/workflows/host-asan-rocjitsu-tests.yml
     with:
       therock_ref: e0e238c0323f76aeabdd348cfd3798a653820fdc
-      artifacts_run_id: ${{ github.run_id }}
+      artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
 
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary
