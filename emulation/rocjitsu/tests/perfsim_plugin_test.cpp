@@ -627,36 +627,93 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
   const std::string config = plugin_config_with_observed_workgroup_cap(1);
   testing::internal::CaptureStderr();
   {
-    PerfsimPlugin plugin(config.c_str());
-    plugin.onInit();
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    ASSERT_TRUE(group.add(std::make_unique<PerfsimPlugin>(config.c_str())));
+    group.onInit();
 
     KernelDispatchInfo info = dispatch_info(42);
     info.wfs_per_workgroup = 2;
-    plugin.onAmdgpuDispatchPacketProcessed(info);
-    plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+    group.onAmdgpuDispatchPacketProcessed(info);
+    group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
     Wavefront &first = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 0);
     Wavefront &same_workgroup = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 1);
     // This coordinate collides with {1000,0,0} under FFM's packed cluster ID.
     // The observation cap is defined in terms of RocJITsu workgroup identity,
     // so the collision must not admit this distinct workgroup.
     Wavefront &capped = fixture.wave(info.dispatch_id, 11, {0, 1, 0}, 0);
-    plugin.onAmdgpuWavefrontDispatched(first);
-    plugin.onAmdgpuWavefrontDispatched(same_workgroup);
-    plugin.onAmdgpuWavefrontDispatched(capped);
-    EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&first));
-    EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&same_workgroup));
-    EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&capped));
+    group.onAmdgpuWavefrontDispatched(first);
+    group.onAmdgpuWavefrontDispatched(same_workgroup);
+    group.onAmdgpuWavefrontDispatched(capped);
+    EXPECT_TRUE(group.observes_memory_routing(first));
+    EXPECT_TRUE(group.observes_tensor_dma_memory_access(first));
+    EXPECT_TRUE(group.observes_memory_routing(same_workgroup));
+    EXPECT_TRUE(group.observes_tensor_dma_memory_access(same_workgroup));
+    EXPECT_FALSE(group.observes_memory_routing(capped));
+    EXPECT_FALSE(group.observes_tensor_dma_memory_access(capped));
+
+    // Exercise the VM-facing group entry points for a capped-out wave. Its
+    // cached subscription excludes both callbacks, and the adapter must not
+    // turn that intentional omission into a dispatch rejection.
+    const std::array<uint32_t, 1> global_words{0xDC508000};
+    SyntheticInstruction global("global_load_b32", global_words, MEMORY_OP);
+    group.onAmdgpuBeforeExecuteInstruction(0x5000, global, capped);
+    std::array<uint64_t, 32> addresses{};
+    addresses[0] = 0x100000;
+    MemoryAccessObservation memory_access;
+    memory_access.mnemonic = "global_load_b32";
+    memory_access.pc = 0x5000;
+    memory_access.compute_unit_id = static_cast<uint32_t>(capped.cu().id());
+    memory_access.dispatch_id = info.dispatch_id;
+    memory_access.queue_id = capped.queue_id();
+    memory_access.workgroup_id = capped.wg_id();
+    memory_access.wavefront_id = capped.wf_id();
+    memory_access.process_id = capped.process_id();
+    memory_access.route = MemoryRoute::GLOBAL;
+    memory_access.decoded_space = DecodedMemorySpace::GLOBAL;
+    memory_access.is_load = true;
+    memory_access.wavefront_size = 32;
+    memory_access.element_size_bytes = 4;
+    memory_access.elements_per_lane = 1;
+    memory_access.active_lane_mask = 1;
+    memory_access.architectural_exec_lane_mask = 1;
+    memory_access.valid_lane_mask = 1;
+    memory_access.request_lane_mask = 1;
+    memory_access.addresses = addresses;
+    group.onAmdgpuMemoryAccessRouted(memory_access, global, capped);
+
+    const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
+    SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
+    group.onAmdgpuBeforeExecuteInstruction(0x6000, tensor, capped);
+    const std::array<uint64_t, 2> tensor_addresses{0x300000, 0x300004};
+    TensorDmaMemoryAccessObservation tensor_access;
+    tensor_access.mnemonic = "tensor_load_to_lds";
+    tensor_access.pc = 0x6000;
+    tensor_access.compute_unit_id = static_cast<uint32_t>(capped.cu().id());
+    tensor_access.dispatch_id = info.dispatch_id;
+    tensor_access.queue_id = capped.queue_id();
+    tensor_access.workgroup_id = capped.wg_id();
+    tensor_access.wavefront_id = capped.wf_id();
+    tensor_access.process_id = capped.process_id();
+    tensor_access.element_size_bytes = 4;
+    tensor_access.tile_dim0 = 2;
+    tensor_access.tile_dim1 = 1;
+    tensor_access.data_size = 2;
+    tensor_access.tensor_dim0_stride = 8;
+    tensor_access.tensor_dim1_stride = 16;
+    tensor_access.is_load = true;
+    tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
+    group.onAmdgpuTensorDmaMemoryAccess(tensor_access, capped);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, same_workgroup);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x5000, end, capped);
-    plugin.onAmdgpuWavefrontHalted(first);
-    plugin.onAmdgpuWavefrontHalted(same_workgroup);
-    plugin.onAmdgpuWavefrontHalted(capped);
-    plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
-    plugin.onShutdown();
+    group.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
+    group.onAmdgpuBeforeExecuteInstruction(0x4000, end, same_workgroup);
+    group.onAmdgpuBeforeExecuteInstruction(0x7000, end, capped);
+    group.onAmdgpuWavefrontHalted(first);
+    group.onAmdgpuWavefrontHalted(same_workgroup);
+    group.onAmdgpuWavefrontHalted(capped);
+    group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    group.onShutdown();
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
@@ -665,7 +722,9 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
   EXPECT_NE(line_with_prefix(trace, "begin 42 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "instruction 42 1000 0 0 0 0 12288 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "instruction 42 1000 0 1 1 0 16384 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "instruction 42 1000 0 0 0 0 20480 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 42 1000 0 0 0 0 28672 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "memory 42 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "tdm 42 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "end 42 "), trace.size());
 }
 
@@ -713,7 +772,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     access.valid_lane_mask = 0x9;
     access.request_lane_mask = 0x9;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, wave);
     addresses[0] = 0xDEADBEEF;
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
@@ -737,7 +796,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     tensor_access.tensor_dim1_stride = 104;
     tensor_access.is_load = true;
     tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
-    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
+    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access, wave);
     tensor_addresses[0] = 0xDEADBEEF;
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
