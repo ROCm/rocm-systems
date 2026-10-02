@@ -37,6 +37,12 @@ ncclResult_t AmdSmiDiagUnavailable(Args...) {
 }
 }  // namespace
 
+int g_amdSmiDiagInitCalls = 0;
+ncclResult_t amd_smi_diagInit() {
+  ++g_amdSmiDiagInitCalls;
+  return ncclSystemError;
+}
+
 std::function<ncclResult_t(uint32_t*)> g_amdSmiDiagGpuCount = AmdSmiDiagUnavailable<uint32_t*>;
 ncclResult_t amd_smi_diagGpuCount(uint32_t* count) { return g_amdSmiDiagGpuCount(count); }
 
@@ -62,6 +68,7 @@ void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_amdSmiInitResult = ncclSuccess;
+  g_amdSmiDiagInitCalls = 0;
   g_amdSmiDiagGpuCount = AmdSmiDiagUnavailable<uint32_t*>;
   g_amdSmiDiagGpuModel = AmdSmiDiagUnavailable<int64_t, char*, size_t>;
   g_amdSmiDiagEccCounts = AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagEccCounts*>;

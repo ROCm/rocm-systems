@@ -854,6 +854,14 @@ struct amdsmiDiagXgmiLinks {
 };
 
 /**
+ * @brief Load and initialize amd_smi for the queries below, once per process
+ *
+ * The queries do it on first use; calling this up front keeps the first
+ * query from paying the library load.
+ */
+ncclResult_t amd_smi_diagInit();
+
+/**
  * @brief Number of AMD GPUs on the node, independent of HIP_VISIBLE_DEVICES
  */
 ncclResult_t amd_smi_diagGpuCount(uint32_t* count);

@@ -929,6 +929,10 @@ static ncclResult_t amd_smi_diagLoad() {
   return amdSmiDiagLoadResult;
 }
 
+ncclResult_t amd_smi_diagInit() {
+  return amd_smi_diagLoad();
+}
+
 static ncclResult_t amd_smi_diagHandle(int64_t busId, amdsmi_processor_handle* handle) {
   if (amd_smi_diagLoad() != ncclSuccess) return ncclSystemError;
   // busIdToInt64 encoding: domain[35:20] bus[19:12] device[11:4] function[3:0].
@@ -1002,6 +1006,9 @@ ncclResult_t amd_smi_diagXgmiLinks(int64_t busId, struct amdsmiDiagXgmiLinks* li
   return ncclSuccess;
 }
 #else
+ncclResult_t amd_smi_diagInit() {
+  return ncclSystemError;
+}
 ncclResult_t amd_smi_diagGpuCount(uint32_t*) {
   return ncclSystemError;
 }

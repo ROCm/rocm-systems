@@ -36,6 +36,12 @@
 #define RAS_DIAG_LINK_SPEED_OK " at consistent speed"
 #endif
 
+void rasDiagnosticsGpuInit() {
+#if RAS_DIAG_AMD_SMI
+  (void)amd_smi_diagInit();
+#endif
+}
+
 // *************************************************************************
 // GPU model and count consistency check.
 // *************************************************************************

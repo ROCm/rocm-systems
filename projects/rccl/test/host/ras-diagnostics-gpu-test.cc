@@ -199,6 +199,11 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
 
 using Lines = std::vector<std::string>;
 
+TEST_F(RasDiagnosticsGpuMicrotest, GpuInitLoadsAmdSmi) {
+  rasDiagnosticsGpuInit();
+  EXPECT_EQ(1, g_amdSmiDiagInitCalls);
+}
+
 TEST_F(RasDiagnosticsGpuMicrotest, HealthyNodesReportOkForEveryCheck) {
   EXPECT_EQ(Lines{"[OK]   GPU inventory: 8x AMD Instinct MI355X per node consistent across 4 ranks in comm "
                   "0x5fa31c27a9e0d1b4"},
