@@ -4,6 +4,8 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/target_provider.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/target_provider.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/target_descriptor.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/target_provider.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -107,7 +109,14 @@ static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1200) == 3);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1201) == 4);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1250) == 5);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1251) == 6);
-static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1100) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 8);
+static_assert(rdna3::kTargetAliases.size() == 1);
+static_assert(rdna3::kTargetAliases[0] == "gfx1100");
+static_assert(rdna3::kModelGpuTargets[0].public_id == ROCJITSU_CODE_TARGET_GFX1100);
+static_assert(!rdna3::kModelGpuTargets[0].capabilities.execution_implemented);
+static_assert(rdna3::kExecutionGpuTargets[0].public_id == ROCJITSU_CODE_TARGET_GFX1100);
+static_assert(rdna3::kExecutionGpuTargets[0].capabilities.execution_implemented);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == INT32_MAX);
 static_assert(sizeof(rj_code_target_id_t) == sizeof(int32_t));
 static_assert(std::is_same_v<std::underlying_type_t<rj_code_target_id_t>, int32_t>);
@@ -427,8 +436,8 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   ASSERT_NE(gfx1251_binding, nullptr);
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
-      ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
-      ROCJITSU_CODE_TARGET_GFX1251,
+      ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201,
+      ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
     const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
@@ -458,6 +467,53 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   auto collect = [&](std::string_view message) { diagnostics.emplace_back(message); };
   EXPECT_TRUE(risc_v_decoder->decode(&kInvalidRiscV, DecodeErrorEmitter(collect)).failed());
   EXPECT_EQ(diagnostics, std::vector<std::string>{"Invalid instruction opcode"});
+}
+
+TEST(IsaTargetRegistryTest, Gfx1100IsNamedWithoutBecomingTheRdna3Default) {
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  ASSERT_TRUE(registry.ok()) << registry.error();
+
+  const IsaTargetDescriptor *rdna3 = registry.find(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(rdna3, nullptr);
+  EXPECT_EQ(rdna3->id, "rdna3");
+  EXPECT_EQ(registry.find("gfx1100"), rdna3);
+  EXPECT_EQ(registry.find(ROCJITSU_CODE_TARGET_GFX1100), rdna3);
+  EXPECT_EQ(rdna3->default_gpu_target, ROCJITSU_CODE_TARGET_INVALID);
+  EXPECT_EQ(registry.find_default_gpu_target(*rdna3), nullptr);
+
+  const IsaGpuTargetDescription *gfx1100 = registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1100);
+  ASSERT_NE(gfx1100, nullptr);
+  EXPECT_EQ(gfx1100->code_object_id, "gfx1100");
+  EXPECT_EQ(gfx1100->elf_machine, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  EXPECT_EQ(gfx1100->gfx_target_version, 110000u);
+  EXPECT_TRUE(gfx1100->capabilities.execution_implemented);
+  EXPECT_FALSE(gfx1100->capabilities.setreg_vgpr_msb_fixup);
+  EXPECT_EQ(registry.find_gpu_target_by_code_object_id("gfx1100"), gfx1100);
+  EXPECT_EQ(registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100), gfx1100);
+
+  // Other RDNA3 parts stay unnamed rather than aliasing onto gfx1100.
+  constexpr uint32_t kGfx1101ElfMachine = 0x46;
+  EXPECT_EQ(registry.find_gpu_target_by_code_object_id("gfx1101"), nullptr);
+  EXPECT_EQ(registry.find_gpu_target_by_elf_machine(kGfx1101ElfMachine), nullptr);
+  EXPECT_EQ(registry.find("gfx1101"), nullptr);
+
+  // The named and architecture-selected decoders decode the same RDNA3 form.
+  std::unique_ptr<Decoder> named = Decoder::create(registry, ROCJITSU_CODE_TARGET_GFX1100);
+  std::unique_ptr<Decoder> by_name = Decoder::create(registry, "gfx1100");
+  std::unique_ptr<Decoder> by_architecture = Decoder::create(registry, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(named, nullptr);
+  ASSERT_NE(by_name, nullptr);
+  ASSERT_NE(by_architecture, nullptr);
+  // v_mul_f32_e32 v2, v0, v1
+  const rj_code_binary_inst_t mul[] = {
+      (uint32_t{rdna3::kVMulF32Vop2} << 25) | (2u << 17) | (1u << 9) | 256u, 0u};
+  for (Decoder *decoder : {named.get(), by_name.get(), by_architecture.get()}) {
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, mul));
+    ASSERT_NE(instruction, nullptr);
+    EXPECT_EQ(instruction->mnemonic(), "v_mul_f32_e32");
+    EXPECT_EQ(instruction->opcode(), rdna3::kVMulF32Vop2);
+    EXPECT_NE(instruction->execute, nullptr);
+  }
 }
 
 TEST(IsaTargetRegistryTest, PublicCEntryPointAcceptsCanonicalTargetIds) {

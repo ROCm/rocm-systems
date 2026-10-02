@@ -2621,11 +2621,41 @@ def simd_probe_line(
     *,
     true16_vop3: bool = False,
     result_writer: str | None = None,
+    include_integer_transcendentals: bool = True,
 ) -> str | None:
     probe = _simd_probe_line(
         template_name, true16_vop3=true16_vop3, result_writer=result_writer
     )
+    if include_integer_transcendentals:
+        batch_probe = integer_transcendental_probe_line(
+            template_name, true16_vop3=true16_vop3
+        )
+        if batch_probe is not None:
+            probe = batch_probe + ('\n' + probe if probe else '')
     return _guard_mode_arithmetic_probe(template_name, probe)
+
+
+def integer_transcendental_probe_line(
+    template_name: str, *, true16_vop3: bool = False
+) -> str | None:
+    """Build the probe for a pure integer transcendental mapping."""
+    base, _, form = template_name.rpartition('_')
+    transcendental = {
+        'v_log_f32': 'Log',
+        'v_exp_f32': 'Exp',
+        'v_sin_f32': 'Sin',
+        'v_cos_f32': 'Cos',
+        'v_rcp_f32': 'Rcp',
+        'v_rsq_f32': 'Rsq',
+        'v_sqrt_f32': 'Sqrt',
+    }.get(base)
+    if transcendental and form in ('vop1', 'vop3') and not true16_vop3:
+        return (
+            '  if (amdgpu::try_execute_transcendental_f32_simd'
+            f'<{str(form == "vop3").lower()}>(inst, wf, '
+            f'amdgpu::transcendental::F32Operation::{transcendental})) return;'
+        )
+    return None
 
 
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:

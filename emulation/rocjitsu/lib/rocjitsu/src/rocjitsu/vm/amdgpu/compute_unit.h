@@ -1456,6 +1456,9 @@ inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
+inline rj_code_target_id_t InstructionComputeUnitView::target() const {
+  return raw_cu().config().target;
+}
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();

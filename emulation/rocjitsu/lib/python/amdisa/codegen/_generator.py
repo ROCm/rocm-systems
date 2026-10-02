@@ -14484,6 +14484,7 @@ class CodeGenerator:
         os.makedirs(shared_dir, exist_ok=True)
 
         from amdisa.codegen.execute.simd_codegen import (
+            integer_transcendental_probe_line,
             simd_extra_includes,
             simd_probe_line,
         )
@@ -14508,6 +14509,8 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/cube.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/mul_f32_exec.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/dx9_mul_f32_exec.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -14547,15 +14550,19 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf'
                 f'{result_parameter}) {{'
             )
+            integer_probe = integer_transcendental_probe_line(
+                mnemonic, true16_vop3=is_true16_vop3
+            )
             probe = simd_probe_line(
                 mnemonic,
                 true16_vop3=is_true16_vop3,
                 result_writer='commit_result' if uses_result_writer else None,
+                include_integer_transcendentals=False,
             )
             if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
-                # These mappings ignore guest rounding. Keep output scaling and clamp
-                # under the saved environment too: OMOD can overflow or touch
-                # signaling NaNs, and SIMD clamp compares NaN results.
+                # These mappings ignore guest rounding. Even the integer batch
+                # can allocate cold destination storage, so retain its original
+                # environment. OMOD and clamp also need this FP policy.
                 lines.append('  fp_mode::ScopedEnvironment environment(0);')
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
@@ -14567,6 +14574,19 @@ class CodeGenerator:
                 'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
                 'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
             }
+            # Target-qualified integer implementations that report their own
+            # causes. They decline, without side effects, for every target,
+            # form, and wave state that the classifier path below must handle.
+            qualified_probes = {
+                'v_mul_f32_vop2': 'try_execute_qualified_mul_f32_vop2',
+                'v_mul_f32_vop3': 'try_execute_qualified_mul_f32_vop3',
+                'v_mul_dx9_zero_f32_vop2': 'try_execute_qualified_dx9_mul_f32_vop2',
+                'v_mul_dx9_zero_f32_vop3': 'try_execute_qualified_dx9_mul_f32_vop3',
+            }
+            qualified_probe = qualified_probes.get(mnemonic)
+            if qualified_probe is not None:
+                lines.append(f'  if (hwfloat::{qualified_probe}(inst, wf))')
+                lines.append('    return;')
             classifier = alu_classifiers.get(mnemonic)
             if classifier is not None:
                 lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
@@ -14575,12 +14595,14 @@ class CodeGenerator:
                 # such return; the classifier separately records the transient
                 # per-instruction causes used for trap delivery.
                 lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
-            if probe is not None:
+            for candidate in (integer_probe, probe):
+                if candidate is None:
+                    continue
                 if classifier is None:
-                    lines.append(probe)
+                    lines.append(candidate)
                 else:
                     lines.append('  if (!alu_exception_trap_enables(wf)) {')
-                    lines.append(probe.replace('  ', '    ', 1))
+                    lines.append(candidate.replace('  ', '    ', 1))
                     lines.append('  }')
             lines.append(prefixed_body)
             lines.append('}')

@@ -37,6 +37,9 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
+#include <cerrno>
+#include <cfenv>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -235,6 +238,111 @@ TEST(Vop2FmaSimdCorrectness, PartialExecMask) {
   }
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+template <typename Float, typename Bits, std::size_t N>
+void check_host_fma(const std::array<std::array<Bits, 3>, N> &inputs) {
+  if (!amdgpu::host_fma::available())
+    GTEST_SKIP() << "Host AVX/FMA is unavailable";
+  using V = util::stdx::simd<Float, util::stdx::simd_abi::compatible<Float>>;
+  using U = util::stdx::simd<Bits, util::stdx::simd_abi::compatible<Bits>>;
+#if defined(__x86_64__)
+  static_assert(sizeof(V) == 16 && std::is_trivially_copyable_v<V>);
+#endif
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (std::size_t base = 0; base < inputs.size(); base += V::size()) {
+      const auto operand = [&](std::size_t index) {
+        return V([&](auto lane) {
+          return std::bit_cast<Float>(inputs[(base + lane) % inputs.size()][index]);
+        });
+      };
+      const V a = operand(0), b = operand(1), c = operand(2);
+      struct Result {
+        U bits;
+        int error;
+      };
+      const auto run = [&](bool hardware) {
+        std::fenv_t saved;
+        const int saved_error = errno;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        const uint32_t saved_mxcsr = _mm_getcsr();
+#endif
+        EXPECT_EQ(std::feholdexcept(&saved), 0);
+        EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
+        EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO | FE_INEXACT), 0);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        const uint32_t host_mxcsr = _mm_getcsr() | (1u << 6) | (1u << 15);
+        _mm_setcsr(host_mxcsr);
+#endif
+        const int host_flags = std::fetestexcept(FE_ALL_EXCEPT);
+        errno = E2BIG;
+        V value;
+        {
+          amdgpu::fp_mode::ScopedEnvironment environment(round);
+          value = hardware ? amdgpu::host_fma::fused(a, b, c) : util::stdx::fma(a, b, c);
+        }
+        const int error = errno;
+        const int actual_round = std::fegetround(), flags = std::fetestexcept(FE_ALL_EXCEPT);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        const uint32_t mxcsr = _mm_getcsr();
+#endif
+        const int restored = std::fesetenv(&saved);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        _mm_setcsr(saved_mxcsr);
+#endif
+        errno = saved_error;
+        EXPECT_EQ(restored, 0);
+        EXPECT_EQ(actual_round, FE_UPWARD);
+        EXPECT_EQ(flags, host_flags);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        EXPECT_EQ(mxcsr, host_mxcsr);
+#endif
+        return Result{std::bit_cast<U>(value), error};
+      };
+      const Result reference = run(false), actual = run(true);
+      EXPECT_EQ(actual.error, reference.error) << "round=" << round << " base=" << base;
+      for (std::size_t lane = 0; lane < V::size(); ++lane) {
+        EXPECT_EQ(actual.bits[lane], reference.bits[lane])
+            << "round=" << round << " case=" << (base + lane) % inputs.size();
+      }
+    }
+  }
+}
+
+TEST(Vop2FmaSimdCorrectness, HostF32FmaMatchesLibraryRangeAndRounding) {
+  // Finite inputs exercise the raw backend. Architectural NaN selection stays
+  // in fma_f32_simd and is covered by the instruction comparisons above.
+  check_host_fma<float>(std::array<std::array<uint32_t, 3>, 12>{{
+      {0x3f800001u, 0x3f7fffffu, 0xbf800000u},
+      {0x3f800001u, 0x3f800001u, 0xbf800002u},
+      {0x7f7fffffu, 0x40000000u, 0u},
+      {0xff7fffffu, 0x40000000u, 0u},
+      {0x00800000u, 0x3f7fffffu, 0u},
+      {0x80800000u, 0x3f7fffffu, 0x80000000u},
+      {0x00800000u, 0x33000000u, 0u},
+      {0x80800000u, 0x33000000u, 0x80000000u},
+      {1u, 1u, 0x00800000u},
+      {0x80000001u, 1u, 0x00800000u},
+      {0x80000000u, 0x3f800000u, 0x80000000u},
+      {0u, 0x3f800000u, 0x80000000u},
+  }});
+}
+
+TEST(Vop2FmaSimdCorrectness, HostF64FmaMatchesLibraryRangeAndRounding) {
+  check_host_fma<double>(std::array<std::array<uint64_t, 3>, 12>{{
+      {0x3ff0000000000001ULL, 0x3fefffffffffffffULL, 0xbff0000000000000ULL},
+      {0x3ff0000000000001ULL, 0x3ff0000000000001ULL, 0xbff0000000000002ULL},
+      {0x7fefffffffffffffULL, 0x4000000000000000ULL, 0ULL},
+      {0xffefffffffffffffULL, 0x4000000000000000ULL, 0ULL},
+      {0x0010000000000000ULL, 0x3fefffffffffffffULL, 0ULL},
+      {0x8010000000000000ULL, 0x3fefffffffffffffULL, 0x8000000000000000ULL},
+      {0x0010000000000000ULL, 0x3c90000000000000ULL, 0ULL},
+      {0x8010000000000000ULL, 0x3c90000000000000ULL, 0x8000000000000000ULL},
+      {1ULL, 1ULL, 0x0010000000000000ULL},
+      {0x8000000000000001ULL, 1ULL, 0x0010000000000000ULL},
+      {0x8000000000000000ULL, 0x3ff0000000000000ULL, 0x8000000000000000ULL},
+      {0ULL, 0x3ff0000000000000ULL, 0x8000000000000000ULL},
+  }});
 }
 
 } // namespace

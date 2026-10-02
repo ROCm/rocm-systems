@@ -48,6 +48,8 @@ public:
   Lds &lds();
   bool sram_ecc() const;
   bool setreg_vgpr_msb_fixup() const;
+  /// Concrete GPU target, or ROCJITSU_CODE_TARGET_INVALID for architecture-only execution.
+  rj_code_target_id_t target() const;
   /// Whether register accesses have a diagnostic or plugin consumer.
   bool observes_register_access() const;
   bool debug_active() const;

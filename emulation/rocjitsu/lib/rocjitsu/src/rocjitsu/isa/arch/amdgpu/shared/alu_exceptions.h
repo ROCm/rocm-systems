@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/mul_f32_policy.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>
@@ -80,6 +81,21 @@ uint32_t classify_mul_lanes(const Lhs &lhs, const Rhs &rhs, Wavefront &wf, Class
   return causes;
 }
 
+// Keep the existing active-lane read and cause-delivery sequence. Only the
+// numerical cause calculation changes for the physically qualified policy.
+template <typename Lhs, typename Rhs>
+uint32_t classify_qualified_mul_f32_lanes(const Lhs &lhs, const Rhs &rhs, Wavefront &wf,
+                                          uint32_t abs = 0, uint32_t neg = 0) {
+  const hwfloat::MulF32Policy policy = hwfloat::detail::mul_f32_policy(wf);
+  return classify_mul_lanes(lhs, rhs, wf, [&](float a, float b) {
+    uint32_t a_bits = std::bit_cast<uint32_t>(a);
+    uint32_t b_bits = std::bit_cast<uint32_t>(b);
+    a_bits = (a_bits & ((abs & 1u) ? 0x7fffffffu : 0xffffffffu)) ^ ((neg & 1u) ? 0x80000000u : 0u);
+    b_bits = (b_bits & ((abs & 2u) ? 0x7fffffffu : 0xffffffffu)) ^ ((neg & 2u) ? 0x80000000u : 0u);
+    return hwfloat::plain_mul_f32_causes(hwfloat::multiply_f32(a_bits, b_bits, policy), policy);
+  });
+}
+
 } // namespace detail
 
 /// @brief EXCP causes raised by `lhs * rhs`, optionally scaled by an output
@@ -109,11 +125,16 @@ inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) 
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefront &wf) {
+  if (hwfloat::detail::has_qualified_mul_f32_vop2_policy(inst, wf))
+    return detail::classify_qualified_mul_f32_lanes(inst.src0, inst.vsrc1, wf);
   return detail::classify_mul_lanes(
       inst.src0, inst.vsrc1, wf, [](float lhs, float rhs) { return classify_mul_f32(lhs, rhs); });
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefront &wf) {
+  if (hwfloat::detail::has_qualified_mul_f32_vop3_policy(inst, wf))
+    return detail::classify_qualified_mul_f32_lanes(inst.src0, inst.src1, wf, inst.inst_.abs,
+                                                    inst.inst_.neg);
   // OMOD scales the exact and rounded products alike. Its policy is uniform
   // across the wave, including which causes the target suppresses.
   const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
