@@ -26,7 +26,7 @@ extern unsigned __hip_pch_wave32_size;
 extern unsigned __hip_pch_wave64_size;
 #endif
 
-extern "C" void __hipGetPCH(const char** pch, unsigned int* size) {
+void __hipGetPCH(const char** pch, unsigned int* size) {
 #ifdef __HIP_ENABLE_PCH
   hipDeviceProp_t deviceProp;
   int deviceId;

@@ -1547,13 +1547,11 @@ typedef struct hipExternalSemaphoreWaitParams_st {
   unsigned int reserved[16];
 } hipExternalSemaphoreWaitParams;
 
-#if __HIP_HAS_GET_PCH
 /**
  * Internal use only. This API may change in the future
  * Pre-Compiled header for online compilation
  */
 void __hipGetPCH(const char** pch, unsigned int* size);
-#endif
 
 /**
  * HIP Access falgs for Interop resources.
