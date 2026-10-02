@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <strings.h>
 #include <utility>
 #include <vector>
@@ -49,10 +50,10 @@ constexpr size_t kSegBytes    = 2u * 1024 * 1024; // rounded up to VMM granulari
 
 class NetIbMultiSegmentMPITest : public NetIbMPITest {
 protected:
-    std::vector<MultiSegmentVmmBuffer*> owned_;
+    std::vector<std::unique_ptr<MultiSegmentVmmBuffer>> owned_;
 
     void TearDown() override {
-        for (auto* b : owned_) { FreeMultiSegmentVmm(*b); delete b; }
+        for (auto& b : owned_) FreeMultiSegmentVmm(*b);
         owned_.clear();
         NetIbMPITest::TearDown();
     }
@@ -60,10 +61,10 @@ protected:
     MultiSegmentVmmBuffer* AllocSym(int nSeg, size_t segBytes = kSegBytes) {
         int dev = 0;
         if (hipGetDevice(&dev) != hipSuccess) return nullptr;
-        auto* b = new MultiSegmentVmmBuffer();
-        if (!AllocMultiSegmentVmm(dev, nSeg, segBytes, b)) { delete b; return nullptr; }
-        owned_.push_back(b);
-        return b;
+        auto b = std::make_unique<MultiSegmentVmmBuffer>();
+        if (!AllocMultiSegmentVmm(dev, nSeg, segBytes, b.get())) return nullptr;
+        owned_.push_back(std::move(b));
+        return owned_.back().get();
     }
 
     bool SyncSkip(bool want) {
