@@ -46,15 +46,6 @@ from utils.utils_counter_defs import (
 from vendored import yaml
 
 
-def _coalesce_refill_enabled_from_env() -> bool:
-    """Second-pass metric coalesce refill (default on).
-
-    Set ROCPROF_COMPUTE_COALESCE_REFILL=0 to disable.
-    """
-    raw = os.environ.get("ROCPROF_COMPUTE_COALESCE_REFILL", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
 def _same_bucket_priority_ids_from_policy_value(
     arch_name: str,
     ids: object,
@@ -373,35 +364,12 @@ class OmniSoC_Base:
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
     def parse_counters(self, config_text: str) -> set[str]:
-        """Hardware PMC names in YAML metric config text (inspector / CP-SAT)."""
+        """Hardware PMC names in YAML metric config text."""
         counters, _variables = extract_counters_and_variables(
             config_text,
             self._mspec.gpu_series,
         )
         return counters
-
-    def _expanded_hw_counters_for_metric_ids(
-        self, metric_ids: tuple[str, ...]
-    ) -> set[str]:
-        """Hardware PMC names for the given metric id strings, TCC-expanded."""
-        if not metric_ids or not self.__arch:
-            return set()
-        args = self.get_args()
-        config_arch = canonical_config_arch(self.__arch) or self.__arch
-        config_root_dir = f"{args.config_dir}/{config_arch}"
-        config_filename_dict = {
-            filename.name.split("_")[0]: str(filename)
-            for filename in Path(config_root_dir).glob("*.yaml")
-        }
-        snippets: list[str] = []
-        for mid in metric_ids:
-            self._append_analysis_yaml_for_filter_token(
-                mid, config_filename_dict, config_root_dir, snippets
-            )
-        if not snippets:
-            return set()
-        raw_counters = self.parse_counters("\n".join(snippets))
-        return self._expand_tcc_template_counters(raw_counters)
 
     def _metric_aware_coalesce_pass(
         self,
@@ -490,150 +458,6 @@ class OmniSoC_Base:
                     f"{label!r} in one bucket; deferring to first-fit.",
                 )
         return remaining, files, file_count
-
-    def _cp_sat_same_bin_counter_groups(
-        self, work_set: set[str]
-    ) -> list[frozenset[str]]:
-        """Priority metrics intersected with ``work_set`` (for CP-SAT same-bin rows)."""
-        groups: list[frozenset[str]] = []
-        for token in self._same_bucket_priority_metric_ids():
-            expanded = self._expanded_hw_counters_for_metric_ids((token,))
-            inter = frozenset(expanded & work_set)
-            if inter:
-                groups.append(inter)
-        return groups
-
-    def _cp_sat_metric_spread_index_groups(
-        self,
-        items_sorted: list[str],
-    ) -> list[list[int]]:
-        """Per-metric item index lists (len >= 2) for CP-SAT spread objective."""
-        item_index = {name: idx for idx, name in enumerate(items_sorted)}
-        out: list[list[int]] = []
-        for (
-            _stem_id,
-            _panel_id,
-            _metric_idx,
-            _metric_name,
-            metric_yaml,
-        ) in self._iter_arch_analysis_yaml_metrics():
-            formula_hw, _ = extract_counters_and_variables(
-                metric_yaml,
-                self._mspec.gpu_series,
-                include_supported_denom=False,
-            )
-            hw = self._expand_tcc_template_counters(formula_hw)
-            idxs = sorted({item_index[c] for c in hw if c in item_index})
-            if len(idxs) >= 2:
-                out.append(idxs)
-        return out
-
-    @staticmethod
-    def _cp_sat_metric_spread_penalty_from_env() -> int:
-        raw = os.environ.get(
-            "ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY", "100"
-        ).strip()
-        try:
-            return max(0, int(raw))
-        except ValueError:
-            return 100
-
-    def _try_cp_sat_pmc_perf_buckets(
-        self,
-        work_set: set[str],
-        file_count_start: int,
-    ) -> list[CounterFile] | None:
-        """
-        If ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed,
-        partition **all** of ``work_set`` under vector caps. Hard same-bin rows
-        still apply to priority metrics; by default a **metric-spread** objective
-        (``ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY``, default ``100``)
-        reduces formulas spanning 2+ passes at the cost of more buckets—set
-        ``0`` to restore min-bin-only behavior. On success, clears those
-        counters from ``work_set`` and returns new ``CounterFile`` rows; else
-        returns ``None`` (no mutation).
-        """
-        if os.environ.get("ROCPROF_COMPUTE_PERFMON_CP_SAT", "").strip() != "1":
-            return None
-        if not work_set:
-            return None
-        items = sorted(work_set)
-        if any(is_tcc_channel_counter(c) for c in items):
-            console_debug(
-                "profiling",
-                "CP-SAT perfmon: skipped (TCC channel counters present).",
-            )
-            return None
-
-        try:
-            from utils.perfmon_cp_sat import cp_sat_partition_counters
-        except ImportError as exc:
-            console_debug(
-                "profiling",
-                f"CP-SAT perfmon: skipped (import error: {exc}).",
-            )
-            return None
-
-        groups = self._cp_sat_same_bin_counter_groups(work_set)
-        spread_penalty = self._cp_sat_metric_spread_penalty_from_env()
-        spread_groups = (
-            self._cp_sat_metric_spread_index_groups(items)
-            if spread_penalty > 0
-            else None
-        )
-        if spread_penalty > 0 and spread_groups:
-            console_debug(
-                "profiling",
-                f"CP-SAT perfmon: metric_spread_penalty={spread_penalty}, "
-                f"{len(spread_groups)} metric group(s).",
-            )
-        partition = cp_sat_partition_counters(
-            items,
-            self.__perfmon_config,
-            groups,
-            metric_spread_index_groups=spread_groups,
-            metric_spread_penalty=spread_penalty,
-        )
-        if partition is None:
-            console_debug(
-                "profiling",
-                "CP-SAT perfmon: no feasible/optimal solution within limit; "
-                "using heuristic only.",
-            )
-            return None
-
-        placed_check: set[str] = set()
-        out_files: list[CounterFile] = []
-        file_count = file_count_start
-        for bucket_items in partition:
-            bucket = CounterFile(str(file_count), self.__perfmon_config)
-            file_count += 1
-            for ctr in sorted(bucket_items):
-                if not bucket.add(ctr):
-                    console_warning(
-                        "profiling",
-                        "CP-SAT perfmon: CounterFile rejected layout; "
-                        "falling back to heuristic.",
-                    )
-                    return None
-                placed_check.add(ctr)
-            out_files.append(bucket)
-
-        if placed_check != set(items):
-            console_warning(
-                "profiling",
-                "CP-SAT perfmon: partition mismatch; falling back to heuristic.",
-            )
-            return None
-
-        for ctr in items:
-            work_set.discard(ctr)
-        console_debug(
-            "profiling",
-            f"CP-SAT perfmon: placed all {len(items)} counter(s) in "
-            f"{len(out_files)} bucket(s).",
-        )
-        return out_files
 
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
@@ -730,8 +554,6 @@ class OmniSoC_Base:
     def _allocate_perfmon_counter_files(
         self,
         counters: set[str],
-        *,
-        apply_refill: bool = True,
     ) -> tuple[list[CounterFile], int, int]:
         """Bin-pack counters into perfmon buckets.
 
@@ -747,14 +569,8 @@ class OmniSoC_Base:
         ``CounterFile`` gets a full-bucket collection (counters may be duplicated
         across passes), then ``SLOT_LIMIT`` PMCs are filled into existing buckets.
 
-        **Legacy heuristic** (priority coalesce → first-fit → optional refill):
+        **Legacy heuristic** (priority coalesce → first-fit):
         set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1``.
-
-        **Optional CP-SAT path** (legacy path only; fewer buckets under hard
-        same-bin groups): set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install
-        ``ortools`` (see ``[optimizer]`` extra in ``pyproject.toml``). Applies
-        only when the PMC set has no TCC channel counters and is within size
-        limits; otherwise falls back to the heuristic above.
         """
         output_files: list[CounterFile] = []
         # Kept for call-site compatibility; dedicated accum files are gone.
@@ -777,12 +593,7 @@ class OmniSoC_Base:
             output_files, file_count, _stats = single_pass
             return output_files, file_count, accu_file_count
 
-        # Legacy path: CP-SAT (optional) → priority coalesce → first-fit → refill.
-        cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
-        if cp_sat_files is not None:
-            output_files.extend(cp_sat_files)
-            file_count += len(cp_sat_files)
-
+        # Legacy path: priority coalesce → first-fit.
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(
                 work_set, output_files, file_count
@@ -809,19 +620,6 @@ class OmniSoC_Base:
                 output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
-
-        if apply_refill and _coalesce_refill_enabled_from_env():
-            from rocprof_compute_soc.counter_grouping_refill import (
-                apply_metric_coalesce_refill_pass,
-            )
-
-            output_files, file_count, _refill_stats = apply_metric_coalesce_refill_pass(
-                self,
-                output_files,
-                file_count,
-                set(counters),
-                self.__perfmon_config,
-            )
 
         return output_files, file_count, accu_file_count
 

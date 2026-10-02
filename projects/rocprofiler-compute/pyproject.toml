@@ -5,11 +5,6 @@ name = "rocprof_compute"
 requires-python = ">=3.8"
 dynamic = ["version"]
 
-[project.optional-dependencies]
-optimizer = [
-    "ortools>=9.10",
-]
-
 [tool.ruff]
 line-length = 88
 

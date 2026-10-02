@@ -26,8 +26,7 @@ from counter_grouping_inspector import (  # noqa: E402
     iter_yaml_metrics,
 )
 
-from rocprof_compute_soc.counter_grouping_refill import (  # noqa: E402
-    apply_metric_coalesce_refill_pass,
+from rocprof_compute_soc.counter_grouping_buckets import (  # noqa: E402
     counters_fit_one_bucket,
 )
 from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
@@ -166,15 +165,10 @@ def main() -> None:
                 lambda c=counters: _rocprof_supported_superset(c)
             )
 
-            # Overview tables: legacy coalesce / first-fit / refill comparison.
+            # Legacy overview: coalesce + first-fit (no refill / CP-SAT).
             os.environ[_LEGACY_ENV] = "1"
             os.environ.pop(_SPP_ENV, None)
-            before_files, fc, _ = soc._allocate_perfmon_counter_files(
-                set(counters), apply_refill=False
-            )
-            after_files, _fc2, refill_stats = apply_metric_coalesce_refill_pass(
-                soc, before_files, fc, set(counters), perfmon_config
-            )
+            legacy_files, _fc, _ = soc._allocate_perfmon_counter_files(set(counters))
 
             # Default allocate path: single-pass packable + SLOT_LIMIT fill.
             os.environ.pop(_LEGACY_ENV, None)
@@ -190,8 +184,8 @@ def main() -> None:
             else:
                 os.environ[key] = value
 
-    before_rows = _metric_rows(before_files, config_dir, arch, counters)
-    after_rows = _metric_rows(after_files, config_dir, arch, counters)
+    legacy_rows = _metric_rows(legacy_files, config_dir, arch, counters)
+    legacy_summary = _summarize(legacy_rows)
 
     yaml_metric_total = sum(1 for _ in iter_yaml_metrics(config_dir, arch))
 
@@ -199,11 +193,13 @@ def main() -> None:
         "arch": arch,
         "yaml_metric_total": yaml_metric_total,
         "pmc_total": len(counters),
-        "buckets_before": len(before_files),
-        "buckets_after": len(after_files),
-        "refill_consolidated": refill_stats.metrics_consolidated,
-        "before": _summarize(before_rows),
-        "after": _summarize(after_rows),
+        # Compat keys: historical HTML used before/after refill columns.
+        # Both now describe the same legacy (no refill) layout.
+        "buckets_before": len(legacy_files),
+        "buckets_after": len(legacy_files),
+        "refill_consolidated": 0,
+        "before": legacy_summary,
+        "after": legacy_summary,
         "spp": {
             "buckets": spp_stats.bucket_count,
             "packable_metric_count": spp_stats.packable_metric_count,

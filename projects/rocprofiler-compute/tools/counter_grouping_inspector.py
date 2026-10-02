@@ -180,8 +180,6 @@ def run_soc_detect_and_coalesce(
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
-    *,
-    apply_refill: bool = True,
 ) -> tuple[set[str], list[CounterFile]]:
     """Run SoC counter detection and perfmon coalesce.
 
@@ -202,10 +200,9 @@ def run_soc_detect_and_coalesce(
         lambda c=counters: _rocprof_supported_superset(c)
     )
 
-    if apply_refill:
-        soc.perfmon_coalesce(counters)
+    soc.perfmon_coalesce(counters)
     perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
-        soc._allocate_perfmon_counter_files(counters, apply_refill=apply_refill)
+        soc._allocate_perfmon_counter_files(counters)
     )
     return counters, perfmon_counter_files
 
@@ -591,8 +588,7 @@ Examples:
   python tools/counter_grouping_inspector.py --arch gfx942 --block 0200 0400
   python tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
   python tools/counter_grouping_inspector.py --arch gfx942 --output plan.svg
-  python tools/counter_grouping_inspector.py --arch gfx942 --compare-spp -o spp.txt
-  python tools/counter_grouping_inspector.py --arch gfx942 --compare-refill -o plan.txt
+  python tools/counter_grouping_inspector.py --arch gfx942 --compare-spp -o plan.txt
 """,
     )
     parser.add_argument(
@@ -640,30 +636,13 @@ Examples:
         "--compare-spp",
         action="store_true",
         help=(
-            "Emit before (legacy heuristic + refill) and after (default SPP) "
+            "Emit before (legacy heuristic, no refill) and after (default SPP) "
             "bucket layouts, multi-bucket counts, and per-section HW packing "
             "limits / display-column notes (.txt only)."
         ),
     )
-    parser.add_argument(
-        "--compare-refill",
-        action="store_true",
-        help=(
-            "Emit before (no refill) and after (refill) bucket layouts under "
-            "the legacy heuristic (forces LEGACY_HEURISTIC=1), including "
-            "per-section HW packing limits / display-column notes. .txt only."
-        ),
-    )
-    parser.add_argument(
-        "--no-refill",
-        action="store_true",
-        help="Disable second-pass metric coalesce refill (legacy packing only).",
-    )
 
     args = parser.parse_args()
-
-    if args.compare_spp and args.compare_refill:
-        console_error("Use only one of --compare-spp or --compare-refill.")
 
     config_dir = args.config_dir or get_default_config_dir()
     if not config_dir.is_dir():
@@ -696,21 +675,6 @@ Examples:
             )
         return
 
-    if args.compare_refill:
-        if args.output and args.output.suffix.lower() == ".svg":
-            console_error("--compare-refill requires .txt output (or stdout).")
-        with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmp:
-            _run_compare_refill(
-                args,
-                arch,
-                config_dir,
-                perfmon_config,
-                Path(tmp),
-            )
-        return
-
-    apply_refill = not args.no_refill
-
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
         counters, output_files = run_soc_detect_and_coalesce(
@@ -719,7 +683,6 @@ Examples:
             args.block,
             perfmon_config,
             workload_root,
-            apply_refill=apply_refill,
         )
 
         if not counters:
@@ -785,7 +748,6 @@ def _allocate_under_env(
     workload_root: Path,
     *,
     env_updates: dict[str, str | None],
-    apply_refill: bool,
 ) -> tuple[OmniSoC_Base, set[str], list[CounterFile]]:
     """Allocate under temporary env, restoring prior values afterward."""
     backup = _backup_compare_env()
@@ -802,10 +764,7 @@ def _allocate_under_env(
             perfmon_config,
             workload_root,
         )
-        files, _fc, _acc = soc._allocate_perfmon_counter_files(
-            counters,
-            apply_refill=apply_refill,
-        )
+        files, _fc, _acc = soc._allocate_perfmon_counter_files(counters)
         return soc, counters, files
     finally:
         _restore_compare_env(backup)
@@ -818,7 +777,7 @@ def _run_compare_spp(
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> None:
-    from rocprof_compute_soc.counter_grouping_refill import (
+    from rocprof_compute_soc.counter_grouping_buckets import (
         count_multi_bucket_metrics,
     )
     from rocprof_compute_soc.counter_grouping_single_pass import (
@@ -826,7 +785,7 @@ def _run_compare_spp(
         collect_unique_packable_unions,
     )
 
-    # Before = shipping legacy path (priority + refill).
+    # Before = legacy heuristic (priority coalesce + first-fit).
     soc_legacy, counters, files_legacy = _allocate_under_env(
         arch,
         config_dir,
@@ -837,7 +796,6 @@ def _run_compare_spp(
             _LEGACY_HEURISTIC_ENV: "1",
             _SINGLE_PASS_PACKABLE_ENV: None,
         },
-        apply_refill=True,
     )
     # After = default SPP (on unless LEGACY_HEURISTIC / SINGLE_PASS_PACKABLE=0).
     soc_spp, _c2, files_spp = _allocate_under_env(
@@ -850,7 +808,6 @@ def _run_compare_spp(
             _LEGACY_HEURISTIC_ENV: None,
             _SINGLE_PASS_PACKABLE_ENV: None,
         },
-        apply_refill=False,
     )
     # Union-based packable multi: fair under SPP PMC duplication.
     unions, _packable_n = collect_unique_packable_unions(
@@ -875,76 +832,6 @@ def _run_compare_spp(
         packable_legacy,
         packable_spp,
     )
-
-
-def _run_compare_refill(
-    args: argparse.Namespace,
-    arch: str,
-    config_dir: Path,
-    perfmon_config: dict[str, int],
-    workload_root: Path,
-) -> None:
-    from rocprof_compute_soc.counter_grouping_refill import (
-        RefillStats,
-        apply_metric_coalesce_refill_pass,
-        count_multi_bucket_metrics,
-        count_packable_multi_bucket_metrics,
-    )
-
-    # Refill compare only makes sense on the legacy heuristic path.
-    backup = _backup_compare_env()
-    try:
-        os.environ[_LEGACY_HEURISTIC_ENV] = "1"
-        os.environ.pop(_SINGLE_PASS_PACKABLE_ENV, None)
-        soc, counters = _prepare_inspector_soc_for_allocate(
-            arch,
-            config_dir,
-            args.block,
-            perfmon_config,
-            workload_root,
-        )
-        files_before, file_count, _acc = soc._allocate_perfmon_counter_files(
-            counters,
-            apply_refill=False,
-        )
-        files_after, _fc, refill_run = apply_metric_coalesce_refill_pass(
-            soc,
-            files_before,
-            file_count,
-            counters,
-            perfmon_config,
-        )
-        stats = RefillStats(
-            bucket_count=len(files_after),
-            packable_multi_bucket_before=count_packable_multi_bucket_metrics(
-                files_before,
-                soc,
-                counters,
-                perfmon_config,
-            ),
-            packable_multi_bucket_after=count_packable_multi_bucket_metrics(
-                files_after,
-                soc,
-                counters,
-                perfmon_config,
-            ),
-            metrics_consolidated=refill_run.metrics_consolidated,
-        )
-        multi_before = count_multi_bucket_metrics(files_before, soc, counters)
-        multi_after = count_multi_bucket_metrics(files_after, soc, counters)
-        soc.perfmon_coalesce(counters)
-        _emit_compare_refill_output(
-            args,
-            files_before,
-            files_after,
-            config_dir,
-            arch,
-            stats,
-            multi_before,
-            multi_after,
-        )
-    finally:
-        _restore_compare_env(backup)
 
 
 def generate_compare_spp_report(
@@ -981,9 +868,7 @@ def generate_compare_spp_report(
         generate_bucket_plan(
             files_legacy,
             arch,
-            heading=(
-                f"BEFORE (legacy heuristic + refill) — {len(files_legacy)} bucket(s)"
-            ),
+            heading=(f"BEFORE (legacy heuristic) — {len(files_legacy)} bucket(s)"),
         )
     )
     buf.write(
@@ -1038,99 +923,6 @@ def _emit_compare_spp_output(
     if args.output:
         args.output.write_text(full, encoding="utf-8")
         print(f"Compare-SPP report written to {args.output}")
-    else:
-        print(full, end="")
-
-
-def generate_compare_refill_report(
-    files_before: list[CounterFile],
-    files_after: list[CounterFile],
-    config_dir: Path,
-    arch: str,
-    refill_stats: Any,
-    *,
-    multi_bucket_before: int | None = None,
-    multi_bucket_after: int | None = None,
-) -> str:
-    """Before/after bucket layout and packable multi-bucket summary."""
-    buf = StringIO()
-    buf.write("Metric coalesce refill comparison\n")
-    buf.write(f"Architecture: {arch}\n\n")
-    buf.write("Summary\n")
-    buf.write(f"  Perfmon buckets (before): {len(files_before)}\n")
-    buf.write(f"  Perfmon buckets (after):  {len(files_after)}\n")
-    buf.write(
-        "  Packable multi-bucket metrics (before): "
-        f"{refill_stats.packable_multi_bucket_before}\n"
-    )
-    buf.write(
-        "  Packable multi-bucket metrics (after):  "
-        f"{refill_stats.packable_multi_bucket_after}\n"
-    )
-    buf.write(
-        f"  Metrics consolidated by refill: {refill_stats.metrics_consolidated}\n"
-    )
-    if multi_bucket_before is not None and multi_bucket_after is not None:
-        buf.write(f"  All multi-bucket metrics (before): {multi_bucket_before}\n")
-        buf.write(f"  All multi-bucket metrics (after):  {multi_bucket_after}\n")
-    buf.write("\n")
-    buf.write(
-        generate_bucket_plan(
-            files_before,
-            arch,
-            heading=f"BEFORE refill — {len(files_before)} bucket(s)",
-        )
-    )
-    buf.write(
-        generate_bucket_metrics(
-            files_before,
-            config_dir,
-            arch,
-            section_heading="BEFORE refill — multi-bucket metrics",
-        )
-    )
-    buf.write(
-        generate_bucket_plan(
-            files_after,
-            arch,
-            heading=f"AFTER refill — {len(files_after)} bucket(s)",
-        )
-    )
-    buf.write(
-        generate_bucket_metrics(
-            files_after,
-            config_dir,
-            arch,
-            section_heading="AFTER refill — multi-bucket metrics",
-        )
-    )
-    return buf.getvalue()
-
-
-def _emit_compare_refill_output(
-    args: argparse.Namespace,
-    files_before: list[CounterFile],
-    files_after: list[CounterFile],
-    config_dir: Path,
-    arch: str,
-    stats: Any,
-    multi_bucket_before: int,
-    multi_bucket_after: int,
-) -> None:
-    report = generate_compare_refill_report(
-        files_before,
-        files_after,
-        config_dir,
-        arch,
-        stats,
-        multi_bucket_before=multi_bucket_before,
-        multi_bucket_after=multi_bucket_after,
-    )
-    weighted_section = _weighted_avg_section(config_dir, arch)
-    full = report + weighted_section
-    if args.output:
-        args.output.write_text(full, encoding="utf-8")
-        print(f"Compare-refill report written to {args.output}")
     else:
         print(full, end="")
 

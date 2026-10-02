@@ -25,7 +25,7 @@ pass when a LEVEL+REQ home already exists.
 
 Disable with ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1`` (or
 ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0``) to restore the priority
-coalesce + first-fit + refill path.
+coalesce + first-fit path.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 
 from utils.logger import console_debug, console_warning
 
-from .counter_grouping_refill import (
+from .counter_grouping_buckets import (
     _bucket_counter_set,
     _iter_metric_groups,
     counters_fit_one_bucket,
@@ -80,7 +80,7 @@ class SinglePassPackableStats:
 
 
 def legacy_heuristic_enabled_from_env() -> bool:
-    """Return True when the legacy coalesce / first-fit / refill path is forced."""
+    """Return True when the legacy coalesce / first-fit path is forced."""
     raw = os.environ.get("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 

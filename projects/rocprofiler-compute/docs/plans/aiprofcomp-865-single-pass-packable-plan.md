@@ -64,7 +64,9 @@ Do not fail Phase 1 on 358 vs 368; they measure different scans. Prefer gates ab
 2. **Allow PMC duplication across passes** when packable unions conflict — required for the 358 guarantee; differs from shipping’s unique-assignment rule.
 3. **Priority policy YAML is not required** for the 358 guarantee; optional only as tie-break for *which* metric gets a duplicate when unions conflict (defer unless multi-arch shows need).
 4. **Do not** use `WEIGHTED_AVG` for the former 59 POLICY_GAP metrics — Phase 1 packing covers them.
-5. **Refill** (`apply_metric_coalesce_refill_pass`) is obsolete once Single-pass packable is default — remove from allocate after cutover.
+5. **Refill and CP-SAT removed:** shared packing helpers live in
+   `counter_grouping_buckets.py`; allocate is SPP (default) or legacy
+   coalesce + first-fit only (`LEGACY_HEURISTIC=1`).
 6. **SLOT_LIMIT fill** must run inside the production allocate path (today it exists only in `tools/eval_single_pass_packable.py`).
 
 ---
@@ -125,8 +127,8 @@ pmc_perf_*.txt  (gfx942: 14 passes, +0 for SLOT fill)
 | File | Action |
 |------|--------|
 | `src/rocprof_compute_soc/counter_grouping_single_pass.py` | (1) Call `fill_slot_limit_into_existing_passes` at end of `try_allocate_single_pass_packable` before success return. (2) Invert env: default **on**; `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` restores old path if kept. (3) Update module docstring (no longer “experiment”). Extend `SinglePassPackableStats` with SLOT fill fields. |
-| `src/rocprof_compute_soc/soc_base.py` | `_allocate_perfmon_counter_files`: SPP is default; skip `_metric_aware_coalesce_pass`, CP-SAT, and refill when SPP succeeds. Update docstring. Optional: delete CP-SAT from default story (leave behind flag). |
-| `src/rocprof_compute_soc/counter_grouping_refill.py` | Stop calling from allocate; keep shared helpers (`_iter_metric_groups`, `counters_fit_one_bucket`, `rebuild_counter_file`) used by SPP / inspector. |
+| `src/rocprof_compute_soc/soc_base.py` | `_allocate_perfmon_counter_files`: SPP is default; legacy = coalesce + first-fit only (no refill / CP-SAT). |
+| `src/rocprof_compute_soc/counter_grouping_buckets.py` | Shared helpers (`_iter_metric_groups`, `counters_fit_one_bucket`, `rebuild_counter_file`) for SPP / inspector. |
 | `…/profiling_counter_grouping_policy.yaml` | Stop using `same_bucket_priority_metric_ids` for packing steer in Phase 1; deprecate until cleanup deletes. |
 | `tests/unit/rocprof_compute_soc/test_counter_grouping_single_pass.py` | Default-on; assert duplication allowed; assert SLOT fill integrated; assert `packable_multi==0` on fixture. Update env tests for inverted gate. |
 | Tests that assume 12-pass / priority coalesce | Update expected pass counts / bucket layouts (grep for coalesce / priority / refill). |
@@ -283,7 +285,7 @@ Do **after** Phase 1 default cutover and multi-arch offline sign-off (can parall
 |---|------|--------|
 | C1 | Delete `_metric_aware_coalesce_pass` | And callers / helpers only used by coalesce |
 | C2 | Remove `same_bucket_priority_metric_ids` | From `profiling_counter_grouping_policy.yaml` (or shrink file to anti-affinity only if introduced for gfx1250) |
-| C3 | Remove refill call path | Delete or slim `counter_grouping_refill.py`; move shared helpers next to SPP if needed |
+| C3 | Remove refill + CP-SAT | Done: helpers in `counter_grouping_buckets.py`; allocate is SPP or legacy coalesce+first-fit |
 | C4 | Update inspector | See §6.1 |
 | C5 | Update docs | HTML (shipping tab → historical), impact report, `single-run-collection-phases.md`, stakeholder Q&A, Phase 2 design preamble |
 | C6 | Remove env gate | Drop `ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE`; drop `LEGACY_HEURISTIC` after one release if kept for bisect |

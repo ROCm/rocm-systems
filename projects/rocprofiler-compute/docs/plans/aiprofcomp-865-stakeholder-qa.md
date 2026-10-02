@@ -121,7 +121,7 @@ flowchart TD
 1. **Symptom:** CPX **percent inflation** (AIPROFCOMP-78) — visible on HBM % and WGM max.
 2. **Environment:** Partition/sysinfo correct?
 3. **Grouping:** Are **golden** metrics **single-bucket** in the inspector?
-   - **No** → Phase 1 (policy, coalesce, future refill for packable multi-bucket).
+   - **No** → Phase 1 (policy, coalesce; packing / SPP for packable multi-bucket).
    - **Yes** but still wrong → **HW_BUG** or **INTENTIONAL** (VALU).
 4. **Still slot-limited after Phase 1** → Phase 2 (collectables + `WEIGHTED_AVG` / `COLLECT_SUM`).
 

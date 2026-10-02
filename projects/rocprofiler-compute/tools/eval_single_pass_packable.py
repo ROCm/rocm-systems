@@ -28,7 +28,7 @@ from counter_grouping_inspector import (  # noqa: E402
     get_default_config_dir,
 )
 
-from rocprof_compute_soc.counter_grouping_refill import (  # noqa: E402
+from rocprof_compute_soc.counter_grouping_buckets import (  # noqa: E402
     count_multi_bucket_metrics,
 )
 from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
@@ -42,8 +42,6 @@ from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 _ENV_KEYS = (
     "ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE",
     "ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC",
-    "ROCPROF_COMPUTE_PERFMON_CP_SAT",
-    "ROCPROF_COMPUTE_COALESCE_REFILL",
 )
 
 
@@ -74,15 +72,11 @@ def _build_soc(arch: str, tmp: Path):
 def _run_legacy(arch: str) -> dict[str, int | float]:
     backup = _backup_env()
     try:
-        os.environ.pop("ROCPROF_COMPUTE_PERFMON_CP_SAT", None)
         os.environ["ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC"] = "1"
-        os.environ["ROCPROF_COMPUTE_COALESCE_REFILL"] = "1"
         with tempfile.TemporaryDirectory(prefix="eval_spp_") as tmp:
             soc, counters, perfmon_config = _build_soc(arch, Path(tmp))
             t0 = time.perf_counter()
-            files, _fc, _acc = soc._allocate_perfmon_counter_files(
-                set(counters), apply_refill=True
-            )
+            files, _fc, _acc = soc._allocate_perfmon_counter_files(set(counters))
             elapsed = time.perf_counter() - t0
             unions, packable_n = collect_unique_packable_unions(
                 soc, counters, perfmon_config
@@ -105,10 +99,8 @@ def _run_legacy(arch: str) -> dict[str, int | float]:
 def _run_spp_default(arch: str) -> dict[str, int | float]:
     backup = _backup_env()
     try:
-        os.environ.pop("ROCPROF_COMPUTE_PERFMON_CP_SAT", None)
         os.environ.pop("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", None)
         os.environ.pop("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", None)
-        os.environ["ROCPROF_COMPUTE_COALESCE_REFILL"] = "0"
         with tempfile.TemporaryDirectory(prefix="eval_spp_") as tmp:
             soc, counters, perfmon_config = _build_soc(arch, Path(tmp))
             t0 = time.perf_counter()
@@ -156,7 +148,7 @@ def main() -> int:
 
     print(f"arch={args.arch}")
     print()
-    print("Legacy (LEGACY_HEURISTIC=1 + priority + refill)")
+    print("Legacy (LEGACY_HEURISTIC=1 + priority coalesce + first-fit)")
     for key, val in baseline.items():
         print(f"  {key}: {val}")
     print()

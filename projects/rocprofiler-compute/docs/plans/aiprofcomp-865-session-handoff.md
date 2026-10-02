@@ -151,7 +151,7 @@ done
 | Allocate entry | `src/rocprof_compute_soc/soc_base.py` → `_allocate_perfmon_counter_files` |
 | SPP + SLOT fill | `src/rocprof_compute_soc/counter_grouping_single_pass.py` → `try_allocate_single_pass_packable` |
 | Legacy coalesce | `soc_base._metric_aware_coalesce_pass` (legacy path only) |
-| Refill helpers | `src/rocprof_compute_soc/counter_grouping_refill.py` |
+| Bucket helpers | `src/rocprof_compute_soc/counter_grouping_buckets.py` |
 | Inspector | `tools/counter_grouping_inspector.py` |
 | Phase 2 design | `docs/plans/aiprofcomp-865-phase2-weighted-avg-design.md` |
 

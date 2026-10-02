@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from rocprof_compute_soc.counter_grouping_refill import rebuild_counter_file
+from rocprof_compute_soc.counter_grouping_buckets import rebuild_counter_file
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
     _bucket_tcc_channel_bases,

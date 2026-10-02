@@ -538,7 +538,7 @@
           <th scope="row">Packable multi-pass (POLICY_GAP)</th>
           <td>Formula PMCs span 2+ buckets in the current implementation, but a
           <code>CounterFile</code> trial shows they <em>would</em> fit one bucket.
-          Fix via coalesce / refill / repack—not <code>WEIGHTED_AVG</code>.</td>
+          Fix via packing / SPP (not <code>WEIGHTED_AVG</code>).</td>
         </tr>
       </tbody>
     </table>
@@ -549,8 +549,8 @@
     <p><strong>Architecture:</strong> gfx942 default analysis config.
     <strong>Default packing:</strong> Single-pass packable + SLOT fill
     (<strong>14</strong> passes, <code>packable_multi=0</code>).
-    Overview tables below still measure the <em>legacy</em> heuristic + refill
-    path for historical comparison.</p>
+    Overview tables below measure the <em>legacy</em> heuristic
+    (coalesce + first-fit; no refill / CP-SAT) for historical comparison.</p>
     <dl class="status-grid">
       <div>
         <dt>408 YAML metrics total</dt>
@@ -563,7 +563,7 @@
       </div>
       <div>
         <dt>14 perfmon passes (default SPP)</dt>
-        <dd>Legacy heuristic + refill:
+        <dd>Legacy heuristic (coalesce + first-fit):
         <strong>13</strong> passes</dd>
       </div>
     </dl>
@@ -610,12 +610,13 @@
         <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>.</p>
       </li>
       <li>
-        <span class="solution-title">2. Legacy heuristic + prioritized grouping + refill (historical)</span>
+        <span class="solution-title">2. Legacy heuristic + prioritized grouping (historical)</span>
         <p class="solution-body">Previous shipping path: metric-aware coalesce plus
         <code>profiling_counter_grouping_policy.yaml</code>
-        <em>same_bucket_priority_metric_ids</em>, then per-counter first-fit, then optional
-        <code>apply_metric_coalesce_refill_pass</code>. Still available via
-        <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>.
+        <em>same_bucket_priority_metric_ids</em>, then per-counter first-fit.
+        Restored only via
+        <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>
+        (no refill / CP-SAT).
         Overview tables below measure this path. See the
         <strong>Fewer passes (legacy)</strong> tab.</p>
       </li>
@@ -623,7 +624,7 @@
         <span class="solution-title">3. Additive passes for the 53 packable leftovers
         (estimation · superseded by SPP)</span>
         <p class="solution-body">Under the legacy
-        <strong>13</strong>-pass layout after refill, the
+        <strong>13</strong>-pass legacy layout, the
         <strong>305</strong> single-pass metrics stay
         untouched. Adding buckets for leftovers was one alternative; SPP covers
         the same set with duplication instead (total
@@ -645,8 +646,8 @@
   <section class="doc-section evaluation">
     <h2>4. Evaluation</h2>
 
-    <h3>Table 1. Improvement with Refill passes</h3>
-    <p class="table-caption-meta">Packing layout only (no refill vs + refill). Phase&nbsp;2
+    <h3>Table 1. Legacy heuristic layout (refill removed)</h3>
+    <p class="table-caption-meta">Packing layout under legacy coalesce + first-fit (refill removed). Phase&nbsp;2
     <code>WEIGHTED_AVG</code> is not folded into these counts—see Table&nbsp;2.</p>
     <div class="table-wrap">
   <table class="decompose">
@@ -654,7 +655,7 @@
       <tr>
         <th>Topic</th>
         <th>Heuristic + prioritized policy<br/><span class="meta">(no refill)</span></th>
-        <th>+ Refill pass</th>
+        <th>Legacy (same; refill removed)</th>
         <th>Notes / comments</th>
       </tr>
     </thead>
@@ -679,16 +680,12 @@
         <td>Scroll lists. Metric id = file.panel.idx.</td>
       </tr>
       <tr class="improved">
-        <td class="topic">Refill improvement</td>
+        <td class="topic">Refill (removed)</td>
         <td colspan="2">
-          Net <strong>14</strong> fewer multi-pass metrics
-          (83 → 69); single-pass 291 → 305.
-          Refill accepted <strong>19</strong> packable
-          consolidate moves (co-locate one metric&apos;s PMCs into an existing bucket).
-          Moves can reshuffle other counters: 33 metrics left multi-pass,
-          19 became newly multi-pass—so consolidations ≠ net delta.
+          Refill and CP-SAT are removed from allocate. Columns now both describe
+          the legacy coalesce + first-fit layout (no second-pass repair).
         </td>
-        <td>Refill only accepts moves that improve packable/total multi counts; does not add passes.</td>
+        <td>Use <code>--compare-spp</code> for legacy vs default SPP.</td>
       </tr>
       <tr>
         <td class="topic">Packable multi-pass leftover<br/><span class="meta">(POLICY_GAP — fix via packing)</span></td>
@@ -697,11 +694,11 @@
         <td>PMC set fits one <code>perfmon_config</code> bucket but layout splits across passes.</td>
       </tr>
       <tr>
-        <td class="topic">Packable leftover list (53 after refill)</td>
+        <td class="topic">Packable leftover list (53 under legacy)</td>
         <td colspan="2"><ul class='metric-list'><li><code>0200.201.10</code> VMEM Utilization <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>0200.201.11</code> Branch Utilization <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>0200.201.24</code> L2-Fabric Write Latency <span class='meta'>(2 buckets: 0, 6)</span></li><li><code>0200.201.30</code> CU Utilization <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>0200.201.8</code> VALU Utilization <span class='meta'>(2 buckets: 1, 12)</span></li><li><code>0200.201.9</code> MFMA Utilization <span class='meta'>(2 buckets: 1, 4)</span></li><li><code>0300.301.0</code> Wavefront Occupancy <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>0300.301.23</code> LDS Util <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>0300.301.38</code> sL1D Hit <span class='meta'>(2 buckets: 4, 6)</span></li><li><code>0300.301.45</code> IL1 Hit <span class='meta'>(2 buckets: 4, 7)</span></li><li><code>0300.301.59</code> Fabric Wr Lat <span class='meta'>(2 buckets: 0, 6)</span></li><li><code>0300.301.63</code> HBM Read Traffic <span class='meta'>(2 buckets: 0, 12)</span></li><li><code>0300.301.65</code> Remote Read Traffic <span class='meta'>(2 buckets: 0, 12)</span></li><li><code>0500.501.0</code> CPF Utilization <span class='meta'>(2 buckets: 0, 3)</span></li><li><code>0500.501.1</code> CPF Stall <span class='meta'>(2 buckets: 3, 4)</span></li><li><code>0500.501.2</code> CPF-L2 Utilization <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>0500.502.0</code> CPC Utilization <span class='meta'>(2 buckets: 0, 2)</span></li><li><code>0500.502.1</code> CPC Stall Rate <span class='meta'>(2 buckets: 2, 5)</span></li><li><code>0500.502.2</code> CPC Packet Decoding Utilization <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>0500.502.3</code> CPC-Workgroup Manager Utilization <span class='meta'>(2 buckets: 2, 6)</span></li><li><code>0600.601.1</code> Scheduler-Pipe Utilization <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>0600.601.2</code> Workgroup Manager Utilization <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>0600.601.3</code> Shader Engine Utilization <span class='meta'>(2 buckets: 1, 7)</span></li><li><code>0600.601.4</code> SIMD Utilization <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>0600.602.10</code> Reached CU Wavefront Limit <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>0600.602.2</code> Scheduler-Pipe Stall Rate <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>0600.602.3</code> Scratch Stall Rate <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>0600.602.8</code> Insufficient CU Barriers <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>0600.602.9</code> Reached CU Workgroup Limit <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>0700.702.2</code> Instructions per wavefront <span class='meta'>(2 buckets: 5, 6)</span></li><li><code>1000.1001.0</code> VALU <span class='meta'>(2 buckets: 4, 7)</span></li><li><code>1100.1102.3</code> VALU Utilization <span class='meta'>(2 buckets: 1, 12)</span></li><li><code>1100.1102.4</code> VMEM Utilization <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>1100.1102.5</code> Branch Utilization <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>1100.1102.7</code> MFMA Utilization <span class='meta'>(2 buckets: 1, 4)</span></li><li><code>1200.1201.0</code> Utilization <span class='meta'>(2 buckets: 1, 5)</span></li><li><code>1200.1201.1</code> Access Rate <span class='meta'>(2 buckets: 1, 7)</span></li><li><code>1500.1501.0</code> Address Processing Unit Busy <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>1500.1501.1</code> Address Stall <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>1500.1501.3</code> Data-Processor → Address Stall <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>1500.1504.0</code> Data-Return Busy <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>1500.1504.1</code> Cache RAM → Data-Return Stall <span class='meta'>(2 buckets: 0, 1)</span></li><li><code>1600.1601.2</code> Utilization <span class='meta'>(2 buckets: 1, 2)</span></li><li><code>1600.1602.3</code> Tag RAM Stall (Write) <span class='meta'>(2 buckets: 2, 3)</span></li><li><code>1600.1602.4</code> Tag RAM Stall (Atomic) <span class='meta'>(2 buckets: 2, 3)</span></li><li><code>1700.1701.0</code> Utilization <span class='meta'>(2 buckets: 1, 4)</span></li><li><code>1700.1702.1</code> HBM Read Traffic <span class='meta'>(2 buckets: 0, 12)</span></li><li><code>1700.1702.10</code> Write and Atomic Latency <span class='meta'>(2 buckets: 0, 6)</span></li><li><code>1700.1702.2</code> Remote Read Traffic <span class='meta'>(2 buckets: 0, 12)</span></li><li><code>1700.1702.3</code> Uncached Read Traffic <span class='meta'>(2 buckets: 12, 7)</span></li><li><code>1700.1702.7</code> Atomic Traffic <span class='meta'>(2 buckets: 0, 6)</span></li><li><code>1700.1702.8</code> Uncached Write and Atomic Traffic <span class='meta'>(2 buckets: 0, 7)</span></li><li><code>1700.1706.5</code> Remote Read <span class='meta'>(2 buckets: 0, 12)</span></li></ul></td>
         <td>
           <strong>Why still split:</strong> greedy pass-minimizing coalesce; priority policy covers only
-          P0 ids; refill is local and cannot globally repack; TCC channel rules constrain bucket sharing.
+          P0 ids; greedy coalesce; TCC channel rules constrain bucket sharing.
           <em>Not</em> <code>SLOT_LIMIT</code>.
         </td>
       </tr>
@@ -731,7 +728,7 @@
 
     <h3>Table 3. Additive passes to cover the 53 packable leftovers</h3>
     <p class="table-caption-meta">Frozen current
-    <strong>13</strong>-pass plan after refill (the
+    <strong>13</strong>-pass legacy plan (the
     <strong>305</strong> single-pass metrics stay untouched).
     New buckets may <em>duplicate</em> counters already collected in the base
     plan. Covers the 53 <code>POLICY_GAP</code> metrics only—not the
@@ -772,7 +769,7 @@
             <td class="topic">Old “68” story (13+55)</td>
             <td>—</td>
             <td>—</td>
-            <td>Wrong model / old baseline (pre-refill 13-pass + naive additive).
+            <td>Wrong model / old baseline (pre-SPP 13-pass + naive additive).
             Do not use.</td>
           </tr>
         </tbody>
@@ -784,7 +781,7 @@
     <h2>5. FAQ</h2>
     <ol class="faq-list">
       <li>
-        <span class="faq-q">Why refill is a 2nd round
+        <span class="faq-q">Why packing stayed two-goal historically
           <span class="meta">(why not one-step multi-objective search)</span></span>
 
     <ol class='comments'>
@@ -801,16 +798,11 @@
       heuristic + priority policy already targets (a). Folding (b) into the same
       greedy pack as an equal weight tends to trade extra passes or destabilize
       layouts users already depend on.</li>
-      <li><strong>Refill = constrained repair for (b):</strong> After round&nbsp;1,
-      find multi-pass metrics whose PMC set still fits one hardware bucket, then
-      apply local moves that must not increase pass count. That is fill-in, not a
-      second full global pack.</li>
-      <li><strong>Scoped out of refill:</strong> The 16 <code>SLOT_LIMIT</code>
-      metrics cannot be finished by packing; they stay Phase&nbsp;2
-      (<code>WEIGHTED_AVG</code>), not a reason to run a joint one-step solver.</li>
-      <li><strong>Heavier one-shot search is optional later:</strong> Offline /
-      CP-SAT / CI repack with a hard pass cap can come later if refill leaves too
-      many packable leftovers—not inside every <code>profile</code> on day one.</li>
+      <li><strong>SPP replaced second-pass repair:</strong> Default allocate now
+      guarantees packable unions in one bucket (PMC duplication allowed). Refill
+      and CP-SAT paths are removed.</li>
+      <li><strong>SLOT_LIMIT stays Phase&nbsp;2:</strong> The 16 parents that cannot
+      fit one hardware bucket use <code>WEIGHTED_AVG</code>, not packing.</li>
       <li><strong>Named <code>*_ACCUM</code> PMCs:</strong> With rocprofiler-sdk,
       counters such as <code>SQ_LEVEL_WAVES_ACCUM</code> are
       <code>accumulate(LEVEL, HIGH_RES)</code> definitions and cost
@@ -839,11 +831,11 @@
   <section class="doc-section takeaway">
     <h2>6. Summary</h2>
 
-    <h3>Decomposed tree (gfx942 default, after refill)</h3>
+    <h3>Decomposed tree (gfx942 legacy heuristic)</h3>
     <div class="decomp-tree">408 YAML metrics
 ├── 374 with profile PMCs
 │   ├── <span class="hl">305</span> single-pass
-│   │     ← Legacy heuristic + prioritized policy + Refill
+│   │     ← Legacy heuristic + prioritized policy
 │   └── 69 multi-pass
 │       ├── <span class="hl">53</span> POLICY_GAP (packable leftovers)
 │       │     ← additive +4 passes (est.) / policy / packing
@@ -859,7 +851,7 @@
       <code>305</code> + <code>69</code>;
       <code>69</code> =
       <code>53</code> + <code>16</code>.
-      The <code>305</code> are from heuristic + prioritized policy + refill.
+      The <code>305</code> are from heuristic + prioritized policy (no refill).
       The <code>16</code> go to Phase&nbsp;2 <code>WEIGHTED_AVG</code> collectables.
     </p>
 
@@ -878,7 +870,7 @@
       <code>same_bucket_priority_metric_ids</code> (more P0 / P1 ids) so greedy
       coalesce keeps those formulas together—trade-off: which metrics deserve
       priority, and does a larger policy destabilize pass count?</li>
-      <li><strong>Improve packing?</strong> Stronger refill / metric-aware coalesce,
+      <li><strong>Improve packing?</strong> Stronger metric-aware coalesce / SPP,
       or offline global repack within a hard pass cap—still packing, not
       decomposition.</li>
       <li><strong>Something else?</strong> e.g. accept residual multi-pass for
@@ -888,7 +880,7 @@
 
     <h3>Planned to-do</h3>
     <ul class="planned-todo">
-      <li>Validate refill with real workloads on MI300.</li>
+      <li>Validate SPP with real workloads on MI300.</li>
       <li>Verify and mark the impact of the proposed solution on MI300
       <strong>CPX</strong> mode (partition/sysinfo correct; P0 HBM and
       related ratios vs SPX baseline).</li>
@@ -913,10 +905,10 @@
     <em>same_bucket_priority_metric_ids</em>, profiling runs
     <strong>metric-aware coalesce</strong> first (keep a metric&apos;s PMCs in one
     bucket when possible), then <strong>per-counter first-fit</strong> for whatever
-    is left, then optional refill. Code:
+    is left. Code:
     <code>_allocate_perfmon_counter_files</code> →
-    <code>_metric_aware_coalesce_pass</code> → first-fit →
-    <code>apply_metric_coalesce_refill_pass</code>.
+    <code>_metric_aware_coalesce_pass</code> → first-fit
+    (under <code>LEGACY_HEURISTIC=1</code>).
     Default allocate uses Single-pass packable instead.</p>
 
     <div class="flow-diagram">
@@ -938,7 +930,7 @@ flowchart TD
   W --> M
   M -->|yes| L
   M -->|no| FF
-  FF --> G[pmc_perf buckets<br/>~13 passes on gfx942 after refill]
+  FF --> G[pmc_perf buckets<br/>~13 passes on gfx942 legacy]
       </pre>
     </div>
 
@@ -981,7 +973,7 @@ Visit order: HBM-like → M1 → M2 → M3
     <h2>Single-pass packable (default)</h2>
     <p class="solution-body">Default allocate path in
     <code>_allocate_perfmon_counter_files</code> (no env flag required).
-    Restore the legacy coalesce / first-fit / refill path with
+    Restore the legacy coalesce / first-fit path with
     <code>ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1</code>
     (or <code>ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0</code>).
     <strong>Goal:</strong> every packable metric (PMC set fits one hardware bucket)
@@ -1006,7 +998,7 @@ Visit order: HBM-like → M1 → M2 → M3
       <pre class="mermaid" id="single-pass-flow">
 flowchart TD
   A[Profile PMC set] --> B{LEGACY_HEURISTIC=1<br/>or SINGLE_PASS_PACKABLE=0?}
-  B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit<br/>+ optional refill]
+  B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit<br/>]
   B -->|no default| U[Unique packable PMC unions<br/>skip SLOT_LIMIT for now]
   U --> O[Order unions:<br/>largest PMC sets first]
   O --> L[Next packable union]
@@ -1117,7 +1109,7 @@ Visit order: largest unions first (M1, then HBM-like, M2, M3)</div>
         </thead>
         <tbody>
           <tr>
-            <td class="topic">Legacy (heuristic + refill)</td>
+            <td class="topic">Legacy (heuristic)</td>
             <td><strong>13</strong></td>
             <td>—</td>
             <td>305 single-pass · 53 POLICY_GAP left</td>
