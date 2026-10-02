@@ -54,11 +54,10 @@ namespace blit
 {
 namespace
 {
-constexpr auto full_kernel_name   = "kernel_replay_blit";
-constexpr auto stride_kernel_name = "kernel_replay_blit_stride";
+constexpr auto kernel_name = "kernel_replay_blit";
 
-using kernel_abi::bytes_per_tile;
 using kernel_abi::copy_descriptor_t;
+using kernel_abi::items_for_size;
 using kernel_abi::kernel_args_t;
 using kernel_abi::workgroup_size;
 
@@ -75,8 +74,7 @@ struct kernel_state_t
     int                      file = -1;
     hsa_code_object_reader_t reader{};
     hsa_executable_t         executable{};
-    kernel_info_t            full_kernel{};
-    kernel_info_t            stride_kernel{};
+    kernel_info_t            kernel{};
     hsa_signal_t             completion{};
     void*                    kernarg          = nullptr;
     size_t                   kernarg_capacity = 0;
@@ -180,10 +178,7 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     if(status != HSA_STATUS_SUCCESS) return status;
 
     const auto hsa_agent = agent.get_hsa_agent();
-    status = initialize_kernel(state.executable, hsa_agent, full_kernel_name, state.full_kernel);
-    if(status != HSA_STATUS_SUCCESS) return status;
-    status =
-        initialize_kernel(state.executable, hsa_agent, stride_kernel_name, state.stride_kernel);
+    status = initialize_kernel(state.executable, hsa_agent, kernel_name, state.kernel);
     if(status != HSA_STATUS_SUCCESS) return status;
 
     status = ext->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &state.completion);
@@ -322,36 +317,33 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
 
     auto descriptor_data = std::vector<copy_descriptor_t>{};
     descriptor_data.reserve(regions.size());
-    auto total_tiles = uint64_t{0};
+    auto total_items = uint64_t{0};
     for(const auto& region : regions)
     {
         if(!region.dst || !region.src || region.size == 0) return std::nullopt;
-        const auto tile_count =
-            region.size / bytes_per_tile + static_cast<uint64_t>(region.size % bytes_per_tile != 0);
-        if(tile_count > std::numeric_limits<uint64_t>::max() - total_tiles) return std::nullopt;
-        descriptor_data.emplace_back(copy_descriptor_t{reinterpret_cast<uint64_t>(region.src),
-                                                       reinterpret_cast<uint64_t>(region.dst),
-                                                       region.size,
-                                                       total_tiles,
-                                                       tile_count});
-        total_tiles += tile_count;
+        const auto item_count = items_for_size(region.size);
+        if(item_count > std::numeric_limits<uint64_t>::max() - total_items) return std::nullopt;
+        descriptor_data.emplace_back(copy_descriptor_t{
+            reinterpret_cast<uint64_t>(region.src),
+            reinterpret_cast<uint64_t>(region.dst),
+            region.size,
+        });
+        total_items += item_count;
     }
 
-    constexpr auto max_launched_tiles =
-        uint64_t{std::numeric_limits<uint32_t>::max()} / workgroup_size;
-    const auto use_stride = (total_tiles > max_launched_tiles);
+    constexpr auto max_workgroups = uint64_t{std::numeric_limits<uint32_t>::max()} / workgroup_size;
+    const auto     requested_workgroups =
+        total_items / workgroup_size + static_cast<uint64_t>(total_items % workgroup_size != 0);
+    constexpr auto blocks_per_cu = uint64_t{2};
+    const auto     cu_count      = agent.get_rocp_agent()->cu_count;
+    if(cu_count == 0) return std::nullopt;
+    const auto occupancy_workgroups = static_cast<uint64_t>(cu_count) * blocks_per_cu;
+    const auto launched_workgroups =
+        std::min({requested_workgroups, max_workgroups, occupancy_workgroups});
+    if(launched_workgroups == 0) return std::nullopt;
+    const auto launched_items = launched_workgroups * workgroup_size;
 
-    auto launched_tiles = total_tiles;
-    if(use_stride)
-    {
-        constexpr auto blocks_per_cu = uint64_t{2};
-        const auto     cu_count      = agent.get_rocp_agent()->cu_count;
-        if(cu_count == 0) return std::nullopt;
-        launched_tiles = std::min(total_tiles, static_cast<uint64_t>(cu_count) * blocks_per_cu);
-    }
-    if(launched_tiles == 0 || launched_tiles > max_launched_tiles) return std::nullopt;
-
-    const auto& kernel = use_stride ? state->stride_kernel : state->full_kernel;
+    const auto& kernel = state->kernel;
     if(kernel.kernarg_size < sizeof(kernel_args_t)) return std::nullopt;
     const auto descriptor_offset = (kernel.kernarg_size + 15) & ~size_t{15};
     if(regions.size() > std::numeric_limits<uint32_t>::max() ||
@@ -407,13 +399,14 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     std::memcpy(descriptor_memory,
                 descriptor_data.data(),
                 descriptor_data.size() * sizeof(descriptor_data[0]));
-    const auto kernel_args = kernel_args_t{reinterpret_cast<uint64_t>(descriptor_memory),
-                                           static_cast<uint64_t>(descriptor_data.size()),
-                                           total_tiles,
-                                           launched_tiles};
+    const auto kernel_args = kernel_args_t{
+        reinterpret_cast<uint64_t>(descriptor_memory),
+        static_cast<uint64_t>(descriptor_data.size()),
+        launched_items,
+    };
     std::memcpy(impl->kernarg, &kernel_args, sizeof(kernel_args));
 
-    const auto grid_size_x = static_cast<uint32_t>(launched_tiles * workgroup_size);
+    const auto grid_size_x = static_cast<uint32_t>(launched_items);
 
     auto packet   = hsa_kernel_dispatch_packet_t{};
     packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
