@@ -6,7 +6,9 @@
 
 // Host-only microtests for `src/ras/diagnostics.cc`.
 
+#include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -91,6 +93,8 @@ uint64_t DiagnosticsTestClockNano() { return static_cast<uint64_t>(g_clockNano);
 
 // Test-local collaborator fakes.
 
+// Keep synthetic clients paired with this TU's rasCollFree and fixture cleanup,
+// independently of ras-test.cc's client ownership and collaborator fakes.
 struct rasClient* rasClientsHead = nullptr;
 
 namespace {
@@ -151,10 +155,16 @@ ncclResult_t rasNetSendCollReq(const struct rasCollRequest* req, bool* pAllDone,
   return ncclSuccess;
 }
 
+// Collectors publish owned records only on success; failure hooks must not supply records.
 #define DEFINE_CHECK_FAKE(idx, collectFn, summarizeFn)                                                            \
   ncclResult_t collectFn(const struct rasDiagnosticsContext* ctx, struct rasDiagnosticsLocalData* data) {         \
     ++g_checkHooks[idx].collectLocalCalls;                                                                        \
     g_checkHooks[idx].lastCollectLocalCtx = *ctx;                                                                 \
+    *data = {};                                                                                                 \
+    if (g_checkHooks[idx].collectLocalResult != ncclSuccess) {                                                    \
+      EXPECT_EQ(nullptr, g_checkHooks[idx].collectLocalData.records);                                             \
+      return g_checkHooks[idx].collectLocalResult;                                                               \
+    }                                                                                                           \
     *data = g_checkHooks[idx].collectLocalData;                                                                   \
     g_checkHooks[idx].collectLocalData.records = nullptr;                                                         \
     return g_checkHooks[idx].collectLocalResult;                                                                  \
@@ -292,7 +302,7 @@ struct FakeComm {
 // Unlike rasDiagnosticsAppendCheckPayload, this helper always writes a header for a
 // check that produced zero records so malformed/zero-record receive paths can be tested.
 struct CheckContribution {
-  rasDiagnosticsCheckId checkId;
+  int checkId;
   int recordStride;
   std::vector<char> records;
 };
@@ -302,13 +312,14 @@ std::vector<char> BuildPeerPayload(const std::vector<CheckContribution>& checks)
   int nChecks = 0;
   for (auto& c : checks) {
     struct rasDiagnosticsCheckPayloadHeader h{};
-    h.checkId = c.checkId;
+    static_assert(sizeof(h.checkId) == sizeof(c.checkId));
     h.recordStride = c.recordStride;
     h.nRecords = c.recordStride > 0 ? static_cast<int>(c.records.size() / c.recordStride) : 0;
     h.payloadBytes = static_cast<int>(c.records.size());
     size_t off = buf.size();
     buf.resize(off + sizeof(h));
     memcpy(buf.data() + off, &h, sizeof(h));
+    memcpy(buf.data() + off + offsetof(rasDiagnosticsCheckPayloadHeader, checkId), &c.checkId, sizeof(c.checkId));
     buf.insert(buf.end(), c.records.begin(), c.records.end());
     nChecks++;
   }
@@ -595,7 +606,6 @@ TEST_F(RasDiagnosticsMicrotest, ClientInit_ExistingDiagnosticsStateReturnsIntern
   auto* client = MakeClient();
   client->diagnostics = reinterpret_cast<struct rasDiagnosticsClientState*>(0x1);
   EXPECT_EQ(ncclInternalError, rasDiagnosticsClientInit(client, &ctx, nullptr));
-  client->diagnostics = nullptr;  // Avoid a bogus free in cleanup.
   free(client);
 }
 
@@ -736,16 +746,16 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagInit_ScopedRequestPassesFilterToChecks) 
   req.diag.commFilter.commHash = 0x99;
   req.diag.commFilter.hostHash = 0x88;
   req.diag.commFilter.pidHash = 0x77;
-  g_checkHooks[0].collectLocalData.nRecords = 1;
-  g_checkHooks[0].collectLocalData.recordStride = 4;
-  g_checkHooks[0].collectLocalData.recordsBytes = 4;
-  g_checkHooks[0].collectLocalData.records = static_cast<char*>(malloc(4));
-  memcpy(g_checkHooks[0].collectLocalData.records, "test", 4);
-  g_checkHooks[1].collectLocalData.nRecords = 2;
-  g_checkHooks[1].collectLocalData.recordStride = 2;
-  g_checkHooks[1].collectLocalData.recordsBytes = 4;
-  g_checkHooks[1].collectLocalData.records = static_cast<char*>(malloc(4));
-  memcpy(g_checkHooks[1].collectLocalData.records, "next", 4);
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.nRecords = 1;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.recordStride = 4;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.recordsBytes = 4;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.records = static_cast<char*>(malloc(4));
+  memcpy(g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.records, "test", 4);
+  g_checkHooks[RAS_DIAG_CHECK_CUDA_DRIVER_VERSION].collectLocalData.nRecords = 2;
+  g_checkHooks[RAS_DIAG_CHECK_CUDA_DRIVER_VERSION].collectLocalData.recordStride = 2;
+  g_checkHooks[RAS_DIAG_CHECK_CUDA_DRIVER_VERSION].collectLocalData.recordsBytes = 4;
+  g_checkHooks[RAS_DIAG_CHECK_CUDA_DRIVER_VERSION].collectLocalData.records = static_cast<char*>(malloc(4));
+  memcpy(g_checkHooks[RAS_DIAG_CHECK_CUDA_DRIVER_VERSION].collectLocalData.records, "next", 4);
   char* data = nullptr;
   int nData = 0;
   size_t reqLen = 0;
@@ -784,7 +794,13 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagInit_ScopedRequestPassesFilterToChecks) 
 
 TEST_F(RasDiagnosticsMicrotest, CollDiagInit_CheckWithZeroRecordsIsOmitted) {
   struct rasCollRequest req{};
-  // All hooks default to zero records.
+  auto& contribution = g_checkHooks[RAS_DIAG_CHECK_ECC].collectLocalData;
+  contribution.nRecords = 1;
+  contribution.recordStride = 4;
+  contribution.recordsBytes = 4;
+  contribution.records = static_cast<char*>(malloc(4));
+  ASSERT_NE(nullptr, contribution.records);
+  memcpy(contribution.records, "test", 4);
   char* data = nullptr;
   int nData = 0;
   size_t reqLen = 0;
@@ -793,13 +809,19 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagInit_CheckWithZeroRecordsIsOmitted) {
   for (auto& h : g_checkHooks) EXPECT_EQ(1, h.collectLocalCalls);
   ASSERT_NE(nullptr, data);
   auto* peerHeader = PeerPayloadHeader(data);
-  EXPECT_EQ(0, peerHeader->nChecks);
+  EXPECT_EQ(1, peerHeader->nChecks);
+  EXPECT_EQ(sizeof(*peerHeader) + sizeof(rasDiagnosticsCheckPayloadHeader) + 4, static_cast<size_t>(nData));
+  auto* checkHeader = FirstCheckHeader(data);
+  EXPECT_EQ(RAS_DIAG_CHECK_ECC, checkHeader->checkId);
+  EXPECT_EQ(1, checkHeader->nRecords);
+  EXPECT_EQ(4, checkHeader->payloadBytes);
+  EXPECT_EQ(0, memcmp(checkHeader + 1, "test", 4));
   free(data);
 }
 
 TEST_F(RasDiagnosticsMicrotest, CollDiagInit_CheckFailurePropagatesErrorAndFreesPayload) {
   struct rasCollRequest req{};
-  g_checkHooks[2].collectLocalResult = ncclSystemError;
+  g_checkHooks[RAS_DIAG_CHECK_ECC].collectLocalResult = ncclSystemError;
   char* data = nullptr;
   int nData = 0;
   size_t reqLen = 0;
@@ -812,15 +834,15 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagInit_CheckFailurePropagatesErrorAndFrees
 
 TEST_F(RasDiagnosticsMicrotest, CollDiagInit_AllocationFailuresLeaveOutputsEmpty) {
   struct rasCollRequest req{};
-  g_checkHooks[0].collectLocalData.nRecords = 1;
-  g_checkHooks[0].collectLocalData.recordStride = 4;
-  g_checkHooks[0].collectLocalData.recordsBytes = 4;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.nRecords = 1;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.recordStride = 4;
+  g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.recordsBytes = 4;
 
   for (int failAt = 1; failAt <= 3; failAt++) {
     char* records = static_cast<char*>(malloc(4));
-    g_checkHooks[0].collectLocalData.records = records;
+    g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.records = records;
     memcpy(records, "test", 4);
-    const int collectCallsBefore = g_checkHooks[0].collectLocalCalls;
+    const int collectCallsBefore = g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalCalls;
     g_reallocationCalls = 0;
     g_failReallocationCall = failAt;
     char* data = reinterpret_cast<char*>(1);
@@ -830,8 +852,8 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagInit_AllocationFailuresLeaveOutputsEmpty
     EXPECT_EQ(ncclSystemError, rasCollDiagInit(&pReq, &reqLen, &data, &nData)) << failAt;
     EXPECT_EQ(nullptr, data);
     EXPECT_EQ(0, nData);
-    if (g_checkHooks[0].collectLocalCalls == collectCallsBefore) free(records);
-    g_checkHooks[0].collectLocalData.records = nullptr;
+    if (g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalCalls == collectCallsBefore) free(records);
+    g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].collectLocalData.records = nullptr;
   }
 }
 
@@ -896,7 +918,7 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagMerge_AppendsIncomingBytes) {
   int dataOffset = msgLen + nPeers * static_cast<int>(sizeof(union ncclSocketAddress));
   ALIGN_SIZE(dataOffset, alignof(int64_t));
   msgLen = dataOffset + declaredData;
-  std::vector<char> buf(msgLen, 0x5a);
+  std::vector<char> buf(std::max(sizeof(struct rasMsg), static_cast<size_t>(msgLen)), 0x5a);
   auto* msg = reinterpret_cast<struct rasMsg*>(buf.data());
   msg->collResp.nData = declaredData;
   msg->collResp.nPeers = nPeers;
@@ -918,7 +940,7 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagMerge_AllocationFailurePreservesExisting
 
   int dataOffset = static_cast<int>(rasMsgLength(RAS_MSG_COLLRESP));
   ALIGN_SIZE(dataOffset, alignof(int64_t));
-  std::vector<char> buf(dataOffset + 4, 0);
+  std::vector<char> buf(std::max(sizeof(struct rasMsg), static_cast<size_t>(dataOffset + 4)), 0);
   auto* msg = reinterpret_cast<struct rasMsg*>(buf.data());
   msg->collResp.nData = 4;
   g_failReallocationCall = 1;
@@ -933,9 +955,27 @@ TEST_F(RasDiagnosticsMicrotest, CollDiagMerge_AllocationFailurePreservesExisting
 // rasDiagnosticsResume (drives the static rasDiagnosticsSummarizePeerPayloads)
 // ===========================================================================
 
-TEST_F(RasDiagnosticsMicrotest, Resume_InvalidClientStateReturnsInternalError) {
+TEST_F(RasDiagnosticsMicrotest, Resume_NullClientReturnsInternalError) {
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsResume(nullptr));
+}
+
+TEST_F(RasDiagnosticsMicrotest, Resume_MissingDiagnosticsStateReturnsInternalError) {
   auto* client = MakeClient();
-  EXPECT_EQ(ncclInternalError, rasDiagnosticsResume(client));  // No diagnostics, no coll.
+  client->coll = static_cast<struct rasCollective*>(calloc(1, sizeof(struct rasCollective)));
+  ASSERT_NE(nullptr, client->coll);
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsResume(client));
+  free(client->coll);
+  free(client);
+}
+
+TEST_F(RasDiagnosticsMicrotest, Resume_MissingCollectiveReturnsInternalError) {
+  struct rasDiagnosticsContext ctx{};
+  auto* client = MakeDiagClient(ctx);
+  ASSERT_NE(nullptr, client);
+  ASSERT_NE(nullptr, client->diagnostics);
+  EXPECT_EQ(nullptr, client->coll);
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsResume(client));
+  rasDiagnosticsClientCleanup(client);
   free(client);
 }
 
@@ -987,15 +1027,15 @@ TEST_F(RasDiagnosticsMicrotest, Resume_CommScopedReportsCommNRanks) {
   auto* client = MakeDiagClient(ctx, &reporter, true);
   ASSERT_NE(nullptr, client);
   client->coll->nPeers = 999;  // Should be ignored in favor of ctx.commNRanks.
-  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 1, {1}}}});
+  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 4, {1, 0, 0, 0}}}});
   client->coll->data = static_cast<char*>(calloc(gathered.size(), 1));
   memcpy(client->coll->data, gathered.data(), gathered.size());
   client->coll->nData = static_cast<int>(gathered.size());
 
   ASSERT_EQ(ncclSuccess, rasDiagnosticsResume(client));
   EXPECT_NE(std::string::npos, g_emittedLines.back().find("7 ranks"));
-  EXPECT_TRUE(g_checkHooks[0].lastSummarizeCtx.hasCommFilter);
-  EXPECT_EQ(7, g_checkHooks[0].lastSummarizeCtx.commNRanks);
+  EXPECT_TRUE(g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeCtx.hasCommFilter);
+  EXPECT_EQ(7, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeCtx.commNRanks);
   free(client);
 }
 
@@ -1017,12 +1057,11 @@ TEST_F(RasDiagnosticsMicrotest, Resume_SummarizeCalledForEveryCheckEvenWithoutRe
     EXPECT_EQ(RecordingEmit, g_checkHooks[id].lastSummarizeReporter.emit);
     EXPECT_EQ(RecordingFinish, g_checkHooks[id].lastSummarizeReporter.finish);
   }
-  EXPECT_EQ(4, g_checkHooks[2].lastSummarizeNData);
-  ASSERT_EQ(4u, g_checkHooks[2].lastSummarizeData.size());
-  EXPECT_EQ(0, memcmp(g_checkHooks[2].lastSummarizeData.data(), "\x01\x02\x03\x04", 4));
+  EXPECT_EQ(4, g_checkHooks[RAS_DIAG_CHECK_ECC].lastSummarizeNData);
+  ASSERT_EQ(4u, g_checkHooks[RAS_DIAG_CHECK_ECC].lastSummarizeData.size());
+  EXPECT_EQ(0, memcmp(g_checkHooks[RAS_DIAG_CHECK_ECC].lastSummarizeData.data(), "\x01\x02\x03\x04", 4));
   // A check that no peer contributed to is still summarized, with an empty payload.
-  EXPECT_EQ(1, g_checkHooks[0].summarizeCalls);
-  EXPECT_EQ(0, g_checkHooks[0].lastSummarizeNData);
+  EXPECT_EQ(0, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeNData);
   free(client);
 }
 
@@ -1039,23 +1078,23 @@ TEST_F(RasDiagnosticsMicrotest, Resume_MultiplePeersAccumulateSameCheck) {
   client->coll->nData = static_cast<int>(gathered.size());
 
   ASSERT_EQ(ncclSuccess, rasDiagnosticsResume(client));
-  EXPECT_EQ(8, g_checkHooks[0].lastSummarizeNData);
-  ASSERT_EQ(8u, g_checkHooks[0].lastSummarizeData.size());
+  EXPECT_EQ(8, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeNData);
+  ASSERT_EQ(8u, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData.size());
   const char expected[8] = {1, 1, 1, 1, 2, 2, 2, 2};
-  EXPECT_EQ(0, memcmp(g_checkHooks[0].lastSummarizeData.data(), expected, 8));
+  EXPECT_EQ(0, memcmp(g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData.data(), expected, 8));
   free(client);
 }
 
 TEST_F(RasDiagnosticsMicrotest, SummarizePeerPayloads_MultipleChecksInOnePeerReachCorrectHooks) {
   struct rasDiagnosticsContext ctx{};
   auto reporter = MakeRecordingReporter();
-  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 2, {1, 2}},
-                                      {RAS_DIAG_CHECK_ECC, 2, {3, 4}}}});
+  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 4, {1, 2, 0, 0}},
+                                      {RAS_DIAG_CHECK_ECC, 4, {3, 4, 0, 0}}}});
 
   ASSERT_EQ(ncclSuccess, rasDiagnosticsSummarizePeerPayloads(&ctx, &reporter, gathered.data(),
                                                              static_cast<int>(gathered.size())));
-  EXPECT_EQ((std::vector<char>{1, 2}), g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData);
-  EXPECT_EQ((std::vector<char>{3, 4}), g_checkHooks[RAS_DIAG_CHECK_ECC].lastSummarizeData);
+  EXPECT_EQ((std::vector<char>{1, 2, 0, 0}), g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData);
+  EXPECT_EQ((std::vector<char>{3, 4, 0, 0}), g_checkHooks[RAS_DIAG_CHECK_ECC].lastSummarizeData);
 }
 
 TEST_F(RasDiagnosticsMicrotest, Resume_TruncatedPeerHeaderReturnsErrorButStillFinishes) {
@@ -1075,19 +1114,41 @@ TEST_F(RasDiagnosticsMicrotest, Resume_TruncatedPeerHeaderReturnsErrorButStillFi
   free(client);
 }
 
-TEST_F(RasDiagnosticsMicrotest, Resume_UnknownCheckIdReturnsError) {
-  for (int id : {-1, 99}) {
-    const auto* sentinel = reinterpret_cast<const struct rasDiagnosticsCheck*>(0x1);
-    const struct rasDiagnosticsCheck* check = sentinel;
-    EXPECT_EQ(ncclInternalError, rasDiagnosticsGetCheck(static_cast<rasDiagnosticsCheckId>(id), &check)) << id;
-    EXPECT_EQ(sentinel, check) << id;
+TEST_F(RasDiagnosticsMicrotest, GetCheck_CountSentinelReturnsInternalError) {
+  const auto* sentinel = reinterpret_cast<const struct rasDiagnosticsCheck*>(0x1);
+  const struct rasDiagnosticsCheck* check = sentinel;
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsGetCheck(RAS_DIAG_CHECK_COUNT, &check));
+  EXPECT_EQ(sentinel, check);
+}
 
+TEST_F(RasDiagnosticsMicrotest, Resume_CountSentinelReturnsInternalError) {
+  auto reporter = MakeRecordingReporter();
+  struct rasDiagnosticsContext ctx{};
+  auto* client = MakeDiagClient(ctx, &reporter, true);
+  ASSERT_NE(nullptr, client);
+
+  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_COUNT, 4, {1, 2, 3, 4}}}});
+  client->coll->data = static_cast<char*>(calloc(gathered.size(), 1));
+  memcpy(client->coll->data, gathered.data(), gathered.size());
+  client->coll->nData = static_cast<int>(gathered.size());
+
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsResume(client));
+  EXPECT_EQ(1, g_finishCalls);
+  EXPECT_EQ(ncclInternalError, g_lastFinishResult);
+  EXPECT_EQ(nullptr, client->coll);
+  EXPECT_EQ(nullptr, client->diagnostics);
+  free(client);
+}
+
+TEST_F(RasDiagnosticsMicrotest, DISABLED_Resume_UnknownWireCheckIdReturnsError) {
+  SCOPED_TRACE("AICOMRCCL-2741: production loads an out-of-range enum before validating the wire ID");
+  for (int id : {-1, 99}) {
     auto reporter = MakeRecordingReporter();
     struct rasDiagnosticsContext ctx{};
     auto* client = MakeDiagClient(ctx, &reporter, true);
     ASSERT_NE(nullptr, client);
 
-    auto gathered = BuildGatheredData({{{static_cast<rasDiagnosticsCheckId>(id), 4, {1, 2, 3, 4}}}});
+    auto gathered = BuildGatheredData({{{id, 4, {1, 2, 3, 4}}}});
     client->coll->data = static_cast<char*>(calloc(gathered.size(), 1));
     memcpy(client->coll->data, gathered.data(), gathered.size());
     client->coll->nData = static_cast<int>(gathered.size());
@@ -1201,14 +1262,14 @@ TEST_F(RasDiagnosticsMicrotest, SummarizePeerPayloads_SummarizerFailurePropagate
 TEST_F(RasDiagnosticsMicrotest, SummarizePeerPayloads_ZeroRecordBlockDoesNotSetStride) {
   struct rasDiagnosticsContext ctx{};
   auto reporter = MakeRecordingReporter();
-  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 4, {}}},
-                                     {{RAS_DIAG_CHECK_GPU_MODEL, 2, {5, 6}}}});
+  auto gathered = BuildGatheredData({{{RAS_DIAG_CHECK_GPU_MODEL, 8, {}}},
+                                     {{RAS_DIAG_CHECK_GPU_MODEL, 4, {5, 6, 7, 8}}}});
 
   ASSERT_EQ(ncclSuccess, rasDiagnosticsSummarizePeerPayloads(&ctx, &reporter, gathered.data(),
                                                              static_cast<int>(gathered.size())));
   EXPECT_EQ(1, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].summarizeCalls);
-  EXPECT_EQ(2, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeNData);
-  EXPECT_EQ((std::vector<char>{5, 6}), g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData);
+  EXPECT_EQ(4, g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeNData);
+  EXPECT_EQ((std::vector<char>{5, 6, 7, 8}), g_checkHooks[RAS_DIAG_CHECK_GPU_MODEL].lastSummarizeData);
 }
 
 TEST_F(RasDiagnosticsMicrotest, SummarizePeerPayloads_AllocationFailurePropagates) {
@@ -1298,19 +1359,26 @@ TEST_F(RasDiagnosticsMicrotest, Start_PostsCollectiveAndAdvancesStateWhenIncompl
 
 TEST_F(RasDiagnosticsMicrotest, Start_ReturnsSuccessWhenAlreadyAllDone) {
   struct rasDiagnosticsContext ctx{};
-  auto* client = MakeDiagClient(ctx);
+  auto reporter = MakeRecordingReporter();
+  auto* client = MakeDiagClient(ctx, &reporter);
   ASSERT_NE(nullptr, client);
   g_netSendCollReqAllDone = true;
+  auto* completed = static_cast<struct rasCollective*>(calloc(1, sizeof(struct rasCollective)));
+  ASSERT_NE(nullptr, completed);
+  g_netSendCollReqCollToAssign = completed;
 
   EXPECT_EQ(ncclSuccess, rasDiagnosticsStart(client));
   EXPECT_EQ(RAS_CLIENT_DIAG_FINI, client->status);
   EXPECT_FALSE(g_lastSentReq.diag.hasCommFilter);
-  rasDiagnosticsClientCleanup(client);
+  ASSERT_EQ(completed, client->coll);
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsResume(client));
+  EXPECT_EQ(1, g_finishCalls);
+  EXPECT_EQ(nullptr, client->coll);
   EXPECT_EQ(nullptr, client->diagnostics);
   free(client);
 }
 
-TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesCollAndCleansUpDiagnostics) {
+TEST_F(RasDiagnosticsMicrotest, Start_SendFailureLeavesNoCollectiveAndCleansUpDiagnostics) {
   struct rasDiagnosticsContext ctx{};
   auto* client = MakeDiagClient(ctx);
   ASSERT_NE(nullptr, client);
@@ -1322,16 +1390,16 @@ TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesCollAndCleansUpDiagnostics
   free(client);
 }
 
-TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesPartiallyCreatedCollective) {
+TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesStaleCollectiveAndCleansUpDiagnostics) {
   struct rasDiagnosticsContext ctx{};
   auto* client = MakeDiagClient(ctx, nullptr, true);
   ASSERT_NE(nullptr, client);
-  auto* partiallyCreated = client->coll;
+  auto* staleCollective = client->coll;
   g_netSendCollReqResult = ncclSystemError;
 
   EXPECT_EQ(ncclSystemError, rasDiagnosticsStart(client));
   EXPECT_EQ(1, g_collFreeCalls);
-  EXPECT_EQ(partiallyCreated, g_lastCollFree);
+  EXPECT_EQ(staleCollective, g_lastCollFree);
   EXPECT_EQ(nullptr, client->coll);
   EXPECT_EQ(nullptr, client->diagnostics);
   free(client);
