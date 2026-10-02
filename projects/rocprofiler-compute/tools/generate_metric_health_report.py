@@ -321,7 +321,7 @@ def parse_log(path: Path) -> ParsedLog:
         raw_min, min_v = _cell_at(cols, min_col)
         raw_max, max_v = _cell_at(cols, max_col)
         raw_val, val_v = _cell_at(cols, value_col)
-        _raw_avg, avg_v = _cell_at(cols, avg_col)
+        raw_avg, avg_v = _cell_at(cols, avg_col)
 
         value: float | None = None
         raw = ""
@@ -340,19 +340,39 @@ def parse_log(path: Path) -> ParsedLog:
 
         # Keep Avg/Min/Max rows even when Median is not yet known so recompute
         # / formula merge can see them. Never assign Avg to ``value``.
+        # Also keep all-N/A rows (raw "N/A") so per-workload Totals and N/A
+        # buckets stay aligned across workloads that omit different paths.
+        has_present_cell = any(
+            r != ""
+            for r, idx in (
+                (raw_med, median_col),
+                (raw_min, min_col),
+                (raw_max, max_col),
+                (raw_val, value_col),
+                (raw_avg, avg_col),
+            )
+            if idx is not None
+        )
         if (
             value is None
             and med_v is None
             and min_v is None
             and val_v is None
             and avg_v is None
+            and not has_present_cell
         ):
             continue
+
+        if value is None and not raw:
+            raw = next(
+                (r for r in (raw_med, raw_val, raw_min, raw_max, raw_avg) if r),
+                "N/A",
+            )
 
         key = f"{metric_id}|{name}"
         result.metrics[key] = MetricValue(
             value=value,
-            raw=raw if value is not None else "",
+            raw=raw,
             source=source,
             min_v=min_v,
             max_v=max_v,
@@ -559,6 +579,97 @@ def render_zero_sub_bucket_lines(summary: dict[str, int]) -> str:
     return "".join(lines)
 
 
+# CDNA3 multi-XCD L2-per-channel expansion ($total_l2_chan) applies here.
+_CDNA3_L2_CHAN_ARCHES = frozenset({"gfx940", "gfx941", "gfx942"})
+
+
+def count_yaml_metric_entries(config_arch: str) -> tuple[int, int]:
+    """Return (metric table entries, unique metric names) for analysis_configs."""
+    config_dir = SRC / "rocprof_compute_soc" / "analysis_configs" / config_arch
+    entries = 0
+    names: set[str] = set()
+    if not config_dir.is_dir():
+        return 0, 0
+    for yaml_path in sorted(config_dir.glob("*.yaml")):
+        data = yaml.safe_load(yaml_path.read_text())
+        panel = data.get("Panel Config", data)
+        for entry in panel.get("data source", []):
+            if not isinstance(entry, dict):
+                continue
+            table = entry.get("metric_table", entry)
+            if not isinstance(table, dict) or "metric" not in table:
+                continue
+            metrics = table.get("metric") or {}
+            entries += len(metrics)
+            names.update(metrics)
+    return entries, len(names)
+
+
+def build_total_note(
+    arch: str,
+    config_arch: str,
+    summary: dict[str, dict[str, int]],
+    all_keys_count: int,
+    stat_label: str,
+) -> str:
+    """Arch-specific explanation of card Total vs YAML metric definitions."""
+    yaml_entries, yaml_unique = count_yaml_metric_entries(config_arch)
+    yaml_bit = (
+        f"YAML metric definitions (~{yaml_entries} table entries / "
+        f"~{yaml_unique} unique names in <code>analysis_configs/{html.escape(config_arch)}</code>)"
+    )
+    totals = ", ".join(f"{html.escape(wl)}={s['total']}" for wl, s in summary.items())
+    common_tail = (
+        f"Each card Total equals the union of analyze-table rows across workloads "
+        f"(<b>{all_keys_count}</b> here; per-workload "
+        f"{totals}). All-N/A cells are kept and bucketed as N/A / Expected N/A — "
+        f"they are not dropped from Total. Entire panels omitted by TTY "
+        f"('<code>Not showing table with empty column(s)</code>') are not in any Total. "
+        f"Cell values are <b>{html.escape(stat_label)}</b> "
+        f"(from log Median column, or recomputed from per-dispatch data)."
+    )
+
+    if arch in _CDNA3_L2_CHAN_ARCHES:
+        return (
+            "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
+            "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+            f"not {yaml_bit}. "
+            "Block 18 (L2 Cache per Channel) expands each placeholder table across "
+            "<code>$total_l2_chan</code> (= <code>l2_banks × num_xcd</code>). "
+            "Example: this run reconciles to 16 channels (CPX / single-XCD) → ~471 rows; "
+            "MI300X SPX would use "
+            "<code>l2_banks(16)×num_xcd(8)=128</code> → "
+            "<code>387 + 1 + 8×128 = 1412</code> rows. "
+            "If sysinfo reports SPX/128 channels but the profiled ROCR device is a "
+            "single-XCD die (<code>cu_per_gpu≈38</code>), channels 16–127 have no "
+            "TCC results and appear as N/A (896 = 112×8 tables) — fix is reconciling "
+            "<code>num_xcd</code>/<code>total_l2_chan</code> to the visible device "
+            "(CPX → 16 channels). "
+            f"{common_tail}"
+            "</p>"
+        )
+
+    if config_arch == "gfx115x" or arch.startswith("gfx115"):
+        return (
+            "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
+            "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+            f"not {yaml_bit}. "
+            "RDNA3.5 / gfx115x has no CDNA Block-18 "
+            "<code>$total_l2_chan</code> L2-per-channel expansion, so Totals stay near "
+            "the YAML entry count (plus any non-channel table expansion). "
+            f"{common_tail}"
+            "</p>"
+        )
+
+    return (
+        "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
+        "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
+        f"not {yaml_bit}. "
+        f"{common_tail}"
+        "</p>"
+    )
+
+
 def _iteration_banner(
     iterations: int | None,
     dispatch_counts: dict[str, int | None],
@@ -668,17 +779,18 @@ def build_report(
         }
         for wl in wl_names
     }
-    # Total counts analyze-table rows parsed from --view table logs, not the
-    # ~408 YAML metric definitions. Block 18 (L2 per channel) expands each
-    # placeholder table across $total_l2_chan channels (e.g. gfx942 SPX:
-    # 387 + 1 + 8×128 = 1412). On a single-XCD (CPX) die, total_l2_chan
-    # should be 16 (l2_banks), not 128 — see MachineSpecsCDNA reconcile.
+    # Total counts analyze-table rows parsed from --view table logs (including
+    # all-N/A cells), not YAML metric definitions. On CDNA3, Block 18 expands
+    # across $total_l2_chan — see build_total_note(). Missing keys (present in
+    # another workload's log only) count as N/A so each card Total matches the
+    # main-table row universe (len(all_keys)).
     for key in all_keys:
         for wl in wl_names:
             mv = parsed[wl].get(key)
-            if mv is None:
-                continue
             summary[wl]["total"] += 1
+            if mv is None:
+                summary[wl]["na"] += 1
+                continue
             if mv.cls in summary[wl]:
                 summary[wl][mv.cls] += 1
 
@@ -712,23 +824,7 @@ def build_report(
             f"<div style='color:#c62828'>🚨 &gt;100% hardware: {s['overflow']}</div></div>"
         )
 
-    total_note = (
-        "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
-        "<b>Total</b> counts analyze-table rows (from <code>--view table</code> logs), "
-        "not YAML metric definitions (~408). "
-        "Block 18 (L2 Cache per Channel) expands via "
-        "<code>$total_l2_chan</code>: e.g. MI300X SPX "
-        "<code>l2_banks(16)×num_xcd(8)=128</code> → "
-        "<code>387 + 1 + 8×128 = 1412</code> rows. "
-        "If sysinfo reports SPX/128 channels but the profiled ROCR device is a "
-        "single-XCD die (<code>cu_per_gpu≈38</code>), channels 16–127 have no "
-        "TCC results and appear as N/A (896 = 112×8 tables) — fix is reconciling "
-        "<code>num_xcd</code>/<code>total_l2_chan</code> to the visible device "
-        "(CPX → 16 channels), not a larger vcopy/mega_kernel. "
-        f"Cell values are <b>{html.escape(stat_label)}</b> "
-        "(from log Median column, or recomputed from per-dispatch data)."
-        "</p>"
-    )
+    total_note = build_total_note(arch, config_arch, summary, len(all_keys), stat_label)
 
     improve_rows: list[str] = []
     delta_rows: list[str] = []
@@ -859,12 +955,18 @@ def build_report(
         )
     if delta_rows:
         n_hi = sum(1 for r in delta_rows if "delta-ge-100" in r)
+        n_delta = len(delta_rows)
+        n_metrics = len(all_keys)
+        delta_of_total_pct = (100.0 * n_delta / n_metrics) if n_metrics else 0.0
         rel_pct = DELTA_REL_THRESHOLD * 100
         hi_pct = DELTA_HIGHLIGHT_THRESHOLD * 100
         near_zero = f"{DELTA_NEAR_ZERO:g}"
+        # Fraction uses unique analyze-table metrics (same universe as card
+        # Total / main table rows), not metric×workload cells.
         improve_section += (
             f"<h2>Value deltas vs {html.escape(baseline_label)} "
-            f"(|rel| ≥ {rel_pct:.0f}%, {len(delta_rows)} rows)</h2>"
+            f"(|rel| ≥ {rel_pct:.0f}%, {n_delta} rows, "
+            f"{delta_of_total_pct:.1f}% of {n_metrics} metrics)</h2>"
             "<p class='filter-note'>Click a column header to sort "
             "(Kernel name, ID, Metric, |rel|, …). "
             f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
@@ -873,7 +975,8 @@ def build_report(
             "|rel| = |new−old|/|old|.</p>"
             "<p class='filter-note'>"
             f"Include when |rel| ≥ {rel_pct:.0f}% "
-            f"({len(delta_rows)} rows)<br>"
+            f"({n_delta} rows, {delta_of_total_pct:.1f}% of "
+            f"{n_metrics} metrics)<br>"
             f"Highlight when |rel| ≥ {hi_pct:.0f}% "
             f"({n_hi} rows)<br>"
             f"Skip when baseline |old| &lt; {near_zero} "
