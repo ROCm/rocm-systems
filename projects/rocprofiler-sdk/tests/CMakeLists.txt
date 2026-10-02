@@ -93,6 +93,7 @@ add_subdirectory(pc_sampling)
 add_subdirectory(hip-graph-tracing)
 add_subdirectory(hip-graph-forkjoin-deadlock)
 add_subdirectory(counter-collection)
+add_subdirectory(counter-collection-per-agent)
 add_subdirectory(kernel-replay-concurrency)
 add_subdirectory(kernel-replay-local-context)
 add_subdirectory(perf-common)
@@ -143,3 +144,6 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} -m unittest spm_runner_preflight_test
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(rocprofiler-sdk-spm-runner-preflight PROPERTIES LABELS "unittests")
+
+# time-boxed repetition of flaky-test suspects (in-tree builds only)
+add_subdirectory(stress)
