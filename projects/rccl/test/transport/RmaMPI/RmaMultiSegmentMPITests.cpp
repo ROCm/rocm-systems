@@ -1042,6 +1042,106 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
     }
 }
 
+// The signal itself lives in a multi-segment window. NEGATIVE: atomics that
+// straddle a segment boundary, are misaligned inside a later segment, or run
+// past the window are rejected without posting. POSITIVE: atomics at the last
+// word of segment 0, the first word of segment 1, and inside segment 2 each
+// land at exactly that offset and nowhere else.
+TEST_F(RmaMultiSegmentMPITest, IPutSignalInLaterSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+    MultiSegmentVmmBuffer* sw = AllocSym(3, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr))
+        GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+
+    const size_t      kSize     = sb->totalSize;
+    const size_t      seg       = sw->segSize;
+    const size_t      sigTotal  = sw->totalSize;
+    constexpr uint8_t kSentinel = 0x6E;
+
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x4C);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, kSize, kSentinel);
+    FillSentinel(sw->ptr, sigTotal, 0);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize,    &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,    &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sigTotal, &sigMh,  &sigGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        const size_t badOffs[] = {seg - 4, seg + 4, sigTotal - 4, sigTotal};
+        for (size_t off : badOffs)
+        {
+            void* req = nullptr;
+            EXPECT_EQ(ncclInvalidArgument,
+                      rma_->iputSignal(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1,
+                                       off, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
+                                       /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+                << "signal at offset " << off << " must be rejected";
+            EXPECT_EQ(req, nullptr) << "rejected iputSignal at offset " << off << " posted a request";
+        }
+    }
+    Barrier();
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(AllSentinel(rb->ptr, kSize, kSentinel))
+            << "rejected iputSignal wrote the payload";
+        EXPECT_TRUE(AllSentinel(sw->ptr, sigTotal, 0))
+            << "rejected iputSignal wrote the signal window";
+    }
+    Barrier();
+
+    struct { size_t off; uint32_t op; uint64_t value; uint64_t expect; } cases[] = {
+        {2 * seg + 64, NCCL_NET_SIGNAL_OP_INC, 0, 1},
+        {seg - 8,      NCCL_NET_SIGNAL_OP_ADD, 5, 5},
+        {seg,          NCCL_NET_SIGNAL_OP_ADD, 7, 7},
+    };
+    if (worldRank_ == 0)
+    {
+        for (const auto& c : cases)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iputSignal(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1,
+                                       c.off, sigMh, c.value, c.op,
+                                       /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+                << "signal at offset " << c.off;
+            ASSERT_TRUE(PollUntilDone(req));
+        }
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x4C))
+            << "iputSignal payload mismatch";
+        std::vector<uint64_t> words(sigTotal / sizeof(uint64_t));
+        ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sigTotal, hipMemcpyDeviceToHost));
+        for (const auto& c : cases)
+        {
+            EXPECT_EQ(words[c.off / sizeof(uint64_t)], c.expect)
+                << "signal missing at offset " << c.off;
+            words[c.off / sizeof(uint64_t)] = 0;
+        }
+        size_t stray = 0, firstStray = 0;
+        for (size_t i = 0; i < words.size(); i++)
+        {
+            if (words[i] != 0 && stray++ == 0) firstStray = i * sizeof(uint64_t);
+        }
+        EXPECT_EQ(stray, 0u) << "stray signal writes; first at offset " << firstStray;
+    }
+}
+
 // Sweep IPut payloads from 0 to the full window across edge sizes (byte, word,
 // page, 64K, and segment boundaries). Verifies the payload landed and that no
 // byte past `size` was touched (catches over-write / boundary-split errors).
