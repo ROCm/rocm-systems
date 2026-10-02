@@ -765,7 +765,6 @@ def test_pre_processing_persists_membw_analysis_config(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace()
     mock_soc.profiling_setup.return_value = effective_filter_blocks
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -810,7 +809,6 @@ def test_pre_processing_pmc_power_gating_warning(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
     mock_soc.profiling_setup.return_value = []
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",

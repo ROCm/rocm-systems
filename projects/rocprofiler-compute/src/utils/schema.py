@@ -32,9 +32,6 @@ class ArchConfig:
     # [Index: Metric name] pairs
     metric_list: dict[str, str] = field(default_factory=dict)
 
-    # [Metric name: Counters] pairs
-    metric_counters: dict[str, list] = field(default_factory=dict)
-
 
 @dataclass
 class Workload:
@@ -45,7 +42,6 @@ class Workload:
     filter_kernel_ids: list[int] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
-    avail_ips: list[int] = field(default_factory=list)
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)

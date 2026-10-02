@@ -3,10 +3,7 @@
 
 """Shared helpers for memory chart renderers (gfx9, gfx11, gfx1250)."""
 
-import argparse
-import json
 import math
-import pathlib
 import re
 from collections.abc import Callable
 from io import StringIO
@@ -68,7 +65,7 @@ def format_value(
     return f"{numeric:.{precision}f}{unit}"
 
 
-def format_scientific(value: Union[int, float, str, None], precision: int = 2) -> str:
+def format_scientific(value: Union[int, float, str, None]) -> str:
     """Format as rounded integer (<1000) or scientific notation (>=1000)."""
     if value is None:
         return "N/A"
@@ -80,7 +77,7 @@ def format_scientific(value: Union[int, float, str, None], precision: int = 2) -
         return "N/A"
     if abs(numeric) < 1000:
         return str(round(numeric))
-    return f"{numeric:.{precision}e}"
+    return f"{numeric:.2e}"
 
 
 def colored(text: str, color: str) -> str:
@@ -181,25 +178,21 @@ def format_mem_chart_heading(
     normal_unit: str,
     *,
     panel_id: int = 300,
-    section_label: str = "Memory Chart",
 ) -> str:
-    """Build heading: '{panel_id//100}. {label} (Normalization: {unit})'."""
+    """Build heading: '{panel_id//100}. Memory Chart (Normalization: {unit})'."""
     section = max(0, int(panel_id)) // 100
-    return f"{section}. {section_label} (Normalization: {normal_unit})"
+    return f"{section}. Memory Chart (Normalization: {normal_unit})"
 
 
 def build_legend(
     *,
     include_atomic: bool = True,
-    include_util: bool = True,
     include_stall: bool = False,
 ) -> str:
     """Build the color legend string from ``_LEGEND_ENTRIES``."""
     exclude = set()
     if not include_atomic:
         exclude.add("atomic")
-    if not include_util:
-        exclude.add("util")
     entries = [
         (symbol, label, key)
         for symbol, label, key in _LEGEND_ENTRIES
@@ -342,76 +335,3 @@ def render_chart_to_string(
     )
     create_fn(flat, console, show_debug=False, **diagram_kwargs)
     return buf.getvalue()
-
-
-def mem_chart_cli_main(
-    description: str,
-    create_fn: Callable[..., None],
-    normalize_fn: Callable[[dict[str, Any]], dict[str, Any]],
-    default_metrics: dict[str, Any],
-    console_width: int = 240,
-) -> None:
-    """Shared CLI entry point for memory chart renderers."""
-    arg_parser = argparse.ArgumentParser(description=description)
-    arg_parser.add_argument("--data", "-d", help="JSON file with metrics data")
-    arg_parser.add_argument("--debug", action="store_true", help="Show debug info")
-    arg_parser.add_argument("--norm", default="per_kernel", help="Normalization unit")
-    arg_parser.add_argument("--arch", default=None, help="GPU architecture")
-    arg_parser.add_argument("--txt", help="Write plain text to file")
-    arg_parser.add_argument("--svg", help="Write SVG to file")
-    args = arg_parser.parse_args()
-
-    if args.data:
-        with pathlib.Path(args.data).open(encoding="utf-8") as fp:
-            metrics = normalize_fn(json.load(fp))
-    else:
-        metrics = normalize_fn(dict(default_metrics))
-
-    heading = format_mem_chart_heading(args.norm)
-    arch_kwargs: dict[str, Any] = {}
-    if args.arch:
-        arch_kwargs["gpu_arch"] = args.arch
-
-    if args.txt:
-        buf = StringIO()
-        console = Console(
-            file=buf,
-            force_terminal=False,
-            width=console_width,
-            height=80,
-        )
-        create_fn(
-            metrics,
-            console,
-            show_debug=args.debug,
-            chart_title=heading,
-            **arch_kwargs,
-        )
-        with pathlib.Path(args.txt).open("w", encoding="utf-8") as fp:
-            fp.write(strip_ansi(buf.getvalue()))
-        return
-
-    if args.svg:
-        console = Console(
-            record=True,
-            width=console_width,
-            height=80,
-        )
-        create_fn(
-            metrics,
-            console,
-            show_debug=args.debug,
-            chart_title=heading,
-            **arch_kwargs,
-        )
-        console.save_svg(args.svg, title="Memory Chart")
-        return
-
-    console = Console(width=console_width)
-    create_fn(
-        metrics,
-        console,
-        show_debug=args.debug,
-        chart_title=heading,
-        **arch_kwargs,
-    )

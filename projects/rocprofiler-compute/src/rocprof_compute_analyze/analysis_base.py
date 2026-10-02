@@ -176,15 +176,14 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def load_options(self, normalization_filter: Optional[str]) -> None:
+    def load_options(self) -> None:
         args = self.get_args()
-        target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
             build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
-                target_filter,
+                args.normal_unit,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -197,9 +196,7 @@ class OmniAnalyze_Base:
                 )
 
     @demarcate
-    def initalize_runs(
-        self, normalization_filter: Optional[str] = None
-    ) -> OrderedDict[str, schema.Workload]:
+    def initalize_runs(self) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
 
         # load required configs
@@ -217,7 +214,7 @@ class OmniAnalyze_Base:
                     getattr(self, "_profiling_config", {}),
                 )
 
-        self.load_options(normalization_filter)
+        self.load_options()
 
         for path_info in args.path:
             w = schema.Workload()
@@ -257,7 +254,6 @@ class OmniAnalyze_Base:
                         w.sys_info = parser.correct_sys_info(
                             mspec, args.specs_correction
                         )
-                w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
                 w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
                 w.dfs_type = self._arch_configs[arch].dfs_type
                 self._runs[path_info[0]] = w

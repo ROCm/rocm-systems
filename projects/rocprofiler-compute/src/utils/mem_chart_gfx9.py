@@ -26,7 +26,6 @@ from utils.mem_chart_common import (
     format_scientific,
     format_value,
     make_arrows,
-    mem_chart_cli_main,
     metric_line,
     pad_to,
     progress_bar,
@@ -772,18 +771,3 @@ def plot_mem_chart(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    """CLI entry point for the CDNA memory chart."""
-    mem_chart_cli_main(
-        "CDNA Memory Chart - CLI",
-        create_mem_chart_diagram,
-        normalize_mem_chart_metrics,
-        DEFAULT_SAMPLE_METRICS,
-        console_width=_CONSOLE_WIDTH,
-    )
-
-
-if __name__ == "__main__":
-    main()

@@ -291,7 +291,7 @@ class TestBuildDfs:
         assert list(ac.dfs[201]["Metric"]) == ["M1"]
         assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
-    def test_metric_counters_only_for_built_metrics(self):
+    def test_expressions_only_for_built_metrics(self):
         ac = _make_arch_config([
             (
                 200,
@@ -309,9 +309,6 @@ class TestBuildDfs:
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
 
-        assert "Kept" in ac.metric_counters
-        assert "Dropped" not in ac.metric_counters
-        assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
         assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
 
     @pytest.mark.parametrize(
@@ -522,13 +519,13 @@ class TestApplyFilters:
         """A string GPU filter keeps only matching rows."""
         workload = _filter_workload()
         workload.filter_gpu_ids = "0"
-        assert len(apply_filters(workload, "/tmp", False)) == 2
+        assert len(apply_filters(workload, False)) == 2
 
     def test_dispatch_id_filter(self) -> None:
         """A dispatch-ID filter keeps only matching rows."""
         workload = _filter_workload()
         workload.filter_dispatch_ids = ["1", "2"]
-        filtered = apply_filters(workload, "/tmp", False)
+        filtered = apply_filters(workload, False)
         assert list(filtered["Dispatch_ID"]) == [1, 2]
         assert list(filtered["Kernel_Name"]) == ["vecCopy", "vecAdd"]
 
@@ -537,7 +534,7 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.raw_pmc.index = [30, 31, 32, 33]
         workload.filter_dispatch_ids = ["2"]
-        filtered = apply_filters(workload, "/tmp", False)
+        filtered = apply_filters(workload, False)
         assert list(filtered["Dispatch_ID"]) == [2]
         assert list(filtered["Kernel_Name"]) == ["vecAdd"]
 
@@ -550,7 +547,7 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.filter_dispatch_ids = ["0"]
         with pytest.raises(SystemExit):
-            apply_filters(workload, "/tmp", False)
+            apply_filters(workload, False)
         assert "0 is an invalid dispatch id" in str(error_calls[0])
         assert "from 1 to 4" in str(error_calls[0])
 
@@ -558,14 +555,14 @@ class TestApplyFilters:
         """'> 0' skips nothing and keeps every dispatch."""
         workload = _filter_workload()
         workload.filter_dispatch_ids = [">0"]
-        filtered = apply_filters(workload, "/tmp", False)
+        filtered = apply_filters(workload, False)
         assert list(filtered["Dispatch_ID"]) == [1, 2, 3, 4]
 
     def test_dispatch_greater_than_dispatch_count_keeps_none(self) -> None:
         """'> n' where n is the number of dispatches skips all of them."""
         workload = _filter_workload()
         workload.filter_dispatch_ids = [">4"]
-        assert apply_filters(workload, "/tmp", False).empty
+        assert apply_filters(workload, False).empty
 
     def test_dispatch_greater_than_threshold_keeps_sparse_ids(self) -> None:
         """'> n' compares against dispatch ids, not the dispatch count."""
@@ -576,7 +573,7 @@ class TestApplyFilters:
             "Dispatch_ID": [1, 6],
         })
         workload.filter_dispatch_ids = [">4"]
-        filtered = apply_filters(workload, "/tmp", False)
+        filtered = apply_filters(workload, False)
         assert list(filtered["Dispatch_ID"]) == [6]
 
     def test_dispatch_greater_than_highest_id_errors(self, monkeypatch) -> None:
@@ -588,7 +585,7 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.filter_dispatch_ids = [">5"]
         with pytest.raises(SystemExit):
-            apply_filters(workload, "/tmp", False)
+            apply_filters(workload, False)
         assert ">5 is an invalid dispatch id" in str(error_calls[0])
         assert "from 1 to 4" in str(error_calls[0])
 
@@ -602,14 +599,14 @@ class TestApplyFilters:
         workload.raw_pmc = workload.raw_pmc.iloc[0:0]
         workload.filter_dispatch_ids = [">0"]
         with pytest.raises(SystemExit):
-            apply_filters(workload, "/tmp", False)
+            apply_filters(workload, False)
         assert "This workload has no dispatches." in str(error_calls[0])
 
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
         workload = _filter_workload()
         workload.filter_gpu_ids = [0, 1]
-        assert len(apply_filters(workload, "/tmp", False)) == 4
+        assert len(apply_filters(workload, False)) == 4
 
 
 class TestApplyKernelFilter:

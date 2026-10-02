@@ -150,8 +150,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
 
     expected_num_xcd = "4" if specs_correction else 8
     assert workload.sys_info["num_xcd"].item() == expected_num_xcd
-    # initalize_runs reads ip_blocks off sys_info straight after the correction.
-    assert workload.avail_ips == sysinfo["ip_blocks"].split("|")
 
 
 # =============================================================================

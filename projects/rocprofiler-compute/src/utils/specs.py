@@ -892,7 +892,7 @@ class MachineSpecs:
             self.l2_banks,
             getattr(self, "compute_partition", None),
         )
-        self.num_dies = mi_gpu_specs.get_num_dies(self.gpu_arch, self.gpu_model)
+        self.num_dies = mi_gpu_specs.get_num_dies(self.gpu_model)
         self.cache_sizes = set_cache_sizes(
             self.gpu_model,
             gpu_info["num_compute_units"],
@@ -1088,11 +1088,3 @@ class MachineSpecsRDNA35(MachineSpecs):
             self.num_memory_channels = str(int(bit_width) // 32)
         else:
             self.num_memory_channels = self.total_l2_chan
-
-
-if __name__ == "__main__":
-    specs = generate_machine_specs(None, None)
-    if specs:
-        print(specs)
-    else:
-        console_error("specs", "Failed to generate machine specifications", exit=False)

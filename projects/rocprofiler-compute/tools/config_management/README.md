@@ -24,17 +24,23 @@ rocprofiler-compute/
 │       │   └── 0000_top_stats.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
+│       ├── gfx941/
+│       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
+│       ├── gfx1250/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
-│       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
+│       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
+│       └── gfx12_config_template.yaml   # gfx12xx panel contract
 │
 └── tools/config_management/
     ├── master_config_workflow_script.py
+    ├── metric_description_manager.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
     ├── hash_manager.py
     ├── hash_checker.py
+    ├── utils_ruamel.py
     ├── .config_hashes.json
     └── README.md
 ```
@@ -176,7 +182,7 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,940,941,942,950,115x,1250}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
   └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
