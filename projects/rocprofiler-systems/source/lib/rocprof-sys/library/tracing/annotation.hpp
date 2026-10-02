@@ -63,11 +63,11 @@ add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
     static_assert(concepts::is_string_type<named_type>::value,
                   "Error! name is not a string type");
 
-    auto _get_dbg = [&]() {
+    auto const _get_dbg = [&]() {
         auto* _dbg = ctx.event()->add_debug_annotations();
         if(_idx >= 0)
         {
-            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
+            auto const _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
             _dbg->set_name(_arg_name);
         }
         else
@@ -152,7 +152,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         }
         else
         {
-            auto* _value = reinterpret_cast<type*>(_annotation.value);
+            auto const* _value = reinterpret_cast<type*>(_annotation.value);
             add_perfetto_annotation(ctx, _annotation.name, *_value);
         }
     }
@@ -230,20 +230,20 @@ private:
                                                                         obj.get()))
     {
         static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        auto _labels = obj.label_array();
-        auto _data   = obj.get();
-        auto _size   = std::min<size_t>(_labels.size(), _data.size());
+        auto const _labels = obj.label_array();
+        auto const _data   = obj.get();
+        auto const _size   = std::min<size_t>(_labels.size(), _data.size());
         return std::make_tuple(_size, _labels, _data);
     }
 
     template <typename T, typename DataT>
     static auto sfinae_data(T& obj, long)
     {
-        using strvec_t    = std::vector<std::string>;
-        using datavec_t   = std::vector<DataT>;
-        size_t    _size   = 1;
-        strvec_t  _labels = { obj.get_label() };
-        datavec_t _data   = { obj.get() };
+        using strvec_t          = std::vector<std::string>;
+        using datavec_t         = std::vector<DataT>;
+        size_t const    _size   = 1;
+        strvec_t const  _labels = { obj.get_label() };
+        datavec_t const _data   = { obj.get() };
         return std::tuple<size_t, strvec_t, datavec_t>{ _size, _labels, _data };
     }
 };
