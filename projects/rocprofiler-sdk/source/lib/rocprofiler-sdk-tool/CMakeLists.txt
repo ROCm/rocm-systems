@@ -13,10 +13,19 @@ set(TOOL_HEADERS
     helper.hpp
     kernel_filter_range.hpp
     kernel_iteration_filter.hpp
+    kernel_replay_plan.hpp
     stream_stack.hpp)
 
-set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp kernel_filter_range.cpp
-                 kernel_iteration_filter.cpp main.c stream_stack.cpp tool.cpp)
+set(TOOL_SOURCES
+    att_no_intercept.cpp
+    config.cpp
+    graph_stack.cpp
+    kernel_filter_range.cpp
+    kernel_iteration_filter.cpp
+    kernel_replay_plan.cpp
+    main.c
+    stream_stack.cpp
+    tool.cpp)
 
 if(rocprof-trace-decoder_FOUND)
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)

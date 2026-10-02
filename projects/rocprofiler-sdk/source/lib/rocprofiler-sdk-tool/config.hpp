@@ -162,6 +162,12 @@ struct config : output_config
     // snapshot/restore between passes). The pass count is the number of counter groups.
     bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
 
+    // With --att under kernel replay, how many of the configured counter groups run ahead of the
+    // dispatch thread trace pass. rocprofv3 derives it from the job order of a job_replay_mode:
+    // kernel input file; the command line traces first.
+    uint64_t kernel_replay_att_after_groups =
+        get_env<uint64_t>("ROCPROF_KERNEL_REPLAY_ATT_AFTER_GROUPS", 0);
+
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
     std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
@@ -357,6 +363,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
     CFG_SERIALIZE_MEMBER(kernel_replay);
+    CFG_SERIALIZE_MEMBER(kernel_replay_att_after_groups);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
     CFG_SERIALIZE_MEMBER(att_no_intercept);

@@ -29,6 +29,7 @@
 #include "graph_stack.hpp"
 #include "helper.hpp"
 #include "kernel_iteration_filter.hpp"
+#include "kernel_replay_plan.hpp"
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
@@ -399,26 +400,14 @@ thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 // a lookup only matches the dispatch id the plan was made for, so a plan cannot leak into another
 // dispatch.
 //
-// With --att, a targeted dispatch gets one extra pass ahead of its counter passes: pass 0 runs the
-// dispatch thread trace with counter collection switched off, and counter group g runs on pass
-// g + 1 with the trace switched off. The two never share a pass -- the trace perturbs the counters,
-// and both services write the single per-dispatch user_data slot the SDK hands out.
-struct replay_dispatch_plan_t
+// With --att, a targeted dispatch gets one extra pass that runs the dispatch thread trace with
+// counter collection switched off, while every counter pass runs with the trace switched off (see
+// tool::replay_pass_layout). The two never share a pass -- the trace perturbs the counters, and
+// both services write the single per-dispatch user_data slot the SDK hands out.
+struct replay_dispatch_plan_t : tool::replay_pass_layout
 {
-    rocprofiler_dispatch_id_t dispatch_id       = 0;
-    bool                      targeted          = false;
-    bool                      thread_trace_pass = false;
-    uint64_t                  counter_passes    = 0;
-
-    uint64_t total_passes() const { return (thread_trace_pass ? 1 : 0) + counter_passes; }
-
-    // The counter group a replay pass collects, or nullopt for the thread trace pass.
-    std::optional<uint64_t> counter_group(uint64_t pass) const
-    {
-        if(!thread_trace_pass) return pass;
-        if(pass == 0) return std::nullopt;
-        return pass - 1;
-    }
+    rocprofiler_dispatch_id_t dispatch_id = 0;
+    bool                      targeted    = false;
 };
 
 thread_local auto tl_replay_plan = std::optional<replay_dispatch_plan_t>{};
@@ -1565,6 +1554,9 @@ struct agent_profiles
     const uint64_t                                                    rotation;
     const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
         profiles;
+    // For each of an agent's profiles, the position in the configured group list of the group it
+    // was built from. An agent skips groups it cannot collect, so this is not always 0..N-1.
+    const std::unordered_map<rocprofiler_agent_id_t, std::vector<uint64_t>> group_sources;
 };
 
 std::optional<rocprofiler_counter_config_id_t>
@@ -1659,21 +1651,26 @@ generate_agent_profiles()
 {
     std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
                                                                       profiles;
+    std::unordered_map<rocprofiler_agent_id_t, std::vector<uint64_t>> sources;
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
     for(const auto& agent : get_gpu_agents())
     {
+        uint64_t group_idx = 0;
         for(const auto& counter_set : tool::get_config().counters)
         {
+            const auto source = group_idx++;
             if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
             auto profile = construct_counter_collection_profile(agent->id, counter_set);
             if(profile.has_value())
             {
                 profiles[agent->id].push_back(profile.value());
+                sources[agent->id].push_back(source);
             }
         }
         pos[agent->id] = 0;
     }
-    return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
+    return agent_profiles{
+        std::move(pos), tool::get_config().counter_groups_interval, profiles, sources};
 }
 
 // Shared, lazily-built per-agent profile set (one config per counter group). Used by both the
@@ -1795,6 +1792,16 @@ get_replay_group_count(rocprofiler_agent_id_t agent_id)
     return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
 }
 
+// Where an agent's counter groups came from in the configured group list (see agent_profiles).
+const std::vector<uint64_t>&
+get_replay_group_sources(rocprofiler_agent_id_t agent_id)
+{
+    static const auto none        = std::vector<uint64_t>{};
+    const auto&       sources_map = get_agent_profiles().group_sources;
+    const auto        sources     = sources_map.find(agent_id);
+    return (sources == sources_map.end()) ? none : sources->second;
+}
+
 // The plan kernel replay made at CONFIG for this dispatch, or null when replay never planned it (a
 // HIP graph launch or a multi-packet submission, which the SDK runs without CONFIG).
 const replay_dispatch_plan_t*
@@ -1812,8 +1819,11 @@ plan_replay_dispatch(const rocprofiler_kernel_dispatch_info_t& dispatch_info)
     plan.targeted    = is_targeted_kernel(dispatch_info.kernel_id, counter_kernel_iteration);
     if(plan.targeted)
     {
-        plan.thread_trace_pass = replay_thread_trace_agents.count(dispatch_info.agent_id) > 0;
-        plan.counter_passes    = get_replay_group_count(dispatch_info.agent_id);
+        plan.counter_passes = get_replay_group_count(dispatch_info.agent_id);
+        if(replay_thread_trace_agents.count(dispatch_info.agent_id) > 0)
+            plan.thread_trace_pass =
+                tool::thread_trace_pass_index(get_replay_group_sources(dispatch_info.agent_id),
+                                              tool::get_config().kernel_replay_att_after_groups);
     }
     return plan;
 }
@@ -2689,11 +2699,13 @@ kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_in
     return (n == 0) ? 1 : n;
 }
 
-// Switch services for a replay pass of a dispatch planned with a thread trace pass: pass 0 traces
-// with counter collection off, and pass 1 swaps them. The SDK keeps a local toggle for the rest of
-// the loop and restores both contexts when the loop ends, so later passes need nothing.
+// Switch services for a replay pass of a dispatch planned with a thread trace pass: the thread
+// trace pass runs with counter collection off, and every counter pass with the trace off. Both
+// contexts are set on every pass, wherever the thread trace pass falls; the SDK keeps each local
+// toggle for the rest of the loop and restores both contexts when the loop ends.
 void
-select_thread_trace_pass_services(const rocprofiler_callback_tracing_kernel_replay_data_t& payload)
+select_thread_trace_pass_services(const rocprofiler_callback_tracing_kernel_replay_data_t& payload,
+                                  const replay_dispatch_plan_t&                            plan)
 {
     auto toggle = [&payload](bool enable, rocprofiler_context_id_t ctx, std::string_view what) {
         auto fn = enable ? payload.replay_start_context : payload.replay_stop_context;
@@ -2708,15 +2720,9 @@ select_thread_trace_pass_services(const rocprofiler_callback_tracing_kernel_repl
             << payload.current_pass << ": " << rocprofiler_get_status_string(status);
     };
 
-    if(payload.current_pass == 0)
-    {
-        toggle(false, counter_collection_ctx, "counter collection");
-    }
-    else if(payload.current_pass == 1)
-    {
-        toggle(false, att_replay_context, "thread trace");
-        toggle(true, counter_collection_ctx, "counter collection");
-    }
+    const bool thread_trace = !plan.counter_group(payload.current_pass).has_value();
+    toggle(!thread_trace, counter_collection_ctx, "counter collection");
+    toggle(thread_trace, att_replay_context, "thread trace");
 }
 
 // Kernel replay CONFIG callback: plan the dispatch and install the pass-count callback during
@@ -2754,7 +2760,7 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
 
             if(const auto* plan = get_replay_plan(payload->dispatch_info.dispatch_id);
                plan && plan->thread_trace_pass)
-                select_thread_trace_pass_services(*payload);
+                select_thread_trace_pass_services(*payload, *plan);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
