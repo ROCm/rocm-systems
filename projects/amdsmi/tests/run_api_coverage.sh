@@ -22,6 +22,7 @@
 #   -t, --tests-dir DIR  installed or build test dir holding amdsmitst
 #   -H, --history FILE   accumulate the trend in one file instead of inheriting
 #                        it from the previous run directory
+#       --no_history     don't write this run's row to the trend at all
 #   -n, --notes TEXT     free-text note recorded with this run
 #   -U, --unit-filter P  positive GTest pattern for the Unit column (default *Unit*)
 #   -F, --func-filter P  positive GTest pattern for the Functional column
@@ -66,6 +67,7 @@ SRC_ROOT="$(dirname "$SCRIPT_DIR")"
 TESTS_DIR="${AMDSMI_PATH:-/opt/rocm/share/amd_smi}/tests"
 OUTDIR=""
 HISTORY=""
+NO_HISTORY=0
 NOTES=""
 # Positive GTest selection, split so the Unit and Functional columns stay
 # separate. The per-ASIC exclusions from amdsmitst.exclude are appended as the
@@ -91,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     -H | --history)
       [[ $# -ge 2 ]] || { echo "error: $1 needs a value" >&2; exit 2; }
       HISTORY="$2"; shift 2 ;;
+    --no_history) NO_HISTORY=1; shift ;;
     -n | --notes)
       [[ $# -ge 2 ]] || { echo "error: $1 needs a value" >&2; exit 2; }
       NOTES="$2"; shift 2 ;;
@@ -125,6 +128,15 @@ OUTDIR="${OUTDIR:-$PWD/api-coverage-results-$(date +%Y-%m-%dT%H-%M-%S)}"
 mkdir -p "$OUTDIR" || exit 2
 OUTDIR="$(cd "$OUTDIR" && pwd)"
 echo "logs -> $OUTDIR" >&2
+
+# Reusing -o across runs (e.g. rerunning with --no-cpp) must not let a suite
+# that didn't execute this time keep a previous run's log in place -- that
+# would make api_summary.py silently count stale results as current. Clear
+# every known log up front so a skipped suite leaves its log absent instead,
+# which the missing-log check below already reports correctly.
+for log in _c_unit_test.log _c_func_test.log _py_unit_test.log _py_func_test.log _py_cli_test.log; do
+  rm -f "$OUTDIR/$log"
+done
 
 # The installed tree names the Python suites python_unittest/; the source tree
 # calls it python/. Accept either so this works before and after `make install`.
@@ -234,6 +246,7 @@ python3 "$SCRIPT_DIR/api_summary.py" --verbose ERROR \
 # api_coverage_trend.csv carrying forward the previous run dir's rows.
 REPORT_ARGS=(--log_dir "$OUTDIR" --amdsmi "$SRC_ROOT/include/amd_smi/amdsmi.h")
 [[ -n "$HISTORY" ]] && REPORT_ARGS+=(--history "$HISTORY")
+[[ "$NO_HISTORY" == 1 ]] && REPORT_ARGS+=(--no_history)
 [[ -n "$NOTES" ]] && REPORT_ARGS+=(--notes "$NOTES")
 python3 "$SCRIPT_DIR/api_coverage_report.py" "${REPORT_ARGS[@]}" || exit 1
 
