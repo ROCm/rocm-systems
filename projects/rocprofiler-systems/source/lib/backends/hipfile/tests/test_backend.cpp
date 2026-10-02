@@ -56,6 +56,9 @@ constexpr std::size_t k_zero_gpu_slot     = 0;
 constexpr std::size_t k_adjacent_gpu_slot = 2;
 constexpr std::size_t k_far_gpu_slot      = 4;
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileBackendTest : public ::testing::Test
 {
 protected:

@@ -78,6 +78,9 @@ constexpr double        k_nine_kilobyte_bandwidth = 9'000.0;
 constexpr double        k_four_kilobyte_bandwidth = 4'000.0;
 constexpr double        k_five_kilobyte_bandwidth = 5000.0;
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileDeviceTest : public ::testing::Test
 {
 protected:

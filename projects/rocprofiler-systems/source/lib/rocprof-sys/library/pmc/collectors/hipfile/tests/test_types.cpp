@@ -81,6 +81,7 @@ TEST(HipFileMetricTable, named_bits_match_metric_table_positions)
         const auto entry = expected.find(metric.suffix);
         ASSERT_NE(entry, expected.end());
 
+        // NOLINTNEXTLINE(misc-const-correctness) -- the setter writes the selected bit
         enabled_metrics probe{};
         entry->second(probe);
 
