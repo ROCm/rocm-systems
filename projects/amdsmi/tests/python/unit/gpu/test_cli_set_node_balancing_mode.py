@@ -56,7 +56,13 @@ Two layers are covered here, modeled on ``test_cli_set_clk_limit.py`` /
   * ``AMDSMI_STATUS_NOT_SUPPORTED`` (the balancing-mode-specific divergence
     from ``amdsmi_set_npm_limit()``, which uses ``AMDSMI_STATUS_INVAL`` for
     its own disabled-check) returns a "not supported on this node" message
-    without raising.
+    without raising. To tell this apart from "the requested mode is absent
+    from this platform's ``supported_npm_mode`` bitmask" (same status code),
+    the catch block separately queries
+    ``amdsmi_get_npm_supported_balancing_modes()``: if the requested mode is
+    missing from that result, the message becomes ``"BALANCING_MODE:
+    [AMDSMI_STATUS_NOT_SUPPORTED] <mode> is not supported on this
+    platform"`` instead of the generic message above.
   * Any other library exception (e.g. ``AMDSMI_STATUS_INVAL``) is reported as
     an error message referencing the requested mode, without raising.
 
@@ -129,6 +135,11 @@ def _build_fake_amdsmi():
     interface.AMDSMI_MAX_UTIL = 100
     # Overwritten per-test.
     interface.amdsmi_set_npm_balancing_mode = lambda _handle, _mode: None
+    # Defaults to "both modes supported" so existing NOT_SUPPORTED tests (which
+    # pre-date this query and mean "NPM disabled") keep getting the generic
+    # message; overwritten per-test to exercise the "mode not supported on
+    # this platform" branch.
+    interface.amdsmi_get_npm_supported_balancing_modes = lambda _handle: ["PB", "FB"]
 
     exception.AmdSmiLibraryException = _FakeLibraryException
 
@@ -323,6 +334,9 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: self.calls.append((h, m))
+        # Reset to "both modes supported" each test -- individual tests
+        # override this to exercise the "mode absent from platform" branch.
+        self.interface.amdsmi_get_npm_supported_balancing_modes = lambda h: ["PB", "FB"]
 
     def _validate(self, node_handle, requested_mode):
         # A lightweight duck-typed ``self`` -- exercises the real, unbound
@@ -333,6 +347,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
             error_collector=mock.Mock(),
             get_output_format=lambda: "human",
             NPM_BALANCING_MODE_FROM_CLI=self.helpers_cls.NPM_BALANCING_MODE_FROM_CLI,
+            NPM_BALANCING_MODE_TO_CLI=self.helpers_cls.NPM_BALANCING_MODE_TO_CLI,
         )
         logger = _FakeLogger()
         return fake_self, self.validate(fake_self, node_handle, requested_mode, logger)
@@ -376,6 +391,29 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
 
         self.assertIn(
             "NPM balancing mode is not supported on this node; cannot set balancing mode", result
+        )
+        fake_self.error_collector.record_library_error.assert_called_once_with(
+            _STATUS_NOT_SUPPORTED
+        )
+
+    def test_not_supported_mode_absent_from_platform_reports_distinct_message(self):
+        # Disambiguates from the generic "NPM disabled" message above: when the
+        # requested mode is absent from amdsmi_get_npm_supported_balancing_modes()'s
+        # bitmask, the same AMDSMI_STATUS_NOT_SUPPORTED is reported with a
+        # platform-specific message instead.
+        self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: (_ for _ in ()).throw(
+            _FakeLibraryException(
+                _STATUS_NOT_SUPPORTED, "AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+            )
+        )
+        self.interface.amdsmi_get_npm_supported_balancing_modes = lambda h: ["FB"]
+
+        fake_self, result = self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
+
+        self.assertIn(
+            "BALANCING_MODE: [AMDSMI_STATUS_NOT_SUPPORTED] "
+            "POWER_BALANCING is not supported on this platform",
+            result,
         )
         fake_self.error_collector.record_library_error.assert_called_once_with(
             _STATUS_NOT_SUPPORTED

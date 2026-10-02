@@ -716,7 +716,12 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   try {
     // Navigate to the board directory from the DRM device path
     fs::path board_dir = drm_device_path / "board";
-    fs::path npm_status = board_dir / "npm_status";
+    // MI4xx exposes npm_status under board/npm/; MI350 exposes it directly
+    // under board/. Check both locations, no ASIC-specific branching.
+    fs::path npm_status = board_dir / "npm" / "npm_status";
+    if (!fs::exists(npm_status)) {
+      npm_status = board_dir / "npm_status";
+    }
 
     // Check if board directory and npm_status exist
     if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
@@ -1893,6 +1898,38 @@ amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t li
   rsmi_status_t rstatus =
       rsmi_dev_npm_limit_set(0, reinterpret_cast<uintptr_t>(node_handle), limit);
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || supported_modes == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  uint64_t bitmask = 0;
+  rsmi_status_t rstatus = rsmi_dev_npm_supported_balancing_modes_get(
+      0, reinterpret_cast<uintptr_t>(node_handle), &bitmask);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *supported_modes = static_cast<amdsmi_bit_field_t>(bitmask);
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,

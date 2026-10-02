@@ -123,12 +123,12 @@ TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "disabled");
-  board.WriteFile("npm_mode", "1");
+  board.WriteFile("mode", "1");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  // Get is never gated on NPM enablement; it reflects board/npm_mode even
+  // Get is never gated on NPM enablement; it reflects board/mode even
   // while NPM is disabled.
   EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
@@ -140,11 +140,11 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  // The platform/driver creates board/npm_mode with its default value ("1")
+  // The platform/driver creates board/mode with its default value ("1")
   // when NPM is enabled; simulate that here rather than leaving the file
   // absent, since a genuinely missing/unreadable file now reports
   // AMDSMI_STATUS_SUCCESS + AMDSMI_NPM_BALANCING_MODE_INVALID (N/A).
-  board.WriteFile("npm_mode", "1");
+  board.WriteFile("mode", "1");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
@@ -159,7 +159,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsInvalidMode) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  // Deliberately do not create board/npm_mode: the sysfs node absent/
+  // Deliberately do not create board/mode: the sysfs node absent/
   // unreadable must report N/A (INVALID), not a fabricated PB, and must
   // agree with amdsmi_set_npm_balancing_mode()'s NOT_SUPPORTED for the
   // identical state (see SetNpmBalancingModeRootMissingModeFileIsNotSupported).
@@ -177,7 +177,7 @@ TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  board.WriteFile("npm_mode", "0");
+  board.WriteFile("mode", "0");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
@@ -193,7 +193,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  board.WriteFile("npm_mode", "2");
+  board.WriteFile("mode", "2");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
@@ -256,17 +256,17 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "disabled");
-  board.WriteFile("npm_mode", "1");
+  board.WriteFile("mode", "1");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
-  // Must not even open board/npm_mode for write when NPM is disabled: this is
+  // Must not even open board/mode for write when NPM is disabled: this is
   // AMDSMI_STATUS_NOT_SUPPORTED, a deliberate divergence from
   // amdsmi_set_npm_limit()'s own disabled-check (AMDSMI_STATUS_INVAL).
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
             AMDSMI_STATUS_NOT_SUPPORTED);
   // The file must be untouched.
-  EXPECT_EQ(board.ReadFile("npm_mode"), "1");
+  EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
@@ -279,13 +279,13 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  board.WriteFile("npm_mode", "1");
+  board.WriteFile("mode", "1");
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
             AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(board.ReadFile("npm_mode"), "2");
+  EXPECT_EQ(board.ReadFile("mode"), "2");
 
   amdsmi_npm_balancing_mode_t readback = AMDSMI_NPM_BALANCING_MODE_INVALID;
   EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &readback), AMDSMI_STATUS_SUCCESS);
@@ -293,7 +293,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
             AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(board.ReadFile("npm_mode"), "1");
+  EXPECT_EQ(board.ReadFile("mode"), "1");
 
   readback = AMDSMI_NPM_BALANCING_MODE_INVALID;
   EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &readback), AMDSMI_STATUS_SUCCESS);
@@ -310,7 +310,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  // Deliberately do not create board/npm_mode: set_npm_board_mode() requires
+  // Deliberately do not create board/mode: set_npm_board_mode() requires
   // the file to already exist (it does not create it), mirroring
   // set_npm_board_limit()'s missing-file handling.
   std::string board_path = board.path().string();
@@ -342,4 +342,152 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
             AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  if (!amd::smi::is_sudo_user()) {
+    GTEST_SKIP_("Invalid permission - Must run as super user");
+  }
+
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("mode", "1");
+  // bit 2 (FREQUENCY_BALANCING) only -- POWER_BALANCING (bit 1) is absent.
+  board.WriteFile("supported_mode", "0x4");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  // The file must be untouched.
+  EXPECT_EQ(board.ReadFile("mode"), "1");
+}
+
+TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  if (!amd::smi::is_sudo_user()) {
+    GTEST_SKIP_("Invalid permission - Must run as super user");
+  }
+
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("mode", "1");
+  // bits 1+2 -- both modes supported, matching today's real platforms.
+  board.WriteFile("supported_mode", "0x6");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(board.ReadFile("mode"), "2");
+}
+
+TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
+  // The supported_mode sysfs file is not yet implemented on all driver
+  // versions; its absence must not block an otherwise-valid set.
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  if (!amd::smi::is_sudo_user()) {
+    GTEST_SKIP_("Invalid permission - Must run as super user");
+  }
+
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("mode", "1");
+  // Deliberately do not create board/supported_mode.
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(board.ReadFile("mode"), "2");
+}
+
+// ---------------------------------------------------------------------
+// amdsmi_get_npm_supported_balancing_modes()
+// ---------------------------------------------------------------------
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_bit_field_t supported_modes;
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(nullptr, &supported_modes),
+            AMDSMI_STATUS_INVAL);
+}
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  std::string board_path = "/tmp/amdsmi_npm_supported_balancing_modes_test_null_out_probe";
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, nullptr), AMDSMI_STATUS_INVAL);
+}
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  TempBoardDir board;
+  // Deliberately do not create board/supported_mode: not yet implemented
+  // by the driver on all platforms.
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  amdsmi_bit_field_t supported_modes = 0;
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  TempBoardDir board;
+  board.WriteFile("npm_status", "disabled");
+  board.WriteFile("supported_mode", "0x6");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  amdsmi_bit_field_t supported_modes = 0;
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(supported_modes, 0x6u);
+}
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  TempBoardDir board;
+  board.WriteFile("supported_mode", "0x2");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  amdsmi_bit_field_t supported_modes = 0;
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(supported_modes, 0x2u);
+}
+
+TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
+  ScopedAmdSmiInit init;
+  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+
+  TempBoardDir board;
+  board.WriteFile("supported_mode", "not-a-hex-number");
+  std::string board_path = board.path().string();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+
+  amdsmi_bit_field_t supported_modes = 0;
+  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
 }

@@ -2741,10 +2741,12 @@ amdsmi_npm_balancing_mode_t__enumvalues = {
     0: 'AMDSMI_NPM_BALANCING_MODE_INVALID',
     1: 'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
     2: 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
+    3: 'AMDSMI_NPM_BALANCING_MODE_MAX',
 }
 AMDSMI_NPM_BALANCING_MODE_INVALID = 0
 AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1
 AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2
+AMDSMI_NPM_BALANCING_MODE_MAX = 3
 amdsmi_npm_balancing_mode_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_compute_tray_type_t'
@@ -4368,6 +4370,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_npm_supported_balancing_modes = _libraries['libamd_smi.so'].amdsmi_get_npm_supported_balancing_modes
+    amdsmi_get_npm_supported_balancing_modes.restype = amdsmi_status_t
+    amdsmi_get_npm_supported_balancing_modes.argtypes = [amdsmi_node_handle, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_tray_info = _libraries['libamd_smi.so'].amdsmi_get_tray_info
     amdsmi_get_tray_info.restype = amdsmi_status_t
     amdsmi_get_tray_info.argtypes = [amdsmi_node_handle, ctypes.POINTER(struct_amdsmi_tray_info_t)]
@@ -5199,6 +5207,7 @@ __all__ = \
     'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
     'AMDSMI_MM__MAX', 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
     'AMDSMI_NPM_BALANCING_MODE_INVALID',
+    'AMDSMI_NPM_BALANCING_MODE_MAX',
     'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
     'AMDSMI_NPM_STATUS_DISABLED', 'AMDSMI_NPM_STATUS_ENABLED',
     'AMDSMI_POWER_CAP_TYPE_PPT0', 'AMDSMI_POWER_CAP_TYPE_PPT1',
@@ -5505,6 +5514,7 @@ __all__ = \
     'amdsmi_get_nic_rdma_port_statistics',
     'amdsmi_get_nic_vendor_statistics', 'amdsmi_get_node_handle',
     'amdsmi_get_npm_balancing_mode', 'amdsmi_get_npm_info',
+    'amdsmi_get_npm_supported_balancing_modes',
     'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
     'amdsmi_get_power_info',
     'amdsmi_get_processor_count_from_handles',

@@ -72,6 +72,7 @@ class NodeCommands:
             "threshold": "N/A",
             "balancing_mode": "N/A",
             "current_node_power": "N/A",
+            "supported_balancing_modes": "N/A",
         }
         power_unit = "W"
         limit = "N/A"
@@ -119,6 +120,19 @@ class NodeCommands:
                     )
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("amdsmi_get_npm_balancing_mode failed: %s", e.get_error_info())
+
+                try:
+                    supported_modes = amdsmi_interface.amdsmi_get_npm_supported_balancing_modes(
+                        args.nodes
+                    )
+                    npm_dict["supported_balancing_modes"] = [
+                        self.helpers.NPM_BALANCING_MODE_TO_CLI.get(mode, mode)
+                        for mode in supported_modes
+                    ]
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(
+                        "amdsmi_get_npm_supported_balancing_modes failed: %s", e.get_error_info()
+                    )
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -178,6 +192,12 @@ class NodeCommands:
                 node_output.append(f"        BALANCING_MODE: {balancing_mode}")
                 current_node_power = npm_dict.get("current_node_power", "N/A")
                 node_output.append(f"        CURRENT_NODE_POWER: {current_node_power} {power_unit}")
+                supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                if isinstance(supported_balancing_modes, list):
+                    supported_balancing_modes = ", ".join(supported_balancing_modes)
+                node_output.append(
+                    f"        SUPPORTED_BALANCING_MODES: {supported_balancing_modes}"
+                )
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -212,6 +232,10 @@ class NodeCommands:
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
                     csv_dict["balancing_mode"] = npm_dict.get("balancing_mode", "N/A")
                     csv_dict["current_node_power"] = npm_dict.get("current_node_power", "N/A")
+                    supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                    if isinstance(supported_balancing_modes, list):
+                        supported_balancing_modes = ";".join(supported_balancing_modes)
+                    csv_dict["supported_balancing_modes"] = supported_balancing_modes
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:

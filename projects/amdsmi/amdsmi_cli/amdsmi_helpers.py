@@ -3471,13 +3471,30 @@ class AMDSMIHelpers:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                # NOT_SUPPORTED covers both "NPM disabled" and "board/mode sysfs
-                # file missing/unreadable while NPM is enabled" -- the status
-                # code alone can't distinguish them, so avoid overclaiming which
-                # one it is.
-                message = (
-                    "NPM balancing mode is not supported on this node; cannot set balancing mode"
-                )
+                # NOT_SUPPORTED covers "NPM disabled", "board/mode sysfs file
+                # missing/unreadable while NPM is enabled", and "requested mode
+                # absent from this platform's supported_npm_mode bitmask" --
+                # the status code alone can't distinguish them. Query the
+                # supported-modes bitmask separately to tell the last case
+                # apart from the other two, which stay lumped together since
+                # they're indistinguishable from here.
+                try:
+                    supported = amdsmi_interface.amdsmi_get_npm_supported_balancing_modes(
+                        node_handle
+                    )
+                    cli_supported_modes = [
+                        self.NPM_BALANCING_MODE_TO_CLI.get(m, m) for m in supported
+                    ]
+                except amdsmi_exception.AmdSmiLibraryException:
+                    cli_supported_modes = None
+
+                if cli_supported_modes is not None and requested_mode not in cli_supported_modes:
+                    message = (
+                        f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
+                        f"{requested_mode} is not supported on this platform"
+                    )
+                else:
+                    message = "NPM balancing mode is not supported on this node; cannot set balancing mode"
             else:
                 message = f"[{e.get_error_info(detailed=False)}] Unable to set NPM balancing mode to {requested_mode}"
             self.error_collector.record_library_error(e.get_error_code())

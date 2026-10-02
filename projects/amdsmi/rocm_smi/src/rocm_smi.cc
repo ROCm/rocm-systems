@@ -3386,6 +3386,21 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_ha
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  // board/supported_npm_mode is not yet implemented on all platforms, so its
+  // absence (RSMI_STATUS_NOT_SUPPORTED) must not block the write -- only an
+  // explicit bitmask that excludes the requested mode does.
+  uint64_t supported_modes = 0;
+  rsmi_status_t supported_ret =
+      amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
+  if (supported_ret == RSMI_STATUS_SUCCESS &&
+      (supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
+    ss << __PRETTY_FUNCTION__ << " | mode=" << mode
+       << " not in supported_modes bitmask=" << supported_modes << " -> returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   // Fail closed and NEVER touch sysfs when NPM is disabled on this node.
   // Unlike rsmi_dev_npm_limit_set()'s analogous check (which returns
   // RSMI_STATUS_INVALID_ARGS), balancing mode requires RSMI_STATUS_NOT_SUPPORTED
@@ -3492,6 +3507,48 @@ rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uin
      << getRSMIStatusString(ret, false);
   LOG_TRACE(ss);
   return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (bitmask == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(bitmask)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret = amd::smi::get_npm_supported_modes(*board_path_str, bitmask);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_supported_modes failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

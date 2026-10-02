@@ -3247,6 +3247,42 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_npm_supported_balancing_modes
+
+Description: Returns the set of NPM balancing modes supported by this node's
+platform/ASIC, independent of current NPM enablement.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `List[str]` — subset of `["PB", "FB"]` (e.g. `["PB", "FB"]` on
+platforms that support both)
+
+Exceptions that can be thrown by `amdsmi_get_npm_supported_balancing_modes` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        supported_modes = amdsmi.amdsmi_get_npm_supported_balancing_modes(node_handle)
+        print(supported_modes)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_tray_info
 
 Description: Returns node-scoped compute tray type and accelerator count via UALoE.

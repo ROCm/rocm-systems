@@ -639,7 +639,8 @@ typedef struct {
 typedef enum {
   RSMI_NPM_BALANCING_MODE_INVALID = 0,
   RSMI_NPM_BALANCING_MODE_POWER_BALANCING,
-  RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
+  RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING,
+  RSMI_NPM_BALANCING_MODE_MAX
 } rsmi_npm_balancing_mode_t;
 
 /**
@@ -3190,6 +3191,9 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_ha
                                               rsmi_npm_balancing_mode_t mode);
 
 rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask);
 
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
 
