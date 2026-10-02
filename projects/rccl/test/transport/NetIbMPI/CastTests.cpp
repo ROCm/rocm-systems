@@ -1938,7 +1938,7 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -2021,7 +2021,7 @@ TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -2084,7 +2084,7 @@ TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     // Data integrity: fill with a known pattern, verify after transfer.
     constexpr size_t kMsgSize = 4096;
@@ -2136,7 +2136,7 @@ TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMaxSize = 4 * 1024 * 1024;  // 4 MB
     std::vector<char> sendBuf(kMaxSize);
@@ -2198,7 +2198,7 @@ TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 2048;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
