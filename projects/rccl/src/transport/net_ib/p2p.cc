@@ -246,8 +246,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         wr->wr.rdma.remote_addr = remoteBase + sendOffsets[r];
         if (remoteMulti) {
           uint64_t off = remoteReqOff + sendOffsets[r];
-          int s = ncclIbSegmentForOffset(nRemote, rOff, off);
-          if (s < 0 && off == rOff[nRemote]) s = nRemote - 1;
+          int s = ncclIbSegmentForZeroLengthOffset(nRemote, rOff, off);
           if (s < 0) return ncclInternalError;
           wr->wr.rdma.rkey = remoteRkeys[s];
         } else {

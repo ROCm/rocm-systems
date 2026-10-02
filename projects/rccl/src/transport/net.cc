@@ -2499,8 +2499,9 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   }
 
   // Uniform-segment guard: interior segments equal the max stride; first/last
-  // may be shorter. Non-uniform layouts such as DeepEP [GPU][CPU] decline here
-  // so the collective falls back to staging; GIN/RMA registers those windows.
+  // may be shorter, so every two-segment layout (including DeepEP [GPU][CPU])
+  // registers. Layouts with a mismatched interior segment decline here and the
+  // collective falls back to staging.
   if (!ncclIbSegmentsUniform(nSeg, segLens)) {
     INFO(NCCL_NET | NCCL_REG,
          "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
