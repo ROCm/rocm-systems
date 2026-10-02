@@ -176,8 +176,8 @@ TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
 }
 
 // A CDNA allocation's top six SGPRs hold FLAT_SCRATCH, XNACK_MASK and VCC, so
-// a 32-SGPR kernel leaves ordinary storage only below s26. A floor of 25 used
-// to place the run at s[26:27], which flat scratch aliases.
+// a 32-SGPR kernel leaves ordinary storage only below s26. A floor of 25 would
+// otherwise place the run at s[26:27], which flat scratch aliases.
 TEST(PlanDbiEntryStorage, RunInTheCdnaSpecialRegisterTailFailsClosed) {
   const Kernel kernel(kernel_naming_sgpr(24));
   std::string error;
