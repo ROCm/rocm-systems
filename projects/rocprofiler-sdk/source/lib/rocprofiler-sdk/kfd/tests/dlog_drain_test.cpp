@@ -87,11 +87,13 @@ struct recorder
 {
     std::map<std::pair<uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> pairs;  // -> (start,end)
     std::vector<std::pair<uint32_t, uint32_t>>                             eops_without_start;
+    std::map<std::pair<uint32_t, uint32_t>, uint32_t>                      regions;
     size_t                                                                 records = 0;
     auto                                                                   on_record()
     {
         return [this](const drained_record& r) {
             ++records;
+            regions[{r.doorbell_off, r.dispatch_id}] = r.region;
             if(r.start_known)
                 pairs[{r.doorbell_off, r.dispatch_id}] = {r.start_ticks, r.end_ticks};
             else
@@ -382,6 +384,34 @@ TEST(dlog_drain, per_region_wptr_uses_eight_byte_stride)
     }
     for(uint32_t r = 0; r < 4; ++r)
         EXPECT_EQ(e.st.cursors.rptr[r], e.ring.wptr[r]) << "region " << r << " cursor";
+}
+
+// The region a dispatch's EOP arrives on is the hardware pipe it ran on; it must
+// survive pairing on both the matched-pair and the START-lost paths.
+TEST(dlog_drain, drained_record_carries_eop_region)
+{
+    const uint32_t db = 4100;
+    env            e(4, 2048);
+    // matched pairs on regions 0 and 3
+    e.ring.put(0, 0, kRecStart, 1, db, 100);
+    e.ring.put(0, 1, kRecEop, 1, db, 200);
+    e.ring.put(3, 0, kRecStart, 2, db, 110);
+    e.ring.put(3, 1, kRecEop, 2, db, 210);
+    // START and EOP on different regions: the EOP's region is reported
+    e.ring.put(1, 0, kRecStart, 3, db, 120);
+    e.ring.put(2, 0, kRecEop, 3, db, 220);
+    // EOP whose START was lost
+    e.ring.put(2, 1, kRecEop, 4, db, 230);
+    e.ring.wptr = {2, 1, 2, 2};
+
+    EXPECT_EQ(e.drain(), 3u);
+    ASSERT_EQ(e.rec.eops_without_start.size(), 1u);
+    EXPECT_EQ(e.rec.eops_without_start[0], std::make_pair(db, 4u));
+    ASSERT_EQ(e.rec.regions.size(), 4u);
+    EXPECT_EQ(e.rec.regions[std::make_pair(db, 1u)], 0u);
+    EXPECT_EQ(e.rec.regions[std::make_pair(db, 2u)], 3u);
+    EXPECT_EQ(e.rec.regions[std::make_pair(db, 3u)], 2u);
+    EXPECT_EQ(e.rec.regions[std::make_pair(db, 4u)], 2u);
 }
 
 // ABI v4 wrap boundary: draining a span that straddles the N-1 -> 0 slot boundary

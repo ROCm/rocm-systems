@@ -98,6 +98,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -1255,9 +1256,18 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 auto attr = get_ext_attribution(record);
+
+                // an older core emits a shorter record: copy only record->size bytes and
+                // default-fill the members it does not cover
+                using record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+                auto data      = record_t{};
+                std::memcpy(&data, record, std::min<size_t>(record->size, sizeof(data)));
+                if(record->size < offsetof(record_t, pipe_id) + sizeof(data.pipe_id))
+                    data.pipe_id = ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE;
+
                 tool::write_ring_buffer(
                     tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
-                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                        data, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::KERNEL_DISPATCH);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,7 @@ emit_kernel_dispatch_record(tracing::tracing_data&                              
                             context::correlation_id*                             correlation_id,
                             rocprofiler_thread_id_t                              tid,
                             uint64_t                                             start_timestamp,
-                            uint64_t                                             end_timestamp);
+                            uint64_t                                             end_timestamp,
+                            int32_t                                              pipe_id);
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

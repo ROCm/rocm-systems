@@ -808,7 +808,8 @@ WriteInterceptor(const void* packets,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
+                                      .reserved_padding     = {0}},
+                                  ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE};
 
             {
                 auto tracer_data = _packet_data.callback_record;
