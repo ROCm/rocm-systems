@@ -30,6 +30,7 @@
 
 #include "lib/aqlprofile/pm4/cmd_config.h"
 #include "lib/aqlprofile/pm4/trace_decoder_instrument.h"
+#include "lib/aqlprofile/pm4/sqtt_harvest.h"
 
 #define SQTT_PERFCOUNTER_TOKEN     (1u << 14)
 #define SQTT_PERFCOUNTER_SIMD_MASK 24
@@ -172,7 +173,16 @@ public:
     , se_number_total(agent_info->se_num)
     , timestamp_freq(agent_info->timestamp_freq)
     , cu_per_se(agent_info->cu_num / agent_info->se_num)
-    {}
+    {
+        if constexpr(Primitives::GFXIP_LEVEL == 11)
+        {
+            if(agent_info->xcc_num == 1)
+                trace_topology = Gfx11TraceTopology(agent_info->cu_bitmap.bits,
+                                                    agent_info->se_num,
+                                                    agent_info->shader_arrays_per_se,
+                                                    agent_info->cu_num);
+        }
+    }
 
     // Returns TT_CONTROL_UTC_ERR_MASK
     virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
@@ -253,6 +263,40 @@ public:
         if(Primitives::GFXIP_LEVEL == 10 || Primitives::GFXIP_LEVEL == 11)
             config->capacity_per_disabled_se = 1 << Primitives::TT_BUFF_ALIGN_SHIFT;
 
+        const bool legacy_mode = config->deprecated_mask != 0 &&
+                                 config->deprecated_tokenMask != 0 &&
+                                 config->deprecated_tokenMask2 != 0;
+
+        for(uint64_t se_index = 0; se_index < se_number_total; se_index++)
+        {
+            bool bMaskedIn                     = ((1ull << se_index) & config->se_mask) != 0;
+            config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
+            config->target_sa_per_se[se_index] = 0;
+            if constexpr(Primitives::GFXIP_LEVEL == 11)
+            {
+                if(bMaskedIn && !legacy_mode && trace_topology.available())
+                {
+                    auto target = trace_topology.select(se_index, config->targetCu);
+                    config->target_cu_per_se[se_index] = target.wgp;
+                    config->target_sa_per_se[se_index] = target.sa;
+                    if(target.wgp < 0)
+                    {
+                        config->se_mask &= ~(1ull << se_index);
+                        std::clog << "SQTT: skipping inactive shader engine " << se_index << '\n';
+                    }
+                    else if(target.wgp != static_cast<int>(config->targetCu) || target.sa != 0)
+                        std::clog << "SQTT: SE" << se_index << " requested WGP " << config->targetCu
+                                  << " is inactive; using SA" << target.sa << " WGP" << target.wgp
+                                  << '\n';
+                }
+            }
+        }
+        if constexpr(Primitives::GFXIP_LEVEL == 11)
+        {
+            if(!legacy_mode && trace_topology.available() && config->se_mask == 0)
+                throw std::runtime_error("SQTT: selected shader engines have no active WGPs");
+        }
+
         const uint64_t base_step = GetBaseStep(config);
 
         // Old v1 API calls this with buffer == 0 first
@@ -266,15 +310,6 @@ public:
                 throw std::runtime_error("SQTT Buffer size too low");
         }
         config->capacity_per_se = base_step;
-
-        const bool legacy_mode = config->deprecated_mask && config->deprecated_tokenMask &&
-                                 config->deprecated_tokenMask2;
-
-        for(uint64_t se_index = 0; se_index < se_number_total; se_index++)
-        {
-            bool bMaskedIn                     = ((1 << se_index) & config->se_mask) != 0;
-            config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
-        }
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
@@ -415,6 +450,18 @@ public:
                     const uint64_t sqtt_size =
                         bMaskedIn ? base_step : config->capacity_per_disabled_se;
                     if(sqtt_size == 0) continue;
+                    if constexpr(Primitives::GFXIP_LEVEL == 11)
+                    {
+                        // A harvested SE has no SQTT registers. Do not program it,
+                        // even with a disabled-SE buffer: register access may alias
+                        // an active engine on harvested parts.
+                        if(!legacy_mode && trace_topology.available() &&
+                           trace_topology.select(global_se, config->targetCu).wgp < 0)
+                        {
+                            base_addr += sqtt_size;
+                            continue;
+                        }
+                    }
 
                     uint32_t ctrl_val =
                         Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
@@ -448,8 +495,16 @@ public:
                     }
 
                     // Program the thread trace mask
-                    const uint32_t mask_value = Primitives::sqtt_mask_value(
-                        config->targetCu, config->simd_sel, config->vmIdMask);
+                    uint32_t mask_value;
+                    if constexpr(Primitives::GFXIP_LEVEL == 11)
+                        mask_value = Primitives::sqtt_mask_value(
+                            bMaskedIn ? config->GetTargetCU(global_se) : config->targetCu,
+                            config->simd_sel,
+                            config->vmIdMask,
+                            config->GetTargetSA(global_se));
+                    else
+                        mask_value = Primitives::sqtt_mask_value(
+                            config->targetCu, config->simd_sel, config->vmIdMask);
                     WriteConfigPacket(
                         cmd_buffer, Primitives::SQ_THREAD_TRACE_MASK_ADDR, mask_value);
 
@@ -618,6 +673,16 @@ public:
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
                 for(uint64_t index = 0; index < se_number_xcc; index++)
                 {
+                    if constexpr(Primitives::GFXIP_LEVEL == 11)
+                    {
+                        const bool legacy_mode = config->deprecated_mask != 0 &&
+                                                 config->deprecated_tokenMask != 0 &&
+                                                 config->deprecated_tokenMask2 != 0;
+                        if(!legacy_mode && trace_topology.available() &&
+                           trace_topology.select(index + xcc * se_number_xcc, config->targetCu)
+                                   .wgp < 0)
+                            continue;
+                    }
                     Select_GRBM_SE_SH0(cmd_buffer, index);
                     ReadValues(cmd_buffer, config, index + xcc * se_number_xcc);
                 }
@@ -832,6 +897,7 @@ public:
     size_t   xcc_number_{};
     uint32_t timestamp_freq{};
     uint32_t cu_per_se{};
+    Gfx11TraceTopology trace_topology{};
 };
 
 }  // namespace pm4_builder

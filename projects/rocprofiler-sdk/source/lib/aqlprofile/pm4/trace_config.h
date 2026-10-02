@@ -78,9 +78,12 @@ struct TraceConfig
     std::unordered_map<int, int>      target_cu_per_se{};
     std::unordered_map<int, uint64_t> se_base_addresses{};
 
+    std::unordered_map<int, uint32_t> target_sa_per_se{};
+
     bool enable_rt_timestamp{false};
 
     int      GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
+    uint32_t GetTargetSA(int SE) const { return target_sa_per_se.at(SE); };
     uint64_t GetSEmask() const { return se_mask; };
     uint64_t GetSEBaseAddr(int SE) const { return se_base_addresses.at(SE); }
     uint64_t GetCapacity(int SE) const

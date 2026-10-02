@@ -631,13 +631,13 @@ public:
 
     // Enable all of the WTYPEs
     // Enable Shader Array (SH) at index Zero to be used for fine-grained data
-    static uint32_t sqtt_mask_value(uint32_t wgp, uint32_t simd, uint32_t vmid)
+    static uint32_t sqtt_mask_value(uint32_t wgp, uint32_t simd, uint32_t /*vmid*/, uint32_t sa = 0)
     {
 #if SQTT_PRIM_ENABLED
         uint32_t sq_thread_trace_mask =
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, sa) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 1 << 6);
         return sq_thread_trace_mask;
 #else
