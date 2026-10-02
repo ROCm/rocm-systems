@@ -739,3 +739,26 @@ cmake --build build -j"$(nproc)"
 
 Disable coverage instrumentation for the standalone host-only test binaries
 with `-DHOST_TEST_COVERAGE=OFF`.
+
+### Shared RAS diagnostic fixtures
+
+`fakes/ras_registry_test_support.h` owns test installation/reset of the
+`ras.cc` communicator registry. Both operations hold `ncclCommsMutex` and
+clear `ncclCommsSorted`; installation validates allocation before replacing
+the old registry and preserves explicit vacant slots. The RAS and diagnostics
+suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
+owned communicator and recording reporter used by the diagnostic suites.
+
+`SetMicroEnviron` in `fakes/env_fakes.{h,cc}` replaces the scripted environment
+for enumeration tests, preserving input order and malformed entries while
+making valid entries visible through `micro_getenv` and `getenv`. While that
+override is active, `SetMicroEnv` and `SetMicroEnvAbsent` also update `environ`.
+`ClearMicroEnv`/`ResetEnvFakes` restore the original process environment and
+clear the lookup map. Map-only tests retain the existing fallback behavior
+unless they opt into the enumeration override.
+
+`DISABLED_Summarize_HashCollisionsReportFullCommIdentity` tracks AICOMRCCL-2743.
+The environment reporters currently omit host and process hashes, so distinct
+communicators can appear identical. The disabled regression specifies the full
+identity for consistent, mismatch, and mismatch-summary reports. Enable it
+with the separate production fix; enabled tests still pin correct grouping.

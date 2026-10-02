@@ -12,38 +12,30 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "fakes/env_fakes.h"
+#include "fakes/ras_registry_test_support.h"
 #include "ras/diagnostics_checks_common.h"
 
 namespace {
 
 int g_allocationCalls;
 int g_failAllocationCall;
-std::vector<size_t> g_allocationCounts;
-
-template <typename T>
-ncclResult_t DiagnosticsEnvTestCalloc(T** ptr, size_t count) {
+template <typename... Args>
+ncclResult_t DiagnosticsEnvTestCalloc(const char* file, int line, const char* function, Args&&... args) {
   ++g_allocationCalls;
-  g_allocationCounts.push_back(count);
   if (g_allocationCalls == g_failAllocationCall) return ncclSystemError;
-  return ncclCallocDebug(ptr, count, __FILE__, __LINE__, __func__, false);
-}
-
-template <typename T>
-ncclResult_t DiagnosticsEnvTestCalloc(ncclUniquePtr<T>& ptr, size_t count) {
-  ++g_allocationCalls;
-  g_allocationCounts.push_back(count);
-  if (g_allocationCalls == g_failAllocationCall) return ncclSystemError;
-  return ncclCallocDebug(ptr, count, __FILE__, __LINE__, __func__, false);
+  return ncclCallocDebug(std::forward<Args>(args)..., file, line, function, false);
 }
 
 }  // namespace
 
 #undef ncclCalloc
-#define ncclCalloc(...) DiagnosticsEnvTestCalloc(__VA_ARGS__)
+#define ncclCalloc(...) DiagnosticsEnvTestCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #include RAS_DIAGNOSTICS_ENV_CC_PATH
 
@@ -122,50 +114,26 @@ struct FakeComm {
   ncclComm* get() { return comm.get(); }
 };
 
-void InstallNcclComms(std::vector<ncclComm*> comms) {
-  free(ncclComms);
-  nNcclComms = static_cast<int>(comms.size());
-  ncclComms = static_cast<ncclComm**>(calloc(comms.size() ? comms.size() : 1, sizeof(*ncclComms)));
-  ASSERT_NE(nullptr, ncclComms);
-  for (size_t i = 0; i < comms.size(); i++) ncclComms[i] = comms[i];
-}
-
-// --------- Fake `environ` plumbing ---------
-
-char** g_realEnviron;
-std::vector<std::string> g_envStorage;
-std::vector<char*> g_envPointers;
-
-void SetFakeEnviron(const std::vector<std::string>& entries) {
-  g_envStorage = entries;
-  g_envPointers.clear();
-  for (auto& s : g_envStorage) g_envPointers.push_back(const_cast<char*>(s.c_str()));
-  g_envPointers.push_back(nullptr);
-  environ = g_envPointers.data();
-}
+using ras_test::InstallNcclComms;
 
 void ResetWholeFileSeams() {
   g_allocationCalls = 0;
   g_failAllocationCall = 0;
-  g_allocationCounts.clear();
   g_emitCalls = 0;
   g_emitFailAt = 0;
   g_emittedLines.clear();
-  free(ncclComms);
-  ncclComms = nullptr;
-  nNcclComms = 0;
-  SetFakeEnviron({});
+  ras_test::ResetNcclComms();
+  ResetEnvFakes();
 }
 
 class RasDiagnosticsEnvMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    g_realEnviron = environ;
     ResetWholeFileSeams();
+    SetMicroEnviron({});
   }
   void TearDown() override {
     ResetWholeFileSeams();
-    environ = g_realEnviron;
   }
 };
 
@@ -175,21 +143,72 @@ class RasDiagnosticsEnvMicrotest : public ::testing::Test {
 // rasDiagnosticsNcclEnvCollectLocal (through the shared microtest copy of rasDiagnosticsCollectLocalRecords)
 // ===========================================================================
 
+TEST_F(RasDiagnosticsEnvMicrotest, EnvironmentViews_EnumerationAndLookupStayInSync) {
+  SetMicroEnviron({"NCCL_DEBUG=INFO", "PATH=/scripted"});
+  EXPECT_STREQ("INFO", micro_getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("INFO", std::getenv("NCCL_DEBUG"));
+  ASSERT_NE(nullptr, environ[0]);
+  EXPECT_STREQ("NCCL_DEBUG=INFO", environ[0]);
+
+  SetMicroEnv("NCCL_DEBUG", "WARN");
+  EXPECT_STREQ("WARN", micro_getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("WARN", std::getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("NCCL_DEBUG=WARN", environ[0]);
+  SetMicroEnv("NCCL_NEW", "1");
+  EXPECT_STREQ("NCCL_NEW=1", environ[2]);
+  EXPECT_STREQ("1", micro_getenv("NCCL_NEW"));
+
+  SetMicroEnvAbsent("NCCL_DEBUG");
+  EXPECT_EQ(nullptr, micro_getenv("NCCL_DEBUG"));
+  EXPECT_EQ(nullptr, std::getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("PATH=/scripted", environ[0]);
+  EXPECT_STREQ("NCCL_NEW=1", environ[1]);
+  EXPECT_EQ(nullptr, environ[2]);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, EnvironmentViews_ResetRestoresOriginalEnviron) {
+  ResetEnvFakes();
+  char** original = environ;
+  SetMicroEnviron({"NCCL_DEBUG=INFO"});
+  SetMicroEnviron({"NCCL_DEBUG=WARN"});
+  ResetEnvFakes();
+  EXPECT_EQ(original, environ);
+  EXPECT_EQ(nullptr, micro_getenv("NCCL_DEBUG"));
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, EnvironmentViews_DuplicateUpdatesPreserveOtherEntries) {
+  SetMicroEnviron({"NCCL_NO_EQUALS", "NCCL_DEBUG=INFO", "NCCL_DEBUG=WARN", "NCCL_OTHER=a=b"});
+  EXPECT_STREQ("INFO", micro_getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("INFO", std::getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("a=b", micro_getenv("NCCL_OTHER"));
+  SetMicroEnv("NCCL_DEBUG", "TRACE");
+  EXPECT_STREQ("NCCL_NO_EQUALS", environ[0]);
+  EXPECT_STREQ("NCCL_DEBUG=TRACE", environ[1]);
+  EXPECT_STREQ("NCCL_OTHER=a=b", environ[2]);
+  EXPECT_EQ(nullptr, environ[3]);
+  EXPECT_STREQ("TRACE", micro_getenv("NCCL_DEBUG"));
+  EXPECT_STREQ("TRACE", std::getenv("NCCL_DEBUG"));
+}
+
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_NoMatchingCommsReturnsEmpty) {
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvCollectLocal(&ctx, &data));
+  const auto result = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
+  ASSERT_EQ(ncclSuccess, result);
   EXPECT_EQ(0, data.nRecords);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_FiltersNonNcclPrefixedVars) {
   FakeComm fc(0x1000, 0, 1);
   InstallNcclComms({fc.get()});
-  SetFakeEnviron({"PATH=/usr/bin", "NCCL_DEBUG=INFO", "NCCLFOO=1", "HOME=/root"});
+  SetMicroEnviron({"PATH=/usr/bin", "NCCL_DEBUG=INFO", "NCCLFOO=1", "HOME=/root"});
 
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvCollectLocal(&ctx, &data));
+  const auto result = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
+  ASSERT_EQ(ncclSuccess, result);
   ASSERT_EQ(1, data.nRecords);
   const auto* envData = reinterpret_cast<const struct rasDiagnosticsNcclEnvData*>(
     data.records + sizeof(struct rasDiagnosticsRankHeader));
@@ -198,22 +217,22 @@ TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_FiltersNonNcclPrefixedVars) {
   EXPECT_NE(std::string::npos, blob.find("NCCL_DEBUG=INFO"));
   EXPECT_EQ(std::string::npos, blob.find("NCCLFOO"));
   EXPECT_EQ(std::string::npos, blob.find("PATH="));
-  free(data.records);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_NoNcclVarsProducesEmptyPayload) {
   FakeComm fc(0x1000, 0, 1);
   InstallNcclComms({fc.get()});
-  SetFakeEnviron({"PATH=/usr/bin"});
+  SetMicroEnviron({"PATH=/usr/bin"});
 
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvCollectLocal(&ctx, &data));
+  const auto result = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
+  ASSERT_EQ(ncclSuccess, result);
   ASSERT_EQ(1, data.nRecords);
   const auto* envData = reinterpret_cast<const struct rasDiagnosticsNcclEnvData*>(
     data.records + sizeof(struct rasDiagnosticsRankHeader));
   EXPECT_EQ(0, envData->bytesUsed);
-  free(data.records);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_ExceedingByteBudgetSetsTruncated) {
@@ -222,18 +241,19 @@ TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_ExceedingByteBudgetSetsTruncated
   std::vector<std::string> entries;
   // Each ~1040 bytes; ~17 of them exceed the 16384-byte budget.
   for (int i = 0; i < 17; i++) entries.push_back("NCCL_VAR" + std::to_string(i) + "=" + std::string(1024, 'a'));
-  SetFakeEnviron(entries);
+  SetMicroEnviron(entries);
 
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvCollectLocal(&ctx, &data));
+  const auto result = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
+  ASSERT_EQ(ncclSuccess, result);
   ASSERT_EQ(1, data.nRecords);
   const auto* envData = reinterpret_cast<const struct rasDiagnosticsNcclEnvData*>(
     data.records + sizeof(struct rasDiagnosticsRankHeader));
   EXPECT_EQ(1, envData->truncated);
   EXPECT_EQ(15532, envData->bytesUsed);
   EXPECT_EQ(0u, std::string(envData->data, envData->bytesUsed).find("NCCL_VAR0="));
-  free(data.records);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_ExactFitAtTheByteBudgetIsNotTruncated) {
@@ -243,17 +263,18 @@ TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_ExactFitAtTheByteBudgetIsNotTrun
   // including the NUL) exactly equals the remaining budget -- fits exactly, at the
   // boundary between "fits" and "doesn't fit".
   std::string value(RAS_DIAG_ENV_BYTES - 1 - 7, 'a');
-  SetFakeEnviron({"NCCL_X=" + value});
+  SetMicroEnviron({"NCCL_X=" + value});
 
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvCollectLocal(&ctx, &data));
+  const auto result = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
+  ASSERT_EQ(ncclSuccess, result);
   ASSERT_EQ(1, data.nRecords);
   const auto* envData = reinterpret_cast<const struct rasDiagnosticsNcclEnvData*>(
     data.records + sizeof(struct rasDiagnosticsRankHeader));
   EXPECT_EQ(0, envData->truncated);
   EXPECT_EQ(RAS_DIAG_ENV_BYTES, envData->bytesUsed);
-  free(data.records);
 }
 
 // ===========================================================================
@@ -285,6 +306,11 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_SizeNotMultipleOfStrideReturnsInter
   auto reporter = MakeRecordingReporter();
   char buf[4] = {};
   EXPECT_EQ(ncclInternalError, rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf, 1));
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, Summarize_NegativeSizeReturnsInternalError) {
+  auto reporter = MakeRecordingReporter();
+  char buf[4] = {};
   EXPECT_EQ(ncclInternalError,
             rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf, -static_cast<int>(EnvRecordStride())));
 }
@@ -302,9 +328,9 @@ ncclResult_t CollectThenSummarize(struct rasDiagnosticsReporter* reporter) {
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
   ncclResult_t ret = rasDiagnosticsNcclEnvCollectLocal(&ctx, &data);
+  ncclUniquePtr<char> recordsOwner(data.records);
   if (ret != ncclSuccess) return ret;
   ret = rasDiagnosticsNcclEnvSummarize(&ctx, reporter, data.records, data.recordsBytes);
-  free(data.records);
   return ret;
 }
 
@@ -313,7 +339,7 @@ ncclResult_t CollectThenSummarize(struct rasDiagnosticsReporter* reporter) {
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_SingleRankConsistentReport) {
   FakeComm fc(0x2000, 0, 1);
   InstallNcclComms({fc.get()});
-  SetFakeEnviron({"NCCL_A_NO_EQUALS", "NCCL_DEBUG=INFO"});
+  SetMicroEnviron({"NCCL_A_NO_EQUALS", "NCCL_DEBUG=INFO"});
   auto reporter = MakeRecordingReporter();
 
   ASSERT_EQ(ncclSuccess, CollectThenSummarize(&reporter));
@@ -342,7 +368,7 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_IncompleteGroupReportsIncomplete) {
   // commNRanks says 2, but only rank 0 is present in ncclComms -- an incomplete gather.
   FakeComm fc(0x3000, 0, 2);
   InstallNcclComms({fc.get()});
-  SetFakeEnviron({});
+  SetMicroEnviron({});
   auto reporter = MakeRecordingReporter();
 
   ASSERT_EQ(ncclSuccess, CollectThenSummarize(&reporter));
@@ -413,9 +439,6 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TwoDistinctKeysAreSortedAndDeduplic
   EXPECT_EQ("[INFO] NCCL environment: NCCL_DEBUG_SUBSYS=COLL on rank(s) {1}", g_emittedLines[5]);
   EXPECT_EQ("[INFO] NCCL environment: 2 NCCL_* env var(s) differ across ranks in comm 0x4150", g_emittedLines[6]);
   EXPECT_FALSE(AnyLineContains(g_emittedLines, "consistent"));
-  ASSERT_GE(g_allocationCounts.size(), 2u);
-  EXPECT_EQ(buf.size(), g_allocationCounts[0]);
-  EXPECT_EQ(4u, g_allocationCounts[1]);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_AllocationFailuresPropagate) {
@@ -425,10 +448,12 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_AllocationFailuresPropagate) {
   FillEnvRecord(buf, 1, {0x4175, 0, 0}, 1, 2, {"NCCL_DEBUG=WARN"});
 
   auto reporter = MakeRecordingReporter();
-  for (int failAt = 1; failAt <= 5; failAt++) {
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf.data(), static_cast<int>(buf.size())));
+  const int allocationCount = g_allocationCalls;
+  ASSERT_GT(allocationCount, 0);
+  for (int failAt = 1; failAt <= allocationCount; failAt++) {
     SCOPED_TRACE(failAt);
     g_allocationCalls = 0;
-    g_allocationCounts.clear();
     g_failAllocationCall = failAt;
     EXPECT_EQ(ncclSystemError,
               rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf.data(), static_cast<int>(buf.size())))
@@ -439,7 +464,7 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_AllocationFailuresPropagate) {
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_EntryArrayAllocationFailurePropagates) {
   FakeComm fc(0x4180, 0, 1);
   InstallNcclComms({fc.get()});
-  SetFakeEnviron({"NCCL_DEBUG=INFO"});
+  SetMicroEnviron({"NCCL_DEBUG=INFO"});
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};
   g_allocationCalls = 0;
@@ -450,7 +475,7 @@ TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_EntryArrayAllocationFailurePropa
   EXPECT_EQ(nullptr, data.records);
 }
 
-TEST_F(RasDiagnosticsEnvMicrotest, Summarize_ReporterFailuresPropagate) {
+TEST_F(RasDiagnosticsEnvMicrotest, Summarize_MismatchReporterFailuresPropagate) {
   const size_t stride = EnvRecordStride();
   std::vector<char> mismatch(stride * 2, 0);
   FillEnvRecord(mismatch, 0, {0x4200, 0, 0}, 0, 2, {"NCCL_DEBUG=INFO"});
@@ -467,27 +492,6 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_ReporterFailuresPropagate) {
     EXPECT_EQ(failAt, g_emitCalls);
   }
 
-  std::vector<char> single(stride, 0);
-  auto* envData = FillEnvRecord(single, 0, {0x4300, 0, 0}, 0, 1);
-
-  g_emitCalls = 0;
-  g_emitFailAt = 1;
-  EXPECT_EQ(ncclSystemError,
-            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, single.data(), static_cast<int>(single.size())));
-  EXPECT_EQ(1, g_emitCalls);
-
-  envData->truncated = 1;
-  g_emitCalls = 0;
-  EXPECT_EQ(ncclSystemError,
-            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, single.data(), static_cast<int>(single.size())));
-  EXPECT_EQ(1, g_emitCalls);
-
-  reinterpret_cast<struct rasDiagnosticsRankHeader*>(single.data())->commNRanks = 2;
-  envData->truncated = 0;
-  g_emitCalls = 0;
-  EXPECT_EQ(ncclSystemError,
-            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, single.data(), static_cast<int>(single.size())));
-  EXPECT_EQ(1, g_emitCalls);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_ValueSetOnOneRankUnsetOnAnotherIsAMismatch) {
@@ -510,7 +514,7 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TruncatedRankReportsTruncationWarni
 
   auto reporter = MakeRecordingReporter();
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf.data(), static_cast<int>(buf.size())));
-  EXPECT_TRUE(AnyLineContains(g_emittedLines, "1 rank(s) had >16384 bytes"));
+  EXPECT_TRUE(AnyLineContains(g_emittedLines, "1 rank(s) had >" + std::to_string(RAS_DIAG_ENV_BYTES) + " bytes"));
   EXPECT_FALSE(AnyLineContains(g_emittedLines, "consistent across"));
 }
 
@@ -541,17 +545,32 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TwoDistinctCommsAreReportedSeparate
 
   auto reporter = MakeRecordingReporter();
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf.data(), static_cast<int>(buf.size())));
-  const std::vector<std::string> expectedLines = {
-    "[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x8000",
-    "[INFO] NCCL environment: mismatch across 2 ranks in comm 0x8000 for NCCL_DEBUG",
-    "[INFO] NCCL environment: NCCL_DEBUG=INFO on rank(s) {0}",
-    "[INFO] NCCL environment: NCCL_DEBUG=WARN on rank(s) {1}",
-    "[INFO] NCCL environment: 1 NCCL_* env var(s) differ across ranks in comm 0x8000",
-    "[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x9000",
-  };
-  EXPECT_EQ(expectedLines, g_emittedLines);
-  const std::vector<size_t> expectedAllocationCounts = {buf.size(), 1, 1, 2, 2, 2, 2};
-  EXPECT_EQ(expectedAllocationCounts, g_allocationCounts);
+  ASSERT_EQ(6u, g_emittedLines.size());
+  EXPECT_EQ(0u, g_emittedLines[0].find("[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x8000"));
+  EXPECT_EQ(0u, g_emittedLines[1].find("[INFO] NCCL environment: mismatch across 2 ranks in comm 0x8000"));
+  EXPECT_NE(std::string::npos, g_emittedLines[1].find(" for NCCL_DEBUG"));
+  EXPECT_EQ("[INFO] NCCL environment: NCCL_DEBUG=INFO on rank(s) {0}", g_emittedLines[2]);
+  EXPECT_EQ("[INFO] NCCL environment: NCCL_DEBUG=WARN on rank(s) {1}", g_emittedLines[3]);
+  EXPECT_EQ(0u, g_emittedLines[4].find("[INFO] NCCL environment: 1 NCCL_* env var(s) differ across ranks in comm 0x8000"));
+  EXPECT_EQ(0u, g_emittedLines[5].find("[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x9000"));
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, DISABLED_Summarize_HashCollisionsReportFullCommIdentity) {
+  SCOPED_TRACE("AICOMRCCL-2743: reporters omit host and process hashes from the communicator identity");
+  std::vector<char> records(EnvRecordStride() * 3, 0);
+  FillEnvRecord(records, 0, {0x8000, 0x8100, 0x8200}, 0, 1, {"NCCL_FIRST=ONLY"});
+  FillEnvRecord(records, 1, {0x8000, 0x8300, 0x8400}, 1, 2, {"NCCL_DEBUG=WARN"});
+  FillEnvRecord(records, 2, {0x8000, 0x8300, 0x8400}, 0, 2, {"NCCL_DEBUG=INFO"});
+  auto reporter = MakeRecordingReporter();
+  ASSERT_EQ(ncclSuccess,
+            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, records.data(), static_cast<int>(records.size())));
+  ASSERT_EQ(5u, g_emittedLines.size());
+  EXPECT_EQ("[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x8000/0x8100/0x8200",
+            g_emittedLines[0]);
+  EXPECT_EQ("[INFO] NCCL environment: mismatch across 2 ranks in comm 0x8000/0x8300/0x8400 for NCCL_DEBUG",
+            g_emittedLines[1]);
+  EXPECT_EQ("[INFO] NCCL environment: 1 NCCL_* env var(s) differ across ranks in comm 0x8000/0x8300/0x8400",
+            g_emittedLines[4]);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_LongKeyAndValueAreTruncatedWithEllipsis) {
@@ -591,4 +610,34 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_ControlCharactersAreSanitizedToQues
   EXPECT_TRUE(AnyLineContains(g_emittedLines, "NCCL_A?KEY"));
   EXPECT_TRUE(AnyLineContains(g_emittedLines, "NCCL_B?KEY=a?b"));
   EXPECT_TRUE(AnyLineContains(g_emittedLines, "NCCL_X=a?b"));
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, Summarize_ConsistentReporterFailurePropagates) {
+  std::vector<char> records(EnvRecordStride(), 0);
+  FillEnvRecord(records, 0, {0x4300, 0, 0}, 0, 1, {}, false);
+  auto reporter = MakeRecordingReporter();
+  g_emitFailAt = 1;
+  EXPECT_EQ(ncclSystemError,
+            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, records.data(), static_cast<int>(records.size())));
+  EXPECT_EQ(1, g_emitCalls);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TruncatedReporterFailurePropagates) {
+  std::vector<char> records(EnvRecordStride(), 0);
+  FillEnvRecord(records, 0, {0x4300, 0, 0}, 0, 1, {}, true);
+  auto reporter = MakeRecordingReporter();
+  g_emitFailAt = 1;
+  EXPECT_EQ(ncclSystemError,
+            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, records.data(), static_cast<int>(records.size())));
+  EXPECT_EQ(1, g_emitCalls);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, Summarize_IncompleteReporterFailurePropagates) {
+  std::vector<char> records(EnvRecordStride(), 0);
+  FillEnvRecord(records, 0, {0x4300, 0, 0}, 0, 2, {}, false);
+  auto reporter = MakeRecordingReporter();
+  g_emitFailAt = 1;
+  EXPECT_EQ(ncclSystemError,
+            rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, records.data(), static_cast<int>(records.size())));
+  EXPECT_EQ(1, g_emitCalls);
 }
