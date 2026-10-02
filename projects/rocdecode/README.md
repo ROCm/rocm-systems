@@ -141,20 +141,22 @@ git clone https://github.com/ROCm/rocm-systems.git
 cd rocm-systems\projects\rocdecode
 mkdir build && cd build
 set ROCM_PATH=<path-to-TheRock-build>
-cmake .. -DROCM_PATH="%ROCM_PATH%"
+cmake ..
 cmake --build . --config Release
 cmake --install . --config Release
 ```
 
 > [!NOTE]
-> * Set `ROCM_PATH` as an environment variable, not only on the `cmake` command line, and use the
->   same command prompt for the steps below. The VA-API headers and import libraries are found
->   there at build time, libva reads it at run time to locate the VA-API driver, and the test and
->   sample commands below expand `%ROCM_PATH%`.
+> * Set `ROCM_PATH` as an environment variable and use the same command prompt for the steps
+>   below. CMake reads it from the environment, so no `-DROCM_PATH` is needed. Keep it set: the
+>   VA-API headers and import libraries are found there at build time, libva reads it at run
+>   time to locate the VA-API driver, and the test and sample commands below expand
+>   `%ROCM_PATH%`.
 > * FFmpeg is detected automatically when it is installed in a common location. Set
->   `FFMPEG_ROOT=<path-to-ffmpeg>` the same way and add `-DFFMPEG_ROOT="%FFMPEG_ROOT%"` only if it
->   lives somewhere else, or to pin a specific build. The commands below use `%FFMPEG_ROOT%` to
->   name the DLL directory for `PATH`, so set it either way if you plan to copy them verbatim.
+>   `FFMPEG_ROOT=<path-to-ffmpeg>` the same way only if it lives somewhere else, or to pin a
+>   specific build; CMake reads that from the environment too. The commands below use
+>   `%FFMPEG_ROOT%` to name the DLL directory for `PATH`, so set it either way if you plan to
+>   copy them verbatim.
 > * Don't quote the `set` lines themselves — `cmd.exe` would make the quotation marks part of the
 >   value. Paths containing spaces are quoted where they are *used*, as in the commands here.
 
@@ -247,7 +249,7 @@ guide for other options.
   set FFMPEG_ROOT=<path-to-ffmpeg>
   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
-  cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode" -DROCM_PATH="%ROCM_PATH%" -DFFMPEG_ROOT="%FFMPEG_ROOT%"
+  cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode"
   cmake --build . --config Release
   Release\videodecode.exe -i "%ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4"
   ```
@@ -260,7 +262,7 @@ guide for other options.
   > dependency:
   >
   > ```bat
-  > cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw" -DROCM_PATH="%ROCM_PATH%"
+  > cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw"
   > cmake --build . --config Release
   > Release\videodecoderaw.exe -i "%ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265" -f 5
   > ```
@@ -282,7 +284,7 @@ guide for other options.
   set FFMPEG_ROOT=<path-to-ffmpeg>
   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-test && cd rocdecode-test
-  cmake "%ROCM_PATH%\share\rocdecode\test" -DROCM_PATH="%ROCM_PATH%" -DFFMPEG_ROOT="%FFMPEG_ROOT%"
+  cmake "%ROCM_PATH%\share\rocdecode\test"
   cmake --build . --config Release
   ctest -C Release -VV
   ```
