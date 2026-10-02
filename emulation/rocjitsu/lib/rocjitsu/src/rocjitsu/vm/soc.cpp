@@ -25,6 +25,10 @@ amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
       arch == ROCJITSU_CODE_ARCH_RDNA4) {
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
   }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+    return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
+  }
   return amdgpu::SdmaPacketDialect::Legacy;
 }
 
