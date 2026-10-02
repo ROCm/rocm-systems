@@ -43,12 +43,30 @@
 
 namespace sdma_anvil {
 
+// How an engine was chosen for one peer, and the values that explain the choice. The two failure
+// logs that report it -- the queue-create error and the missing-xGMI-id error -- need the same
+// fields, so they travel as one record: a second copy means the next diagnostic field has to be
+// remembered in two places.
+struct EngineSelection {
+  int engineId{-1};  // -1 when no engine could be mapped for this pair
+  int srcDeviceId{-1};
+  int dstDeviceId{-1};
+  // Result of hsa_amd_memory_get_preferred_copy_engine. queried stays false when the agents were
+  // not valid enough to ask, which is different from asking and being refused.
+  hsa_status_t preferredStatus{HSA_STATUS_ERROR};
+  uint32_t preferredMask{0};
+  bool preferredQueried{false};
+  bool usedPreferred{false};
+  // Engine counts this node reports, which bound every id above.
+  uint32_t numSdmaEngines{0};
+  uint32_t numSdmaXgmiEngines{0};
+  uint32_t numSdmaEnginesTotal{0};
+};
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
-            uint32_t engineId, hsa_status_t preferredStatus, uint32_t preferredMask,
-            bool usedPreferred, uint32_t numSdmaEngines, uint32_t numSdmaXgmiEngines);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId,
+            const EngineSelection& selection);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
@@ -97,8 +115,7 @@ class AnvilLib {
   void disconnect();
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                             hsa_status_t preferredStatus, uint32_t preferredMask,
-                             bool usedPreferred, int* channelIdx = nullptr);
+                             const EngineSelection& selection, int* channelIdx = nullptr);
 
  private:
   /*
@@ -134,20 +151,18 @@ class AnvilLib {
   // Queues already taken by this process, keyed by the engine the create actually used.
   std::unordered_map<uint32_t, uint32_t> queuesUsedPerEngine_;
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
-  // Last preferred-engine query, so a getOamId failure can print status and mask.
-  hsa_status_t lastPreferredStatus_{HSA_STATUS_ERROR};
-  uint32_t lastPreferredMask_{0};
-  bool lastPreferredQueried_{false};
-  int lastSrcDeviceId_{-1};
-  int lastDstDeviceId_{-1};
+  // Selection in progress, so getOamId can report why the map was consulted without the caller
+  // threading the same values back down.
+  EngineSelection selection_;
 
   void buildGpuAgentMap();
   hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
   void querySdmaEngineCounts();
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
-  int getSdmaEngineId(int srcDeviceId, int dstDeviceId, hsa_status_t* preferredStatus,
-                      uint32_t* preferredMask, bool* usedPreferred);
+  // Chooses an engine for the pair and records why, so the caller can hand the same record to
+  // every queue it then creates.
+  EngineSelection getSdmaEngineId(int srcDeviceId, int dstDeviceId);
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;

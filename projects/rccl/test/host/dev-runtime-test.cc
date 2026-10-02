@@ -3541,6 +3541,202 @@ TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// windowRegisterNonSym stage 1, cuMem arm. cudaIpcGetMemHandle rejects a VMM
+// allocation, so the exporter retains its allocation handle and the importer
+// resolves it through the owner's proxy -- the same exchange
+// ncclP2pImportShareableBuffer performs for registered buffers. GIN windows
+// always take this arm, because GIN requires NCCL_CUMEM_ENABLE=1.
+//
+// ncclCuMemEnable() is a controllable seam here (fakes/nccl_fakes.cc), so this
+// suite arms it rather than inheriting the suite above, whose default of 0
+// reaches only the refusals.
+
+class WindowRegisterNonSymCuMemTest : public WindowRegisterNonSymIpcTest {
+protected:
+  // The retained local handle, and the base the importer maps each peer at.
+  const hipMemGenericAllocationHandle_t kRetained =
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(0x5150);
+  void* const kPeerBase = reinterpret_cast<void*>(0x900000);
+  hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
+
+  void SetUp() override {
+    WindowRegisterNonSymIpcTest::SetUp();
+    // Only POSIX-FD exports the raw handle through the owner's proxy; the arm
+    // is gated on it, so pin it rather than relying on the fake's default.
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  }
+  void TearDown() override {
+    ncclCuMemHandleType = savedHandleType;
+    WindowRegisterNonSymIpcTest::TearDown();
+  }
+
+  // Report the queried pointer as its own allocation base, with segments of
+  // segSize. The walk inside ncclCuMemGetAddressRange advances by the size each
+  // query reports, so a zero size -- the seam's default -- spins forever.
+  std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> AddressRangeOf(size_t segSize) {
+    return [segSize](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+      if (pbase) *pbase = dptr;
+      if (psize) *psize = segSize;
+      return hipSuccess;
+    };
+  }
+
+  // Publish every peer as a cuMem exporter over an allocSize-byte allocation.
+  std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherCuMemPeers(size_t allocSize) {
+    return [this, allocSize](void*, int*, int self, int size, void* buf, int) {
+      auto* e = static_cast<ExchangeEntry*>(buf);
+      for (int r = 0; r < size; r++) {
+        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+        e[r].userOffset = 64 * r;
+        e[r].userSize = 4096;
+        e[r].allocSize = allocSize;
+        e[r].isCuMem = 1;
+        e[r].cuMemHandle = 0xAB00 + r;  // the exporter's handle, opaque to us
+      }
+      return ncclSuccess;
+    };
+  }
+};
+
+// The happy path: a VMM window is exported by handle and every out-of-process
+// peer is imported through the proxy rather than through cudaIpcOpenMemHandle.
+TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = kRetained;
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  // 8 KiB published under a 4 KiB user slice, so the size handed to the import
+  // is visibly the whole allocation rather than the caller's request.
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherCuMemPeers(8192));
+  // The exporter must not reach the legacy handle for a VMM buffer, and the
+  // importer must not reach the legacy opener. Both seams default to failing,
+  // so a regression surfaces as a failed Register as well as these counts.
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook ipcOpen(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a cuMem peer must not be opened as a legacy IPC handle";
+    return hipErrorInvalidValue;
+  });
+
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           if (g) *g = 4096;
+                           return hipSuccess;
+                         });
+  std::vector<int> handedOutFds;
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    const int dup3d = dup(STDERR_FILENO);
+    handedOutFds.push_back(dup3d);
+    if (fd) *fd = dup3d;
+    return dup3d < 0 ? ncclSystemError : ncclSuccess;
+  });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x6060);
+                      return hipSuccess;
+                    });
+  ScopedHook reserve(g_hipMemAddressReserve, [&](void** p, size_t, size_t, void*, unsigned long long) {
+    if (p) *p = kPeerBase;
+    return hipSuccess;
+  });
+  ScopedHook map(g_hipMemMap,
+                 [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+                   return hipSuccess;
+                 });
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; });
+  // The import must be tracked as offload memory, like transport/p2p.cc's call,
+  // so suspend/resume has a dyn-mem entry to walk. ncclMemPersist early-outs.
+  std::vector<ncclMemType_t> trackedTypes;
+  std::vector<size_t> trackedSizes;
+  ScopedHook track(g_memTrackImportFromPeer,
+                   [&](ncclMemManager*, void*, size_t size, hipMemGenericAllocationHandle_t,
+                       hipMemAllocationHandleType, ncclMemType_t memType, int, int, void*) {
+                     trackedTypes.push_back(memType);
+                     trackedSizes.push_back(size);
+                     return ncclSuccess;
+                   });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_NE(out, nullptr);
+
+  // Ranks 1 and 2 are imported; our own slot reuses the caller's pointer.
+  EXPECT_EQ(proxyFd.calls, 2);
+  EXPECT_EQ(import.calls, 2);
+  EXPECT_EQ(ipcOpen.calls, 0);
+  EXPECT_EQ(ipcGet.calls, 0);  // VMM buffers never take the legacy export
+
+  ASSERT_EQ(trackedTypes.size(), 2u);
+  EXPECT_EQ(trackedTypes[0], ncclMemOffload);
+  EXPECT_EQ(trackedTypes[1], ncclMemOffload);
+  // The whole published allocation is mapped, not just the user's slice.
+  EXPECT_EQ(trackedSizes[0], 8192u);
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  ASSERT_EQ(win->ipcPeerCount, 3);
+  EXPECT_EQ(win->ipcPeerPtrs[0], kUserPtr);
+  // Each peer is its mapped base advanced by the offset it published, and is
+  // recorded as cuMem so teardown takes the matching release.
+  EXPECT_EQ(win->ipcPeerPtrs[1], static_cast<char*>(kPeerBase) + 64);
+  EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(kPeerBase) + 128);
+  EXPECT_EQ(win->ipcPeerIsCuMem[1], 1);
+  EXPECT_EQ(win->ipcPeerIsCuMem[2], 1);
+  // The retained handle is held only until every peer has imported.
+  EXPECT_EQ(release.calls, 1);
+
+  // Production closed each converted fd, so a second close must fail.
+  ASSERT_EQ(handedOutFds.size(), 2u);
+  for (int fd : handedOutFds) {
+    ASSERT_GE(fd, 0);
+    EXPECT_EQ(::close(fd), -1);
+    EXPECT_EQ(errno, EBADF);
+  }
+}
+
+// Branch: the retained handle covers one VMM segment, but the looped walk spans
+// more than that segment. Publishing the two together would hand peers a size
+// the handle cannot map, so the export drops to legacy IPC and releases the
+// handle instead.
+TEST_F(WindowRegisterNonSymCuMemTest, LoopedRangeExceedsRetainedSegment_FallsBackToLegacyIpc) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = kRetained;
+    return hipSuccess;
+  });
+  // 2 KiB segments under a 4 KiB window: the first query sizes the retained
+  // segment, the walk then totals two of them.
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(2048));
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  // Peers stay legacy: this rank's export arm is what is under test.
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook ipcOpen(g_hipIpcOpenMemHandle, [&](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    if (ptr) *ptr = kPeerBase;
+    return hipSuccess;
+  });
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int*) {
+    ADD_FAILURE() << "the fallback must not import anything through the proxy";
+    return ncclSystemError;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+
+  EXPECT_EQ(ipcGet.calls, 1);    // legacy export ran instead
+  EXPECT_EQ(release.calls, 1);   // the retained handle was dropped, not published
+  EXPECT_EQ(proxyFd.calls, 0);
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
+  EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrWindowRegisterInGroup is the entry point for window registration. It
 // takes a local registration, then either hands off to the non-symmetric helper
 // or walks the symmetric path itself.

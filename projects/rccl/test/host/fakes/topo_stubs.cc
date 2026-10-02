@@ -119,7 +119,22 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
   return g_ncclTopoGetSystem(comm, system, dumpXmlFile);
 }
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected) { ::abort(); }
+// Controllable (was fail-loud), same shape as g_ncclTopoPathAllNVLink below. :2591 writes
+// comm->isAllDirectNvlink, and the line after it is the GIN gate this PR changed
+// (globalGinTypeBitMask && globalCuMemGdrSupport && (!hasMloPart || ncclParamGinMloPart())), so an
+// abort here is what stops a rung from ever reaching that gate. No test drives it to success yet --
+// the rung-4 terminator is ~380 lines earlier and ncclTopoComputeP2pChannels (:54),
+// ncclProfilerPluginInit, ncclTransportCheckP2pType and ncclProxyCreate are still fail-loud in
+// between -- so this is the seam half of that work, per MICROTEST_README.md "Adding more
+// controllable seams". Default succeeds and reports NOT all-direct, matching its sibling.
+std::function<ncclResult_t(struct ncclTopoSystem*, bool*)> g_ncclTopoPathAllDirectNVLink =
+    [](struct ncclTopoSystem*, bool* allNvlinkConnected) {
+      *allNvlinkConnected = false;
+      return ncclSuccess;
+    };
+ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected) {
+  return g_ncclTopoPathAllDirectNVLink(system, allNvlinkConnected);
+}
 // Controllable (was fail-loud). :1985 writes comm->isAllNvlink, which :2037 then folds across ranks.
 std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink =
     [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
@@ -222,6 +237,10 @@ void ResetTopoStubs() {
     return ncclSuccess;
   };
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
+  g_ncclTopoPathAllDirectNVLink = [](struct ncclTopoSystem*, bool* allNvlinkConnected) {
+    *allNvlinkConnected = false;
+    return ncclSuccess;
+  };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
   g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
