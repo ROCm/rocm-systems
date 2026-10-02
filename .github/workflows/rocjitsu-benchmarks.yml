@@ -17,7 +17,7 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: e1bac822f3fd2e8c29e3a08ae6c326db1692a757 # rocjitsu-test-corpus#44
+  CORPUS_SHA: c1a0197ad0c930a0ca48f04699f38d27e6cfea2b # Manual branch publication
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   RESULTS_BRANCH: gh-pages-rocjitsu
@@ -136,7 +136,10 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    if: >-
+      ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+           (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/'))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -168,6 +171,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocm-systems
+          ref: develop
           path: dashboard
           persist-credentials: false
           sparse-checkout: emulation/rocjitsu/website/dashboard
@@ -227,7 +231,7 @@ jobs:
                 --expected-corpus-sha "${CORPUS_SHA}" \
                 --machine-id "${BENCHMARK_MACHINE}" \
                 --trigger "${TRIGGER}" \
-                --branch develop \
+                --branch "${GITHUB_REF_NAME}" \
                 --commit-message "${COMMIT_MESSAGE}" \
                 --source-ref "${GITHUB_REF_NAME}" \
                 --is-beta
