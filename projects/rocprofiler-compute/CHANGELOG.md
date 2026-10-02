@@ -36,6 +36,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
+* Fixed dispatch IDs not always following kernel launch order.
 
 ### Upcoming changes
 
