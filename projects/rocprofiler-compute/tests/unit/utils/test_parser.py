@@ -18,6 +18,7 @@ from utils import schema
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
+    apply_non_kernel_filters,
     build_dfs,
     correct_sys_info,
     load_pc_sampling_data,
@@ -463,6 +464,12 @@ class TestExpandPlaceholderRanges:
 def _filter_workload() -> SimpleNamespace:
     """Workload stub exposing raw_pmc and filter attributes for apply_filters."""
     return SimpleNamespace(
+        dfs={
+            1: pd.DataFrame({
+                "Kernel_Name": ["vecCopy", "vecAdd", "vecMul"],
+                "Selected": ["", "", ""],
+            })
+        },
         raw_pmc=pd.DataFrame({
             "GPU_ID": [0, 0, 1, 1],
             "Kernel_Name": ["vecCopy", "vecAdd", "vecCopy", "vecMul"],
@@ -610,6 +617,121 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.filter_gpu_ids = [0, 1]
         assert len(apply_filters(workload, "/tmp", False)) == 4
+
+    @pytest.mark.parametrize("dispatch_id", ["2", ">2"])
+    def test_combined_filters_keep_kernel_scoped_dispatch_error(
+        self, monkeypatch, dispatch_id
+    ) -> None:
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = "0"
+        workload.filter_kernel_ids = [0]
+        workload.filter_dispatch_ids = [dispatch_id]
+
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False)
+
+        assert error_calls == [
+            (
+                "analysis",
+                f"{dispatch_id} is an invalid dispatch id. "
+                "Dispatch ids run from 1 to 1.",
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "gpu_ids,dispatch_ids,kernel_ids,expected_rows,expected_index",
+        [
+            (
+                None,
+                None,
+                None,
+                [
+                    (0, "vecCopy", 1),
+                    (0, "vecAdd", 2),
+                    (1, "vecCopy", 3),
+                    (1, "vecMul", 4),
+                ],
+                [0, 1, 2, 3],
+            ),
+            (
+                "0",
+                None,
+                None,
+                [(0, "vecCopy", 1), (0, "vecAdd", 2)],
+                [0, 1],
+            ),
+            (
+                None,
+                ["1", "3"],
+                None,
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                None,
+                None,
+                [0],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+            (
+                "0",
+                ["1"],
+                [0],
+                [(0, "vecCopy", 1)],
+                [0],
+            ),
+            (
+                [0, 1],
+                ["1", "3"],
+                [0],
+                [(0, "vecCopy", 1), (1, "vecCopy", 3)],
+                [0, 2],
+            ),
+        ],
+    )
+    def test_apply_filters_matches_expected_rows(
+        self,
+        gpu_ids,
+        dispatch_ids,
+        kernel_ids,
+        expected_rows,
+        expected_index,
+    ) -> None:
+        workload = _filter_workload()
+        workload.filter_gpu_ids = gpu_ids
+        workload.filter_dispatch_ids = dispatch_ids
+        workload.filter_kernel_ids = kernel_ids
+
+        filtered = apply_filters(workload, "/tmp", False)
+        columns = ["GPU_ID", "Kernel_Name", "Dispatch_ID"]
+        expected = pd.DataFrame(
+            expected_rows,
+            columns=columns,
+            index=expected_index,
+        )
+
+        pd.testing.assert_frame_equal(filtered, expected)
+
+    def test_non_kernel_filters_keep_other_kernels(self) -> None:
+        """GPU and dispatch filters leave a kernel outside -k available."""
+        workload = _filter_workload()
+        workload.filter_gpu_ids = "0"
+        workload.filter_dispatch_ids = ["2"]
+        workload.filter_kernel_ids = [0]
+
+        filtered = apply_non_kernel_filters(workload)
+
+        expected = pd.DataFrame(
+            [(0, "vecAdd", 2)],
+            columns=["GPU_ID", "Kernel_Name", "Dispatch_ID"],
+            index=[1],
+        )
+        pd.testing.assert_frame_equal(filtered, expected)
 
 
 class TestApplyKernelFilter:

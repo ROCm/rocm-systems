@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import strip_ansi
 from utils.tty import (
@@ -21,6 +22,7 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
+    resolve_hidden_columns,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -111,6 +113,27 @@ def sample_time_data() -> pd.DataFrame:
 def original_ns_values() -> dict[str, float]:
     """Original nanosecond values for the time row of sample_time_data."""
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
+
+
+def test_resolve_hidden_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicitly included columns become visible in terminal tables."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    resolved = resolve_hidden_columns(make_args(include_cols=None))
+    assert resolved == ["Description", "Unit", "Count"]
+    assert resolve_hidden_columns(make_args(include_cols=["Unit"])) == [
+        "Description",
+        "Count",
+    ]
+    assert resolve_hidden_columns(make_args(include_cols=["Description"])) == [
+        "Unit",
+        "Count",
+    ]
+    assert resolve_hidden_columns(make_args(include_cols=["Avg"])) == hidden_columns
+
+    resolved.append("Avg")
+    assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
 
 def test_format_table_output_suppresses_empty_column() -> None:
