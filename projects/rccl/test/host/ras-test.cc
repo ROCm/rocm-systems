@@ -26,6 +26,7 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/ras_fakes.h"
+#include "fakes/ras_param_fakes.h"
 #include "fakes/signature-drift.h"
 #include "os_socket_pair.h"
 #include "ras/ras_internal.h"
@@ -451,6 +452,7 @@ uint64_t g_clockNano = 100 * CLOCK_UNITS_PER_SEC;
 
 void ResetWholeFileSeams() {
   ResetRasFakes();
+  ResetRasParamFakes();
   g_socketInitResult = ncclSuccess;
   g_socketListenResult = ncclSuccess;
   g_socketPairCreateResult = ncclSuccess;

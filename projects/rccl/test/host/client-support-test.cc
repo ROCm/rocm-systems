@@ -55,6 +55,7 @@
 #include "fakes/env_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/ras_fakes.h"
+#include "fakes/ras_param_fakes.h"
 #include "ras/diagnostics.h"
 #include "ras/ras_internal.h"
 
@@ -310,6 +311,7 @@ namespace {
 
 void ResetWholeFileSeams() {
   ResetRasFakes();
+  ResetRasParamFakes();
   g_parsedSocketAddress.clear();
   g_callocCallIndex = 0;
   g_callocFailAt = -1;

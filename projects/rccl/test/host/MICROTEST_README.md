@@ -105,7 +105,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket
     I/O is redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query
     through `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
-    `fakes/ras_fakes.{h,cc}`. Inclusion-time symbol renames allow this TU to
+    `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
+    scaling. Inclusion-time symbol renames allow this TU to
     share `rccl-UnitTestsMicro` with `ras-test.cc` and the RAS fakes; preserve
     that isolation when adding collaborators. The guard-less positional pair
     `libc_seam.h` / `libc_seam_undef.h` must bracket the production source
@@ -344,7 +345,7 @@ symbol.
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` |
+| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
@@ -355,7 +356,7 @@ symbol.
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
 | `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
-| reusable RAS poll-entry, message, timeout, and diagnostics-context seams | `fakes/ras_fakes.cc` |
+| reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |

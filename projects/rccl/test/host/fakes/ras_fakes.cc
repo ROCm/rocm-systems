@@ -10,7 +10,6 @@
 #include <cstring>
 
 #include "fakes/signature-drift.h"
-#include "ras/ras_param.h"
 
 struct pollfd* g_rasFakePfds = nullptr;
 std::vector<struct pollfd> g_rasFakePfdsStorage;
@@ -49,8 +48,6 @@ void DefaultRasMsgFree(struct rasMsg* msg) {
   free(meta);
 }
 
-int64_t DefaultRasTimeoutFactorNs(int64_t baseSeconds) { return baseSeconds * CLOCK_UNITS_PER_SEC; }
-
 ncclResult_t DefaultRasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
   ++g_diagContextInitCalls;
   g_diagnosticsInitComm = comm;
@@ -63,14 +60,12 @@ ncclResult_t DefaultRasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx,
 std::function<ncclResult_t(int*)> g_rasGetNewPollEntry = DefaultRasGetNewPollEntry;
 std::function<ncclResult_t(struct rasMsg**, size_t)> g_rasMsgAlloc = DefaultRasMsgAlloc;
 std::function<void(struct rasMsg*)> g_rasMsgFree = DefaultRasMsgFree;
-std::function<int64_t(int64_t)> g_rasTimeoutFactorNs = DefaultRasTimeoutFactorNs;
 std::function<ncclResult_t(struct rasDiagnosticsContext*, const struct ncclComm*)> g_rasDiagnosticsContextInit =
   DefaultRasDiagnosticsContextInit;
 
 ASSERT_HOOK_MATCHES_PROD(g_rasGetNewPollEntry, rasGetNewPollEntry);
 ASSERT_HOOK_MATCHES_PROD(g_rasMsgAlloc, rasMsgAlloc);
 ASSERT_HOOK_MATCHES_PROD(g_rasMsgFree, rasMsgFree);
-ASSERT_HOOK_MATCHES_PROD(g_rasTimeoutFactorNs, rasTimeoutFactorNs);
 ASSERT_HOOK_MATCHES_PROD(g_rasDiagnosticsContextInit, rasDiagnosticsContextInit);
 
 #undef ASSERT_HOOK_MATCHES_PROD
@@ -78,8 +73,6 @@ ASSERT_HOOK_MATCHES_PROD(g_rasDiagnosticsContextInit, rasDiagnosticsContextInit)
 ncclResult_t RasTestGetNewPollEntry(int* index) { return g_rasGetNewPollEntry(index); }
 ncclResult_t RasTestMsgAlloc(struct rasMsg** msg, size_t msgLen) { return g_rasMsgAlloc(msg, msgLen); }
 void RasTestMsgFree(struct rasMsg* msg) { g_rasMsgFree(msg); }
-
-int64_t rasTimeoutFactorNs(int64_t baseSeconds) { return g_rasTimeoutFactorNs(baseSeconds); }
 
 ncclResult_t rasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
   return g_rasDiagnosticsContextInit(ctx, comm);
@@ -89,7 +82,6 @@ void ResetRasFakes() {
   g_rasGetNewPollEntry = DefaultRasGetNewPollEntry;
   g_rasMsgAlloc = DefaultRasMsgAlloc;
   g_rasMsgFree = DefaultRasMsgFree;
-  g_rasTimeoutFactorNs = DefaultRasTimeoutFactorNs;
   g_rasDiagnosticsContextInit = DefaultRasDiagnosticsContextInit;
   g_rasFakePfdsStorage.clear();
   g_rasFakePfds = nullptr;

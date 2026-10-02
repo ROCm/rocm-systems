@@ -32,7 +32,6 @@ extern const struct ncclComm* g_diagnosticsInitComm;
 extern std::function<ncclResult_t(int*)> g_rasGetNewPollEntry;
 extern std::function<ncclResult_t(struct rasMsg**, size_t)> g_rasMsgAlloc;
 extern std::function<void(struct rasMsg*)> g_rasMsgFree;
-extern std::function<int64_t(int64_t)> g_rasTimeoutFactorNs;
 extern std::function<ncclResult_t(struct rasDiagnosticsContext*, const struct ncclComm*)>
   g_rasDiagnosticsContextInit;
 
