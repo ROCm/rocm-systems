@@ -28,10 +28,7 @@ ROCPD_COUNTER_HEADER = (
 )
 ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
 
-NATIVE_COUNTERS_HEADER = (
-    "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,counter_id,"
-    "counter_name,counter_value\n"
-)
+NATIVE_COUNTERS_HEADER = "dispatch_id,counter_id,counter_name,counter_value\n"
 NATIVE_DISPATCH_HEADER = (
     "dispatch_id,gpu_id,kernel_id,grid_size,workgroup_size,lds_per_workgroup,"
     "scratch_per_workitem,start_timestamp,end_timestamp,correlation_id\n"
@@ -47,7 +44,7 @@ def write_native_process(workload_dir, fbase, pid, counters, dispatch_ids):
     common.write_gzip_csv(
         workload_dir / f"counters_{fbase}_{pid}.csv.gz",
         NATIVE_COUNTERS_HEADER
-        + "".join(f"{d},0,7,0,5,{name},{value}\n" for d, name, value in counters),
+        + "".join(f"{d},5,{name},{value}\n" for d, name, value in counters),
     )
     common.write_gzip_csv(
         workload_dir / f"dispatch_{fbase}_{pid}.csv.gz",

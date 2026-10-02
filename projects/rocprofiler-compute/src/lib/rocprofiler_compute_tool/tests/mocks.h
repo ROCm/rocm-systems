@@ -69,6 +69,13 @@ public:
         void*    record_callback_args   = nullptr;
     };
 
+    struct callback_tracing_service_info
+    {
+        rocprofiler_callback_tracing_kind_t          kind = ROCPROFILER_CALLBACK_TRACING_NONE;
+        std::vector<rocprofiler_tracing_operation_t> operations;
+        void*                                        callback_args = nullptr;
+    };
+
     struct create_counter_config_info
     {
         std::vector<std::string> counter_names;
@@ -122,6 +129,7 @@ public:
     const std::vector<uint64_t>&                        get_created_contexts() const;
     const std::vector<uint64_t>&                        get_started_contexts() const;
     const std::vector<dispatch_counting_service_info>&  get_dispatch_counting_service_info() const;
+    const std::vector<callback_tracing_service_info>&   get_callback_tracing_service_info() const;
     const std::vector<create_counter_config_info>&      get_create_counter_config_info() const;
     const std::vector<query_counter_record_info>&       get_query_counter_record_info() const;
     const std::vector<hsa_intercept_registration_info>& get_hsa_intercept_registration_info() const;
@@ -132,6 +140,7 @@ private:
     std::vector<uint64_t>                        m_created_contexts;
     std::vector<uint64_t>                        m_started_contexts;
     std::vector<dispatch_counting_service_info>  m_dispatch_counting_service_info;
+    std::vector<callback_tracing_service_info>   m_callback_tracing_service_info;
     std ::vector<create_counter_config_info>     m_create_counter_config_info;
     std::vector<query_counter_record_info>       m_query_counter_record_info;
     std::vector<std::string>                     m_counter_names;

@@ -35,9 +35,6 @@ def native_counters(*rows):
     return pd.DataFrame([
         {
             "dispatch_id": dispatch_id,
-            "gpu_id": 2,
-            "kernel_id": 7,
-            "lds_per_workgroup": 0,
             "counter_id": 5,
             "counter_name": counter_name,
             "counter_value": counter_value,

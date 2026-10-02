@@ -152,16 +152,36 @@ TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
     EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbCapturesOneDispatchRecord)
+TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbCapturesNoDispatchRecord)
 {
     invoke_record_callback(10, "counter10", 11.);
+
+    EXPECT_TRUE(m_tool_data->dispatch_records.empty());
+}
+
+TEST_F(TestSdkCallbacks, ProvidedDispatchComplete_KernelDispatchCbCapturesOneDispatchRecord)
+{
+    invoke_kernel_dispatch_callback(ROCPROFILER_KERNEL_DISPATCH_COMPLETE);
 
     ASSERT_EQ(m_tool_data->dispatch_records.size(), 1);
     const auto& dispatch = m_tool_data->dispatch_records[0];
     EXPECT_EQ(dispatch.dispatch_id, 100);
     EXPECT_EQ(dispatch.agent_id, 200);
     EXPECT_EQ(dispatch.kernel_id, 300);
+    EXPECT_EQ(dispatch.grid_size, 24);
+    EXPECT_EQ(dispatch.workgroup_size, 6);
     EXPECT_EQ(dispatch.lds_per_workgroup, 400);
+    EXPECT_EQ(dispatch.scratch_per_workitem, 500);
+    EXPECT_EQ(dispatch.start_timestamp, 600);
+    EXPECT_EQ(dispatch.end_timestamp, 700);
+    EXPECT_EQ(dispatch.correlation_id, 800);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedDispatchEnqueue_KernelDispatchCbCapturesNothing)
+{
+    invoke_kernel_dispatch_callback(ROCPROFILER_KERNEL_DISPATCH_ENQUEUE);
+
+    EXPECT_TRUE(m_tool_data->dispatch_records.empty());
 }
 
 TEST_F(TestSdkCallbacks, ProvidedKernelSymbol_ToolTracingCbDemanglesAndDropsTheKdSuffix)
@@ -284,10 +304,29 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
     EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
     EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
     EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
     EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
-              dispatch_data.dispatch_info.group_segment_size);
+}
+
+void TestSdkCallbacks::invoke_kernel_dispatch_callback(rocprofiler_tracing_operation_t operation)
+{
+    rocprofiler_callback_tracing_kernel_dispatch_data_t payload = {};
+    payload.dispatch_info.dispatch_id                           = 100;
+    payload.dispatch_info.agent_id.handle                       = 200;
+    payload.dispatch_info.kernel_id                             = 300;
+    payload.dispatch_info.grid_size                             = {2, 3, 4};
+    payload.dispatch_info.workgroup_size                        = {1, 2, 3};
+    payload.dispatch_info.group_segment_size                    = 400;
+    payload.dispatch_info.private_segment_size                  = 500;
+    payload.start_timestamp                                     = 600;
+    payload.end_timestamp                                       = 700;
+
+    rocprofiler_callback_tracing_record_t record = {};
+    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH;
+    record.operation                             = operation;
+    record.correlation_id.internal               = 800;
+    record.payload                               = &payload;
+
+    m_sdk_callbacks->kernel_dispatch_callback(record, &m_tool_data);
 }
 
 void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name)

@@ -63,7 +63,7 @@ struct iteration_multiplexing_dispatch_record_t
     std::map<kernel_dispatch_info_t, std::size_t> kernel_params_to_profile_index;
 };
 
-/// One profiled kernel dispatch. Grid and workgroup sizes are the products of
+/// One completed kernel dispatch. Grid and workgroup sizes are the products of
 /// their three dimensions, which is the form analyze consumes.
 struct dispatch_record_t
 {
@@ -90,13 +90,13 @@ struct kernel_symbol_record_t
     uint32_t    sgpr_count       = 0;
 };
 
+/// kernel_id is kept for the kernel filter and not written: the dispatch
+/// artifact carries it.
 struct counter_info_record_t
 {
-    uint64_t    dispatch_id     = 0;
-    uint64_t    agent_id        = 0;
-    uint64_t    kernel_id       = 0;
-    uint32_t    LDS_memory_size = 0;
-    uint64_t    counter_id      = 0;
+    uint64_t    dispatch_id = 0;
+    uint64_t    kernel_id   = 0;
+    uint64_t    counter_id  = 0;
     std::string counter_name;
     double      counter_value = 0.;
 };
@@ -136,6 +136,9 @@ public:
 
     virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                        void*                                 callback_data) = 0;
+
+    virtual void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                                          void*                                 callback_data) = 0;
 };
 
 class SdkCallbacksImpl : public SdkCallbacks
@@ -153,6 +156,9 @@ public:
                          void*                                        callback_data_args) override;
 
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data) override;
+
+    void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                                  void*                                 callback_data) override;
 
 private:
     static bool is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
