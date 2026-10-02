@@ -33,7 +33,8 @@
 
 TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
 {
-    auto* handle = dlopen(ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE, RTLD_LAZY | RTLD_LOCAL);
+    auto registration_attach_fixture_name = fmt::format("$ORIGIN/../lib/{}", ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE);
+    auto* handle = dlopen(registration_attach_fixture_name.c_str(), RTLD_LAZY | RTLD_LOCAL);
     ASSERT_NE(handle, nullptr) << dlerror();
     auto close_handle = rocprofiler::common::scope_destructor{[handle]() { dlclose(handle); }};
 
