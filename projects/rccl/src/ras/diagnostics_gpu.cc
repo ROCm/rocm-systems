@@ -19,6 +19,23 @@
 #include "nvmlwrap.h"
 #include "param.h"
 
+// AMD builds read the GPU data from AMD SMI instead of NVML; the report names the data source and the vendor terms.
+// The XGMI link query reads no link speed, so only the NVLink check reports the speeds consistent.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#include "amdsmi_wrap.h"
+#define RAS_DIAG_AMD_SMI 1
+#define RAS_DIAG_GPU_SOURCE "AMD SMI"
+#define RAS_DIAG_DRIVER_LABEL "HIP driver version"
+#define RAS_DIAG_LINK_LABEL "XGMI"
+#define RAS_DIAG_LINK_SPEED_OK ""
+#else
+#define RAS_DIAG_AMD_SMI 0
+#define RAS_DIAG_GPU_SOURCE "NVML"
+#define RAS_DIAG_DRIVER_LABEL "CUDA driver version"
+#define RAS_DIAG_LINK_LABEL "NVLink"
+#define RAS_DIAG_LINK_SPEED_OK " at consistent speed"
+#endif
+
 // *************************************************************************
 // GPU model and count consistency check.
 // *************************************************************************
@@ -39,6 +56,12 @@ static ncclResult_t rasDiagnosticsGpuModelFillLocalData(const struct rasDiagnost
   gpuData->nGpus = 0;
   gpuData->model[0] = '\0';
 
+#if RAS_DIAG_AMD_SMI
+  if (amd_smi_diagGpuCount(&nDev) == ncclSuccess) gpuData->nGpus = (uint8_t)nDev;
+  if (amd_smi_diagGpuModel(comm->busId, gpuData->model, sizeof(gpuData->model)) != ncclSuccess) {
+    gpuData->model[0] = '\0';
+  }
+#else
   if (ncclNvmlDeviceGetCount(&nDev) == ncclSuccess) gpuData->nGpus = (uint8_t)nDev;
   if (comm->nvmlDev >= 0 && comm->nvmlDev < ncclNvmlDeviceCount) {
     nvmlDevice_t device;
@@ -48,6 +71,7 @@ static ncclResult_t rasDiagnosticsGpuModelFillLocalData(const struct rasDiagnost
       }
     }
   }
+#endif
 
   if (gpuData->model[0] == '\0') snprintf(gpuData->model, sizeof(gpuData->model), "%s", RAS_DIAG_GPU_MODEL_UNKNOWN);
   gpuData->model[sizeof(gpuData->model) - 1] = '\0';
@@ -137,18 +161,19 @@ ncclResult_t rasDiagnosticsGpuModelSummarize(
       } else if (countKnown) {
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
                                            "GPU inventory: %d GPUs per node consistent across %d ranks in comm 0x%lx, "
-                                           "GPU model unavailable via NVML",
+                                           "GPU model unavailable via " RAS_DIAG_GPU_SOURCE,
                                            expectedNGpus, commNRanks, startRank->commId.commHash),
                       ret, exit);
       } else if (modelKnown) {
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
                                            "GPU inventory: %s per node consistent across %d ranks in comm 0x%lx, "
-                                           "GPU count unavailable via NVML",
+                                           "GPU count unavailable via " RAS_DIAG_GPU_SOURCE,
                                            expectedModel, commNRanks, startRank->commId.commHash),
                       ret, exit);
       } else {
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
-                                           "GPU inventory: unavailable via NVML across %d ranks in comm 0x%lx",
+                                           "GPU inventory: unavailable via " RAS_DIAG_GPU_SOURCE
+                                           " across %d ranks in comm 0x%lx",
                                            commNRanks, startRank->commId.commHash),
                       ret, exit);
       }
@@ -314,7 +339,7 @@ ncclResult_t rasDiagnosticsCudaDriverVersionCollectLocal(const struct rasDiagnos
 ncclResult_t rasDiagnosticsCudaDriverVersionSummarize(
   const struct rasDiagnosticsContext* ctx, const struct rasDiagnosticsReporter* reporter, const char* data, int nData) {
   (void)ctx;
-  return rasDiagnosticsVersionSummarize(reporter, data, nData, "CUDA driver version",
+  return rasDiagnosticsVersionSummarize(reporter, data, nData, RAS_DIAG_DRIVER_LABEL,
                                         sizeof(struct rasDiagnosticsCudaDriverVersionData),
                                         rasDiagnosticsCudaDriverVersionFormat);
 }
@@ -374,6 +399,7 @@ struct rasDiagnosticsEccData {
   uint8_t available; // 1 only if NVML reported every ECC counter for this rank; 0 otherwise.
 };
 
+#if !RAS_DIAG_AMD_SMI
 // Reads one volatile ECC counter. Returns true only if NVML answered.
 static bool rasDiagnosticsEccReadCounter(nvmlDevice_t device, nvmlMemoryErrorType_t errorType,
                                          nvmlMemoryLocation_t location, uint64_t* out) {
@@ -383,6 +409,7 @@ static bool rasDiagnosticsEccReadCounter(nvmlDevice_t device, nvmlMemoryErrorTyp
   *out = value;
   return true;
 }
+#endif
 
 static ncclResult_t rasDiagnosticsEccFillLocalData(const struct rasDiagnosticsCommSnapshot* comm, void* checkData) {
   struct rasDiagnosticsEccData* eccData = (struct rasDiagnosticsEccData*)checkData;
@@ -393,6 +420,16 @@ static ncclResult_t rasDiagnosticsEccFillLocalData(const struct rasDiagnosticsCo
   eccData->uncorrectedDram = 0;
   eccData->available = 0;
 
+#if RAS_DIAG_AMD_SMI
+  // AMD SMI reports totals over all memory blocks, kept in the DRAM fields. Deferred errors were detected but not
+  // corrected, so they count as uncorrected.
+  struct amdsmiDiagEccCounts counts;
+  if (amd_smi_diagEccCounts(comm->busId, &counts) == ncclSuccess) {
+    eccData->correctedDram = counts.correctable;
+    eccData->uncorrectedDram = counts.uncorrectable + counts.deferred;
+    eccData->available = 1;
+  }
+#else
   if (comm->nvmlDev >= 0 && comm->nvmlDev < ncclNvmlDeviceCount) {
     nvmlDevice_t device;
     if (ncclNvmlDeviceGetHandleByIndex((unsigned int)comm->nvmlDev, &device) == ncclSuccess) {
@@ -409,6 +446,7 @@ static ncclResult_t rasDiagnosticsEccFillLocalData(const struct rasDiagnosticsCo
       eccData->available = ok ? 1 : 0;
     }
   }
+#endif
   return ncclSuccess;
 }
 
@@ -492,8 +530,8 @@ ncclResult_t rasDiagnosticsEccSummarize(const struct rasDiagnosticsContext* ctx,
       NCCLCHECKGOTO(rasDiagnosticsReportIncomplete(reporter, "ECC", startRank, end - start), ret, exit);
     } else if (nAvailable == 0) {
       NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
-                                         "ECC: unavailable via NVML across %d ranks in comm 0x%lx", commNRanks,
-                                         startRank->commId.commHash),
+                                         "ECC: unavailable via " RAS_DIAG_GPU_SOURCE " across %d ranks in comm 0x%lx",
+                                         commNRanks, startRank->commId.commHash),
                     ret, exit);
     } else if (nUncorrected == 0 && nCorrected == 0) {
       if (nAvailable == commNRanks) {
@@ -504,7 +542,7 @@ ncclResult_t rasDiagnosticsEccSummarize(const struct rasDiagnosticsContext* ctx,
       } else {
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
                                            "ECC: no uncorrected volatile errors across %d of %d ranks in comm 0x%lx "
-                                           "(ECC counters unavailable via NVML on %d ranks)",
+                                           "(ECC counters unavailable via " RAS_DIAG_GPU_SOURCE " on %d ranks)",
                                            nAvailable, commNRanks, startRank->commId.commHash, commNRanks - nAvailable),
                       ret, exit);
       }
@@ -550,11 +588,20 @@ struct rasDiagnosticsNvLinkData {
 
 static ncclResult_t rasDiagnosticsNvLinkFillLocalData(const struct rasDiagnosticsCommSnapshot* comm, void* checkData) {
   struct rasDiagnosticsNvLinkData* nvlData = (struct rasDiagnosticsNvLinkData*)checkData;
+
+  *nvlData = {};
+
+#if RAS_DIAG_AMD_SMI
+  // XGMI links take the place of NVLinks: a disabled link is not counted, a link that is down is inactive.
+  struct amdsmiDiagXgmiLinks links;
+  if (amd_smi_diagXgmiLinks(comm->busId, &links) == ncclSuccess) {
+    nvlData->nLinks = (uint8_t)links.nLinks;
+    nvlData->nInactive = (uint8_t)links.nDown;
+  }
+#else
   nvmlFieldValue_t linkCount = {};
   unsigned int nUnreadable = 0;
   nvmlDevice_t device;
-
-  *nvlData = {};
 
   if (comm->nvmlDev >= 0 && comm->nvmlDev < ncclNvmlDeviceCount &&
       ncclNvmlDeviceGetHandleByIndex((unsigned int)comm->nvmlDev, &device) == ncclSuccess) {
@@ -588,6 +635,7 @@ static ncclResult_t rasDiagnosticsNvLinkFillLocalData(const struct rasDiagnostic
     // Links whose state NVML cannot report leave nothing to check, so treat the device as having no NVLink.
     if (nUnreadable == nvlData->nLinks) *nvlData = {};
   }
+#endif
   return ncclSuccess;
 }
 
@@ -671,31 +719,32 @@ ncclResult_t rasDiagnosticsNvLinkSummarize(const struct rasDiagnosticsContext* c
     }
 
     if (end - start != commNRanks) {
-      NCCLCHECKGOTO(rasDiagnosticsReportIncomplete(reporter, "NVLink", startRank, end - start), ret, exit);
+      NCCLCHECKGOTO(rasDiagnosticsReportIncomplete(reporter, RAS_DIAG_LINK_LABEL, startRank, end - start), ret, exit);
     } else if (nWithLinks == 0) {
       // Nothing to check: either no device exposes NVLink (e.g. PCIe-only), or NVML cannot report it.
     } else if (nCountMismatch == 0 && nInactive == 0 && nSpeedMismatch == 0) {
       NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_OK,
-                                         "NVLink: %d links per GPU, all active at consistent speed across %d ranks "
-                                         "in comm 0x%lx",
+                                         RAS_DIAG_LINK_LABEL ": %d links per GPU, all active" RAS_DIAG_LINK_SPEED_OK
+                                         " across %d ranks in comm 0x%lx",
                                          refData->nLinks, commNRanks, startRank->commId.commHash),
                     ret, exit);
     } else {
       if (nCountMismatch > 0) {
         char rankSet[128];
         rasDiagnosticsFormatRankSet(rankSet, sizeof(rankSet), countMismatchRanks, nCountMismatchStored, nCountMismatch);
-        NCCLCHECKGOTO(
-          rasDiagnosticsReport(
-            reporter, RAS_DIAG_TAG_INFO,
-            "NVLink: link-count mismatch across %d ranks in comm 0x%lx, rank(s) %s differ from rank %d (%d)",
-            commNRanks, startRank->commId.commHash, rankSet, startRank->commRank, refData->nLinks),
-          ret, exit);
+        NCCLCHECKGOTO(rasDiagnosticsReport(
+                        reporter, RAS_DIAG_TAG_INFO,
+                        RAS_DIAG_LINK_LABEL
+                        ": link-count mismatch across %d ranks in comm 0x%lx, rank(s) %s differ from rank %d (%d)",
+                        commNRanks, startRank->commId.commHash, rankSet, startRank->commRank, refData->nLinks),
+                      ret, exit);
       }
       if (nInactive > 0) {
         char rankSet[128];
         rasDiagnosticsFormatRankSet(rankSet, sizeof(rankSet), inactiveRanks, nInactiveStored, nInactive);
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
-                                           "NVLink: inactive link(s) on rank(s) %s across %d ranks in comm 0x%lx",
+                                           RAS_DIAG_LINK_LABEL
+                                           ": inactive link(s) on rank(s) %s across %d ranks in comm 0x%lx",
                                            rankSet, commNRanks, startRank->commId.commHash),
                       ret, exit);
       }
@@ -703,8 +752,8 @@ ncclResult_t rasDiagnosticsNvLinkSummarize(const struct rasDiagnosticsContext* c
         char rankSet[128];
         rasDiagnosticsFormatRankSet(rankSet, sizeof(rankSet), speedMismatchRanks, nSpeedMismatchStored, nSpeedMismatch);
         NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_INFO,
-                                           "NVLink: inconsistent link speeds on rank(s) %s across %d ranks "
-                                           "in comm 0x%lx",
+                                           RAS_DIAG_LINK_LABEL
+                                           ": inconsistent link speeds on rank(s) %s across %d ranks in comm 0x%lx",
                                            rankSet, commNRanks, startRank->commId.commHash),
                       ret, exit);
       }
