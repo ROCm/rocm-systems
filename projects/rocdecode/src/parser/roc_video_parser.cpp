@@ -274,9 +274,19 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         if (sei_payload_buf_) {
             if ((payload_size + sei_payload_size_) > sei_payload_buf_size_) {
-                // Record the new size: leaving sei_payload_buf_size_ at the old value made every
-                // later message compare against a stale bound and reallocate again.
-                sei_payload_buf_size_ = sei_payload_size_ + payload_size;
+                // Grow geometrically. Fitting the capacity to exactly what is needed leaves it
+                // equal to sei_payload_size_ once the payload below is appended, so every later
+                // message carrying any payload re-enters this branch and copies the whole
+                // accumulated payload again. The messages in one picture are only bounded by the
+                // packet size, so that is quadratic in the packet size.
+                size_t needed = sei_payload_size_ + payload_size;
+                size_t new_size = sei_payload_buf_size_ ? sei_payload_buf_size_ : INIT_SEI_PAYLOAD_BUF_SIZE;
+                while (new_size < needed) {
+                    new_size *= 2;
+                }
+                // sei_payload_size_ is reset per picture and the payloads come out of one packet,
+                // so needed fits in uint32_t even where the doubling has overshot it.
+                sei_payload_buf_size_ = static_cast<uint32_t>(new_size > 0xFFFFFFFFULL ? needed : new_size);
                 uint8_t *tmp_ptr = new uint8_t [sei_payload_buf_size_];
                 memcpy(tmp_ptr, sei_payload_buf_, sei_payload_size_); // save the existing payload
                 delete [] sei_payload_buf_;
