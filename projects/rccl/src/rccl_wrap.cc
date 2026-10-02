@@ -1594,7 +1594,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // (2) Hierarchical AllGather. Live dispatch requires being outside a group
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
     // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
-    if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    if (!symEligible && ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
       decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
       if (query) {
         // -A reports the inter-comm proto/channels; intra values are logged only.

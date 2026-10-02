@@ -239,7 +239,7 @@ kernels_by_file = partition(kernels_to_build, lambda k: (kernel_fname(k), kernel
 # Add dependency only files (e.g. allreduce.cpp)
 for coll in set(k.coll for k in kernels_to_build):
   fbase = coll_to_lower[coll]
-  fname = fbase +'.cpp'
+  fname = fbase + '.cpp'
   if (fname, fbase) not in kernels_by_file:
     kernels_by_file[fname, fbase] = []
 

@@ -112,7 +112,7 @@ static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncc
 }
 
 // Intra-node bcast for railring without multimem.
-// Using same 16B/4B/byte tiers as the single node symmeytric bcast.
+// Using same 16B/4B/byte tiers as the single node symmetric bcast.
 template <typename T>
 static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
                                 ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/false>) {
@@ -144,11 +144,19 @@ static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncc
   }
 
   if (alignment % 4 == 0) {
-    constexpr int BytePerPack = 4;
+    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+    constexpr int BytePerTile = UnrollPacks * WARP_SIZE * BytePerPack;
+    size_t tiles = (nBytes - cursor) / BytePerTile;
+    if (tiles != 0) {
+      bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip,
+                                                          (int)tiles);
+      cursor += tiles * BytePerTile;
+    }
     size_t packs = (nBytes - cursor) / BytePerPack;
     if (packs != 0) {
-      bcastLsaPacks<BytePerPack, /*UnrollPeers=*/4>(tn, t, (ncclSymPtr<char>)input + cursor,
-                                                    (ncclSymPtr<char>)output + cursor, lsa, selfSkip, packs);
+      bcastLsaPacks<BytePerPack, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                              (ncclSymPtr<char>)output + cursor, lsa, selfSkip, packs);
       cursor += packs * BytePerPack;
     }
   }
@@ -210,6 +218,8 @@ static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
           }
         }
       }
+      // Count the last hop, which the LSA warps broadcast and this warp does not forward.
+      localSignalValue += (nElts + chunkSize - 1) / chunkSize;
       gin.flush(warps);
     } else {
       ncclCoopWarpSpan warps(1, blockDim.x / WARP_SIZE - 1, 1);

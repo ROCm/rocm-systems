@@ -6202,8 +6202,8 @@ TEST_F(GinMPIDeviceTests, AllGather_Symmetric) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
-  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating), 524288 (multi-chunk).
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16, size_t{1} << 19};
 
   for (size_t count : counts) {
     SCOPED_TRACE(::testing::Message() << "count=" << count);
@@ -6231,6 +6231,8 @@ TEST_F(GinMPIDeviceTests, AllGather_Symmetric) {
       if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
       if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
     });
+    ASSERT_MPI_NE(sendWin, nullptr);
+    ASSERT_MPI_NE(recvWin, nullptr);
 
     std::vector<float> hostSend(count);
     for (size_t i = 0; i < count; i++)

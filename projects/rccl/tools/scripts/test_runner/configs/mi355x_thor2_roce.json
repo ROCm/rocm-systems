@@ -5231,6 +5231,12 @@
       "enabled": true
     },
     {
+      "name": "GIN AllGather - Symmetric",
+      "description": "Symmetric-memory AllGather (RailRing_LsaST) with 2 ranks/node across 2 nodes",
+      "config": "gin_allgather_sym",
+      "enabled": true
+    },
+    {
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
