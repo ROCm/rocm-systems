@@ -3550,6 +3550,14 @@ pub enum AmdsmiNicCapabilityBitsT {
     AmdsmiNicCapFwctl = 1,
     AmdsmiNicCapNetdev = 2,
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicTypeT {
+    AmdsmiNicTypeUnknown = 0,
+    AmdsmiNicTypeAinic = 1,
+    AmdsmiNicTypeUaloe = 2,
+    AmdsmiNicTypeOther = 3,
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicAsicInfoT {
@@ -3563,6 +3571,7 @@ pub struct AmdsmiNicAsicInfoT {
     pub part_number: [::std::os::raw::c_char; 256usize],
     pub serial_number: [::std::os::raw::c_char; 256usize],
     pub vendor_name: [::std::os::raw::c_char; 256usize],
+    pub type_: u8,
     pub capability: u32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
@@ -3589,6 +3598,8 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiNicAsicInfoT, serial_number) - 777usize];
     ["Offset of field: AmdsmiNicAsicInfoT::vendor_name"]
         [::std::mem::offset_of!(AmdsmiNicAsicInfoT, vendor_name) - 1033usize];
+    ["Offset of field: AmdsmiNicAsicInfoT::type_"]
+        [::std::mem::offset_of!(AmdsmiNicAsicInfoT, type_) - 1289usize];
     ["Offset of field: AmdsmiNicAsicInfoT::capability"]
         [::std::mem::offset_of!(AmdsmiNicAsicInfoT, capability) - 1292usize];
 };
@@ -5782,6 +5793,12 @@ extern "C" {
     pub fn amdsmi_get_nic_asic_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicAsicInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_type(
+        processor_handle: AmdsmiProcessorHandle,
+        type_: *mut AmdsmiNicTypeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
