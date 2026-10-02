@@ -311,7 +311,7 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info);
  *  @brief Reset amdsmi_fabric_info_t to its not-supported state.
  *
  *  The caller overwrites only what the fabric sysfs tree answers for, so a
- *  field it stays silent about reports a sentinel rather than a plausible zero.
+ *  field it stays silent about reports a reserved value rather than a plausible zero.
  *  Callers set `bdf` after this returns; it is cleared here.
  *
  *  @param[out] info Structure to reset to its not-supported state.

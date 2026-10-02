@@ -28,6 +28,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "smi_nic_log.h"
 
 namespace amd::smi {
 
@@ -516,7 +517,26 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
   return {0, bdf_info};
 }
 
+/**
+ * Routes the NIC library's debug lines into the RSMI_LOGGING log. A NIC-only
+ * init never runs RocmSMI::Initialize(), which is what lifts the logger to debug
+ * level, so do that here when logging is on.
+ */
+static void install_nic_debug_log() {
+  auto* logger = ROCmLogging::Logger::getInstance();
+  if (!logger->isLoggerEnabled()) {
+    return;
+  }
+  logger->enableAllLogLevels();
+  amd::smi::nic::log::set_sink([](const std::string& msg) {
+    std::ostringstream ss;
+    ss << msg;
+    LOG_DEBUG(ss);
+  });
+}
+
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
+  install_nic_debug_log();
   bool ainic_only = (nic_filter_ == AMDSMI_NIC_FILTER_AINIC_ONLY);
   smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_, ainic_only);
   CHK_AMDNIC_RET(status);

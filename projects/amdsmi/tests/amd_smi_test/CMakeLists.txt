@@ -156,9 +156,20 @@ target_include_directories(test_nic_stats_suite PRIVATE ${PROJECT_SOURCE_DIR}/sr
 target_link_libraries(test_nic_stats_suite amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_stats_suite COMMAND test_nic_stats_suite)
 
+# Debug-log seam and read-chokepoint logging (real tmpdir files, capture sink).
+add_executable(test_nic_log_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_log_suite.cpp)
+target_compile_options(test_nic_log_suite PRIVATE -fno-rtti)
+target_include_directories(test_nic_log_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+if(LIBNL3_FOUND)
+    target_compile_definitions(test_nic_log_suite PRIVATE HAVE_LIBNL3)
+    target_include_directories(test_nic_log_suite PRIVATE ${LIBNL3_INCLUDE_DIRS})
+endif()
+target_link_libraries(test_nic_log_suite PRIVATE amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_log_suite COMMAND test_nic_log_suite)
+
 # Install tests
 install(
-    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite
+    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite test_nic_log_suite
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
 )

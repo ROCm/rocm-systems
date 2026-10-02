@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // std::numeric_limits is not specialized for enumeration types, so max() on one
-// yields 0 rather than the intended sentinel. Pin the enum defaults so a field
+// yields 0 rather than the intended reserved value. Pin the enum defaults so a field
 // that reverts to that form reports a plausible state instead of "unknown".
 // No GPU required.
 

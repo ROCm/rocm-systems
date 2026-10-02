@@ -56,7 +56,9 @@ std::string format_mac(const std::array<uint8_t, 6>& mac) {
   std::ostringstream oss;
   oss << std::hex << std::setfill('0');
   for (size_t i = 0; i < mac.size(); ++i) {
-    if (i > 0) oss << ":";
+    if (i > 0) {
+      oss << ":";
+    }
     oss << std::setw(2) << static_cast<int>(mac[i]);
   }
   return oss.str();
@@ -141,21 +143,21 @@ void test_netlink_operations(const std::string& iface) {
   auto transport = create_transport(NicBackend_t::Netlink);
 
   auto drvinfo = transport->get_driver_info(iface);
-  record_test("Driver info returns ENOTSUP", !drvinfo.success && drvinfo.error_code == ENOTSUP,
+  record_test("Driver info returns ENOTSUP", !drvinfo.success && (drvinfo.error_code == ENOTSUP),
               "Expected ENOTSUP for unsupported operation");
 
   auto pause = transport->get_pause_params(iface);
-  record_test("Pause params", pause.success || pause.error_code == ENOTSUP,
+  record_test("Pause params", pause.success || (pause.error_code == ENOTSUP),
               pause.success ? std::string("rx=") + (pause.value.rx_pause ? "on" : "off")
                             : "errno: " + std::to_string(pause.error_code));
 
   auto link = transport->get_link_settings(iface);
-  record_test("Link settings", link.success || link.error_code == ENOTSUP,
+  record_test("Link settings", link.success || (link.error_code == ENOTSUP),
               link.success ? "speed: " + std::to_string(link.value.speed) + " Mbps"
                            : "errno: " + std::to_string(link.error_code));
 
   auto perm = transport->get_permanent_address(iface);
-  record_test("Permanent address returns ENOTSUP", !perm.success && perm.error_code == ENOTSUP,
+  record_test("Permanent address returns ENOTSUP", !perm.success && (perm.error_code == ENOTSUP),
               "Expected ENOTSUP for unsupported operation");
 }
 

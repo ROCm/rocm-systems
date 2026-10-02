@@ -27,10 +27,15 @@ namespace transport = ::amd::smi::nic::transport;
  * Port-split capability/state, read from devlink (DEVLINK_CMD_PORT_GET). devlink
  * exposes only the capability bit and the current count (there is no "max
  * sub-ports" attribute), so the schema stops there rather than fabricating one.
+ *
+ * Both fields default to all-ones ("unknown"): the kernel omits the attributes on
+ * ports that do not report split state (ionic, ifoe), and a zero default would
+ * read as a real "not splittable, not split".
  */
 struct DevlinkPortSplit {
-  uint8_t splittable;    // DEVLINK_ATTR_PORT_SPLITTABLE: 1 if the port can split
-  uint32_t split_count;  // DEVLINK_ATTR_PORT_SPLIT_COUNT: current sub-ports (0 if not split)
+  uint8_t splittable = UINT8_MAX;  // DEVLINK_ATTR_PORT_SPLITTABLE: 1 if the port can split
+  // DEVLINK_ATTR_PORT_SPLIT_COUNT: current sub-ports (0 if not split)
+  uint32_t split_count = UINT32_MAX;
 };
 
 /**
@@ -88,6 +93,14 @@ struct DevlinkDeviceInfo {
   uint8_t version_count;         // number of valid entries in versions[]
   DevlinkVersion versions[kMaxDevlinkVersions];
 };
+
+/**
+ * One-line renderings of devlink replies for the debug log. Serial numbers
+ * (including version entries whose name contains "serial") are masked.
+ */
+std::string devlink_describe(const std::vector<DevlinkReporter>& reporters);
+std::string devlink_describe(const DevlinkPortSplit& split);
+std::string devlink_describe(const DevlinkDeviceInfo& info);
 
 /**
  * Abstraction over the devlink generic-netlink family. Declared without any
