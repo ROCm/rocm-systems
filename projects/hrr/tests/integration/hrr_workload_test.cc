@@ -36,6 +36,7 @@
     INFO("hiprtcGetErrorString: " << hiprtcGetErrorString(_hrr_rtc));          \
     REQUIRE(_hrr_rtc == HIPRTC_SUCCESS);                                       \
   } while (0)
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -480,6 +481,9 @@ TEST_CASE("Unit_HRR_AllApis_Direct", "[.][hrr-direct]") {
                                               hrr_scalarAdd, 0, 0));
   REQUIRE(occBlockSize > 0);
 
+  // Host time around the timed span: an upper bound on what the events should
+  // report. A clock read, not a HIP call, so the capture does not change.
+  const auto host_before = std::chrono::steady_clock::now();
   HRR_HIP_CHECK(hipEventRecord(ev_start, s0));
 
   dim3 block(256), grid((N + 255) / 256);
@@ -495,10 +499,28 @@ TEST_CASE("Unit_HRR_AllApis_Direct", "[.][hrr-direct]") {
   // 11. Event query + elapsed time
   // =========================================================================
   HRR_HIP_CHECK(hipEventSynchronize(ev_stop));
+  const auto host_after = std::chrono::steady_clock::now();
   { hipError_t q = hipEventQuery(ev_stop); REQUIRE(q == hipSuccess); }
 
   float ms = 0.f;
   HRR_HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+  // gfx1153 has returned -1 to -42 ms here. Say enough to tell a stale read, a
+  // mix of clock domains and bad GPU ticks apart. The extra HIP calls run only
+  // once the case has already failed, so a passing capture is unchanged.
+  if (ms <= -1.f) {
+    float again = 0.f, reversed = 0.f;
+    const hipError_t again_rc = hipEventElapsedTime(&again, ev_start, ev_stop);
+    const hipError_t reversed_rc = hipEventElapsedTime(&reversed, ev_stop, ev_start);
+    using host_ms = std::chrono::duration<double, std::milli>;
+    const double host_elapsed = host_ms(host_after - host_before).count();
+    INFO("Host time from record(start) to synchronize(stop): " << host_elapsed
+         << " ms");
+    INFO("Elapsed(start, stop) read again: " << again << " ms (rc "
+         << again_rc << "), elapsed(stop, start): " << reversed
+         << " ms (rc " << reversed_rc << ")");
+    INFO(hrr_host_clock_offset());
+    REQUIRE(ms > -1.f);
+  }
   // Allow small negative values: GPU timer resolution can return -epsilon
   // when events are very close together. Accept anything > -1 ms.
   REQUIRE(ms > -1.f);

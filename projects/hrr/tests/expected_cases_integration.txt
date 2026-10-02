@@ -55,6 +55,7 @@ Unit_HRR_DrvMemcpyRoundtrip
 Unit_HRR_DrvMemcpy_Direct
 Unit_HRR_EmbeddedPtrRoundtrip
 Unit_HRR_EmbeddedPtrStruct_Direct
+Unit_HRR_EventElapsedNoCapture
 Unit_HRR_ExtMallocRoundtrip
 Unit_HRR_ExtMalloc_Direct
 Unit_HRR_ExtModuleLaunchKernelRoundtrip

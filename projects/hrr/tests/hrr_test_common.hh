@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -99,6 +100,26 @@ inline bool hrr_gpu_available() {
 inline void hrr_skip_without_gpu() {
   if (!hrr_gpu_available())
     HRR_SKIP_CASE("no ROCm-capable device is detected");
+}
+
+// For a negative hipEventElapsedTime. An event's GPU timestamp reaches HIP in
+// ROCr's CLOCK_BOOTTIME domain, while CLR's CPU fallback (EventDD::time, when
+// the HW time reads 0) stamps CLOCK_MONOTONIC. The two differ by the time the
+// machine has spent suspended, so an elapsed time taken across them is off by
+// about this offset; one far from it points at the GPU ticks instead.
+inline std::string hrr_host_clock_offset() {
+#if defined(__linux__)
+  timespec mono{}, boot{};
+  clock_gettime(CLOCK_MONOTONIC, &mono);
+  clock_gettime(CLOCK_BOOTTIME, &boot);
+  const double ms = (boot.tv_sec - mono.tv_sec) * 1e3 +
+                    (boot.tv_nsec - mono.tv_nsec) / 1e6;
+  std::ostringstream os;
+  os << "CLOCK_BOOTTIME - CLOCK_MONOTONIC = " << ms << " ms";
+  return os.str();
+#else
+  return "host clock offset not measured on this platform";
+#endif
 }
 
 // ---------------------------------------------------------------------------

@@ -517,6 +517,22 @@ jobs:
           set -e
           [ "$suite_rc" -eq 0 ] && [ "$guard_rc" -eq 0 ]
 
+      # gfx1153 has timed two events on one in-order stream at -1 to -42 ms.
+      # Unit_HRR_EventElapsedNoCapture is that span with no HRR in the process,
+      # and CLR's timestamp log (LOG_TS | LOG_SIG at level 3) prints each
+      # signal's raw start/end ticks beside the translated times, which is what
+      # tells a ROCr tick translation fault from a CLR one.
+      - name: Event timestamps without HRR
+        if: ${{ !cancelled() && matrix.family == 'gfx1153' }}
+        timeout-minutes: 2
+        env:
+          AMD_LOG_LEVEL: "3"
+          AMD_LOG_MASK: "0x80020"
+        run: |
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          ./build/hrr/tests/integration/hrr-integration-tests \
+            "Unit_HRR_EventElapsedNoCapture" --durations yes
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

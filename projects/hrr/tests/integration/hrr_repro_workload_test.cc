@@ -33,7 +33,9 @@
 #include <hsa/hsa_ext_amd.h>
 #endif
 
+#include <chrono>
 #include <cstdint>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Workload parameters (kept local so this file is self-contained)
@@ -411,6 +413,80 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
 
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
+}
+
+// ===========================================================================
+// Event timing with no HRR in the process
+//
+// Unit_HRR_AllApis_Direct times one kernel between two events on one in-order
+// stream and requires more than -1 ms. On gfx1153 it has read -1 to -42 ms, and
+// only ever under capture, because that is the only way that case runs. This
+// is the same sequence without capture, repeated: failing here puts the bug in
+// CLR or ROCr, and passing while AllApis fails puts it back in HRR.
+// ===========================================================================
+TEST_CASE("Unit_HRR_EventElapsedNoCapture", "[hrr]") {
+  hrr_skip_without_gpu();
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  int ticksPerMs = 0;  // hipDeviceAttributeWallClockRate is in kHz
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&ticksPerMs,
+                                      hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(ticksPerMs > 0);
+
+  hipStream_t s0, s1;
+  HRR_HIP_CHECK(hipStreamCreate(&s0));
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+  hipEvent_t ev_start, ev_stop;
+  HRR_HIP_CHECK(hipEventCreate(&ev_start));
+  HRR_HIP_CHECK(hipEventCreate(&ev_stop));
+
+  constexpr size_t kBytes = 16 * 1024;
+  std::vector<char> host(kBytes, 1);
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, kBytes));
+
+  constexpr int kIters = 50;
+  int bad = 0, worst_iter = -1;
+  float worst = 0.f;
+  double worst_host_ms = 0.;
+  for (int i = 0; i < kIters; ++i) {
+    // As in AllApis: an H2D copy on the stream, drained, then a 1 ms kernel
+    // between the events, with a second stream waiting on the stop event.
+    HRR_HIP_CHECK(hipMemcpyAsync(d, host.data(), kBytes, hipMemcpyHostToDevice, s0));
+    HRR_HIP_CHECK(hipStreamSynchronize(s0));
+    const auto host_before = std::chrono::steady_clock::now();
+    HRR_HIP_CHECK(hipEventRecord(ev_start, s0));
+    hipLaunchKernelGGL(hrr_repro_spin, dim3(1), dim3(1), 0, s0,
+                       static_cast<uint64_t>(ticksPerMs));
+    HRR_HIP_CHECK(hipGetLastError());
+    HRR_HIP_CHECK(hipEventRecord(ev_stop, s0));
+    HRR_HIP_CHECK(hipStreamWaitEvent(s1, ev_stop, 0));
+    HRR_HIP_CHECK(hipEventSynchronize(ev_stop));
+    const auto host_after = std::chrono::steady_clock::now();
+
+    float ms = 0.f;
+    HRR_HIP_CHECK(hipEventElapsedTime(&ms, ev_start, ev_stop));
+    if (ms <= -1.f) ++bad;
+    if (worst_iter < 0 || ms < worst) {
+      worst = ms;
+      worst_iter = i;
+      worst_host_ms =
+          std::chrono::duration<double, std::milli>(host_after - host_before).count();
+    }
+  }
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+
+  INFO(bad << " of " << kIters << " spans read -1 ms or less; the lowest, "
+           << worst << " ms at iteration " << worst_iter << ", took "
+           << worst_host_ms << " ms on the host");
+  INFO(hrr_host_clock_offset());
+  CHECK(bad == 0);
+
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipEventDestroy(ev_start));
+  HRR_HIP_CHECK(hipEventDestroy(ev_stop));
+  HRR_HIP_CHECK(hipStreamDestroy(s1));
+  HRR_HIP_CHECK(hipStreamDestroy(s0));
 }
 
 /**
