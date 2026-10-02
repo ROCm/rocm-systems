@@ -100,6 +100,8 @@ RegisterAccess::buffer_resource_registers(const Operand &op, unsigned scalar_wor
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
   if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
     return valid_lds_direct_operand(wf.m0());
+  if (inst.mnemonic() == "lds_param_load" || inst.mnemonic() == "ds_param_load")
+    return !(wf.m0() & 0x8000007f);
   if (inst.mnemonic() == "s_barrier_signal_isfirst") {
     const auto &source = *inst.src_operand(0);
     const auto constant = source.const_value();
@@ -126,6 +128,8 @@ uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
+  if (modifiers.exec_parameter_quads)
+    lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) & 0x7777777777777777ull : 0;
   if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource &&
       !modifiers.scalar_buffer_words) {
     const auto selector = modifiers.buffer_resource->encoding_value();
@@ -236,10 +240,47 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   const RegisterAccess registers(wf);
+  const bool graphics_target = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+                               wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                               wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  if (graphics_target && name.starts_with("v_interp_p")) {
+    const bool second = name.starts_with("v_interp_p2_");
+    const bool half = name.find("f16") != std::string_view::npos;
+    const uint64_t quads = whole_active_quads(lanes) & 0x1111111111111111ull;
+    const std::array source_lanes{quads << (second ? 2 : 1), lanes, second ? lanes : quads};
+    for (unsigned i = 0; i < 3; ++i)
+      if (const auto reg = registers.source_register(*inst.src_operand(i))) {
+        const bool packed = half && (i == 0 || (i == 2 && !second));
+        access(*reg, source_lanes[i], packed ? ((modifiers.control & (1u << i)) ? 0xc : 0x3) : 0xf,
+               false);
+      }
+    if (const auto reg = registers.destination_register(*inst.dst_operand(0)))
+      access(*reg, lanes, half && second ? ((modifiers.control & 8) ? 0xc : 0x3) : 0xf, true);
+    return;
+  }
+  if (graphics_target && (name == "exp" || name == "export")) {
+    access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
+    if (!(wf.status_raw() & (1u << 18)))
+      for (unsigned component = 0; component < 4; ++component)
+        if (modifiers.control & (1u << component))
+          if (const auto reg = registers.source_register(*inst.src_operand(component)))
+            access(*reg, lanes, 0xf, false);
+    return;
+  }
+  if (modifiers.image_address)
+    for (unsigned component = 0; component < modifiers.image_coordinate_count; ++component) {
+      const unsigned word = modifiers.image_a16 ? component / 2 : component;
+      const uint16_t reg = modifiers.image_coordinates[word];
+      if (reg < wf.num_vgprs())
+        access({RegClass::VGPR, reg, 1}, lanes,
+               modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, false);
+    }
   if (modifiers.exec_all_if_nonzero)
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
+  if (modifiers.exec_parameter_quads)
+    lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) & 0x7777777777777777ull : 0;
   if (const auto *resource = modifiers.buffer_resource) {
     for (const auto reg :
          registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words))
@@ -533,7 +574,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                   (name.find("mixlo_") != std::string_view::npos ||
                                    name.find("mixhi_") != std::string_view::npos);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
-        (!pending_scalar_ && !op->is_vgpr()))
+        op == modifiers.image_address || (!pending_scalar_ && !op->is_vgpr()))
       return;
     const auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
@@ -800,6 +841,8 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
       return WaitCounterKind::Exp;
     case WaitCounterType::ASYNCCNT:
       return WaitCounterKind::Async;
+    case WaitCounterType::SAMPLECNT:
+      return WaitCounterKind::Sample;
     case WaitCounterType::TENSORCNT:
       return WaitCounterKind::Tensor;
     }

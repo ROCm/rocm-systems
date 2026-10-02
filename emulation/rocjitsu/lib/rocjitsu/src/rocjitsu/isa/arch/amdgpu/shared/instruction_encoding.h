@@ -10,6 +10,7 @@
 #include "rocjitsu/base/api.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -130,6 +131,12 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf;
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
+  bool exec_parameter_quads = false;
+  // Explicit image-load/store coordinates, including NSA selectors and packed halves.
+  const Operand *image_address = nullptr;
+  std::array<uint32_t, 5> image_coordinates{};
+  uint8_t image_coordinate_count = 0;
+  bool image_a16 = false;
   uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;

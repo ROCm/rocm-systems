@@ -18,7 +18,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void ExportVexport::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Export: no-op in compute simulation.
+  wf.export_graphics(inst_.tgt, inst_.en, {inst_.vsrc0, inst_.vsrc1, inst_.vsrc2, inst_.vsrc3},
+                     inst_.row_en);
 }
 
 } // namespace rdna4

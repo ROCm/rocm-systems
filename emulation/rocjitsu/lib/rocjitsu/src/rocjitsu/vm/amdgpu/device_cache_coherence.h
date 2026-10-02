@@ -88,6 +88,10 @@ public:
     /// @brief Result of publishing dirty cache state for this boundary.
     [[nodiscard]] VmAccessOutcome outcome() const;
 
+    /// Advance once for each direct operation performed under a clean batch boundary.
+    /// Requires a successful boundary owned by the calling thread.
+    void advance_data_epoch();
+
     /// @brief Whether this boundary holds the specified coherence domain.
     [[nodiscard]] bool belongs_to(const DeviceCacheCoherence *owner) const {
       return owner_ != nullptr && owner_ == owner;
@@ -113,6 +117,10 @@ public:
   /// returned boundary keeps all L2 maintenance locks held through the backing
   /// atomic operation.
   [[nodiscard]] AtomicBoundary acquire_atomic_boundary();
+  /// Acquire the same exclusion without publishing dirty data or advancing an epoch.
+  /// Dirty participants decline before any backing callback. An admitted caller
+  /// advances the epoch immediately before each proved, callback-free operation.
+  [[nodiscard]] AtomicBoundary try_acquire_clean_boundary();
   /// @brief Quiesce the registered data-cache hierarchy for an external access.
   /// @details WritebackInvalidate publishes dirty state before returning. The
   /// returned lease advances the data and instruction epochs only after the

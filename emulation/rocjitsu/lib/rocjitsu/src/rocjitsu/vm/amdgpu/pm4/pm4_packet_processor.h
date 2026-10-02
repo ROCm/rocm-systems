@@ -9,14 +9,16 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
 struct ComputeQueueRecord;
 class GpuVm;
+class GpuVmAccess;
 
 /// @brief CP services used by packet execution.
-/// @details Queue state remains owned by CP. All callbacks must be populated and
+/// @details Queue state remains owned by CP. Required callbacks must be populated and
 /// run synchronously during process_pm4_packets(); the processor does not retain
 /// the context or callbacks.
 struct Pm4ExecutionContext {
@@ -45,6 +47,16 @@ struct Pm4ExecutionContext {
   /// The processor sets queue.publication_faulted before calling this callback
   /// on terminal cursor-publication failures; CP preserves that failure state.
   std::function<void()> fault_queue;
+  /// @brief Optional graphics services; absent for compute-only owners.
+  /// @details Advance a pending draw once before the packet loop. A true result
+  /// means a shader stage was dispatched and this turn must pause.
+  std::function<bool(const GpuVmAccess &)> advance_graphics;
+  /// @brief Consume one pending indirect draw after submission readiness.
+  /// @details A true result consumes this packet-budget iteration; pause if the
+  /// callback admitted a dispatch, otherwise continue to the next iteration.
+  std::function<bool(const GpuVmAccess &)> advance_indirect_graphics;
+  /// @brief Handle a graphics-engine packet, returning false for common packets.
+  std::function<bool(const GpuVmAccess &, uint32_t, std::vector<uint32_t> &)> execute_graphics;
 };
 
 /// @brief Process a bounded turn of a native ring or DRM indirect-buffer stream.

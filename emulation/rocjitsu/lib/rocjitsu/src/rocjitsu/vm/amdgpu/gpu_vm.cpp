@@ -48,7 +48,8 @@ public:
                    std::shared_ptr<PhysicalMemoryAccess> physical_memory = {},
                    std::shared_ptr<const FaultReporter> fault_reporter = {})
       : translator(std::move(translator)), physical_memory(std::move(physical_memory)),
-        fault_reporter(std::move(fault_reporter)) {}
+        fault_reporter(std::move(fault_reporter)),
+        ram_word_reads_supported(this->translator && this->translator->supports_ram_word_reads()) {}
 
   // One shared lifetime per snapshot; copying a snapshot must not copy the
   // fault callback or separately contend on each backing object's reference count.
@@ -57,6 +58,7 @@ public:
   // Generations share the callable too: pinning must not copy its target while
   // a fault callback is running under another generation's shared lease.
   const std::shared_ptr<const FaultReporter> fault_reporter;
+  const bool ram_word_reads_supported;
   mutable util::DistributedSharedMutex mutex;
   // Written under mutex; atomic so copied policy hits can check retirement without a lease.
   std::atomic<bool> valid{true};
@@ -662,6 +664,106 @@ GpuVmAccess::atomic_modify(uint64_t address, uint32_t width,
   }
   return access_state_->physical_memory->atomic_modify(
       translated.translation.domain, translated.translation.address, width, mutation);
+}
+
+bool GpuVmAccess::supports_ram_word_reads() const {
+  return access_state_ && access_state_->ram_word_reads_supported &&
+         access_state_->valid.load(std::memory_order_relaxed);
+}
+
+bool GpuVmAccess::try_read_ram_words(VmRamRange envelope,
+                                     std::span<const VmRamWordRead> words) const {
+  if (words.empty() || envelope.size < sizeof(uint32_t) ||
+      envelope.size - 1 > UINT64_MAX - envelope.address || !supports_ram_word_reads())
+    return false;
+  for (const auto &[address, destination] : words)
+    if (!destination || address < envelope.address ||
+        address - envelope.address > envelope.size - sizeof(uint32_t))
+      return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  return access_state_->valid && access_state_->translator && access_state_->physical_memory &&
+         access_state_->translator->try_read_ram_words(*access_state_->physical_memory, envelope,
+                                                       words);
+}
+
+std::unique_ptr<VmRamLease> GpuVmAccess::try_lease_ram(uint64_t address, std::size_t size) const {
+  const VmRamRange range{address, size};
+  return try_lease_ram(std::span{&range, 1});
+}
+
+std::unique_ptr<VmRamLease> GpuVmAccess::try_lease_ram(std::span<const VmRamRange> ranges) const {
+  auto request = prepare_ram_lease(ranges);
+  if (!request || !request->try_acquire())
+    return nullptr;
+  return request;
+}
+
+std::unique_ptr<VmRamLeaseRequest>
+GpuVmAccess::prepare_ram_lease(std::span<const VmRamRange> ranges) const {
+  if (ranges.empty() || ranges.size() > VmRamLease::kMaxRanges || !access_state_ ||
+      !access_state_->translator || !access_state_->physical_memory)
+    return nullptr;
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    const auto [address, size] = ranges[i];
+    if (!size || size - 1 > UINT64_MAX - address)
+      return nullptr;
+    for (size_t j = 0; j < i; ++j) {
+      const auto &other = ranges[j];
+      if (address <= other.address + other.size - 1 && other.address <= address + size - 1)
+        return nullptr;
+    }
+  }
+  auto request =
+      access_state_->translator->prepare_ram_lease(*access_state_->physical_memory, ranges);
+  if (!request)
+    return nullptr;
+  class Lease final : public VmRamLeaseRequest {
+  public:
+    Lease(std::shared_ptr<GpuVmAccessState> state, std::unique_ptr<VmRamLeaseRequest> request)
+        : state_(std::move(state)), request_(std::move(request)) {}
+    ~Lease() override {
+      release();
+      // Destroy/deallocate prepared storage only after every operation lock is
+      // released: allocator instrumentation may reenter the address space.
+      request_.reset();
+    }
+    bool try_acquire() override {
+      if (attempted_ || released_)
+        return false;
+      attempted_ = true;
+      try {
+        lock_ = std::shared_lock(state_->mutex);
+        if (state_->valid && request_->try_acquire())
+          return true;
+      } catch (...) {
+        release();
+        throw;
+      }
+      release();
+      return false;
+    }
+    void release() override {
+      if (released_)
+        return;
+      request_->release();
+      if (lock_.owns_lock())
+        lock_.unlock();
+      released_ = true;
+    }
+    std::span<std::byte> bytes(size_t index) const override {
+      assert(lock_.owns_lock() && !released_);
+      return request_->bytes(index);
+    }
+
+  private:
+    std::shared_ptr<GpuVmAccessState> state_;
+    std::shared_lock<util::DistributedSharedMutex> lock_;
+    std::unique_ptr<VmRamLeaseRequest> request_;
+    bool attempted_ = false;
+    bool released_ = false;
+  };
+  // Both heap allocations precede access-state and mapping admission.
+  return std::make_unique<Lease>(access_state_, std::move(request));
 }
 
 std::byte *GpuVmAccess::resolve_host_pointer(uint64_t address, std::size_t size) const {

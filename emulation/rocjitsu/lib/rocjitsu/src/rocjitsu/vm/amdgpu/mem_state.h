@@ -18,17 +18,22 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
+#include "rocjitsu/vm/graphics/image_access.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
+
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class GsRegisters;
 
 /// gfx1250 cluster async-to-LDS uses the low M0 bits as a destination
 /// workgroup-rank mask. Dispatch validation keeps cluster size within this
@@ -145,7 +150,7 @@ private:
 };
 
 /// @brief Dynamic pipeline state for vector memory instructions
-/// (FLAT, MUBUF, MTBUF, DS).
+/// (FLAT, MUBUF, MTBUF, MIMG, DS).
 class VectorMemState : public DynamicInstState {
 public:
   VectorMemState(MemPipelineTag pipeline) {
@@ -186,6 +191,14 @@ public:
   BufferFormat decoded_buffer_format;
   BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
   uint32_t buffer_selectors = 0;
+  bool image_srgb = false;
+  uint32_t image_bc_format = 0;
+  std::array<uint8_t, 64> image_bc_texels{};
+  // Every sampler instruction uses floating-point texel rules, including
+  // nearest sampling without optional multi-tap image_sample state.
+  bool image_sampling = false;
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<ImageSampleAccess> image_sample;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
@@ -217,6 +230,9 @@ public:
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
+  /// NGG counters use the DS completion path, but do not address LDS or GDS memory.
+  std::shared_ptr<GsRegisters> gs_registers;
+  uint32_t gs_register_index = 0;
   // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
   // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
   // by default, including FLAT atomics routed to LDS through the shared

@@ -398,6 +398,8 @@ int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
     return amdgpu::WaitCounters::TENSORCNT_MAX;
   case amdgpu::WaitCounterType::ASYNCCNT:
     return amdgpu::WaitCounters::ASYNCCNT_MAX;
+  case amdgpu::WaitCounterType::SAMPLECNT:
+    return amdgpu::WaitCounters::SAMPLECNT_MAX;
   }
   assert(false && "invalid wait counter type");
   return -1;

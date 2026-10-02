@@ -1254,6 +1254,40 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
     EXPECT_EQ(memory_[1536 + i], expected[i]) << "register " << std::hex << registers[i];
 }
 
+TEST_F(InterposerPm4Test, IndexedIndirectDrawsReadStridedArgumentsAndClampCount) {
+  // Empty draws still load the shader arguments. Leave a sentinel record after
+  // the count buffer's limit to detect an ignored limit or a packed stride.
+  const std::array<std::array<uint32_t, 6>, 3> arguments{
+      {{0, 1, 17, uint32_t(-3), 11, 0xbad}, {0, 2, 23, 7, 13, 0xbad}, {0, 3, 29, 99, 101, 0xbad}}};
+  std::memcpy(memory_ + 1152, arguments.data(), sizeof(arguments));
+  memory_[1200] = 2;
+  std::vector<uint32_t> packets;
+  const auto emit = [&](uint32_t opcode, std::initializer_list<uint32_t> words) {
+    packets.push_back(0xc0000000 | ((words.size() - 1) << 16) | (opcode << 8));
+    packets.insert(packets.end(), words.begin(), words.end());
+  };
+  emit(0x11, {1, uint32_t(kAddress + 4608), uint32_t(kAddress >> 32)});
+  emit(0x26, {uint32_t(kAddress + 5120), uint32_t(kAddress >> 32)});
+  emit(0x13, {32});
+  emit(0x38, {0, 0x01020100, 0x101, 0xd0000103, 3, uint32_t(kAddress + 4800),
+              uint32_t(kAddress >> 32), 24, 0});
+  for (uint32_t i = 0; i < 4; ++i)
+    emit(0x40,
+         {5u << 8, 0x2d00 + i, 0, uint32_t(kAddress + 6144 + i * 4), uint32_t(kAddress >> 32)});
+  // The single-draw packet uses a different first-index enable location.
+  emit(0x25, {0, 0x01020100, 0x10000101, 0});
+  for (uint32_t i = 0; i < 3; ++i)
+    emit(0x40,
+         {5u << 8, 0x2d00 + i, 0, uint32_t(kAddress + 6160 + i * 4), uint32_t(kAddress >> 32)});
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  const std::array<uint32_t, 7> expected{7, 13, 23, 1, uint32_t(-3), 11, 17};
+  for (uint32_t i = 0; i < expected.size(); ++i)
+    EXPECT_EQ(memory_[1536 + i], expected[i]);
+}
+
 TEST_F(InterposerPm4Test, ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState) {
   const uint32_t packet[] = {0xc0026900,
                              0x300,
@@ -1326,6 +1360,40 @@ TEST_F(InterposerPm4Test, ComputeTranslationPrefetchIgnoresPfpSelector) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
   EXPECT_EQ(memory_[1536], 0x12345678u);
+}
+
+TEST_F(InterposerPm4Test, OcclusionQuerySamplesOnlyEnabledInstances) {
+  const uint64_t destination = kAddress + 6144;
+  const uint32_t packets[]{
+      // Enable instances 0 and 2 with a 128-bit stride.
+      0xc0024600,
+      56 | (1u << 8),
+      (5u << 11) | (2u << 9),
+      0,
+      // Begin sample: full PIXEL_PIPE_STAT_DUMP encoding.
+      0xc0024600,
+      57 | (1u << 8),
+      uint32_t(destination),
+      uint32_t(destination >> 32),
+      // End sample: compact EVENT_WRITE_ZPASS encoding.
+      0xc001b100,
+      uint32_t(destination + 8),
+      uint32_t(destination >> 32),
+  };
+  std::fill_n(memory_ + 1536, 14, 0xdeadbeef);
+  std::memcpy(memory_, packets, sizeof(packets));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packets), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  for (uint32_t instance : {0u, 2u}) {
+    EXPECT_EQ(memory_[1536 + 4 * instance], 0u);
+    EXPECT_EQ(memory_[1537 + 4 * instance], 0x80000000u);
+    EXPECT_EQ(memory_[1538 + 4 * instance], 0u);
+    EXPECT_EQ(memory_[1539 + 4 * instance], 0x80000000u);
+  }
+  EXPECT_EQ(memory_[1540], 0xdeadbeefu);
+  EXPECT_EQ(memory_[1541], 0xdeadbeefu);
+  EXPECT_EQ(memory_[1548], 0xdeadbeefu);
 }
 
 TEST_F(InterposerPm4Test, StreamoutQuerySamplesAllFourMemoryCounterPairs) {

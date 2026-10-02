@@ -64,7 +64,7 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::SAMPLECNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };

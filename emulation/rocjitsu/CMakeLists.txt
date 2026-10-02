@@ -375,6 +375,7 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
+        rocjitsu_vm_graphics
         # Host-side plugin loader. The logging/race plugins are no longer
         # linked in statically; they are separate librocjitsu_plugin_<name>.so
         # modules discovered and dlopen()ed at runtime.

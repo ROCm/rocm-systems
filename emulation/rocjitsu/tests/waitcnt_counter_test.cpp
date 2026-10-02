@@ -16,6 +16,23 @@ using namespace rocjitsu::amdgpu;
 // WaitCounters — increment and decrement
 // ---------------------------------------------------------------------------
 
+TEST(WaitCounterTest, SampleAndLoadCountersAreIndependent) {
+  WaitCounters c;
+  c.increment(WaitCounterType::SAMPLECNT);
+  c.increment(WaitCounterType::LOADCNT);
+  WaitTarget target;
+  target.samplecnt = 0;
+  EXPECT_FALSE(target.satisfied(c));
+  c.decrement(WaitCounterType::SAMPLECNT);
+  EXPECT_TRUE(target.satisfied(c));
+  EXPECT_FALSE(c.empty());
+  target.vmcnt = 0;
+  EXPECT_FALSE(target.satisfied(c));
+  c.decrement(WaitCounterType::LOADCNT);
+  EXPECT_TRUE(target.satisfied(c));
+  EXPECT_TRUE(c.empty());
+}
+
 TEST(WaitCounterTest, IncrementVmcnt) {
   WaitCounters c;
   c.increment(WaitCounterType::VMCNT);

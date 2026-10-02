@@ -329,6 +329,8 @@ public:
   using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
   void set_sendmsg_handler(SendmsgHandler cb) { sendmsg_handler_ = std::move(cb); }
   bool handle_sendmsg(Wavefront &wf, uint32_t message) {
+    if (message == 9 && wf.allocate_graphics_exports(wf.m0() & 0x3ff, (wf.m0() >> 12) & 0x7ff))
+      return true;
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 

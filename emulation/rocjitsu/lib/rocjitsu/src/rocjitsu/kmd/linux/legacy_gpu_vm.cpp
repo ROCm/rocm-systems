@@ -29,8 +29,9 @@ class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
 public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
           LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
-      : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
-        vmid_(vmid), original_request_mutex_(registration.request_mutex),
+      : AddressSpaceTranslator(registration.request_mutex != nullptr), memory_(std::move(memory)),
+        address_space_(std::make_shared<LegacyAddressSpace>(*memory_)), vmid_(vmid),
+        original_request_mutex_(registration.request_mutex),
         mutation_epoch_(std::move(registration.mutation_epoch)),
         frontend_lifetime_(std::move(frontend_lifetime)) {
     address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
@@ -41,6 +42,66 @@ public:
     address_space_->set_process_mem_fd(vmid_, registration.client_mem_fd);
     address_space_->set_process_passthrough(vmid_, registration.passthrough);
     address_space_->set_process_fault_reporter(vmid_, registration.fault_reporter);
+  }
+
+  [[nodiscard]] bool try_read_ram_words(PhysicalMemoryAccess &physical, VmRamRange envelope,
+                                        std::span<const VmRamWordRead> words) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !original_request_mutex_)
+      return false;
+    LegacyAddressSpace::PageTableRequestGuard request;
+    std::shared_lock<util::DistributedSharedMutex> mapping;
+    std::span<std::byte> bytes;
+    if (!address_space_->try_acquire_sealed_ram(std::span{&envelope, 1}, vmid_, request, mapping,
+                                                std::span{&bytes, 1}, original_request_mutex_))
+      return false;
+    for (const auto &[address, destination] : words)
+      std::memcpy(destination, bytes.data() + (address - envelope.address), sizeof(*destination));
+    return true;
+  }
+
+  [[nodiscard]] std::unique_ptr<VmRamLeaseRequest>
+  prepare_ram_lease(PhysicalMemoryAccess &physical,
+                    std::span<const VmRamRange> ranges) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || ranges.empty() ||
+        ranges.size() > VmRamLease::kMaxRanges || !original_request_mutex_)
+      return nullptr;
+    class Request final : public VmRamLeaseRequest {
+    public:
+      Request(std::shared_ptr<LegacyAddressSpace> space, uint32_t vmid,
+              std::span<const VmRamRange> ranges,
+              std::shared_ptr<util::DistributedSharedMutex> request_mutex)
+          : space_(std::move(space)), vmid_(vmid), count_(ranges.size()),
+            request_mutex_(std::move(request_mutex)) {
+        std::copy(ranges.begin(), ranges.end(), ranges_.begin());
+      }
+      bool try_acquire() override {
+        return space_->try_acquire_sealed_ram(std::span{ranges_}.first(count_), vmid_, request_,
+                                              mapping_, std::span{bytes_}.first(count_),
+                                              request_mutex_);
+      }
+      void release() override {
+        if (mapping_.owns_lock())
+          mapping_.unlock();
+        request_.unlock();
+      }
+      std::span<std::byte> bytes(size_t index) const override {
+        assert(index < count_);
+        return bytes_[index];
+      }
+
+    private:
+      std::shared_ptr<LegacyAddressSpace> space_;
+      uint32_t vmid_;
+      size_t count_;
+      // Retain the known owner before outer operation locks. Raw registration
+      // replacement declines instead of releasing an unknown final owner there.
+      std::shared_ptr<util::DistributedSharedMutex> request_mutex_;
+      std::array<VmRamRange, kMaxRanges> ranges_{};
+      LegacyAddressSpace::PageTableRequestGuard request_;
+      std::shared_lock<util::DistributedSharedMutex> mapping_;
+      std::array<std::span<std::byte>, kMaxRanges> bytes_{};
+    };
+    return std::make_unique<Request>(address_space_, vmid_, ranges, original_request_mutex_);
   }
 
   [[nodiscard]] bool try_write_private_dwords(PhysicalMemoryAccess &physical,

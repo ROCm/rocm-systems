@@ -4,18 +4,24 @@
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/unorm.h"
+#include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/graphics/image_completion.h"
 #include "util/data_types.h"
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace rocjitsu::amdgpu {
+using namespace buffer_format_detail;
 namespace {
 using Number = BufferNumberFormat;
 using Format = BufferFormat;
@@ -98,67 +104,11 @@ util::FailureOr<Format> decode(uint32_t id, BufferFormatEncoding encoding) {
   return util::Result::failure();
 }
 
-uint32_t mask(uint32_t bits) { return bits == 32 ? ~0u : (1u << bits) - 1; }
-bool integer(Number n) { return n == Number::Uint || n == Number::Sint; }
-
-// Independent of the host floating-point rounding mode.
-double round_even(double value) {
-  const double lo = std::floor(value);
-  const double fraction = value - lo;
-  return lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0));
-}
-
-uint32_t read_bits(std::span<const uint8_t> bytes, uint32_t offset, uint32_t width) {
-  uint64_t value = 0;
-  for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
-    value |= uint64_t{bytes[i]} << ((i - offset / 8) * 8);
-  return static_cast<uint32_t>(value >> (offset % 8)) & mask(width);
-}
-
-uint32_t unpack(uint32_t value, uint32_t width, Number n) {
-  const int32_t signed_value = static_cast<int32_t>(value << (32 - width)) >> (32 - width);
-  if (n == Number::Uint || (n == Number::Float && width == 32))
-    return value;
-  if (n == Number::Sint)
-    return static_cast<uint32_t>(signed_value);
-  float result = 0;
-  switch (n) {
-  case Number::Unorm:
-    result = static_cast<float>(value) / mask(width);
-    break;
-  case Number::Snorm:
-    result = std::max(-1.0f, static_cast<float>(signed_value) / mask(width - 1));
-    break;
-  case Number::Uscaled:
-    result = static_cast<float>(value);
-    break;
-  case Number::Sscaled:
-    result = static_cast<float>(signed_value);
-    break;
-  case Number::Float:
-    if (width == 16)
-      return std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(value)));
-    // Unsigned 10/11-bit floats have five exponent bits and bias 15.
-    {
-      const uint32_t mantissa_bits = width - 5;
-      const uint32_t exponent = value >> mantissa_bits;
-      const uint32_t mantissa = value & mask(mantissa_bits);
-      if (exponent == 31)
-        return 0x7f800000u | (mantissa << (23 - mantissa_bits));
-      result = std::ldexp(static_cast<float>(mantissa + (exponent ? 1u << mantissa_bits : 0)),
-                          (exponent ? static_cast<int>(exponent) - 15 : -14) -
-                              static_cast<int>(mantissa_bits));
-    }
-    break;
-  default:
-    break;
-  }
-  return std::bit_cast<uint32_t>(result);
-}
-
 uint32_t pack(uint32_t value, uint32_t width, Number n) {
   if (integer(n) || (n == Number::Float && width == 32))
     return value & mask(width);
+  if (n == Number::Unorm && hwfloat::supports_unorm_width(width))
+    return hwfloat::unorm_from_f32(value, width);
   const float input = std::bit_cast<float>(value);
   if (n == Number::Float) {
     if (width == 16)
@@ -194,36 +144,18 @@ uint32_t pack(uint32_t value, uint32_t width, Number n) {
 }
 } // namespace
 
+util::FailureOr<BufferFormat> decode_buffer_format(uint32_t format, BufferFormatEncoding encoding) {
+  return decode(format, encoding);
+}
+
 util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
     return util::Result::failure();
-  const auto &f = decoded.value();
-  uint32_t bits = 0;
-  for (auto width : f.widths)
-    bits += width;
-  return bits / 8;
+  return decoded.value().byte_size();
 }
 
 namespace {
-std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
-                                      std::span<const uint8_t> bytes) {
-  std::array<uint32_t, 4> channels{}, result{};
-  uint32_t offset = 0;
-  for (uint32_t i = 0; i < 4; ++i) {
-    if (f.widths[i] && !bytes.empty())
-      channels[i] = unpack(read_bits(bytes, offset, f.widths[i]), f.widths[i], f.number);
-    offset += f.widths[i];
-  }
-  for (uint32_t i = 0; i < 4; ++i) {
-    const uint32_t sel = (selectors >> (3 * i)) & 7;
-    result[i] = sel >= 4   ? channels[sel - 4]
-                : sel == 1 ? (integer(f.number) ? 1u : 0x3f800000u)
-                           : 0;
-  }
-  return result;
-}
-
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
                  std::span<uint8_t> bytes) {
   std::fill(bytes.begin(), bytes.end(), 0);
@@ -266,6 +198,15 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
     return util::Result::failure();
+  // Every channel of this path uses integer bits, including NaN classification.
+  // Other formats and the shader-store conversion scope retain their FP policy.
+  if (decoded.value().number == Number::Unorm &&
+      std::ranges::all_of(decoded.value().widths, [](uint32_t width) {
+        return width == 0 || hwfloat::supports_unorm_width(width);
+      })) {
+    pack_format(decoded.value(), selectors, components, bytes);
+    return util::Result::success();
+  }
   const fp_mode::detail::ScopedFenv environment(0);
   pack_format(decoded.value(), selectors, components, bytes);
   return util::Result::success();
@@ -302,13 +243,8 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (decoded.failed())
     return util::Result::failure();
   d.decoded_buffer_format = decoded.value();
-  uint32_t bits = 0;
-  for (uint32_t width : d.decoded_buffer_format.widths)
-    bits += width;
-  if (!bits)
-    return false;
-  d.elem_size = bits / 8;
-  return true;
+  d.elem_size = d.decoded_buffer_format.byte_size();
+  return d.elem_size != 0;
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
@@ -342,49 +278,23 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
 }
 
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &d) {
+  if (d.image_sampling || d.image_sample || d.image_srgb || d.image_bc_format) {
+    complete_image_load(wf, cu, d);
+    return;
+  }
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
     return;
-  const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.exec_mask & (1ULL << lane)))
+    if (!(d.exec_mask & (uint64_t{1} << lane)))
       continue;
-    const auto bytes = d.lane_mask & (1ULL << lane)
+    const auto bytes = d.lane_mask & (uint64_t{1} << lane)
                            ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
                            : std::span<const uint8_t>{};
-    const auto values = unpack_format(format, d.buffer_selectors, bytes);
-    for (uint32_t reg = 0; reg < registers; ++reg) {
-      if (!d.buffer_d16) {
-        if (d.lds_dst)
-          wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
-                         reinterpret_cast<const uint8_t *>(&values[reg]), 4);
-        else
-          cu.write_vgpr(d.dst_reg_base + reg, lane, values[reg]);
-        continue;
-      }
-      uint32_t packed = 0, write_mask = 0;
-      for (uint32_t i = reg * 2; i < std::min(reg * 2 + 2, d.buffer_components); ++i) {
-        const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
-        uint16_t half = static_cast<uint16_t>(values[i]);
-        if (!integer(format.number)) {
-          const float value = std::bit_cast<float>(values[i]);
-          // Only FLOAT32 -> D16 truncates. Other conversions round to nearest even.
-          half = format.number == Number::Float && format.widths[0] == 32
-                     ? util::f32_to_f16_rtz(value)
-                     : util::f32_to_f16(value);
-        }
-        packed |= uint32_t{half} << shift;
-        write_mask |= 0xffffu << shift;
-      }
-      if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst)
-        packed |= cu.read_vgpr_storage(d.dst_reg_base + reg, lane) & ~write_mask;
-      if (d.lds_dst)
-        wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
-                       reinterpret_cast<const uint8_t *>(&packed), 4);
-      else
-        cu.write_vgpr(d.dst_reg_base + reg, lane, packed);
-    }
+    const auto values = unpack_format(d.decoded_buffer_format, d.buffer_selectors, bytes);
+    write_format_load_lane(wf, cu, d, lane, values);
   }
 }
+
 } // namespace rocjitsu::amdgpu

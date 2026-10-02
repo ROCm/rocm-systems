@@ -7,8 +7,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
-/// dispatch work to compute units.
+/// and process HSA AQL packets or DRM PM4 compute and graphics submissions,
+/// dispatching shader work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
@@ -92,6 +92,7 @@ struct QueueReconfigureRequest;
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
 /// round-robin order, materializing wavefronts in configured slots on first use.
+/// PM4 queues build compute dispatches and graphics draws from registers and packets.
 ///
 /// Event-driven: the CP monitors registered AQL queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
@@ -547,10 +548,16 @@ private:
     VmAccessOutcome outcome;
   };
 
+  /// @brief Initialize private storage for compute and graphics waves.
+  [[nodiscard]] VmAccessOutcome init_wavefront_scratch(ComputeUnitCore *cu, Wavefront *wf,
+                                                       const DispatchEntry &pkt,
+                                                       uint32_t global_wg_id,
+                                                       uint32_t wf_index_in_wg,
+                                                       int flat_scratch_init_sgpr);
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   [[nodiscard]] VmAccessOutcome init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
-                                                    const DispatchEntry &entry,
-                                                    uint32_t global_wg_id, uint32_t wf_index_in_wg);
+                                                    const DispatchEntry &pkt, uint32_t global_wg_id,
+                                                    uint32_t wf_index_in_wg);
 
   void handle_doorbell(simdojo::Tick timestamp);
 
@@ -586,6 +593,23 @@ private:
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
                                                            const GpuVmAccess &transaction_access,
                                                            uint64_t packet_index, uint64_t status);
+  // Graphics owns draw state and execution. The CP retains queue ordering,
+  // VM snapshots, cache boundaries, dispatch scheduling and fence publication.
+  bool execute_graphics_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const GpuVmAccess &memory, uint32_t opcode,
+                            std::vector<uint32_t> &words);
+  bool advance_graphics_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const GpuVmAccess &memory);
+  bool advance_indirect_graphics_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                                     const GpuVmAccess &memory);
+  static void reset_graphics_pm4(ComputeCommandState &state);
+  std::vector<uint32_t> read_graphics_indices(ComputeCommandState &state, const GpuVmAccess &memory,
+                                              uint64_t base, uint32_t available, uint32_t count);
+  void draw_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, uint32_t vertices,
+                std::vector<uint32_t> indices = {});
+  void init_pm4_scratch(DispatchEntry &dp, uint32_t ring_size, uint32_t base_lo, uint32_t base_hi);
+  void dispatch_graphics_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                             DispatchEntry dp);
 
   /// @brief Advertise and maintain ROCr's amd_queue_v2_t scratch-reclaim contract.
   [[nodiscard]] VmAccessOutcome

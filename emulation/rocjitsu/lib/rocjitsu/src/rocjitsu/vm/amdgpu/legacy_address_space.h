@@ -683,6 +683,62 @@ public:
       return copied;
     });
   }
+
+  /// Acquire only private, shrink-sealed driver RAM. Unlike ordinary accesses,
+  /// this path invokes no allocator query, passthrough transport or fault sink.
+  /// Request ownership prevents PTE removal before private backing teardown;
+  /// mapping ownership excludes interposed protection changes until all users join.
+  bool
+  try_acquire_sealed_ram(std::span<const VmRamRange> ranges, uint32_t vmid,
+                         PageTableRequestGuard &request,
+                         std::shared_lock<util::DistributedSharedMutex> &mapping,
+                         std::span<std::span<std::byte>> bytes,
+                         const std::shared_ptr<util::DistributedSharedMutex> &expected = {}) const {
+    if (ranges.empty() || ranges.size() > VmRamLease::kMaxRanges || bytes.size() != ranges.size())
+      return false;
+    for (const auto &[addr, size] : ranges)
+      if (!size || size - 1 > UINT64_MAX - addr)
+        return false;
+    request = acquire_page_table_request(vmid, expected);
+    if (!request.owns_lock())
+      return false;
+    std::shared_lock page_table_lock(*request.page_table_mutex_);
+    mapping = rocjitsu::host_mapping_lock().lock_shared();
+    for (size_t i = 0; i < ranges.size(); ++i) {
+      const auto [addr, size] = ranges[i];
+      uintptr_t first = 0;
+      for (size_t offset = 0; offset < size;) {
+        const uint64_t current = addr + offset;
+        auto it = request.page_table_->find(current >> PAGE_SHIFT);
+        // Ordinary transfers reject in-page extent boundaries and overlapping
+        // coverage. A contiguous host span alone does not prove those accesses safe.
+        if (it == request.page_table_->end() || it->second.host_extents.size() != 1)
+          return false;
+        const size_t page_offset = current & PAGE_MASK;
+        const auto *extent = host_extent_at(it->second, page_offset);
+        if (!extent || extent->owner != LegacyHostExtentOwner::DriverSealedRam)
+          return false;
+        const size_t extent_offset = page_offset - extent->gpu_page_offset;
+        const auto host = reinterpret_cast<uintptr_t>(extent->host_ptr) + extent_offset;
+        if (!offset)
+          first = host;
+        if (!first || size > UINTPTR_MAX - first || host != first + offset)
+          return false;
+        offset += std::min(
+            {size - offset, PAGE_SIZE - page_offset, extent->host_backed_bytes - extent_offset});
+      }
+      // Fresh private GEMs have one retained host mapping. Unlike PRIME imports,
+      // disjoint host intervals therefore establish disjoint underlying bytes.
+      for (size_t j = 0; j < i; ++j) {
+        const auto other = reinterpret_cast<uintptr_t>(bytes[j].data());
+        if (first < other + bytes[j].size() && other < first + size)
+          return false;
+      }
+      bytes[i] = {reinterpret_cast<std::byte *>(first), size};
+    }
+    return true;
+  }
+
   /// Ordered private stores with one live admission and no effects on refusal.
   /// The binding must retain expected beyond its enclosing VM-state lock.
   bool

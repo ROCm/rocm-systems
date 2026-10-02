@@ -541,11 +541,13 @@ inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_m
   return std::isnan(result) ? std::bit_cast<float>(0xffc00000u) : result;
 }
 
-/// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
-inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
-                           uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
-  detail::ScopedFenv environment(round_mode);
+namespace detail {
+
+/// Execute packed F32 arithmetic after establishing a clean environment with FP32 MODE rounding.
+inline uint32_t packed_f32_environment(float first, float second, float third,
+                                       PackedF32Op operation, uint32_t denorm_mode, bool clamp,
+                                       bool clamp_nan_to_zero, rj_code_arch_t arch,
+                                       bool ieee_mode) {
   auto flush = [](float value) {
     const uint32_t bits = std::bit_cast<uint32_t>(value);
     return (bits & 0x7f800000u) == 0 ? std::bit_cast<float>(bits & 0x80000000u) : value;
@@ -574,6 +576,17 @@ inline uint32_t packed_f32(float first, float second, float third, PackedF32Op o
     }
   }
   return std::bit_cast<uint32_t>((denorm_mode & 2u) ? result : flush(result));
+}
+
+} // namespace detail
+
+/// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
+inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
+                           uint32_t round_mode, uint32_t denorm_mode, bool clamp,
+                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+  detail::ScopedFenv environment(round_mode);
+  return detail::packed_f32_environment(first, second, third, operation, denorm_mode, clamp,
+                                        clamp_nan_to_zero, arch, ieee_mode);
 }
 
 /// @brief True16 F16 DOT2 uses fixed RNE without changing its F32 accumulation model.

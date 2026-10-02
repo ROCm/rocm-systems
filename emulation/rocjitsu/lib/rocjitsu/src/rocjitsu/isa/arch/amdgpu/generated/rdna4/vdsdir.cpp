@@ -25,6 +25,7 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

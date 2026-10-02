@@ -438,6 +438,60 @@ TEST(L2CacheTest, AtomicBoundaryFailureRetainsDirtyStateAndSuppressesMutation) {
   EXPECT_EQ(physical->load<uint32_t>(kAtomicAddress), kInitialAtomic + 1);
 }
 
+TEST(L2CacheTest, CleanBoundaryDeclinesDirtyParticipantsWithoutPublicationOrEpoch) {
+  constexpr uint32_t vmid = 76;
+  constexpr uint64_t address = 0x800;
+  constexpr uint32_t initial = 0x11223344, dirty = 0x55667788;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  physical->store(address, initial);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  ASSERT_TRUE(vm.register_translated(vmid, translator, physical));
+  auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  L2Cache first("first", coherence), second("second", coherence);
+  for (auto *l2 : {&first, &second}) {
+    l2->set_backing_memory(&memory);
+    l2->set_gpu_vm(&vm);
+  }
+  const auto before = coherence->current_epoch();
+  {
+    auto boundary = coherence->try_acquire_clean_boundary();
+    ASSERT_EQ(boundary.outcome(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_TRUE(boundary.belongs_to(coherence.get()));
+    EXPECT_EQ(coherence->current_epoch(), before);
+    boundary.advance_data_epoch();
+    boundary.advance_data_epoch();
+    EXPECT_EQ(coherence->current_epoch(), before + 2);
+  }
+  std::array<uint8_t, L2Cache::LINE_SIZE> line{};
+  std::memcpy(line.data(), &dirty, sizeof(dirty));
+  ASSERT_EQ(second.writeback_line(address, line.data(), 0, sizeof(dirty), Mtype::RW, vmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+  const auto writes = physical->write_calls;
+  {
+    auto boundary = coherence->try_acquire_clean_boundary();
+    EXPECT_EQ(boundary.outcome(), rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+    EXPECT_FALSE(boundary.belongs_to(coherence.get()));
+  }
+  EXPECT_EQ(physical->write_calls, writes);
+  EXPECT_EQ(physical->load<uint32_t>(address), initial);
+  EXPECT_EQ(coherence->current_epoch(), before + 2);
+  {
+    auto boundary = coherence->acquire_atomic_boundary();
+    EXPECT_EQ(boundary.outcome(), rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  }
+  EXPECT_GT(physical->write_calls, writes);
+  physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  {
+    auto boundary = coherence->acquire_atomic_boundary();
+    ASSERT_EQ(boundary.outcome(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
+  EXPECT_EQ(physical->load<uint32_t>(address), dirty);
+  EXPECT_EQ(coherence->current_epoch(), before + 3);
+}
+
 TEST(L2CacheTest, FailedDirectDirtyFlushRetainsLineForRetry) {
   constexpr uint32_t kVmid = 74;
   constexpr uint64_t kAddress = 0x800;

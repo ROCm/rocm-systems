@@ -23,7 +23,23 @@ enum class BufferNumberFormat { Unorm, Snorm, Uscaled, Sscaled, Uint, Sint, Floa
 struct BufferFormat {
   std::array<uint32_t, 4> widths{};
   BufferNumberFormat number = BufferNumberFormat::Uint;
+
+  uint32_t byte_size() const {
+    uint32_t bits = 0;
+    for (uint32_t width : widths)
+      bits += width;
+    return bits / 8;
+  }
+  uint32_t component_count() const {
+    uint32_t count = 0;
+    for (uint32_t width : widths)
+      count += width != 0;
+    return count;
+  }
 };
+
+util::FailureOr<BufferFormat>
+decode_buffer_format(uint32_t format, BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 
 /// GFX9 combines DFMT | (NFMT << 4); RDNA uses its generation's FORMAT table.
 /// The memory footprint is independent of the instruction's VGPR count.

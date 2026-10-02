@@ -32,6 +32,8 @@ class ExecutionPluginGroup;
 namespace amdgpu {
 
 struct Pm4FailureState;
+class GraphicsStage;
+class VectorMemState;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
@@ -288,6 +290,14 @@ public:
   }
   /// @brief Report a failed shader to its PM4 queue; returns false for an AQL wave.
   bool fail_pm4_submission();
+  void set_graphics_stage(std::shared_ptr<GraphicsStage> stage) {
+    graphics_stage_ = std::move(stage);
+  }
+  bool allocate_graphics_exports(uint32_t vertices, uint32_t primitives);
+  void export_graphics(uint32_t target, uint32_t mask, const std::array<uint32_t, 4> &sources,
+                       bool row);
+  void prepare_gs_register(VectorMemState &state, uint32_t offset, uint32_t source,
+                           uint32_t destination, bool subtract);
   /// @brief Retain a PM4 scratch slot until this wave retires.
   void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
 
@@ -537,7 +547,7 @@ public:
 
   /// Wait for every modeled memory pipeline, including stores and async DMA.
   void set_wait_all() {
-    wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0, 0};
     if (!wait_satisfied())
       set_state(WfState::WAITCNT);
   }
@@ -639,7 +649,11 @@ public:
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
-    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+    } else if (name == "wait_samplecnt") {
+      wait_target_.samplecnt = t;
+      if (!wait_satisfied())
+        set_state(WfState::WAITCNT);
+    } else if (name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
@@ -882,6 +896,12 @@ public:
   /// @brief Write one allocated VGPR lane from debugger state restore.
   void debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value);
 
+  /// Mutable raw lanes for synchronous VM initialization, without instruction hooks.
+  /// Acquire only at the original first write: lazy storage may allocate here.
+  /// The span remains valid until this wave retires; registers are not contiguous.
+  /// An out-of-allocation register returns an empty span for the caller's fallback.
+  std::span<uint32_t> initialization_vgpr_lanes(uint32_t reg);
+
   /// @brief Stop this wave in the debugger (models the trap handler entry).
   /// @param trap_id Trap id from the s_trap immediate (breakpoint = 1).
   /// @details Records the trap id and halts the wave for debugger inspection.
@@ -985,6 +1005,7 @@ public:
     use_system_clock_ = false;
     scratch_lease_.reset();
     pm4_failure_.reset();
+    graphics_stage_.reset();
     lds_base_ = 0;
     lds_size_ = 0;
     lds_ = nullptr;
@@ -1076,7 +1097,8 @@ protected:
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
-  std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
+  std::shared_ptr<GraphicsStage> graphics_stage_;
+  std::shared_ptr<uint32_t> scratch_lease_; ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).

@@ -13,10 +13,13 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
+
+struct GraphicsCommandState;
 
 /// @brief Compute register offsets relative to the SH register aperture.
 inline constexpr uint32_t kPm4ComputeStartX = 0x204;
@@ -37,10 +40,17 @@ enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  IndexBufferSize = 0x13,
   SetPredication = 0x20,
   CondExec = 0x22,
   PredExec = 0x23,
+  DrawIndexIndirect = 0x25,
+  IndexBase = 0x26,
+  DrawIndex2 = 0x27,
+  DrawIndexIndirectMulti = 0x38,
   ContextControl = 0x28,
+  DrawIndexAuto = 0x2d,
+  NumInstances = 0x2f,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
   SetContextRegPairs = 0xb8,
@@ -55,6 +65,7 @@ enum class Pm4Opcode : uint32_t {
   IndirectBuffer = 0x3f,
   CopyData = 0x40,
   EventWrite = 0x46,
+  EventWriteZpass = 0xb1,
   StreamoutStatsQuery = 0xc3,
   ReleaseMem = 0x49,
   DmaData = 0x50,
@@ -150,11 +161,11 @@ struct ComputeCommandState {
 
   uint64_t indirect_base = 0;
   bool predicate_pass = true;
+  // Allocated on first graphics use; compute queues retain no draw/counter state.
+  std::shared_ptr<GraphicsCommandState> graphics;
   std::array<uint32_t, 0x400> sh_registers{};
   ContextRegisters context_registers{};
   std::array<uint32_t, 0x4000> uconfig_registers{};
-  /// One saved context bank; nested CLEAR_STATE pushes are unsupported.
-  std::unique_ptr<ContextRegisters> saved_context_registers;
   std::deque<Pm4Submission> submissions;
 };
 
