@@ -72,8 +72,7 @@ __device__ TestType CASAtomicAddSystem(TestType* address, TestType val) {
 
 // Performs an atomic operation on parameter `mem` based on the `operation` enumerator.
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__device__ TestType PerformAtomicOperation(TestType* const mem,
-                                           const LinearAllocs /*allocType*/) {
+__device__ TestType PerformAtomicOperation(TestType* const mem) {
   const auto val = GetTestValue<TestType, operation>();
 
   if constexpr (operation == AtomicOperation::kAdd) {
@@ -106,8 +105,7 @@ __device__ TestType PerformAtomicOperation(TestType* const mem,
 // operations are executed on shared memory, and the result is copied back to `global_mem`.
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
-                           const LinearAllocs allocType) {
+__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals) {
   __shared__ TestType shared_mem;
 
   const auto tid = cg::this_grid().thread_rank();
@@ -119,7 +117,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
     __syncthreads();
   }
 
-  old_vals[tid]  = PerformAtomicOperation<TestType, operation, memory_scope>(mem, allocType);
+  old_vals[tid]  = PerformAtomicOperation<TestType, operation, memory_scope>(mem);
 
 
   if constexpr (use_shared_mem) {
@@ -170,8 +168,7 @@ __device__ void GenerateMemoryTraffic(uint8_t* const begin_addr, uint8_t* const 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
 __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
-                           const unsigned int width, const unsigned pitch,
-                           const LinearAllocs allocType) {
+                           const unsigned int width, const unsigned pitch) {
   extern __shared__ uint8_t shared_mem[];
 
   const auto tid = cg::this_grid().thread_rank();
@@ -192,7 +189,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
 
   if (tid < n) {
     old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(
-        PitchedOffset(mem, pitch, tid % width), allocType);
+        PitchedOffset(mem, pitch, tid % width));
   } else {
     uint8_t* const begin_addr = reinterpret_cast<uint8_t*>(atomic_addr + 1);
     uint8_t* const end_addr = reinterpret_cast<uint8_t*>(atomic_addr) + pitch;
@@ -303,11 +300,10 @@ void LaunchKernel(const TestParams& p, hipStream_t stream, TestType* const mem_p
   const auto shared_mem_size = use_shared_mem ? p.width * p.pitch : 0u;
   if (p.width == 1 && p.pitch == sizeof(TestType))
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.alloc_type);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals);
   else
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch,
-            p.alloc_type);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch);
 }
 
 // Performs a host atomic operation on parameter `mem` based on the `operation` enumerator.
