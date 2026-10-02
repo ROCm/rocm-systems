@@ -1,47 +1,6 @@
-/*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2026, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
- */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+//
+// SPDX-License-Identifier: MIT
 
 #include "suites/functional/heap_reservation.h"
 
@@ -236,14 +195,24 @@ HeapReservationTest::HeapReservationTest(void) : TestBase() {
 
 HeapReservationTest::~HeapReservationTest(void) {}
 
-void HeapReservationTest::SetUp(void) { return; }
+// Only the platform-filter half of TestBase::SetUp(). The rest of it calls
+// InitAndSetupHSA(), and a runtime left open here would be inherited by every
+// forked child: their hsa_init() would be a refcount bump that never reaches
+// the reservation path, and the pools would already count against the budget
+// they measure. Each child opens and closes the runtime itself.
+void HeapReservationTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+  SetupPrint();
+}
 
 void HeapReservationTest::Run(void) {
   if (!rocrtst::CheckProfile(this)) return;
   TestBase::Run();
 }
 
-void HeapReservationTest::Close(void) { return; }
+// No TestBase::Close() for the same reason: there is no runtime of ours to
+// tear down, each child having shut its own down already.
+void HeapReservationTest::Close(void) { ClosePrint(); }
 
 void HeapReservationTest::DisplayResults(void) const {
   if (!rocrtst::CheckProfile(this)) return;
