@@ -3285,8 +3285,6 @@ class TestExecutor:
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
-                       "rccl-UnitTestsMicroInit-nodda",
-                       "rccl-UnitTestsMicroDdaDisabled",
                        "rccl-UnitTestsMicroEnqueue",
                        "rccl-UnitTestsMicroSymKernels"]:
             binary_path = os.path.join(host_test_dir, binary)

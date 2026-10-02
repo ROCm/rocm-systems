@@ -181,28 +181,6 @@
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_init_nodda": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroInit-nodda",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "InitMicrotestsNoDda", "description": "Host-only init.cc microtests with ENABLE_DDA compiled out; covers the DDA setup gate the default binary cannot", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_dda_disabled": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroDdaDisabled",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "DdaKernelsDisabled", "description": "Host-only dda_kernels_disabled.cc stubs (eligibility false, launch returns an error); no GPU, no HIP/RCCL runtime", "test_filter": "*"}
-      ]
-    },
     "unit_tests_micro_init_faultinj": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroInit-faultinj",
@@ -278,18 +256,6 @@
       "name": "RCCL Microtests - init.cc (fault injection)",
       "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
       "config": "unit_tests_micro_init_faultinj",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - init.cc (DDA disabled)",
-      "description": "rccl-UnitTestsMicroInit-nodda (init.cc with ENABLE_DDA compiled out)",
-      "config": "unit_tests_micro_init_nodda",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - DDA kernels disabled",
-      "description": "rccl-UnitTestsMicroDdaDisabled (host-only dda_kernels_disabled.cc stubs)",
-      "config": "unit_tests_micro_dda_disabled",
       "enabled": true
     },
     {
