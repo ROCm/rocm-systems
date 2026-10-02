@@ -16,85 +16,16 @@
 #include <unistd.h>
 #include <vector>
 
+#include "MultiSegmentVmmHelpers.hpp"
 #include "nccl.h"
 #include "rccl_ib_multiseg.h"
 #include "rocmwrap.h"
 
 namespace RCCLNetIbTests {
 
-// Contiguous VA range backed by N distinct VMM allocations mapped back-to-back.
-// Mirrors the GIN test helper but is not gated on the GIN backend.
-struct MultiSegmentVmmBuffer {
-    void*                                        ptr       = nullptr;
-    size_t                                       totalSize = 0;
-    size_t                                       segSize   = 0;
-    int                                          nSegments = 0;
-    hipDeviceptr_t                               base      = 0;
-    std::vector<hipMemGenericAllocationHandle_t> handles;
-    bool valid() const { return ptr != nullptr && nSegments > 0; }
-};
-
-inline bool AllocMultiSegmentVmm(int dev, int nSegments, size_t segBytes, MultiSegmentVmmBuffer* out) {
-    if (out == nullptr || nSegments <= 0) return false;
-    *out = MultiSegmentVmmBuffer{};
-
-    hipMemAllocationProp prop            = {};
-    prop.type                            = hipMemAllocationTypePinned;
-    prop.location.type                   = hipMemLocationTypeDevice;
-    prop.location.id                     = dev;
-    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
-    prop.allocFlags.gpuDirectRDMACapable = 1;
-
-    size_t granularity = 0;
-    if (hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum) != hipSuccess
-        || granularity == 0)
-        return false;
-
-    const size_t segSize   = ((segBytes + granularity - 1) / granularity) * granularity;
-    const size_t totalSize = segSize * static_cast<size_t>(nSegments);
-
-    hipDeviceptr_t base = 0;
-    if (hipMemAddressReserve(&base, totalSize, granularity, 0, 0) != hipSuccess) return false;
-
-    std::vector<hipMemGenericAllocationHandle_t> handles;
-    auto cleanup = [&]() {
-        for (size_t i = 0; i < handles.size(); ++i) {
-            (void)hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(reinterpret_cast<uintptr_t>(base) + i * segSize), segSize);
-            (void)hipMemRelease(handles[i]);
-        }
-        (void)hipMemAddressFree(base, totalSize);
-    };
-
-    hipMemAccessDesc accessDesc = {};
-    accessDesc.location.type    = hipMemLocationTypeDevice;
-    accessDesc.location.id      = dev;
-    accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
-
-    for (int s = 0; s < nSegments; ++s) {
-        hipMemGenericAllocationHandle_t h = 0;
-        if (hipMemCreate(&h, segSize, &prop, 0) != hipSuccess) { cleanup(); return false; }
-        handles.push_back(h);
-        hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(reinterpret_cast<uintptr_t>(base) + static_cast<uintptr_t>(s) * segSize);
-        if (hipMemMap(segVa, segSize, 0, h, 0) != hipSuccess) { cleanup(); return false; }
-    }
-    if (hipMemSetAccess(base, totalSize, &accessDesc, 1) != hipSuccess) { cleanup(); return false; }
-
-    out->ptr = reinterpret_cast<void*>(base);
-    out->base = base; out->totalSize = totalSize; out->segSize = segSize;
-    out->nSegments = nSegments; out->handles = std::move(handles);
-    return true;
-}
-
-inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b) {
-    if (b.ptr == nullptr) return;
-    for (size_t i = 0; i < b.handles.size(); ++i) {
-        hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(reinterpret_cast<uintptr_t>(b.base) + i * b.segSize);
-        (void)hipMemUnmap(segVa, b.segSize);
-        (void)hipMemRelease(b.handles[i]);
-    }
-    (void)hipMemAddressFree(b.base, b.totalSize);
-    b = MultiSegmentVmmBuffer{};
-}
+using RCCLTestHelpers::AllocMultiSegmentVmm;
+using RCCLTestHelpers::FreeMultiSegmentVmm;
+using RCCLTestHelpers::MultiSegmentVmmBuffer;
 
 // Export one dma-buf fd per segment and register the buffer as a multi-segment
 // MR via the classic NET/IB plugin entry point. Returns the registration result;
