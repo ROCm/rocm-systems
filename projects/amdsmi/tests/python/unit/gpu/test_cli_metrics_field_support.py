@@ -22,54 +22,27 @@ import re
 import sys
 import unittest
 
-try:
-    from common.common import amdsmi_path
-# Import-time failures in the harness are not one exception type: a checkout with
-# no generated wrapper raises AttributeError out of common's enum tables. These
-# tests need no harness at all, so any failure to reach it is non-fatal.
-except Exception:  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import amdsmi_path, cli_search_order, find_cli_dir
 
-# The module lives in the amd-smi CLI, which exists in two layouts:
-#   * source checkout: <repo>/projects/amdsmi/amdsmi_cli
-#   * installed:       <rocm>/libexec/amdsmi_cli
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
+_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
 _MODULE_FILENAME = "amdsmi_metrics_field_support.py"
 
 # The C++ the version table mirrors. Present in a source checkout only.
 _CPP_SOURCE_PATH = os.path.normpath(
-    os.path.join(_SOURCE_CLI_DIR, "..", "rocm_smi", "src", "rocm_smi_gpu_metrics.cc")
+    os.path.join(_THIS_DIR, "..", "..", "..", "..", "rocm_smi", "src", "rocm_smi_gpu_metrics.cc")
 )
 
+MODULE_PATH = os.path.join(_CLI_DIR, _MODULE_FILENAME) if _CLI_DIR else ""
 
-def _resolve_module_path():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        candidate = os.path.join(cli_dir, _MODULE_FILENAME) if cli_dir else ""
-        if candidate and os.path.isfile(candidate):
-            return candidate
-    return ""
-
-
-MODULE_PATH = _resolve_module_path()
-
-# Inside a source checkout the module must exist, so a missing file is a failure
-# rather than a skip. Only an installed CLI that predates the feature is skipped.
-_RUNNABLE = bool(MODULE_PATH) or os.path.isdir(_SOURCE_CLI_DIR)
-_SKIP_REASON = f"{_MODULE_FILENAME} not found in the installed CLI"
+# Skip only when no CLI resolves; a resolved CLI missing the module fails on load.
+_RUNNABLE = bool(_CLI_DIR)
+_SKIP_REASON = f"amd-smi CLI not found (looked in {amdsmi_path})"
 
 
 def _load_module():
-    if not MODULE_PATH:
-        raise AssertionError(
-            f"{_MODULE_FILENAME} not found in {_SOURCE_CLI_DIR!r} "
-            f"or {_INSTALLED_CLI_DIR or '<no installed CLI>'!r}"
-        )
+    if not os.path.isfile(MODULE_PATH):
+        raise AssertionError(f"{_MODULE_FILENAME} not found in {_CLI_DIR!r}")
     spec = importlib.util.spec_from_file_location("amdsmi_metrics_field_support", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -577,7 +550,3 @@ class TestVersionTableMatchesCppSource(unittest.TestCase):
                     f"only in table: {sorted(actual - expected)} | "
                     f"only in C++: {sorted(expected - actual)}",
                 )
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

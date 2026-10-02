@@ -111,7 +111,7 @@ def _build_fake_amdsmi():
 
 
 def _load_metric_module():
-    return load_cli_module("metric_under_test_vcn", METRIC_PATH)
+    return load_cli_module("metric_under_test_vcn", METRIC_PATH, sys_path_dir=_CLI_DIR)
 
 
 class _FakeLogger:

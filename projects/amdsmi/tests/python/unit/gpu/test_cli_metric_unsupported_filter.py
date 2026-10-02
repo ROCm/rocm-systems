@@ -18,9 +18,7 @@ assertions with the claim that the two machine formats are byte-for-byte what
 ``--show-unsupported`` produces, which is also what the feature replaced.
 
 The stubbing pattern is the one in ``test_cli_metric_partition`` and
-``test_vcn_busy_navi``. The one deliberate difference is that ``metric.py`` is
-taken from the source checkout when there is one: the behavior itself is under
-test, and an installed CLI predating it would make every assertion here vacuous.
+``test_vcn_busy_navi``.
 """
 
 import argparse
@@ -35,37 +33,14 @@ import sys
 import types
 import unittest
 
-try:
-    from common.common import amdsmi_path
-# Import-time failures in the harness are not one exception type: a checkout with
-# no generated wrapper raises AttributeError out of common's enum tables. These
-# tests need no harness at all, so any failure to reach it is non-fatal.
-except Exception:  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
-_INSTALLED_CLI_DIR = (
-    os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
-    if amdsmi_path
-    else ""
-)
-
-
-def _resolve_cli_dir():
-    for cli_dir in (_SOURCE_CLI_DIR, _INSTALLED_CLI_DIR):
-        if cli_dir and os.path.isfile(os.path.join(cli_dir, "subcommands", "metric.py")):
-            return cli_dir
-    return ""
-
-
-CLI_DIR = _resolve_cli_dir()
+CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 METRIC_PATH = os.path.join(CLI_DIR, "subcommands", "metric.py") if CLI_DIR else ""
 
-# Inside a source checkout metric.py must exist, so a miss is a failure rather
-# than a skip. Only an installed CLI that predates the feature is skipped.
-_RUNNABLE = bool(METRIC_PATH) or os.path.isdir(_SOURCE_CLI_DIR)
-_SKIP_REASON = "amd-smi CLI metric.py not found"
+# Skip only when no CLI resolves; a resolved CLI missing metric.py fails on load.
+_RUNNABLE = bool(CLI_DIR)
+_SKIP_REASON = f"amd-smi CLI not found (looked in {amdsmi_path})"
 
 NA = "N/A"
 
@@ -192,7 +167,7 @@ def _pcie_info(*_args, **_kwargs):
     }
 
 
-def _install_fake_amdsmi():
+def _install_fake_amdsmi(test_cls):
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = _FakeInterfaceModule("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
@@ -236,15 +211,18 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
+    stub_modules(
+        test_cls,
+        {
+            "amdsmi": amdsmi_pkg,
+            "amdsmi.amdsmi_interface": interface,
+            "amdsmi.amdsmi_exception": exception,
+        },
+    )
     return interface
 
 
 def _load_metric_module():
-    if not METRIC_PATH:
-        raise AssertionError(f"metric.py not found in {_SOURCE_CLI_DIR!r} or an installed CLI")
     # metric.py imports its CLI-level siblings by bare name.
     if CLI_DIR not in sys.path:
         sys.path.insert(0, CLI_DIR)
@@ -254,7 +232,7 @@ def _load_metric_module():
     return module
 
 
-def _load_logger_module():
+def _load_logger_module(test_cls):
     """The real ``AMDSMILogger``, with only its helpers import replaced.
 
     The CSV column behavior asserted below belongs to the logger, so a
@@ -264,7 +242,7 @@ def _load_logger_module():
     if "amdsmi_helpers" not in sys.modules:
         helpers_module = types.ModuleType("amdsmi_helpers")
         helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-        sys.modules["amdsmi_helpers"] = helpers_module
+        stub_modules(test_cls, {"amdsmi_helpers": helpers_module})
     spec = importlib.util.spec_from_file_location(
         "amdsmi_logger_under_test_unsupported", os.path.join(CLI_DIR, "amdsmi_logger.py")
     )
@@ -429,7 +407,7 @@ class _MetricGpuHarness(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.interface = _install_fake_amdsmi()
+        cls.interface = _install_fake_amdsmi(cls)
         cls.metric_module = _load_metric_module()
 
     def setUp(self):
@@ -806,7 +784,7 @@ class TestWatchIterationsFilterIdentically(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.interface = _install_fake_amdsmi()
+        cls.interface = _install_fake_amdsmi(cls)
         cls.metric_module = _load_metric_module()
 
     def setUp(self):
@@ -870,9 +848,9 @@ class TestPerGpuSuppression(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.interface = _install_fake_amdsmi()
+        cls.interface = _install_fake_amdsmi(cls)
         cls.metric_module = _load_metric_module()
-        cls.logger_module = _load_logger_module()
+        cls.logger_module = _load_logger_module(cls)
 
     def _drive_two_gpus(self, versions, make_logger, show_unsupported=False):
         handles = [object(), object()]
@@ -963,7 +941,3 @@ class TestPerGpuSuppression(unittest.TestCase):
                     list(self._csv_rows(versions)[0]),
                     list(self._csv_rows(versions, show_unsupported=True)[0]),
                 )
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
