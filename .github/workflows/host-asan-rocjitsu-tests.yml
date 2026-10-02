@@ -18,6 +18,9 @@ on:
       native_gpu:
         type: boolean
         default: false
+      hsa_xnack:
+        type: string
+        default: "1"
 
 permissions:
   contents: read
@@ -45,6 +48,7 @@ jobs:
       ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
       SUITE: ${{ matrix.suite }}
       TEST_BACKEND: ${{ inputs.native_gpu && 'native-gfx942' || 'rocjitsu' }}
+      REQUESTED_HSA_XNACK: ${{ inputs.hsa_xnack }}
       ROCRTST_FILTER: rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test
     steps:
       - name: Install build and artifact tools
@@ -115,6 +119,11 @@ jobs:
           grep -q '__asan_' logs/hip-symbols.log
           .venv/bin/python TheRock/build_tools/github_actions/configure_asan_env.py \
             --artifacts-dir "$ROCM_ROOT" 2>&1 | tee logs/asan-environment.log
+          # The shared helper sets XNACK=1 even for host-ASAN. Apply the
+          # requested experiment setting afterwards, preserving ASAN options.
+          [[ "$REQUESTED_HSA_XNACK" == 0 || "$REQUESTED_HSA_XNACK" == 1 ]]
+          echo "HSA_XNACK=$REQUESTED_HSA_XNACK" >> "$GITHUB_ENV"
+          echo "Requested HSA_XNACK=$REQUESTED_HSA_XNACK" >> logs/asan-environment.log
           printf 'Source: %s/actions/runs/%s\n' \
             "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$ARTIFACTS_RUN_ID" > logs/provenance.txt
           git rev-parse HEAD >> logs/provenance.txt
@@ -151,6 +160,23 @@ jobs:
           timeout 120 env LD_PRELOAD="$ASAN_RUNTIME_PATH" \
             "$ROCM_ROOT/bin/rocminfo" > logs/rocminfo.log 2>&1
           grep -Eq 'Name: +gfx942' logs/rocminfo.log
+
+      - name: Record effective runtime XNACK mode
+        run: |
+          set -euo pipefail
+          "$ROCM_ROOT/llvm/bin/clang" .github/scripts/print_hsa_xnack.c \
+            -I emulation/rocjitsu/lib/rocjitsu/external_headers/hsa_headers \
+            -L "$ROCM_ROOT/lib" -Wl,-rpath,"$ROCM_ROOT/lib" \
+            -fsanitize=address -shared-libasan -lhsa-runtime64 -o "$PWD/print-hsa-xnack"
+          if [[ "$TEST_BACKEND" == native-gfx942 ]]; then
+            backend_args=(--native)
+          else
+            backend_args=(--rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
+              --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json")
+          fi
+          python3 .github/scripts/rocjitsu_suite_runner.py "${backend_args[@]}" \
+            --name xnack-mode --cwd "$PWD" --timeout-seconds 120 \
+            --log logs/xnack-mode.log -- "$PWD/print-hsa-xnack"
 
       - name: Run selected systems suite
         env:
@@ -198,6 +224,8 @@ jobs:
             echo "### Host-ASAN $TEST_BACKEND: $SUITE - $result"
             echo "Source build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$ARTIFACTS_RUN_ID"
             echo "Backend: $TEST_BACKEND; runner: $RUNNER_NAME"
+            echo "Requested HSA_XNACK=$REQUESTED_HSA_XNACK"
+            if [[ -f logs/xnack-mode.log ]]; then cat logs/xnack-mode.log; fi
             echo 'Subset: HIP smoke excluding three printf stress cases, or ROCr QUICK_TESTS.'
             echo 'Math-library suites are excluded. Missing artifacts, empty selections and timeouts fail.'
           } >> "$GITHUB_STEP_SUMMARY"

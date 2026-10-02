@@ -32,6 +32,11 @@ on:
         type: boolean
         description: "With run_rocjitsu, execute the identical suites natively on gfx942 ASAN GPU runners"
         default: false
+      rocjitsu_hsa_xnack:
+        type: choice
+        description: "Requested XNACK mode for the host-ASAN comparison"
+        options: ["0", "1"]
+        default: "1"
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
@@ -135,6 +140,7 @@ jobs:
       therock_ref: e0e238c0323f76aeabdd348cfd3798a653820fdc
       artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
       native_gpu: ${{ inputs.rocjitsu_native_comparison || false }}
+      hsa_xnack: ${{ inputs.rocjitsu_hsa_xnack || '1' }}
 
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary
