@@ -5938,15 +5938,22 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx942");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;  // required by branch #3 as of #11389
-        int algo, protocol, maxChannels;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
-                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
-        DeleteCommWithArch(comm);
+        // gfx942/gfx950 have ceRegMax[AllGather]=0 by tuning design; supply the
+        // threshold via param seam so the size window opens. gfx1250 has a non-zero
+        // table entry (8 GiB) and does not need the override.
+        g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
+        for (const char* arch : {"gfx942", "gfx950", "gfx1250"}) {
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nRanks = 1;
+          comm->nNodes = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;  // required by branch #3
+          int algo, protocol, maxChannels;
+          EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                      nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels))
+              << "arch=" << arch;
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo) << "arch=" << arch;
+          DeleteCommWithArch(comm);
+        }
       });
 }
 
