@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -123,90 +124,255 @@ struct RegisterRef {
   constexpr bool operator==(const RegisterRef &) const = default;
 };
 
+/// @brief Storage implementation used by a register set.
+enum class RegisterSetWordType { StandardUint64, Avx2M256 };
+
 namespace register_set_detail {
+template <RegisterSetWordType wordType> struct WordOps {};
+
+template <> struct WordOps<RegisterSetWordType::StandardUint64> {
+  using Word = uint64_t;
+  static constexpr size_t kWordBits = std::numeric_limits<Word>::digits;
+  static Word word_all_bits() { return std::numeric_limits<Word>::max(); }
+  static Word word_or(Word a, Word b) { return a | b; }
+  static Word word_and(Word a, Word b) { return a & b; }
+  static Word word_and_not(Word a, Word b) { return a & ~b; }
+  static bool word_none(Word a) { return a == 0; }
+  static bool word_equal(Word a, Word b) { return a == b; }
+  static Word word_bit_mask(unsigned bitIndex) { return Word{1} << bitIndex; }
+  // A prefix of [0, end), including the empty and full-word cases.
+  static Word word_prefix(unsigned end) {
+    return end == kWordBits ? word_all_bits() : (Word{1} << end) - 1;
+  }
+  template <size_t NumWords> static size_t count_bits(const Word (&words)[NumWords]) {
+    size_t count = 0;
+    for (Word word : words)
+      count += std::popcount(word);
+    return count;
+  }
+};
+
 #if defined(__AVX2__)
-using Word = __m256i;
-inline constexpr size_t kWordBits = 256;
-inline Word word_all_bits() { return _mm256_set1_epi64x(-1); }
-// One occupancy bit per 64-bit lane, scanning all 256 membership bits at once.
-inline unsigned nonempty_lanes(Word word) {
-  const Word empty = _mm256_cmpeq_epi64(word, _mm256_setzero_si256());
-  return ~static_cast<unsigned>(_mm256_movemask_pd(_mm256_castsi256_pd(empty))) & 15u;
-}
-inline Word word_or(Word a, Word b) { return _mm256_or_si256(a, b); }
-inline Word word_and(Word a, Word b) { return _mm256_and_si256(a, b); }
-// Computes a & ~b; the intrinsic complements its first operand.
-inline Word word_and_not(Word a, Word b) { return _mm256_andnot_si256(b, a); }
-inline bool word_none(Word a) { return _mm256_testz_si256(a, a) != 0; }
-inline bool word_equal(Word a, Word b) {
-  return _mm256_movemask_epi8(_mm256_cmpeq_epi8(a, b)) == -1;
-}
-
-// XOR clears the lane-select bits only in the selected lane. Its shift is
-// bitIndex % 64; all other shifts are >= 64 and therefore produce zero.
-inline Word word_bit_mask(unsigned bitIndex) {
-  const Word shiftBits =
-      _mm256_xor_si256(_mm256_set1_epi64x(bitIndex), _mm256_setr_epi64x(0, 64, 128, 192));
-  return _mm256_sllv_epi64(_mm256_set1_epi64x(1), shiftBits);
-}
-
-// A prefix of [0, end), including the empty and full-word cases.
-inline Word word_prefix(unsigned end) {
-  const Word counts = _mm256_sub_epi64(_mm256_set1_epi64x(end), _mm256_set_epi64x(192, 128, 64, 0));
-  const Word positive = _mm256_cmpgt_epi64(counts, _mm256_setzero_si256());
-  const Word high = _mm256_sllv_epi64(word_all_bits(), counts);
-  return _mm256_andnot_si256(high, positive);
-}
-inline Word word_count_lanes(Word bits) {
-  const Word table = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2, 1,
-                                      2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
-  const Word low_mask = _mm256_set1_epi8(15);
-  const Word low = _mm256_shuffle_epi8(table, _mm256_and_si256(bits, low_mask));
-  const Word high =
-      _mm256_shuffle_epi8(table, _mm256_and_si256(_mm256_srli_epi16(bits, 4), low_mask));
-  return _mm256_sad_epu8(_mm256_add_epi8(low, high), _mm256_setzero_si256());
-}
-inline size_t sum_count_lanes(Word sums) {
-  const __m128i halves =
-      _mm_add_epi64(_mm256_castsi256_si128(sums), _mm256_extracti128_si256(sums, 1));
-  const __m128i total = _mm_add_epi64(halves, _mm_unpackhi_epi64(halves, halves));
-  return static_cast<size_t>(_mm_cvtsi128_si64(total));
-}
-#else
-using Word = uint64_t;
-inline constexpr size_t kWordBits = 64;
-inline Word word_all_bits() { return ~Word{0}; }
-inline Word word_or(Word a, Word b) { return a | b; }
-inline Word word_and(Word a, Word b) { return a & b; }
-inline Word word_and_not(Word a, Word b) { return a & ~b; }
-inline bool word_none(Word a) { return a == 0; }
-inline bool word_equal(Word a, Word b) { return a == b; }
-inline Word word_prefix(unsigned end) {
-  return end == kWordBits ? word_all_bits() : (Word{1} << end) - 1;
-}
-inline size_t word_count(Word bits) { return std::popcount(bits); }
-inline Word word_bit_mask(unsigned bitIndex) { return Word{1} << bitIndex; }
+template <> struct WordOps<RegisterSetWordType::Avx2M256> {
+  using Word = __m256i;
+  static constexpr size_t kWordBits = 256;
+  static Word word_all_bits() { return _mm256_set1_epi64x(-1); }
+  static unsigned nonempty_lanes(Word word) {
+    const Word empty = _mm256_cmpeq_epi64(word, _mm256_setzero_si256());
+    return ~static_cast<unsigned>(_mm256_movemask_pd(_mm256_castsi256_pd(empty))) & 15u;
+  }
+  static Word word_or(Word a, Word b) { return _mm256_or_si256(a, b); }
+  static Word word_and(Word a, Word b) { return _mm256_and_si256(a, b); }
+  static Word word_and_not(Word a, Word b) {
+    // Computes a & ~b; the intrinsic complements its first operand.
+    return _mm256_andnot_si256(b, a);
+  }
+  static bool word_none(Word a) { return _mm256_testz_si256(a, a) != 0; }
+  static bool word_equal(Word a, Word b) {
+    return _mm256_movemask_epi8(_mm256_cmpeq_epi8(a, b)) == -1;
+  }
+  static Word word_bit_mask(unsigned bitIndex) {
+    // XOR selects one lane. All other shifts are >= 64 and produce zero.
+    const Word shiftBits =
+        _mm256_xor_si256(_mm256_set1_epi64x(bitIndex), _mm256_setr_epi64x(0, 64, 128, 192));
+    return _mm256_sllv_epi64(_mm256_set1_epi64x(1), shiftBits);
+  }
+  static Word word_prefix(unsigned end) {
+    const Word counts =
+        _mm256_sub_epi64(_mm256_set1_epi64x(end), _mm256_set_epi64x(192, 128, 64, 0));
+    const Word positive = _mm256_cmpgt_epi64(counts, _mm256_setzero_si256());
+    const Word high = _mm256_sllv_epi64(word_all_bits(), counts);
+    return _mm256_andnot_si256(high, positive);
+  }
+  static Word word_count_lanes(Word bits) {
+    const Word table = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 0, 1, 1, 2,
+                                        1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+    const Word low_mask = _mm256_set1_epi8(15);
+    const Word low = _mm256_shuffle_epi8(table, _mm256_and_si256(bits, low_mask));
+    const Word high =
+        _mm256_shuffle_epi8(table, _mm256_and_si256(_mm256_srli_epi16(bits, 4), low_mask));
+    return _mm256_sad_epu8(_mm256_add_epi8(low, high), _mm256_setzero_si256());
+  }
+  static size_t sum_count_lanes(Word sums) {
+    const __m128i halves =
+        _mm_add_epi64(_mm256_castsi256_si128(sums), _mm256_extracti128_si256(sums, 1));
+    const __m128i total = _mm_add_epi64(halves, _mm_unpackhi_epi64(halves, halves));
+    return static_cast<size_t>(_mm_cvtsi128_si64(total));
+  }
+  template <size_t NumWords> static size_t count_bits(const Word (&words)[NumWords]) {
+    // Keep counts in SIMD lanes across words, reducing to a scalar only once.
+    Word numBitsPerLane = _mm256_setzero_si256();
+    for (Word word : words)
+      numBitsPerLane = _mm256_add_epi64(numBitsPerLane, word_count_lanes(word));
+    return sum_count_lanes(numBitsPerLane);
+  }
+};
 #endif
-// Single-bit helpers require bitIndex < kWordBits.
-inline void word_set_bit(Word &word, unsigned bitIndex) {
-  word = word_or(word, word_bit_mask(bitIndex));
-}
-inline void word_reset_bit(Word &word, unsigned bitIndex) {
-  word = word_and_not(word, word_bit_mask(bitIndex));
-}
-inline bool word_test_bit(Word word, unsigned bitIndex) {
-  return !word_none(word_and(word, word_bit_mask(bitIndex)));
-}
-inline Word word_range(unsigned begin, unsigned end) {
-  return word_and_not(word_prefix(end), word_prefix(begin));
-}
 
-template <size_t Words> bool words_equal(const Word (&a)[Words], const Word (&b)[Words]) {
-  for (size_t i = 0; i < Words; ++i)
-    if (!word_equal(a[i], b[i]))
+// Range and set operations shared by scalar and SIMD words.
+template <RegisterSetWordType wordType> struct WordArrayOps : WordOps<wordType> {
+  using Word = typename WordOps<wordType>::Word;
+  using WordOps<wordType>::kWordBits;
+  using WordOps<wordType>::word_all_bits;
+  using WordOps<wordType>::word_or;
+  using WordOps<wordType>::word_and;
+  using WordOps<wordType>::word_and_not;
+  using WordOps<wordType>::word_none;
+  using WordOps<wordType>::word_equal;
+  using WordOps<wordType>::word_bit_mask;
+  using WordOps<wordType>::word_prefix;
+  // Single-bit helpers require bitIndex < kWordBits.
+  static void word_set_bit(Word &word, unsigned bitIndex) {
+    word = word_or(word, word_bit_mask(bitIndex));
+  }
+  static void word_reset_bit(Word &word, unsigned bitIndex) {
+    word = word_and_not(word, word_bit_mask(bitIndex));
+  }
+  static bool word_test_bit(Word word, unsigned bitIndex) {
+    return !word_none(word_and(word, word_bit_mask(bitIndex)));
+  }
+  static Word word_range(unsigned begin, unsigned end) {
+    return word_and_not(word_prefix(end), word_prefix(begin));
+  }
+
+  template <size_t Words> static bool words_equal(const Word (&a)[Words], const Word (&b)[Words]) {
+    for (size_t i = 0; i < Words; ++i)
+      if (!word_equal(a[i], b[i]))
+        return false;
+    return true;
+  }
+  // Visit a nonempty, in-bounds bit range. Stop when an operation returns a
+  // value other than kContinue; otherwise return kContinue after the last word.
+  // Full words need no range mask. Inline to retain the caller's capacity bounds.
+  template <typename WordType, size_t NumWords, typename Operation>
+  [[gnu::always_inline]] static inline bool
+  visit_range(WordType (&words)[NumWords], size_t startBit, size_t endBit, Operation operation) {
+    // Prologue: initial partial word.
+    size_t word = startBit / kWordBits;
+    const size_t firstBitInWord = startBit % kWordBits;
+    if (firstBitInWord != 0) {
+      const size_t endBitInWord = std::min(kWordBits, endBit - word * kWordBits);
+      const Word mask = word_range(firstBitInWord, endBitInWord);
+      if (operation.partial_word(words[word], mask) != Operation::kContinue)
+        return !Operation::kContinue;
+      if (endBitInWord < kWordBits)
+        return Operation::kContinue;
+      ++word;
+    }
+
+    // Middle loop: full words.
+    const size_t endWord = endBit / kWordBits;
+    for (; word < endWord; ++word)
+      if (operation.full_word(words[word]) != Operation::kContinue)
+        return !Operation::kContinue;
+
+    // Epilogue: final partial word.
+    const size_t endBitInWord = endBit % kWordBits;
+    if (endBitInWord != 0) {
+      const Word mask = word_prefix(endBitInWord);
+      return operation.partial_word(words[word], mask);
+    }
+    return Operation::kContinue;
+  }
+
+  struct ContainsWords {
+    static constexpr bool kContinue = true;
+    bool partial_word(const Word &word, Word mask) const {
+      return word_none(word_and_not(mask, word));
+    }
+    bool full_word(const Word &word) const { return word_equal(word, word_all_bits()); }
+  };
+  struct IntersectsWords {
+    static constexpr bool kContinue = false;
+    bool partial_word(const Word &word, Word mask) const {
+      return !word_none(word_and(word, mask));
+    }
+    bool full_word(const Word &word) const { return !word_none(word); }
+  };
+
+  template <typename Update> struct UpdateWords {
+    static constexpr bool kContinue = true;
+    Update update;
+    bool partial_word(Word &word, Word mask) const {
+      word = update(word, mask);
+      return true;
+    }
+    bool full_word(Word &word) const {
+      word = update(word, word_all_bits());
+      return true;
+    }
+  };
+
+  template <size_t CapacityBits, size_t NumWords, typename Update>
+  static void update_range(Word (&words)[NumWords], size_t startBit, size_t numBits,
+                           Update update) {
+    if (numBits == 0)
+      return;
+    if (startBit >= CapacityBits)
+      return;
+    const size_t endBit = startBit + std::min(numBits, CapacityBits - startBit);
+    visit_range(words, startBit, endBit, UpdateWords<Update>{update});
+  }
+  template <size_t CapacityBits, size_t NumWords>
+  static void set_range(Word (&words)[NumWords], size_t startBit, size_t numBits) {
+    if (numBits == 1) {
+      if (startBit < CapacityBits)
+        word_set_bit(words[startBit / kWordBits], startBit % kWordBits);
+      return;
+    }
+    update_range<CapacityBits>(words, startBit, numBits, word_or);
+  }
+  template <size_t CapacityBits, size_t NumWords>
+  static void reset_range(Word (&words)[NumWords], size_t startBit, size_t numBits) {
+    if (numBits == 1) {
+      if (startBit < CapacityBits)
+        word_reset_bit(words[startBit / kWordBits], startBit % kWordBits);
+      return;
+    }
+    update_range<CapacityBits>(words, startBit, numBits, word_and_not);
+  }
+  template <size_t CapacityBits, size_t NumWords>
+  static bool contains_range(const Word (&words)[NumWords], size_t startBit, size_t numBits) {
+    if (startBit >= CapacityBits || numBits > CapacityBits - startBit)
       return false;
-  return true;
-}
+    if (numBits == 1)
+      return word_test_bit(words[startBit / kWordBits], startBit % kWordBits);
+    if (numBits == 0)
+      return true;
+    const size_t endBit = startBit + numBits;
+
+    return visit_range(words, startBit, endBit, ContainsWords{});
+  }
+  template <size_t CapacityBits, size_t NumWords>
+  static bool intersects_range(const Word (&words)[NumWords], size_t startBit, size_t numBits) {
+    if (numBits == 1)
+      return startBit < CapacityBits &&
+             word_test_bit(words[startBit / kWordBits], startBit % kWordBits);
+    if (numBits == 0 || startBit >= CapacityBits)
+      return false;
+    const size_t endBit = startBit + std::min(numBits, CapacityBits - startBit);
+
+    return visit_range(words, startBit, endBit, IntersectsWords{});
+  }
+  template <size_t NumWords, typename Operation>
+  static void combine(Word (&lhs)[NumWords], const Word (&rhs)[NumWords], Operation operation) {
+    for (size_t word = 0; word < NumWords; ++word)
+      lhs[word] = operation(lhs[word], rhs[word]);
+  }
+  template <size_t NumWords> static bool bits_none(const Word (&words)[NumWords]) {
+    for (const Word word : words)
+      if (!word_none(word))
+        return false;
+    return true;
+  }
+  template <size_t NumWords>
+  static bool intersects_bits(const Word (&lhs)[NumWords], const Word (&rhs)[NumWords]) {
+    for (size_t word = 0; word < NumWords; ++word)
+      if (!word_none(word_and(lhs[word], rhs[word])))
+        return true;
+    return false;
+  }
+};
 } // namespace register_set_detail
 
 /// @brief Per-class register set used for def/use and liveness dataflow.
@@ -225,8 +391,16 @@ template <size_t Words> bool words_equal(const Word (&a)[Words], const Word (&b)
 /// describe the full set; consumers that reason only about allocatable/indexed
 /// registers use the ordinary views (`ordinary_size`, `for_each_ordinary`,
 /// `ordinary_only`) so singleton special state never looks spillable or indexed.
-class RegisterSet {
+/// @tparam wordType The storage implementation. Scalar instantiations remain
+/// available in AVX2 builds for testing.
+template <RegisterSetWordType wordType> class RegisterSetT {
+  using Ops = register_set_detail::WordArrayOps<wordType>;
+  using Word = typename Ops::Word;
+
 public:
+  using WordType = Word;
+  static constexpr RegisterSetWordType kWordType = wordType;
+
   /// @brief Add `ref`. For ordinary classes this marks every 32-bit lane it
   /// covers; for special classes it marks the singleton (index/width ignored).
   void expand(RegisterRef ref);
@@ -248,7 +422,7 @@ public:
   ///
   /// @details The any-of counterpart to contains(). Register allocation asks
   /// this to reject a candidate tuple: a run is usable only when none of its
-  /// lanes is in the unavailable set. Classes RegisterSet does not track answer
+  /// lanes is in the unavailable set. Classes RegisterSetT does not track answer
   /// false, matching contains().
   [[nodiscard]] bool intersects(RegisterRef ref) const;
 
@@ -268,35 +442,34 @@ public:
   [[nodiscard]] bool has_specials() const { return special_regs_ != 0; }
 
   /// @brief Return true if any member is present in both sets (ordinary or special).
-  [[nodiscard]] bool intersects(const RegisterSet &rhs) const;
+  [[nodiscard]] bool intersects(const RegisterSetT &rhs) const;
 
-  RegisterSet &operator|=(const RegisterSet &rhs);
-  RegisterSet &operator&=(const RegisterSet &rhs);
-  RegisterSet &operator-=(const RegisterSet &rhs);
+  RegisterSetT &operator|=(const RegisterSetT &rhs);
+  RegisterSetT &operator&=(const RegisterSetT &rhs);
+  RegisterSetT &operator-=(const RegisterSetT &rhs);
 
-  friend RegisterSet operator|(RegisterSet lhs, const RegisterSet &rhs) {
+  friend RegisterSetT operator|(RegisterSetT lhs, const RegisterSetT &rhs) {
     lhs |= rhs;
     return lhs;
   }
-  friend RegisterSet operator&(RegisterSet lhs, const RegisterSet &rhs) {
+  friend RegisterSetT operator&(RegisterSetT lhs, const RegisterSetT &rhs) {
     lhs &= rhs;
     return lhs;
   }
-  friend RegisterSet operator-(RegisterSet lhs, const RegisterSet &rhs) {
+  friend RegisterSetT operator-(RegisterSetT lhs, const RegisterSetT &rhs) {
     lhs -= rhs;
     return lhs;
   }
 
-  friend bool operator==(const RegisterSet &a, const RegisterSet &b) {
-    using register_set_detail::words_equal;
-    return words_equal(a.sgprs_, b.sgprs_) && words_equal(a.vgprs_, b.vgprs_) &&
-           words_equal(a.acc_vgprs_, b.acc_vgprs_) && a.special_regs_ == b.special_regs_;
+  friend bool operator==(const RegisterSetT &a, const RegisterSetT &b) {
+    return Ops::words_equal(a.sgprs_, b.sgprs_) && Ops::words_equal(a.vgprs_, b.vgprs_) &&
+           Ops::words_equal(a.acc_vgprs_, b.acc_vgprs_) && a.special_regs_ == b.special_regs_;
   }
 
   /// @brief Return a copy holding only the ordinary members; special singletons
   /// are dropped. This is the projection scratch/liveness/spill consumers use.
-  [[nodiscard]] RegisterSet ordinary_only() const {
-    RegisterSet copy = *this;
+  [[nodiscard]] RegisterSetT ordinary_only() const {
+    RegisterSetT copy = *this;
     copy.special_regs_ = 0;
     return copy;
   }
@@ -347,80 +520,81 @@ private:
   // other targets use scalar words. expand() clips to the class capacity, so
   // the unused tail bits stay zero under every set operation.
   template <size_t Capacity>
-  using RegisterBits = register_set_detail::Word[(Capacity + register_set_detail::kWordBits - 1) /
-                                                 register_set_detail::kWordBits];
+  using RegisterBits = Word[(Capacity + Ops::kWordBits - 1) / Ops::kWordBits];
 
   // Keep the class constant even when this helper is not inlined. Inline the
   // callback's available callees too: opaque vector/string helpers otherwise
   // obstruct alias analysis and retain costly membership reloads and checks.
   template <RegClass cls, size_t Words, typename F>
-  [[gnu::flatten]] static void for_each_bits(const register_set_detail::Word (&words)[Words],
-                                             F &f) {
-    using namespace register_set_detail;
+  [[gnu::flatten]] static void for_each_bits(const Word (&words)[Words], F &f) {
 #if defined(__AVX2__)
-    for (size_t word = 0; word < Words; ++word) {
-      unsigned lanes = nonempty_lanes(words[word]);
-      while (lanes) {
-        unsigned lane = std::countr_zero(lanes);
-        // Scalar membership cursors avoid carrying a SIMD snapshot across
-        // callbacks. memcpy reads the vector's representation without aliasing
-        // violations and lowers to a scalar load for this fixed-size copy.
-        const auto *address = reinterpret_cast<const unsigned char *>(&words[word]) + lane * 8;
-        const auto load = [&] {
-          uint64_t value;
-          std::memcpy(&value, address, sizeof(value));
-          return value;
-        };
-        uint64_t members = load(), remaining = members;
-        // Full lanes emit consecutive indices. After an edit, resume set-bit
-        // iteration strictly after the last emitted index, including at bit 63.
-        unsigned cursor = 0;
-        if (members == ~uint64_t{0}) {
+    if constexpr (wordType == RegisterSetWordType::Avx2M256) {
+      for (size_t word = 0; word < Words; ++word) {
+        unsigned lanes = Ops::nonempty_lanes(words[word]);
+        while (lanes) {
+          unsigned lane = std::countr_zero(lanes);
+          // Scalar membership cursors avoid carrying a SIMD snapshot across
+          // callbacks. memcpy reads the vector's representation without aliasing
+          // violations and lowers to a scalar load for this fixed-size copy.
+          const auto *address = reinterpret_cast<const unsigned char *>(&words[word]) + lane * 8;
+          const auto load = [&] {
+            uint64_t value;
+            std::memcpy(&value, address, sizeof(value));
+            return value;
+          };
+          uint64_t members = load(), remaining = members;
+          // Full lanes emit consecutive indices. After an edit, resume set-bit
+          // iteration strictly after the last emitted index, including at bit 63.
+          unsigned cursor = 0;
+          if (members == ~uint64_t{0}) {
 #pragma GCC unroll 8
-          for (; cursor < 64; ++cursor) {
-            f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + cursor), 1});
-            members = load();
-            if (members != ~uint64_t{0}) {
-              remaining = members & (~uint64_t{1} << cursor);
-              break;
+            for (; cursor < 64; ++cursor) {
+              f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + cursor), 1});
+              members = load();
+              if (members != ~uint64_t{0}) {
+                remaining = members & (~uint64_t{1} << cursor);
+                break;
+              }
+            }
+            if (cursor == 64)
+              remaining = 0;
+          }
+          while (remaining) {
+            unsigned bit = std::countr_zero(remaining);
+            f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + bit), 1});
+            // Keep edit recovery on a cold path. In particular, this prevents Clang
+            // from putting its shift and mask on the cursor's dependency chain.
+            const uint64_t updated = load();
+            if (updated != members) [[unlikely]] {
+              remaining = updated & (~uint64_t{1} << bit);
+              members = updated;
+            } else {
+              remaining &= remaining - 1;
             }
           }
-          if (cursor == 64)
-            remaining = 0;
+          // Observe additions to later, previously empty lanes as well as removals.
+          lanes = Ops::nonempty_lanes(words[word]) & (~1u << lane);
         }
+      }
+    } else
+#endif
+    {
+      for (size_t word = 0; word < Words; ++word) {
+        Word members = words[word];
+        Word remaining = members;
         while (remaining) {
           unsigned bit = std::countr_zero(remaining);
-          f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + bit), 1});
-          // Keep edit recovery on a cold path. In particular, this prevents Clang
-          // from putting its shift and mask on the cursor's dependency chain.
-          const uint64_t updated = load();
-          if (updated != members) [[unlikely]] {
-            remaining = updated & (~uint64_t{1} << bit);
-            members = updated;
-          } else {
+          f(RegisterRef{cls, static_cast<uint16_t>(word * Ops::kWordBits + bit), 1});
+          Word updated = words[word];
+          if (updated == members)
             remaining &= remaining - 1;
-          }
+          else
+            remaining =
+                bit == Ops::kWordBits - 1 ? 0 : updated & (Ops::word_all_bits() << (bit + 1));
+          members = updated;
         }
-        // Observe additions to later, previously empty lanes as well as removals.
-        lanes = nonempty_lanes(words[word]) & (~1u << lane);
       }
     }
-#else
-    for (size_t word = 0; word < Words; ++word) {
-      Word members = words[word];
-      Word remaining = members;
-      while (remaining) {
-        unsigned bit = std::countr_zero(remaining);
-        f(RegisterRef{cls, static_cast<uint16_t>(word * 64 + bit), 1});
-        Word updated = words[word];
-        if (updated == members)
-          remaining &= remaining - 1;
-        else
-          remaining = bit == 63 ? 0 : updated & (~Word{0} << (bit + 1));
-        members = updated;
-      }
-    }
-#endif
   }
 
   RegisterBits<REGISTER_SET_MAX_SGPRS> sgprs_{};
@@ -431,5 +605,175 @@ private:
   /// present. Only special-class bits are ever set (see `expand`).
   uint16_t special_regs_ = 0;
 };
+
+template <RegisterSetWordType wordType> void RegisterSetT<wordType>::expand(RegisterRef ref) {
+  const size_t numBits = std::max<size_t>(1, ref.width);
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    Ops::template set_range<REGISTER_SET_MAX_SGPRS>(sgprs_, ref.index, numBits);
+    break;
+  case RegClass::VGPR:
+    Ops::template set_range<REGISTER_SET_MAX_VGPRS>(vgprs_, ref.index, numBits);
+    break;
+  case RegClass::ACC_VGPR:
+    Ops::template set_range<REGISTER_SET_MAX_ACC_VGPRS>(acc_vgprs_, ref.index, numBits);
+    break;
+  case RegClass::TTMP:
+    // Trap temporaries are known to the ISA but not tracked by this set: no
+    // bitset and no mask bit, so index/width are dropped (as they are on the
+    // general def/use path). Explicit arm keeps the switch exhaustive.
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    // Special singleton: index/width are meaningless, so just set its bit.
+    special_regs_ |= special_bit(ref.cls);
+    break;
+  }
+}
+
+template <RegisterSetWordType wordType> void RegisterSetT<wordType>::erase(RegisterRef ref) {
+  const size_t numBits = std::max<size_t>(1, ref.width);
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    Ops::template reset_range<REGISTER_SET_MAX_SGPRS>(sgprs_, ref.index, numBits);
+    break;
+  case RegClass::VGPR:
+    Ops::template reset_range<REGISTER_SET_MAX_VGPRS>(vgprs_, ref.index, numBits);
+    break;
+  case RegClass::ACC_VGPR:
+    Ops::template reset_range<REGISTER_SET_MAX_ACC_VGPRS>(acc_vgprs_, ref.index, numBits);
+    break;
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(ref.cls));
+    break;
+  }
+}
+
+template <RegisterSetWordType wordType> void RegisterSetT<wordType>::clear_class(RegClass cls) {
+  switch (cls) {
+  case RegClass::SGPR:
+    std::fill(std::begin(sgprs_), std::end(sgprs_), Word{});
+    break;
+  case RegClass::VGPR:
+    std::fill(std::begin(vgprs_), std::end(vgprs_), Word{});
+    break;
+  case RegClass::ACC_VGPR:
+    std::fill(std::begin(acc_vgprs_), std::end(acc_vgprs_), Word{});
+    break;
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(cls));
+    break;
+  }
+}
+
+template <RegisterSetWordType wordType>
+bool RegisterSetT<wordType>::contains(RegisterRef ref) const {
+  const size_t numBits = std::max<size_t>(1, ref.width);
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    return Ops::template contains_range<REGISTER_SET_MAX_SGPRS>(sgprs_, ref.index, numBits);
+  case RegClass::VGPR:
+    return Ops::template contains_range<REGISTER_SET_MAX_VGPRS>(vgprs_, ref.index, numBits);
+  case RegClass::ACC_VGPR:
+    return Ops::template contains_range<REGISTER_SET_MAX_ACC_VGPRS>(acc_vgprs_, ref.index, numBits);
+  case RegClass::TTMP: // untracked: never present
+    return false;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    return (special_regs_ & special_bit(ref.cls)) != 0;
+  }
+  return false; // unreachable for a valid RegClass; a new class trips -Wswitch first
+}
+
+template <RegisterSetWordType wordType> bool RegisterSetT<wordType>::none() const {
+  return Ops::bits_none(sgprs_) && Ops::bits_none(vgprs_) && Ops::bits_none(acc_vgprs_) &&
+         special_regs_ == 0;
+}
+
+template <RegisterSetWordType wordType> size_t RegisterSetT<wordType>::size() const {
+  return ordinary_size() + static_cast<size_t>(std::popcount(special_regs_));
+}
+
+template <RegisterSetWordType wordType> size_t RegisterSetT<wordType>::ordinary_size() const {
+  return Ops::count_bits(sgprs_) + Ops::count_bits(vgprs_) + Ops::count_bits(acc_vgprs_);
+}
+
+template <RegisterSetWordType wordType>
+bool RegisterSetT<wordType>::intersects(RegisterRef ref) const {
+  const size_t numBits = std::max<size_t>(1, ref.width);
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    return Ops::template intersects_range<REGISTER_SET_MAX_SGPRS>(sgprs_, ref.index, numBits);
+  case RegClass::VGPR:
+    return Ops::template intersects_range<REGISTER_SET_MAX_VGPRS>(vgprs_, ref.index, numBits);
+  case RegClass::ACC_VGPR:
+    return Ops::template intersects_range<REGISTER_SET_MAX_ACC_VGPRS>(acc_vgprs_, ref.index,
+                                                                      numBits);
+  default:
+    return false;
+  }
+}
+
+template <RegisterSetWordType wordType>
+bool RegisterSetT<wordType>::intersects(const RegisterSetT &rhs) const {
+  return Ops::intersects_bits(sgprs_, rhs.sgprs_) || Ops::intersects_bits(vgprs_, rhs.vgprs_) ||
+         Ops::intersects_bits(acc_vgprs_, rhs.acc_vgprs_) ||
+         (special_regs_ & rhs.special_regs_) != 0;
+}
+
+template <RegisterSetWordType wordType>
+RegisterSetT<wordType> &RegisterSetT<wordType>::operator|=(const RegisterSetT &rhs) {
+  Ops::combine(sgprs_, rhs.sgprs_, Ops::word_or);
+  Ops::combine(vgprs_, rhs.vgprs_, Ops::word_or);
+  Ops::combine(acc_vgprs_, rhs.acc_vgprs_, Ops::word_or);
+  special_regs_ |= rhs.special_regs_;
+  return *this;
+}
+
+template <RegisterSetWordType wordType>
+RegisterSetT<wordType> &RegisterSetT<wordType>::operator&=(const RegisterSetT &rhs) {
+  Ops::combine(sgprs_, rhs.sgprs_, Ops::word_and);
+  Ops::combine(vgprs_, rhs.vgprs_, Ops::word_and);
+  Ops::combine(acc_vgprs_, rhs.acc_vgprs_, Ops::word_and);
+  special_regs_ &= rhs.special_regs_;
+  return *this;
+}
+
+template <RegisterSetWordType wordType>
+RegisterSetT<wordType> &RegisterSetT<wordType>::operator-=(const RegisterSetT &rhs) {
+  Ops::combine(sgprs_, rhs.sgprs_, Ops::word_and_not);
+  Ops::combine(vgprs_, rhs.vgprs_, Ops::word_and_not);
+  Ops::combine(acc_vgprs_, rhs.acc_vgprs_, Ops::word_and_not);
+  special_regs_ &= static_cast<uint16_t>(~rhs.special_regs_);
+  return *this;
+}
+
+#if defined(__AVX2__)
+using RegisterSet = RegisterSetT<RegisterSetWordType::Avx2M256>;
+#else
+using RegisterSet = RegisterSetT<RegisterSetWordType::StandardUint64>;
+#endif
 
 } // namespace rocjitsu
