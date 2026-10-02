@@ -33,6 +33,10 @@ docBin/
 # Simulated SYSFS - for early development or debug
 device/
 
+# API coverage run output (tests/run_api_coverage.sh)
+api-coverage-results/
+api-coverage-results-*/
+
 # misc
 esmi_ib_library/
 
