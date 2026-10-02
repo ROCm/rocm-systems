@@ -610,7 +610,8 @@ main(int argc, char** argv)
     for(int iter = 0; iter < config.num_iterations; iter++)
     {
         // Reset device memory for each iteration (except first)
-        // NOTE: d_input must also be reset because test_vmem_operations modifies it
+        // NOTE: d_output is VMEM scratch and is cleared each iter; d_input is
+        // refreshed for host-side memory verification.
         if(iter > 0)
         {
             HIP_CHECK(hipMemset(d_results, 0, sizeof(TestResults)));
@@ -623,6 +624,8 @@ main(int argc, char** argv)
             HIP_CHECK(hipMemcpy(d_global_double, h_global_double.data(),
                                 h_global_double.size() * sizeof(double),
                                 hipMemcpyHostToDevice));
+            // d_input is not mutated by the kernel (VMEM uses d_output as scratch);
+            // still refresh it so host-side verification stays deterministic.
             HIP_CHECK(hipMemcpy(d_input, h_input, BUFFER_SIZE * sizeof(float),
                                 hipMemcpyHostToDevice));
             HIP_CHECK(hipMemset(d_output, 0, BUFFER_SIZE * sizeof(float)));

@@ -4,10 +4,11 @@
 # AMD GPU Mega Kernel Unit Test - Makefile
 #
 # Supported offload-arch values (single source for per-arch binaries):
-ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1153 gfx1201 gfx1200 gfx1250
+ARCHES := gfx950 gfx942 gfx90a gfx908 gfx1150 gfx1151 gfx1152 gfx1153 gfx1201 gfx1200 gfx1250
 ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #
 #   CDNA (Compute/Datacenter):
+#   - MI100 (CDNA1): gfx908
 #   - MI250/MI250X (CDNA2): gfx90a
 #   - MI300/MI300X (CDNA3): gfx942
 #   - MI350/MI355X (CDNA4): gfx950
@@ -33,6 +34,7 @@ GFX1250_HEALTH_BATCH ?= 655360
 #   make gfx950   - Build for MI350 (gfx950/CDNA4)
 #   make gfx942   - Build for MI300 (gfx942/CDNA3)
 #   make gfx90a   - Build for MI250 (gfx90a/CDNA2)
+#   make gfx908   - Build for MI100 (gfx908/CDNA1)
 #   make gfx1150  - Build for Strix Point (gfx1150/RDNA3.5)
 #   make gfx1151  - Build for Strix Halo (gfx1151/RDNA3.5)
 #   make gfx1152  - Build for Krackan (gfx1152/RDNA3.5)
@@ -118,6 +120,7 @@ help:
 	@echo "  $(ARCHES)"
 	@echo ""
 	@echo "  CDNA (Compute/Datacenter):"
+	@echo "    gfx908  - MI100 (CDNA1): FP32/FP64/FP16, MFMA (limited vs gfx90a+)"
 	@echo "    gfx90a  - MI250/MI250X (CDNA2): FP32/FP64/FP16/BF16, HW FP64 atomics"
 	@echo "    gfx942  - MI300/MI300X (CDNA3): + FP8/BF8 (FNUZ-style cvt), TF32, Sparse MFMA"
 	@echo "    gfx950  - MI350/MI355X (CDNA4): + FP6/FP4, OCP FP8/BF8 paths where applicable, Async LDS, Dual-Issue"
@@ -140,6 +143,7 @@ help:
 	@echo "  make gfx950      - Build for MI350 (gfx950/CDNA4)"
 	@echo "  make gfx942      - Build for MI300 (gfx942/CDNA3)"
 	@echo "  make gfx90a      - Build for MI250 (gfx90a/CDNA2)"
+	@echo "  make gfx908      - Build for MI100 (gfx908/CDNA1)"
 	@echo "  make gfx1150     - Build for Strix Point (gfx1150)"
 	@echo "  make gfx1151     - Build for Strix Halo (gfx1151)"
 	@echo "  make gfx1152     - Build for Krackan (gfx1152)"
