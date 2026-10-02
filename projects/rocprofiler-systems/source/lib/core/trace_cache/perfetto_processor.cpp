@@ -690,7 +690,6 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 
     auto _agent_device_id =
         m_agent_manager.get_agent_by_handle(_sms.agent_id_handle).device_type_index;
-    auto _name = std::string{ _sms.name };
 
 // Scratch memory samples from SDK versions prior to 7.0.2 do not include
 // allocation_size field, so counter tracks are not needed
@@ -733,7 +732,7 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
                             { .key = "queue", .value = _queue_id_handle },
                             { .key = "allocation_size", .value = _sms.allocation_size },
                             { .key = "agent_id", .value = _agent_device_id },
-                            { .key = "operation", .value = _name },
+                            { .key = "operation", .value = std::string{ _sms.name } },
                             { .key = "flags", .value = _sms.flags } });
     };
 
@@ -741,8 +740,8 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
         return get_or_create_track(category::rocm_scratch_memory{}, _track_desc_events);
     };
     emit_grouped_event(_group_by_queue, category::rocm_scratch_memory{},
-                       _make_queue_track, _stream_id, _name.c_str(), "", _beg_ts, _end_ts,
-                       _corr_id, add_perfetto_annotations);
+                       _make_queue_track, _stream_id, _sms.name.data(), "", _beg_ts,
+                       _end_ts, _corr_id, add_perfetto_annotations);
 }
 
 void
@@ -758,7 +757,6 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
         m_agent_manager.get_agent_by_handle(_mcs.src_agent_id_handle).logical_node_id;
     auto _dst_agent_log_node_id =
         m_agent_manager.get_agent_by_handle(_mcs.dst_agent_id_handle).logical_node_id;
-    auto _name = std::string{ _mcs.name };
 
     auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
         const auto& _tid_v = thread_info::get(_tid, SystemTID);
@@ -783,7 +781,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                             { .key = "bytes", .value = _mcs.bytes },
                             { .key = "src_agent_id", .value = _src_agent_log_node_id },
                             { .key = "dst_agent_id", .value = _dst_agent_log_node_id },
-                            { .key = "operation", .value = _name },
+                            { .key = "operation", .value = std::string{ _mcs.name } },
                             { .key = "src_address", .value = _mcs.src_address_value },
                             { .key = "dst_address", .value = _mcs.dst_address_value } });
     };
@@ -793,7 +791,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                                    _dst_agent_log_node_id, _thrd_id);
     };
     emit_grouped_event(_group_by_queue, category::rocm_memory_copy{}, _make_queue_track,
-                       _stream_id, _name.c_str(), "", _beg_ts, _end_ts, _corr_id,
+                       _stream_id, _mcs.name.data(), "", _beg_ts, _end_ts, _corr_id,
                        add_perfetto_annotations);
 }
 

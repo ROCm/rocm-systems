@@ -272,8 +272,6 @@ struct external_dependencies
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
     using rocm_rccl_api_category = category::rocm_rccl_api;
     using pmc_event_with_sample  = trace_cache::pmc_event_with_sample;
-    using metadata_registry_t    = trace_cache::metadata_registry;
-    using buffer_storage_t       = trace_cache::buffer_storage_t;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rccl_api_category_name =
@@ -301,16 +299,6 @@ struct external_dependencies
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_ompt_api_category_name =
         trait::name<category::rocm_ompt_api>::value;
-
-    static metadata_registry_t& get_metadata_registry()
-    {
-        return trace_cache::get_metadata_registry();
-    }
-
-    static buffer_storage_t& get_buffer_storage()
-    {
-        return trace_cache::get_buffer_storage();
-    }
 
     static void* dlsym(const char* symbol_name)
     {
@@ -377,6 +365,8 @@ struct external_dependencies
 
     // ─── kernel_dispatch buffered-domain dependencies ────────────────────────────
     using kernel_dispatch_sample_t = trace_cache::kernel_dispatch_sample;
+    using metadata_registry_t      = trace_cache::metadata_registry;
+    using buffer_storage_t         = trace_cache::buffer_storage_t;
 
     static constexpr std::string_view k_kernel_dispatch_category_name =
         trait::name<category::rocm_kernel_dispatch>::value;
@@ -398,6 +388,16 @@ struct external_dependencies
 
     static constexpr std::string_view k_scratch_memory_category_name =
         trait::name<category::rocm_scratch_memory>::value;
+
+    static metadata_registry_t& get_metadata_registry()
+    {
+        return trace_cache::get_metadata_registry();
+    }
+
+    static buffer_storage_t& get_buffer_storage()
+    {
+        return trace_cache::get_buffer_storage();
+    }
 
     static std::string_view get_kernel_symbol_name(std::uint64_t kernel_id)
     {
@@ -659,18 +659,6 @@ get_code_object_info(std::uint64_t _code_object_id)
     return g_tool_data->get_code_object_info(_code_object_id);
 }
 
-// template <typename Tp, typename... Args>
-// Tp*
-// as_pointer(Args&&... _args)
-// {
-//     return new Tp{ std::forward<Args>(_args)... };
-// }
-
-// template <typename... Tp>
-// void
-// consume_args(Tp&&...)
-// {}
-
 template <typename CorrelationIdType>
 std::uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
@@ -689,64 +677,6 @@ get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 #endif
 }
 
-// struct scope_destructor
-// {
-//     /// \fn scope_destructor(FuncT&& _fini, InitT&& _init)
-//     /// \tparam FuncT "std::function<void()> or void (*)()"
-//     /// \tparam InitT "std::function<void()> or void (*)()"
-//     /// \param _fini Function to execute when object is destroyed
-//     /// \param _init Function to execute when object is created (optional)
-//     ///
-//     /// \brief Provides a utility to perform an operation when exiting a scope.
-//     template <typename FuncT, typename InitT = void (*)()>
-//     scope_destructor(FuncT&& _fini, InitT&& _init = []() {});
-
-//     ~scope_destructor() { m_functor(); }
-
-//     // delete copy operations
-//     scope_destructor(const scope_destructor&)            = delete;
-//     scope_destructor& operator=(const scope_destructor&) = delete;
-
-//     // allow move operations
-//     scope_destructor(scope_destructor&& rhs) noexcept;
-//     scope_destructor& operator=(scope_destructor&& rhs) noexcept;
-
-// private:
-//     std::function<void()> m_functor = []() {};
-// };
-
-// template <typename FuncT, typename InitT>
-// scope_destructor::scope_destructor(FuncT&& _fini, InitT&& _init)
-// : m_functor{ std::forward<FuncT>(_fini) }
-// {
-//     _init();
-// }
-
-// inline scope_destructor::scope_destructor(scope_destructor&& rhs) noexcept
-// : m_functor{ std::move(rhs.m_functor) }
-// {
-//     rhs.m_functor = []() {};
-// }
-
-// inline scope_destructor&
-// scope_destructor::operator=(scope_destructor&& rhs) noexcept
-// {
-//     if(this != &rhs)
-//     {
-//         m_functor     = std::move(rhs.m_functor);
-//         rhs.m_functor = []() {};
-//     }
-//     return *this;
-// }
-
-// using kernel_rename_stack_t = std::stack<std::uint64_t>;
-
-// thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
-// thread_local auto thread_dispatch_rename_dtor = scope_destructor{ []() {
-//     delete thread_dispatch_rename;
-//     thread_dispatch_rename = nullptr;
-// } };
-
 template <typename Category>
 void
 cache_category()
@@ -763,76 +693,6 @@ cache_add_thread_info(std::uint64_t tid)
                                                            .start             = 0,
                                                            .end               = 0,
                                                            .extdata           = "{}" });
-}
-
-size_t
-get_mem_copy_dst_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
-{
-#if(ROCPROFILER_VERSION >= 700)
-    return record.dst_address.value;
-#else
-    return 0;
-#endif
-}
-
-size_t
-get_mem_copy_src_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
-{
-#if(ROCPROFILER_VERSION >= 700)
-    return record.src_address.value;
-#else
-    return 0;
-#endif
-}
-
-#if(ROCPROFILER_VERSION >= 600)
-size_t
-get_mem_alloc_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
-{
-#    if(ROCPROFILER_VERSION >= 700)
-    return record.address.value;
-#    else
-    return static_cast<size_t>(record.address.handle);
-#    endif
-}
-#endif
-
-std::uint64_t
-get_scratch_mem_alloc_size(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_scratch_memory_record_t& record)
-{
-// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
-// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
-// is 1.0.0, so we need to check the ROCm version.
-#if ROCPROFSYS_ROCM_VERSION >= 70100
-    return record.allocation_size;
-#else
-    return 0;
-#endif
-}
-
-void
-cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record,
-                      std::uint64_t                                        stream_handle)
-{
-    auto queue_handle = record->dispatch_info.queue_id.handle;
-
-    trace_cache::get_metadata_registry().add_queue(queue_handle);
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-
-    trace_cache::get_buffer_storage().store(trace_cache::kernel_dispatch_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dispatch_info.agent_id.handle, record->dispatch_info.kernel_id,
-        record->dispatch_info.dispatch_id, record->dispatch_info.queue_id.handle,
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        record->dispatch_info.private_segment_size,
-        record->dispatch_info.group_segment_size, record->dispatch_info.workgroup_size.x,
-        record->dispatch_info.workgroup_size.y, record->dispatch_info.workgroup_size.z,
-        record->dispatch_info.grid_size.x, record->dispatch_info.grid_size.y,
-        record->dispatch_info.grid_size.z, stream_handle });
 }
 
 // The cached samples carry the SDK operation name, so every name the SDK can
@@ -858,55 +718,6 @@ register_operation_name_strings()
         }
     }
 }
-
-void
-cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
-                     std::uint64_t                                       stream_handle)
-{
-    trace_cache::get_metadata_registry().add_queue(record->queue_id.handle);
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, record->queue_id.handle,
-        production_backend::get_buffer_tracing_names().at(record->kind,
-                                                          record->operation),
-        static_cast<std::int32_t>(record->operation),
-        static_cast<std::int32_t>(record->flags), get_scratch_mem_alloc_size(*record),
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        stream_handle });
-}
-
-void
-cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
-                  std::uint64_t                                    stream_handle)
-{
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dst_agent_id.handle, record->src_agent_id.handle,
-        production_backend::get_buffer_tracing_names().at(record->kind,
-                                                          record->operation),
-        record->bytes, record->correlation_id.internal,
-        get_parent_stack_id(record->correlation_id), get_mem_copy_dst_address(*record),
-        get_mem_copy_src_address(*record), stream_handle });
-}
-
-#if(ROCPROFILER_VERSION >= 600)
-void
-cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record,
-                        std::uint64_t stream_handle)
-{
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_allocate_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle,
-        production_backend::get_buffer_tracing_names().at(record->kind,
-                                                          record->operation),
-        static_cast<std::int32_t>(record->operation), record->allocation_size,
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        get_mem_alloc_address(*record), stream_handle });
-}
-#endif
 
 void
 tool_code_object_callback(rocprofiler_callback_tracing_record_t record,

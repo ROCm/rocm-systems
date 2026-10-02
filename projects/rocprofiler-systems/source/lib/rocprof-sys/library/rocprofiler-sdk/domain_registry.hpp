@@ -192,10 +192,10 @@ private:
             result.add(callback::k_hip_stream<SdkBackend, Externals>);
         }
 
-        constexpr auto k_rocdecode_min_version =
+        constexpr auto k_rocdecode_and_ompt_min_version =
             version{ .major = 0, .minor = 6, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     k_rocdecode_min_version)
+                     k_rocdecode_and_ompt_min_version)
         {
             result.add(callback::k_rocdecode_api<SdkBackend, Externals>);
             result.add(callback::ompt::k_ompt_api<SdkBackend, Externals>);
