@@ -41,7 +41,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 
 namespace rocprofiler
 {
@@ -249,9 +248,9 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
     // started" and -1 is "in progress"; only a completed initialization proceeds.
     if(::rocprofiler::registration::get_init_status() <= 0)
     {
-        std::clog << "WARNING: rocprofiler-sdk OMPT support is not enabled because the OpenMP "
-                     "runtime initialized before rocprofiler-sdk. Initialize rocprofiler-sdk "
-                     "before the first OpenMP call to enable OMPT.\n";
+        ROCP_WARNING << "rocprofiler-sdk OMPT support is not enabled because the OpenMP runtime "
+                        "initialized before rocprofiler-sdk. Initialize rocprofiler-sdk before "
+                        "the first OpenMP call to enable OMPT.";
         return nullptr;
     }
 
