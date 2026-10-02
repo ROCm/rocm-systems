@@ -26,7 +26,7 @@ permissions:
 jobs:
   simulator:
     name: Host-ASAN ${{ inputs.native_gpu && 'native gfx942' || 'rocJITsu' }} / ${{ matrix.suite }}
-    runs-on: ${{ inputs.native_gpu && 'linux-gfx942-8gpu-asan-sandbox-rocm' || 'aws-linux-scale-rocm-large' }}
+    runs-on: ${{ inputs.native_gpu && 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' || 'aws-linux-scale-rocm-large' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
