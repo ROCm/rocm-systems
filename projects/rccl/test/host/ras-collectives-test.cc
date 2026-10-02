@@ -291,9 +291,7 @@ void FreeConnList() {
 struct rasMsg* MakeCollReqMsg(rasCollectiveType type, const union ncclSocketAddress& rootAddr, uint64_t rootId,
                               int64_t timeout) {
   struct rasMsg* msg = nullptr;
-  size_t reqLen = rasCollDataLength(type);
   EXPECT_EQ(ncclSuccess, rasMsgAlloc(&msg, rasMsgLength(RAS_MSG_COLLREQ, type)));
-  (void)reqLen;
   msg->type = RAS_MSG_COLLREQ;
   msg->collReq.rootAddr = rootAddr;
   msg->collReq.rootId = rootId;
@@ -302,18 +300,23 @@ struct rasMsg* MakeCollReqMsg(rasCollectiveType type, const union ncclSocketAddr
   return msg;
 }
 
+size_t CollRespDataOffset(size_t peerCount) {
+  size_t dataOffset = rasMsgLength(RAS_MSG_COLLRESP) + peerCount * sizeof(union ncclSocketAddress);
+  ALIGN_SIZE(dataOffset, alignof(int64_t));
+  return dataOffset;
+}
+
+const char* CollRespData(const struct rasMsg* msg) {
+  return reinterpret_cast<const char*>(msg) + CollRespDataOffset(msg->collResp.nPeers);
+}
+
 // Builds a heap RAS_MSG_COLLRESP message with optional peers/data, matching rasConnSendCollResp's layout.
 struct rasMsg* MakeCollRespMsg(const union ncclSocketAddress& rootAddr, uint64_t rootId, int nLegTimeouts,
                                const std::vector<union ncclSocketAddress>& peers, const std::vector<char>& data) {
   struct rasMsg* msg = nullptr;
-  int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_COLLRESP)) +
-               static_cast<int>(peers.size() * sizeof(union ncclSocketAddress));
-  int dataOffset = 0;
-  if (!data.empty()) {
-    ALIGN_SIZE(msgLen, alignof(int64_t));
-    dataOffset = msgLen;
-    msgLen += static_cast<int>(data.size());
-  }
+  const size_t headerBytes = rasMsgLength(RAS_MSG_COLLRESP) + peers.size() * sizeof(union ncclSocketAddress);
+  const size_t dataOffset = CollRespDataOffset(peers.size());
+  const size_t msgLen = data.empty() ? headerBytes : dataOffset + data.size();
   EXPECT_EQ(ncclSuccess, rasMsgAlloc(&msg, msgLen));
   msg->type = RAS_MSG_COLLRESP;
   msg->collResp.rootAddr = rootAddr;
@@ -337,7 +340,9 @@ struct rasCollective* MakeCollective(rasCollectiveType type, const union ncclSoc
   coll->timeout = timeout;
   coll->fromConn = fromConn;
   coll->startTime = g_clockNano;
-  coll->fwdConns = static_cast<struct rasConnection**>(calloc(8, sizeof(*coll->fwdConns)));
+  size_t connectionCount = 0;
+  for (auto* conn = rasConnsHead; conn != nullptr; conn = conn->next) connectionCount++;
+  coll->fwdConns = static_cast<struct rasConnection**>(calloc(connectionCount, sizeof(*coll->fwdConns)));
 
   if (rasCollectivesHead) {
     rasCollectivesTail->next = coll;
@@ -485,7 +490,6 @@ void ResetWholeFileSeams() {
   g_failMsgAllocationCall = 0;
 
   rasCollectivesTerminate();
-  rasCollectivesHead = rasCollectivesTail = nullptr;
 
   FreeConnList();
   FreeLinkConns(&rasNextLink);
@@ -925,8 +929,8 @@ TEST_F(RasCollectivesMicrotest, MsgHandleCollReq_BroadcastDuplicateFinishedSends
 
 TEST_F(RasCollectivesMicrotest, MsgHandleCollReq_DuplicateOngoingSendsEmptyResponseAndSkipsRebroadcast) {
   union ncclSocketAddress root = MakeAddr(9);
-  MakeCollective(RAS_COLL_CONNS, root, 5);
   auto* conn = MakeConn(1);
+  MakeCollective(RAS_COLL_CONNS, root, 5);
   auto* msg = MakeCollReqMsg(RAS_COLL_CONNS, root, 5, 0);
   struct rasSocket sock{};
   sock.conn = conn;
@@ -941,13 +945,13 @@ TEST_F(RasCollectivesMicrotest, MsgHandleCollReq_DuplicateOngoingSendsEmptyRespo
 
 TEST_F(RasCollectivesMicrotest, MsgHandleCollReq_TypeMismatchCreatesSecondCollective) {
   union ncclSocketAddress root = MakeAddr(9);
-  MakeCollective(RAS_COLL_CONNS, root, 5);  // Ongoing collective has a different type than the incoming request.
   // A live forwarding connection keeps the new (COMMS) collective from completing
   // immediately, so both collectives are still observable on the list afterward.
   auto* fwd = MakeConn(20);
   MakeSocketForConn(fwd, RAS_SOCK_READY, 0);
   AddLinkConn(&rasNextLink, fwd);
   auto* conn = MakeConn(1);
+  MakeCollective(RAS_COLL_CONNS, root, 5);  // Ongoing collective has a different type than the incoming request.
   auto* msg = MakeCollReqMsg(RAS_COLL_COMMS, root, 5, 0);
   struct rasSocket sock{};
   sock.conn = conn;
@@ -998,10 +1002,7 @@ TEST_F(RasCollectivesMicrotest, ReadyResp_RemotelyInitiatedSendsResponseRecordsH
   EXPECT_EQ(htons(1), g_enqueuedMsgs[0].msg->collResp.peers[0].sin.sin_port);
   EXPECT_EQ(htons(2), g_enqueuedMsgs[0].msg->collResp.peers[1].sin.sin_port);
   ASSERT_EQ(4, g_enqueuedMsgs[0].msg->collResp.nData);
-  int dataOffset = rasMsgLength(RAS_MSG_COLLRESP) +
-                   g_enqueuedMsgs[0].msg->collResp.nPeers * sizeof(*g_enqueuedMsgs[0].msg->collResp.peers);
-  ALIGN_SIZE(dataOffset, alignof(int64_t));
-  EXPECT_EQ(0, memcmp(reinterpret_cast<char*>(g_enqueuedMsgs[0].msg) + dataOffset, "data", 4));
+  EXPECT_EQ(0, memcmp(CollRespData(g_enqueuedMsgs[0].msg), "data", 4));
   EXPECT_EQ(3, g_enqueuedMsgs[0].msg->collResp.nLegTimeouts);
   EXPECT_EQ(nullptr, rasCollectivesHead);  // Freed.
   EXPECT_EQ(1, nRasCollHistory);
@@ -1286,7 +1287,9 @@ TEST_F(RasCollectivesMicrotest, HandleTimeouts_PartialTimeoutBelowExtraWaitsLong
   auto* fromConn = MakeConn(1);
   auto* pending = MakeConn(2);
   auto* stillOut = MakeConn(3);
+  auto* untouched = MakeConn(4);
   MakeSocketForConn(pending, RAS_SOCK_CONNECTING, 0);
+  MakeSocketForConn(untouched, RAS_SOCK_READY, /*createTime*/ 0);
   auto* coll = MakeCollective(RAS_COLL_CONNS, MakeAddr(9), 5, fromConn);
   coll->startTime = 5;
   coll->timeout = 10;
@@ -1294,8 +1297,6 @@ TEST_F(RasCollectivesMicrotest, HandleTimeouts_PartialTimeoutBelowExtraWaitsLong
   coll->fwdConns[coll->nFwdSent++] = stillOut;  // No sock at all -> also times out immediately (nullptr sock).
   // Force nFwdRecv to stay below nFwdSent by adding one more untouched leg (createTime
   // strictly before coll->startTime, so it's recognized as healthy and left alone).
-  auto* untouched = MakeConn(4);
-  MakeSocketForConn(untouched, RAS_SOCK_READY, /*createTime*/ 0);
   coll->fwdConns[coll->nFwdSent++] = untouched;
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_RAS);
   int64_t nextWakeup = INT64_MAX;
@@ -1429,6 +1430,32 @@ void InstallNcclComms(std::vector<ncclComm*> comms) {
 }
 
 }  // namespace
+
+TEST_F(RasCollectivesMicrotest, DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable) {
+  SCOPED_TRACE("AICOMRCCL-2740: enable after the production allocation-failure fix");
+  FakeComm localComm(0xAAAA, 0, 1);
+  InstallNcclComms({localComm.get()});
+  auto* forward = MakeConn(10);
+  MakeSocketForConn(forward, RAS_SOCK_READY, 0);
+  AddLinkConn(&rasNextLink, forward);
+  struct rasCollRequest request{};
+  request.type = RAS_COLL_COMMS;
+  request.rootAddr = MakeAddr(9);
+  request.rootId = 5;
+  struct rasCollective* collective = nullptr;
+  bool allDone = false;
+  g_failAllocationCall = 5;
+
+  ASSERT_EQ(ncclSuccess, rasNetSendCollReq(&request, &allDone, &collective));
+  ASSERT_NE(nullptr, collective);
+  EXPECT_EQ(nullptr, collective->data);
+  EXPECT_EQ(0, collective->nData);
+  EXPECT_FALSE(allDone);
+  ASSERT_EQ(1u, g_enqueuedMsgs.size());
+  EXPECT_EQ(forward, g_enqueuedMsgs[0].conn);
+  EXPECT_EQ(RAS_COLL_COMMS, g_enqueuedMsgs[0].msg->collReq.type);
+  EXPECT_EQ(request.rootId, g_enqueuedMsgs[0].msg->collReq.rootId);
+}
 
 TEST_F(RasCollectivesMicrotest, CommsInit_SingleRankSingleCommCapturesFields) {
   FakeComm fc(0xAAAA, /*rank*/ 0, /*nRanks*/ 1);
@@ -1660,7 +1687,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_EmptyMessageIsNoOp) {
   coll->fwdConns[coll->nFwdSent++] = respConn;
   auto collBlob = BuildRasCollComms({});
   SetData(coll, collBlob);
-  auto msgBlob = BuildRasCollComms({});  // nComms == 0.
+  auto msgBlob = BuildRasCollComms({});
   auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   EXPECT_EQ(0, reinterpret_cast<struct rasCollComms*>(coll->data)->nComms);
@@ -1896,7 +1923,19 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_UnfilledMissingRankRetainsMetadata) {
   FreeAllocatedMsg(msg);
 }
 
-TEST_F(RasCollectivesMicrotest, ComparisonHelpersCoverAllOrderingKeys) {
+TEST_F(RasCollectivesMicrotest, MakeCollective_NineConnectionsAllocatesEveryForwardSlot) {
+  std::vector<struct rasConnection*> connections;
+  for (int port = 1; port <= 9; port++) connections.push_back(MakeConn(port));
+  auto* collective = MakeCollective(RAS_COLL_CONNS, MakeAddr(10), 1);
+  ASSERT_NE(nullptr, collective->fwdConns);
+  for (auto* connection : connections) collective->fwdConns[collective->nFwdSent++] = connection;
+  ASSERT_EQ(9, collective->nFwdSent);
+  for (size_t index = 0; index < connections.size(); index++) {
+    EXPECT_EQ(connections[index], collective->fwdConns[index]);
+  }
+}
+
+TEST_F(RasCollectivesMicrotest, CommsCompare_OrdersByHashThenRankWithNullsLast) {
   FakeComm lowComm(1, 0, 1);
   FakeComm highComm(2, 0, 1);
   FakeComm higherRank(1, 1, 2);
@@ -1912,7 +1951,9 @@ TEST_F(RasCollectivesMicrotest, ComparisonHelpersCoverAllOrderingKeys) {
   EXPECT_LT(ncclCommsCompare(&low, &nullComm), 0);
   EXPECT_GT(ncclCommsCompare(&nullComm, &low), 0);
   EXPECT_EQ(0, ncclCommsCompare(&nullComm, &nullComm));
+}
 
+TEST_F(RasCollectivesMicrotest, PeersHashesCompareAndSearch_OrderByHostThenPid) {
   struct rasPeerInfo lowPeer{};
   struct rasPeerInfo highPeer{};
   struct rasPeerInfo higherPid{};
@@ -1941,7 +1982,9 @@ TEST_F(RasCollectivesMicrotest, ComparisonHelpersCoverAllOrderingKeys) {
   EXPECT_LT(peersHashesSearch(key, &lowPeerPtr), 0);
   key[0] = 2;
   EXPECT_GT(peersHashesSearch(key, &lowPeerPtr), 0);
+}
 
+TEST_F(RasCollectivesMicrotest, CommIdCompare_OrdersByCommThenHostThenPid) {
   struct rasCommId lowId{1, 2, 3};
   struct rasCommId highHash{2, 1, 1};
   struct rasCommId highHost{1, 3, 1};
@@ -1953,7 +1996,9 @@ TEST_F(RasCollectivesMicrotest, ComparisonHelpersCoverAllOrderingKeys) {
   EXPECT_LT(rasCommIdCompare(&lowId, &highPid), 0);
   EXPECT_GT(rasCommIdCompare(&highPid, &lowId), 0);
   EXPECT_EQ(0, rasCommIdCompare(&lowId, &lowId));
+}
 
+TEST_F(RasCollectivesMicrotest, MissingRankSearch_OrdersByCommRank) {
   struct rasCollCommsMissingRank missing{};
   missing.commRank = 4;
   int missingKey = 3;
