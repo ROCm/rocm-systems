@@ -2339,10 +2339,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       memcpy(comm->channels + comm->nChannels + i, comm->channels + nChannelsOrig + i, sizeof(struct ncclChannel));
     }
   } else if (comm->nChannels > nChannelsOrig) {
-    // The NET-less arm above can raise the count past what Preset() was given (e.g. Navi graph
-    // generation forces 56 SHM rings while the tree search falls back to a single channel).
-    // Preset() owns the per-channel intra-node state and only filled nChannelsOrig channels (plus
-    // their duplicates), so copy an existing channel into each added one rather than leaving it empty.
+    // Preset() fills each channel's Tree, only for the channel count it sees at that point. 
+    // On a single node the channel count can grow afterwards, and Postset() rebuilds only the rings. 
+    // So the extra channels keep empty Trees. The else fills each added channel with a copy of an existing one.
     for (int c = nChannelsOrig; c < comm->nChannels; c++) {
       memcpy(comm->channels + c, comm->channels + c % nChannelsOrig, sizeof(struct ncclChannel));
     }
