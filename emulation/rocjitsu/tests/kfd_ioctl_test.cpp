@@ -1159,10 +1159,8 @@ TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
   EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 0u);
 }
 
-// KFD exposes PM4 and AQL as distinct compute queue formats. Rocjitsu supports
-// general KFD compute dispatch only through AQL; its PM4 processor intentionally
-// remains limited to the supported compute-queue packet subset.
-TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
+// Both compute formats share queue ownership; a native PM4 queue stays on one XCD.
+TEST_F(KfdIoctlTest, CreateQueueAcceptsPm4ComputeAndRejectsUnknownTypes) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
 
@@ -1185,7 +1183,50 @@ TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
   pm4.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
   pm4.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
   pm4.queue_percentage = 100;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -ENOTSUP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 1u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u);
+
+  // PM4 target placement is initial queue configuration, separate from decoding.
+  ASSERT_GT(num_xcds, 2u);
+  pm4.queue_percentage = 100 | (2u << 8);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(soc_->xcd(2)->command_processor()->registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(soc_->xcd(0)->command_processor()->registered_queue_count_for_test(), 0u);
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u);
+  pm4.queue_percentage = 100 | (num_xcds << 8);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -EINVAL);
+
+  pm4.queue_percentage = (2u << 8) | 101;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -EINVAL);
+  pm4.queue_percentage = 2u << 8;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  auto *owner = soc_->xcd(2)->command_processor();
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  kfd_ioctl_update_queue_args update{};
+  update.queue_id = pm4.queue_id;
+  update.ring_base_address = pm4.ring_base_address;
+  update.ring_size = pm4.ring_size;
+  update.queue_percentage = (2u << 8) | 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  EXPECT_FALSE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  update.queue_percentage = 2u << 8;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  update.queue_percentage = (2u << 8) | 101;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.queue_percentage = (num_xcds << 8) | 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.queue_percentage = (1u << 8) | 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EOPNOTSUPP);
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
   EXPECT_EQ(registered_on_all_xcds(), 0u);
 
   kfd_ioctl_create_queue_args unknown{};
@@ -1618,6 +1659,7 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
   create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
@@ -7427,7 +7469,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
   alignas(64) std::array<std::array<uint64_t, 3>, 2> pointers{};
   std::array<uint64_t, 2> registrations{};
   for (uint32_t i = 0; i < cps.size(); ++i) {
-    amdgpu::AqlQueueConfig queue{};
+    amdgpu::ComputeQueueConfig queue{};
     queue.address_space = process->gpu(0).address_space;
     queue.process_id = process_id;
     queue.queue_id = i + 1;
@@ -7866,6 +7908,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
   create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);

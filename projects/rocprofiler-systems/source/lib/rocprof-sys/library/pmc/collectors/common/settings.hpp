@@ -114,11 +114,11 @@ struct settings_policy
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() {
+        static auto const _enabled_metrics = []() {
             auto setting =
                 get_setting_value<std::string>(std::string{ env_vars::AMD_SMI_METRICS });
-            auto value_str = setting.has_value() ? setting.value() : "all";
-            auto result    = parse_enabled_metrics(value_str);
+            auto const value_str = setting.has_value() ? setting.value() : "all";
+            auto       result    = parse_enabled_metrics(value_str);
             return result;
         }();
         return _enabled_metrics;
@@ -186,7 +186,7 @@ struct settings_policy
      */
     static cpu::enabled_metrics get_cpu_enabled_metrics()
     {
-        static auto _result = []() {
+        static auto const _result = []() {
             auto setting =
                 get_setting_value<std::string>(std::string{ env_vars::CPU_METRICS });
             const auto value_str = setting.has_value() ? setting.value() : "all";
@@ -198,13 +198,13 @@ struct settings_policy
     static gpu_perf_counter::gpu_perf_counter_settings
     get_gpu_perf_counter_enabled_metrics() noexcept
     {
-        auto value_str = rocprofsys::get_gpu_perf_counters();
+        auto const value_str = rocprofsys::get_gpu_perf_counters();
         if(value_str.empty())
         {
             return gpu_perf_counter::gpu_perf_counter_settings{};
         }
 
-        auto trimmed = utility::string::trim(value_str);
+        auto const trimmed = utility::string::trim(value_str);
 
         gpu_perf_counter::gpu_perf_counter_settings result;
 
@@ -222,21 +222,20 @@ struct settings_policy
                 {
                     continue;
                 }
-                auto pos = subtoken.find(device_qualifier);
+                auto const pos = subtoken.find(device_qualifier);
                 if(pos == std::string::npos)
                 {
                     result.broadcast_names.push_back(subtoken);
                 }
                 else
                 {
-                    auto name       = subtoken.substr(0, pos);
+                    auto const name = subtoken.substr(0, pos);
                     auto device_str = subtoken.substr(pos + device_qualifier.size());
                     if(name.empty())
                     {
                         continue;
                     }
-                    if(device_str.empty() ||
-                       !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
+                    if(device_str.empty() || !std::ranges::all_of(device_str, ::isdigit))
                     {
                         LOG_ERROR("Invalid :device= value in "
                                   "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
@@ -246,7 +245,7 @@ struct settings_policy
                     try
                     {
                         result.explicit_counters.push_back(
-                            { name, std::stoull(device_str) });
+                            { .name = name, .device_index = std::stoull(device_str) });
                     } catch(const std::exception&)
                     {
                         LOG_ERROR("Invalid :device= value in "
@@ -278,10 +277,10 @@ private:
             return result;
         }
 
-        auto make_bits =
+        auto const make_bits =
             [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
-            for(auto b : positions)
+            for(auto const b : positions)
             {
                 v |= (1u << b);
             }
@@ -353,9 +352,9 @@ private:
             return result;
         }
 
-        auto make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
+        auto const make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
             std::uint32_t value = 0;
-            for(auto bit : bit_positions)
+            for(auto const bit : bit_positions)
             {
                 value |= (1u << bit);
             }
@@ -387,7 +386,7 @@ private:
 
         for(; it != end; ++it)
         {
-            auto found = mapper.find(it->str());
+            auto const found = mapper.find(it->str());
             if(found != mapper.end())
             {
                 metrics.value |= found->second;
@@ -413,7 +412,7 @@ private:
             std::string       subtoken;
             while(std::getline(ss2, subtoken, ';'))
             {
-                auto trimmed = rocprofsys::utility::string::trim(subtoken);
+                auto const trimmed = rocprofsys::utility::string::trim(subtoken);
                 if(!trimmed.empty())
                 {
                     result.insert(std::string{ trimmed });

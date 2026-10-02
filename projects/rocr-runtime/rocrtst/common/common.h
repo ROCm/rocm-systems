@@ -146,6 +146,14 @@ bool isEmuModeEnabled();
 /// \returns true if a WSL environment is detected
 bool isWslEnvironment();
 
+/// Record the current test as skipped: register it with SkippedTestTracker
+/// (end-of-run summary) and print a "[ SKIPPED ]" line. Use for runtime skip
+/// conditions that the platform filter doesn't cover, since the vendored gtest
+/// predates GTEST_SKIP().
+/// \param reason Why the test is skipped
+/// \returns true (so callers can `return` in one line)
+bool SkipCurrentTest(const char* reason);
+
 /// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
 /// true so the caller can return early; returns false otherwise.
 /// \param reason Why the test is skipped on WSL
