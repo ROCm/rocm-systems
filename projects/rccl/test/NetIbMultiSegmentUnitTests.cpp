@@ -37,7 +37,7 @@ int SegOf(const Layout& L, uintptr_t addr, size_t len) {
     return ncclIbSegmentIndexForRange(L.n(), L.start.data(), L.len.data(), addr, len);
 }
 
-// Build the (segVA[], segOff[nSeg+1]) tables ncclIbSplitTransfer expects.
+// Build the (segVA[], segOff[nSeg+1]) tables ncclIbSplitTransferAtOffsets expects.
 struct SplitTables {
     std::vector<uint64_t> va;
     std::vector<uint64_t> off; // size nSeg+1, off[nSeg] == total bytes
@@ -157,25 +157,32 @@ TEST(NetIbMultiSeg, OverlappingRangeZeroLengthIsEmpty) {
               0);
 }
 
+// Zero-length WRs pick the remote rkey by registration-relative offset.
 TEST(NetIbMultiSeg, ZeroLengthWrUsesContainingSegment) {
-    Layout L = MakeUniform(kBase, kSeg, 4);
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase), 0);
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase + kSeg), 1);
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(),
-                                              kBase + 2 * kSeg + 64),
-              2);
+    SplitTables t = MakeTables(MakeUniform(kBase, kSeg, 4));
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), 0), 0);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), kSeg), 1);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), 2 * kSeg + 64), 2);
 }
 
 TEST(NetIbMultiSeg, ZeroLengthWrAtLastExclusiveEndUsesLastMr) {
-    Layout L = MakeUniform(kBase, kSeg, 4);
-    uintptr_t end = kBase + 4 * kSeg;
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end), 3);
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end + 1), -1);
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase - 1), -1);
+    SplitTables t = MakeTables(MakeUniform(kBase, kSeg, 4));
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), 4 * kSeg), 3);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), 4 * kSeg + 1), -1);
 }
 
-TEST(NetIbMultiSeg, ZeroLengthWrNullOrEmptyLayout) {
-    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(0, nullptr, nullptr, kBase), -1);
+TEST(NetIbMultiSeg, ZeroLengthWrUnequalSegments) {
+    constexpr uint64_t gpuBytes = 6u * 1024 * 1024;
+    Layout L{{kBase, kBase + gpuBytes}, {gpuBytes, kSeg}};
+    SplitTables t = MakeTables(L);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), gpuBytes - 1), 0);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), gpuBytes), 1);
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(t.n(), t.off.data(), gpuBytes + kSeg), 1);
+}
+
+TEST(NetIbMultiSeg, ZeroLengthWrEmptyLayout) {
+    const uint64_t off[] = {0};
+    EXPECT_EQ(ncclIbSegmentForZeroLengthOffset(0, off, 0), -1);
 }
 
 TEST(NetIbMultiSeg, UniformLayoutAccepted) {
@@ -198,6 +205,15 @@ TEST(NetIbMultiSeg, TrailingSegmentMayNotBeLarger) {
     EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));
 }
 
+// With two segments there is no interior, so any pair passes: a larger
+// trailing segment and the DeepEP [GPU][CPU] shape both register.
+TEST(NetIbMultiSeg, AnyTwoSegmentLayoutIsUniform) {
+    std::vector<size_t> growing = {kSeg, 2 * kSeg};
+    std::vector<size_t> deepEp  = {3 * kSeg, kSeg};
+    EXPECT_TRUE(ncclIbSegmentsUniform(2, growing.data()));
+    EXPECT_TRUE(ncclIbSegmentsUniform(2, deepEp.data()));
+}
+
 TEST(NetIbMultiSeg, SingleOrEmptyLayoutIsUniform) {
     std::vector<size_t> len = {kSeg};
     EXPECT_TRUE(ncclIbSegmentsUniform(1, len.data()));
@@ -218,12 +234,12 @@ TEST(NetIbSplit, SingleSegmentBothSidesOneSlice) {
     Layout remote = MakeUniform(0x900000000ULL, kSeg, 1);
     SplitTables lt = MakeTables(local), rt = MakeTables(remote);
     ncclIbSegSlice out[8];
-    int ns = ncclIbSplitTransfer(lt.n(), lt.va.data(), lt.off.data(),
-                                 rt.n(), rt.va.data(), rt.off.data(),
-                                 /*off*/ 4096, /*len*/ 65536, out, 8);
+    int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                          rt.n(), rt.va.data(), rt.off.data(),
+                                          /*localOff*/ 4096, /*remoteOff*/ 8192, /*len*/ 65536, out, 8);
     ASSERT_EQ(ns, 1);
     EXPECT_EQ(out[0].localAddr,  kBase + 4096);
-    EXPECT_EQ(out[0].remoteAddr, 0x900000000ULL + 4096);
+    EXPECT_EQ(out[0].remoteAddr, 0x900000000ULL + 8192);
     EXPECT_EQ(out[0].len, 65536u);
     EXPECT_EQ(out[0].localSeg, 0);
     EXPECT_EQ(out[0].remoteSeg, 0);
@@ -232,64 +248,78 @@ TEST(NetIbSplit, SingleSegmentBothSidesOneSlice) {
 // A transfer contained in one segment on both sides stays a single slice even
 // when the buffer itself is multi-segment.
 TEST(NetIbSplit, WithinSegmentNoSplit) {
-    Layout L = MakeUniform(kBase, kSeg, 4);
-    SplitTables t = MakeTables(L);
+    Layout local  = MakeUniform(kBase, kSeg, 4);
+    Layout remote = MakeUniform(0x900000000ULL, kSeg, 4);
+    SplitTables lt = MakeTables(local), rt = MakeTables(remote);
     ncclIbSegSlice out[8];
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 /*off*/ kSeg + 1024, /*len*/ 4096, out, 8);
+    int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                          rt.n(), rt.va.data(), rt.off.data(),
+                                          /*localOff*/ kSeg + 1024, /*remoteOff*/ 2 * kSeg + 512,
+                                          /*len*/ 4096, out, 8);
     ASSERT_EQ(ns, 1);
     EXPECT_EQ(out[0].localSeg, 1);
-    EXPECT_EQ(out[0].remoteSeg, 1);
+    EXPECT_EQ(out[0].remoteSeg, 2);
+    EXPECT_EQ(out[0].localAddr, kBase + kSeg + 1024);
+    EXPECT_EQ(out[0].remoteAddr, 0x900000000ULL + 2 * kSeg + 512);
     EXPECT_EQ(out[0].len, 4096u);
 }
 
-// A transfer straddling one boundary (symmetric layout) splits into two slices
-// with the correct per-segment addresses and lengths.
+// A transfer straddling one local boundary splits into two slices with the
+// correct per-segment addresses, while the remote side stays in one segment.
 TEST(NetIbSplit, CrossingOneBoundarySplitsIntoTwo) {
-    Layout L = MakeUniform(kBase, kSeg, 4);
-    SplitTables t = MakeTables(L);
-    uint64_t off = kSeg - 1024;   // 1 KiB before the seg0/seg1 boundary
-    uint64_t len = 4096;          // ends 3 KiB into seg1
+    Layout local  = MakeUniform(kBase, kSeg, 4);
+    Layout remote = MakeUniform(0x900000000ULL, kSeg, 4);
+    SplitTables lt = MakeTables(local), rt = MakeTables(remote);
+    uint64_t localOff  = kSeg - 1024;     // 1 KiB before the local seg0/seg1 boundary
+    uint64_t remoteOff = 2 * kSeg + 4096; // well inside remote seg2
+    uint64_t len = 4096;                  // ends 3 KiB into local seg1
     ncclIbSegSlice out[8];
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 off, len, out, 8);
+    int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                          rt.n(), rt.va.data(), rt.off.data(),
+                                          localOff, remoteOff, len, out, 8);
     ASSERT_EQ(ns, 2);
     EXPECT_EQ(out[0].localSeg, 0);
     EXPECT_EQ(out[0].localAddr, kBase + kSeg - 1024);
+    EXPECT_EQ(out[0].remoteSeg, 2);
+    EXPECT_EQ(out[0].remoteAddr, 0x900000000ULL + remoteOff);
     EXPECT_EQ(out[0].len, 1024u);
     EXPECT_EQ(out[1].localSeg, 1);
     EXPECT_EQ(out[1].localAddr, kBase + kSeg);
+    EXPECT_EQ(out[1].remoteSeg, 2);
+    EXPECT_EQ(out[1].remoteAddr, 0x900000000ULL + remoteOff + 1024);
     EXPECT_EQ(out[1].len, 3072u);
     // Slices reassemble to the original range with no gaps/overlaps.
     EXPECT_EQ(out[0].len + out[1].len, len);
 }
 
-// Asymmetric layouts: the sender and receiver segment at different sizes; the
-// transfer must split at the union of both sides' boundaries.
+// Asymmetric layouts: the sender and receiver segment at different sizes and
+// start at different offsets; the transfer must split at the union of both
+// sides' boundaries.
 TEST(NetIbSplit, AsymmetricLayoutsSplitAtBothBoundaries) {
-    Layout local  = MakeUniform(kBase, kSeg, 4);          // 2 MiB segments
+    Layout local  = MakeUniform(kBase, kSeg, 4);              // 2 MiB segments
     Layout remote = MakeUniform(0x900000000ULL, kSeg / 2, 8); // 1 MiB segments
     SplitTables lt = MakeTables(local), rt = MakeTables(remote);
-    // Transfer the whole buffer.
-    uint64_t total = 4 * kSeg;
+    const uint64_t localOff  = kSeg / 4; // 512 KiB
+    const uint64_t remoteOff = 0;
+    const uint64_t len = 3 * kSeg;
     ncclIbSegSlice out[64];
-    int ns = ncclIbSplitTransfer(lt.n(), lt.va.data(), lt.off.data(),
-                                 rt.n(), rt.va.data(), rt.off.data(),
-                                 0, total, out, 64);
-    // Remote has the finer granularity (1 MiB): 8 slices, each 1 MiB.
-    ASSERT_EQ(ns, 8);
+    int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                          rt.n(), rt.va.data(), rt.off.data(),
+                                          localOff, remoteOff, len, out, 64);
+    // Remote boundaries every 1 MiB plus local ones at 1.5, 3.5 and 5.5 MiB.
+    ASSERT_EQ(ns, 9);
     uint64_t sum = 0, cursor = 0;
     for (int k = 0; k < ns; k++) {
-        EXPECT_EQ(out[k].localAddr,  kBase + cursor);
-        EXPECT_EQ(out[k].remoteAddr, 0x900000000ULL + cursor);
-        EXPECT_EQ(out[k].len, kSeg / 2);
-        EXPECT_EQ(out[k].localSeg, static_cast<int>(cursor / kSeg));
-        EXPECT_EQ(out[k].remoteSeg, static_cast<int>(cursor / (kSeg / 2)));
+        const uint64_t l = localOff + cursor, r = remoteOff + cursor;
+        EXPECT_EQ(out[k].localAddr,  kBase + l);
+        EXPECT_EQ(out[k].remoteAddr, 0x900000000ULL + r);
+        EXPECT_EQ(out[k].localSeg, static_cast<int>(l / kSeg));
+        EXPECT_EQ(out[k].remoteSeg, static_cast<int>(r / (kSeg / 2)));
+        EXPECT_EQ((l + out[k].len - 1) / kSeg, l / kSeg) << "slice " << k << " crosses a local boundary";
+        EXPECT_EQ((r + out[k].len - 1) / (kSeg / 2), r / (kSeg / 2)) << "slice " << k << " crosses a remote boundary";
         sum += out[k].len; cursor += out[k].len;
     }
-    EXPECT_EQ(sum, total);
+    EXPECT_EQ(sum, len);
 }
 
 // Local and remote API buffers may begin at different offsets within their
@@ -345,72 +375,89 @@ TEST(NetIbSplit, DeepEP_EngramCpuToGpuOffsets) {
     EXPECT_EQ(out[0].len, len);
 }
 
-// Full-buffer transfer over a symmetric N-segment layout yields N slices.
+// Full-buffer transfer over an N-segment layout yields N slices, even when the
+// remote copy starts one segment into a larger registration.
 TEST(NetIbSplit, FullBufferProducesOneSlicePerSegment) {
-    Layout L = MakeUniform(kBase, kSeg, 4);
-    SplitTables t = MakeTables(L);
+    Layout local  = MakeUniform(kBase, kSeg, 4);
+    Layout remote = MakeUniform(0x900000000ULL, kSeg, 5);
+    SplitTables lt = MakeTables(local), rt = MakeTables(remote);
     ncclIbSegSlice out[8];
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 0, 4 * kSeg, out, 8);
+    int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                          rt.n(), rt.va.data(), rt.off.data(),
+                                          /*localOff*/ 0, /*remoteOff*/ kSeg, 4 * kSeg, out, 8);
     ASSERT_EQ(ns, 4);
-    for (int k = 0; k < ns; k++) { EXPECT_EQ(out[k].len, kSeg); EXPECT_EQ(out[k].localSeg, k); }
+    for (int k = 0; k < ns; k++) {
+        EXPECT_EQ(out[k].len, kSeg);
+        EXPECT_EQ(out[k].localSeg, k);
+        EXPECT_EQ(out[k].remoteSeg, k + 1);
+    }
 }
 
 TEST(NetIbSplit, ZeroLengthProducesNoSlices) {
     Layout L = MakeUniform(kBase, kSeg, 4);
     SplitTables t = MakeTables(L);
     ncclIbSegSlice out[8];
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 kSeg, 0, out, 8);
+    int ns = ncclIbSplitTransferAtOffsets(t.n(), t.va.data(), t.off.data(),
+                                          t.n(), t.va.data(), t.off.data(),
+                                          kSeg, 2 * kSeg, 0, out, 8);
     EXPECT_EQ(ns, 0);
 }
 
+// Either side starting one byte past the end of its registered range fails.
 TEST(NetIbSplit, OutOfRangeRejected) {
     Layout L = MakeUniform(kBase, kSeg, 4);
     SplitTables t = MakeTables(L);
     ncclIbSegSlice out[8];
-    // Starts one byte past the end of the registered range.
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 4 * kSeg, 16, out, 8);
-    EXPECT_EQ(ns, -1);
+    EXPECT_EQ(ncclIbSplitTransferAtOffsets(t.n(), t.va.data(), t.off.data(),
+                                           t.n(), t.va.data(), t.off.data(),
+                                           /*localOff*/ 4 * kSeg, /*remoteOff*/ 0, 16, out, 8),
+              -1);
+    EXPECT_EQ(ncclIbSplitTransferAtOffsets(t.n(), t.va.data(), t.off.data(),
+                                           t.n(), t.va.data(), t.off.data(),
+                                           /*localOff*/ 0, /*remoteOff*/ 4 * kSeg, 16, out, 8),
+              -1);
 }
 
 TEST(NetIbSplit, MaxSlicesOverflowRejected) {
     Layout L = MakeUniform(kBase, kSeg, 4);
     SplitTables t = MakeTables(L);
     ncclIbSegSlice out[2];
-    // Whole buffer needs 4 slices but only 2 are allowed.
-    int ns = ncclIbSplitTransfer(t.n(), t.va.data(), t.off.data(),
-                                 t.n(), t.va.data(), t.off.data(),
-                                 0, 4 * kSeg, out, 2);
+    // Offsets half a segment apart put a boundary every 1 MiB: 6 slices, 2 allowed.
+    int ns = ncclIbSplitTransferAtOffsets(t.n(), t.va.data(), t.off.data(),
+                                          t.n(), t.va.data(), t.off.data(),
+                                          0, kSeg / 2, 3 * kSeg, out, 2);
     EXPECT_EQ(ns, -1);
 }
 
-// Sweep: for a range that starts and ends anywhere, the produced slices always
-// tile the range contiguously with no gaps or overlaps and never exceed a
-// single segment on either side.
+// Sweep: for ranges that start anywhere on each side, the produced slices
+// always tile the range contiguously with no gaps or overlaps and never exceed
+// a single segment on either side.
 TEST(NetIbSplit, SlicesTileRangeContiguously) {
+    constexpr uint64_t remoteSeg = kSeg / 4; // 512 KiB segments
     Layout local  = MakeUniform(kBase, kSeg, 4);
-    Layout remote = MakeUniform(0x900000000ULL, kSeg / 4, 16); // 512 KiB segments
+    Layout remote = MakeUniform(0x900000000ULL, remoteSeg, 16);
     SplitTables lt = MakeTables(local), rt = MakeTables(remote);
     for (uint64_t off : {uint64_t{0}, uint64_t{1024}, kSeg - 4096, kSeg + kSeg / 2}) {
-        for (uint64_t len : {uint64_t{4096}, kSeg / 4, kSeg, kSeg + 12345}) {
-            if (off + len > 4 * kSeg) continue;
-            ncclIbSegSlice out[64];
-            int ns = ncclIbSplitTransfer(lt.n(), lt.va.data(), lt.off.data(),
-                                         rt.n(), rt.va.data(), rt.off.data(),
-                                         off, len, out, 64);
-            ASSERT_GT(ns, 0) << "off=" << off << " len=" << len;
-            uint64_t cursor = off, sum = 0;
-            for (int k = 0; k < ns; k++) {
-                EXPECT_EQ(out[k].localAddr,  kBase + cursor);
-                EXPECT_EQ(out[k].remoteAddr, 0x900000000ULL + cursor);
-                cursor += out[k].len; sum += out[k].len;
+        for (uint64_t shift : {uint64_t{4096}, remoteSeg / 2 + 123}) {
+            for (uint64_t len : {uint64_t{4096}, kSeg / 4, kSeg, kSeg + 12345}) {
+                const uint64_t remoteOff = off + shift;
+                if (remoteOff + len > 4 * kSeg) continue;
+                ncclIbSegSlice out[64];
+                int ns = ncclIbSplitTransferAtOffsets(lt.n(), lt.va.data(), lt.off.data(),
+                                                      rt.n(), rt.va.data(), rt.off.data(),
+                                                      off, remoteOff, len, out, 64);
+                ASSERT_GT(ns, 0) << "off=" << off << " remoteOff=" << remoteOff << " len=" << len;
+                uint64_t cursor = 0;
+                for (int k = 0; k < ns; k++) {
+                    const uint64_t l = off + cursor, r = remoteOff + cursor;
+                    EXPECT_EQ(out[k].localAddr,  kBase + l);
+                    EXPECT_EQ(out[k].remoteAddr, 0x900000000ULL + r);
+                    EXPECT_EQ((l + out[k].len - 1) / kSeg, l / kSeg);
+                    EXPECT_EQ((r + out[k].len - 1) / remoteSeg, r / remoteSeg);
+                    cursor += out[k].len;
+                }
+                EXPECT_EQ(cursor, len) << "off=" << off << " remoteOff=" << remoteOff << " len=" << len;
             }
-            EXPECT_EQ(sum, len) << "off=" << off << " len=" << len;
         }
     }
 }
