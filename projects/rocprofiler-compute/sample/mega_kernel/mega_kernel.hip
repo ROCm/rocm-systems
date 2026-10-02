@@ -1746,7 +1746,8 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     if (surf_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
         float store_val = (float)tid + 1000.0f;
-        surf1Dwrite(store_val, surf_obj, idx);
+        // surf1Dwrite x coordinate is a byte offset.
+        surf1Dwrite(store_val, surf_obj, idx * (int)sizeof(float));
         tex_store_passed = true;
     }
 #endif

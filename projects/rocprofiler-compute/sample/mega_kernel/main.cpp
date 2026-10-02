@@ -500,30 +500,70 @@ main(int argc, char** argv)
 
     // Create texture and surface objects for gfx115x to exercise
     // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
+    // Texture uses a dedicated linear buffer (not d_input): VMEM flat/global
+    // tests mutate d_input, and the texture cache is not coherent with those
+    // stores in the same kernel. Surfaces require hipArray + SurfaceLoadStore.
     hipTextureObject_t tex_obj       = 0;
     hipSurfaceObject_t surf_obj      = 0;
-    float*             d_surf_buffer = nullptr;
+    float*             d_tex_buffer  = nullptr;
+    hipArray_t         surf_array    = nullptr;
+    bool               surf_enabled  = false;
     if(g_arch_type == 6)
     {
-        hipResourceDesc resDesc;
-        memset(&resDesc, 0, sizeof(resDesc));
-        resDesc.resType                = hipResourceTypeLinear;
-        resDesc.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
-        resDesc.res.linear.desc =
+        hipChannelFormatDesc channel_desc =
             hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-        resDesc.res.linear.devPtr = d_input;
+        HIP_CHECK(hipMalloc(&d_tex_buffer, BUFFER_SIZE * sizeof(float)));
+        HIP_CHECK(hipMemcpy(d_tex_buffer, h_input, BUFFER_SIZE * sizeof(float),
+                            hipMemcpyHostToDevice));
+
+        hipResourceDesc tex_res;
+        memset(&tex_res, 0, sizeof(tex_res));
+        tex_res.resType                = hipResourceTypeLinear;
+        tex_res.res.linear.devPtr      = d_tex_buffer;
+        tex_res.res.linear.desc        = channel_desc;
+        tex_res.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
+
         hipTextureDesc texDesc;
         memset(&texDesc, 0, sizeof(texDesc));
         texDesc.normalizedCoords = 0;
         texDesc.filterMode       = hipFilterModePoint;
         texDesc.addressMode[0]   = hipAddressModeClamp;
-        HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
+        HIP_CHECK(hipCreateTextureObject(&tex_obj, &tex_res, &texDesc, nullptr));
 
-        HIP_CHECK(hipMalloc(&d_surf_buffer, BUFFER_SIZE * sizeof(float)));
-        HIP_CHECK(hipMemset(d_surf_buffer, 0, BUFFER_SIZE * sizeof(float)));
-        resDesc.res.linear.devPtr = d_surf_buffer;
-        HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
+        // Surface path: array-backed resource (HIP rejects hipResourceTypeLinear).
+        hipError_t surf_err =
+            hipMallocArray(&surf_array, &channel_desc, static_cast<size_t>(BUFFER_SIZE),
+                           0, hipArraySurfaceLoadStore);
+        if(surf_err == hipSuccess)
+        {
+            hipResourceDesc surf_res;
+            memset(&surf_res, 0, sizeof(surf_res));
+            surf_res.resType         = hipResourceTypeArray;
+            surf_res.res.array.array = surf_array;
+            surf_err                 = hipCreateSurfaceObject(&surf_obj, &surf_res);
+        }
+        if(surf_err == hipSuccess && surf_obj != 0)
+        {
+            surf_enabled = true;
+        }
+        else
+        {
+            fprintf(stderr,
+                    "WARN: surface object unavailable on this platform (%s); "
+                    "skipping INSTS_TEX_STORE path, continuing with other ops\n",
+                    hipGetErrorString(surf_err));
+            if(surf_obj != 0)
+            {
+                (void) hipDestroySurfaceObject(surf_obj);
+                surf_obj = 0;
+            }
+            if(surf_array != nullptr)
+            {
+                (void) hipFreeArray(surf_array);
+                surf_array = nullptr;
+            }
+        }
     }
 
     printf("Running GPU Mega Kernel for %s...\n",
@@ -615,9 +655,13 @@ main(int argc, char** argv)
     {
         HIP_CHECK(hipDestroySurfaceObject(surf_obj));
     }
-    if(d_surf_buffer != nullptr)
+    if(surf_array != nullptr)
     {
-        HIP_CHECK(hipFree(d_surf_buffer));
+        HIP_CHECK(hipFreeArray(surf_array));
+    }
+    if(d_tex_buffer != nullptr)
+    {
+        HIP_CHECK(hipFree(d_tex_buffer));
     }
 
     // Copy results back
@@ -625,6 +669,12 @@ main(int argc, char** argv)
         hipMemcpy(&h_results, d_results, sizeof(TestResults), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_output, d_output, BUFFER_SIZE * sizeof(float),
                         hipMemcpyDeviceToHost));
+
+    // Soft-gated surface path: mark TEX store as bypassed rather than a false PASS.
+    if(g_arch_type == 6 && !surf_enabled)
+    {
+        h_results.vmem_tex_store_passed = -1;
+    }
 
     // Verify memory operations output
     bool memory_verified = true;
