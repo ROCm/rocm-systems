@@ -128,7 +128,7 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     bool status = true;                                                                            \
     std::call_once(hip::g_ihipInitialized, hip::init, &status);                                    \
     if (!status && !noReturn) {                                                                    \
-      HIP_RETURN(hipErrorInvalidDevice);                                                           \
+      HIP_RETURN(hipErrorNotInitialized);                                                      \
     }                                                                                              \
     HIP_INIT_TLS_DEVICE()                                                                          \
   }
