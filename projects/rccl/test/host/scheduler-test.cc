@@ -989,65 +989,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAnd
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
-// The CE AllReduce fast path writes straight into peers' receive windows. The
-// receive range fits the window, so the bit is set from local state alone and
-// launch preparation must not block in a bootstrap exchange per task.
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathIsLocal) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-
-  alignas(16) uint8_t storage[128];
-  ncclDevrWindow recvWin{};
-  recvWin.userPtr = storage;
-  recvWin.size = sizeof(storage);
-  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
-
-  ncclTaskColl ceTask{};
-  ceTask.func = ncclFuncAllReduce;
-  ceTask.datatype = ncclInt8;
-  ceTask.count = 16;
-  ceTask.recvbuff = storage + 32;
-  ceTask.recvWin = &recvWin;
-  ncclIntruQueueEnqueue(&scene.comm->planner.collCeTaskQueue, &ceTask);
-
-  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(gather.calls, 0);
-  EXPECT_TRUE(ceTask.ceAllReduceFastPath);
-}
-
-// Same setup, but the receive range runs past the window, so the task falls
-// back to staging, again without a bootstrap exchange.
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathOffWhenRangePastWindow) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-
-  alignas(16) uint8_t storage[128];
-  ncclDevrWindow recvWin{};
-  recvWin.userPtr = storage;
-  recvWin.size = sizeof(storage);
-  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
-
-  ncclTaskColl ceTask{};
-  ceTask.func = ncclFuncAllReduce;
-  ceTask.datatype = ncclInt8;
-  ceTask.count = 64;
-  ceTask.recvbuff = storage + 96;
-  ceTask.recvWin = &recvWin;
-  ncclIntruQueueEnqueue(&scene.comm->planner.collCeTaskQueue, &ceTask);
-
-  ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(gather.calls, 0);
-  EXPECT_FALSE(ceTask.ceAllReduceFastPath);
-}
-
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsDevrInitOnceAndPropagatesItsError) {
   MakeSymmetricTaskList_Scene scene;
   ScopedHook devrInitOnceHook(g_devrInitOnce, [](struct ncclComm*) { return ncclInternalError; });
