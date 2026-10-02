@@ -1489,8 +1489,23 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // at 8 channels per peer, 15.0 at 4 and 29.6 at 1; over the 8 partitions of one device it
     // runs 74.3 at 64 and 144.8 at 16.
     //
+    // Strictly greater, where the branch above is >=, so a plan that exactly fills the pool is
+    // left alone instead of halved once more. Exactly full is one round, which is all either loop
+    // is after; the >= above goes a step past its own comment, and that step is not free here
+    // because it is the case that keeps coming up -- 8 partitions land on 16 channels per peer
+    // over 4 rounds and 16 partitions on 8 over 8, both exactly 64. Halving either would cost
+    // about a quarter of the bandwidth: 8 partitions run 1 GiB sendrecv at 120.9 GB/s with 16
+    // channels per peer and 88.5 with 8. The >= is left as it is because the net-bound branch has
+    // its own history and is not what this change is about.
+    //
     // Gated on MLOPart because that is the configuration the contention was measured in: a
     // whole-device (SPX) comm has its own per-peer counts and channel pool and is left as it was.
+    // Within MLOPart it is not narrowed to CPX, though CPX is where the numbers above come from.
+    // The bottleneck is that partitions of one device share one on-package fabric, which is true
+    // of DPX and the other XCP modes too; what changes is how many of them there are, and that is
+    // already the loop's input. A coarser partitioning has fewer peers per device and so needs
+    // fewer rounds to cover them, which is why the loop mostly does not fire there -- it reduces
+    // what the peer count says needs reducing rather than assuming a partition size.
     // Decided per communicator rather than per operation because the device recovers a work's
     // part index with comm->p2pnChannelsPerPeer (see sendrecv.h), so the channel stride cannot
     // vary between plans; a workload whose real peers are few declares them through
