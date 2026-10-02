@@ -187,9 +187,10 @@ namespace RcclUnitTesting
         EXPECT_EQ(destroy.type, rccl::rrRedOpDestroy);
         EXPECT_EQ(destroy.op, ncclMax);
         EXPECT_EQ(destroy.comm, comm.get());
-        EXPECT_NE(destroy.sendbuff, static_cast<const void*>(&ignored)) << "Destroy must not record the scalar";
-        EXPECT_NE(destroy.datatype, ncclFloat64) << "Destroy must not record the datatype";
-        EXPECT_NE(destroy.root, static_cast<int>(ncclScalarHostImmediate)) << "Destroy must not record the residence";
+        // record() builds from the aggregate ncclInfo{.op, .comm}, so the fields Destroy must not set are value-initialised.
+        EXPECT_EQ(destroy.sendbuff, nullptr) << "Destroy must not record the scalar";
+        EXPECT_EQ(destroy.datatype, ncclInt8) << "Destroy must not record the datatype";
+        EXPECT_EQ(destroy.root, 0) << "Destroy must not record the residence";
       },
       {{"RCCL_REPLAY_FILE", "/tmp/test_redop.bin"}}
     );
