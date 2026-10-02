@@ -724,7 +724,8 @@ INSTANTIATE_TEST_SUITE_P(
                       DispatchCase{"PrimeStrides", 11, 16, ExpectPrime, false},
                       DispatchCase{"WaleckiOnly", 10, 5, ExpectWalecki, false},
                       DispatchCase{"OneChannelPastWaleckiOnly", 10, 6, ExpectGreedy, true},
-                      DispatchCase{"WaleckiThenGreedy", 10, 18, ExpectGreedy, true}),
+                      DispatchCase{"WaleckiThenGreedy", 10, 18, ExpectGreedy, true},
+                      DispatchCase{"OddCompositeGreedy", 9, 5, ExpectGreedy, true}),
     [](const ::testing::TestParamInfo<DispatchCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
