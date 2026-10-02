@@ -89,6 +89,12 @@ To collect thread trace with default parameters, use:
 
   rocprofv3 --att -d <output_dir> -- <application_path>
 
+On harvested gfx11 devices, choose a shader-engine mask containing an active SE.
+The default mask ``0x1`` selects SE0, which may be physically inactive. In that
+case, an inactive-only selection is rejected; for example, use
+``--att-shader-engine-mask 0x3f`` to select all six physical SE slots on gfx1100,
+with inactive engines excluded when complete topology is available.
+
 The following table lists the parameters relevant to thread tracing:
 
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+

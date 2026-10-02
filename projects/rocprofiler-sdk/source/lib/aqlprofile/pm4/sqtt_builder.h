@@ -202,10 +202,15 @@ public:
         builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, broadcast);
     }
 
-    void Select_GRBM_SE_SH0(CmdBuffer* cmd_buffer, int se_index)
+    void Select_GRBM_SE(CmdBuffer*         cmd_buffer,
+                        const TraceConfig* config,
+                        int                local_se,
+                        int                global_se)
     {
-        auto sh0 = Primitives::grbm_se_sh_index_value(se_index, 0);
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, sh0);
+        uint32_t sa = 0;
+        if constexpr(Primitives::GFXIP_LEVEL == 11) sa = config->GetTargetSA(global_se);
+        auto selection = Primitives::grbm_se_sh_index_value(local_se, sa);
+        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, selection);
     }
 
     void StartPerfMon(CmdBuffer* cmd_buffer, TraceConfig* config)
@@ -371,7 +376,7 @@ public:
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc_index);
 
                 // Program Grbm to direct writes to one SE
-                Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
+                Select_GRBM_SE(cmd_buffer, config, se_index_xcc, se_index);
                 builder.BuildPrimeL2(cmd_buffer, base_addr);
                 // Program tokenmask2
                 builder.BuildWriteUConfigRegPacket(
@@ -466,7 +471,7 @@ public:
                     uint32_t ctrl_val =
                         Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
 
-                    Select_GRBM_SE_SH0(cmd_buffer, local_se);
+                    Select_GRBM_SE(cmd_buffer, config, local_se, local_se + se_number_xcc * xcc);
                     builder.BuildPrimeL2(cmd_buffer, base_addr);
 
                     if(Primitives::GFXIP_LEVEL == 12)
@@ -544,7 +549,7 @@ public:
                     if(config->target_cu_per_se.at(local_se + se_number_xcc * xcc) < 0)
                         continue;  // Ignore masked SEs
 
-                    Select_GRBM_SE_SH0(cmd_buffer, local_se);
+                    Select_GRBM_SE(cmd_buffer, config, local_se, local_se + se_number_xcc * xcc);
                     builder.BuildWriteShRegPacket(
                         cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 1);
                 }
@@ -630,7 +635,7 @@ public:
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc_index);
 
                 // Program Grbm to direct writes to one SE
-                Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
+                Select_GRBM_SE(cmd_buffer, config, se_index_xcc, se_index);
 
                 // Issue WaitRegMem command to wait until SQTT event has completed
                 const uint32_t mask_val      = Primitives::sqtt_busy_mask();
@@ -683,7 +688,7 @@ public:
                                    .wgp < 0)
                             continue;
                     }
-                    Select_GRBM_SE_SH0(cmd_buffer, index);
+                    Select_GRBM_SE(cmd_buffer, config, index, index + xcc * se_number_xcc);
                     ReadValues(cmd_buffer, config, index + xcc * se_number_xcc);
                 }
             }
@@ -823,7 +828,7 @@ public:
     {
         int                      se_per_xcc = se_number_total / GetXCCNumber();
         XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
-        Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
+        Select_GRBM_SE(cmd_buffer, config, se_id % se_per_xcc, se_id);
 
         auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
                                ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
@@ -855,7 +860,7 @@ public:
         uint64_t base_addr  = reinterpret_cast<uint64_t>(addr);
 
         XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
-        Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
+        Select_GRBM_SE(cmd_buffer, config, se_id % se_per_xcc, se_id);
 
         if(Primitives::GFXIP_LEVEL == 9)
         {

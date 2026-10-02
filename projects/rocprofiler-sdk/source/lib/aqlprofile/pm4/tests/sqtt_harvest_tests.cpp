@@ -135,6 +135,22 @@ TEST(SqttHarvestTest, FallsBackToShaderArrayOne)
     EXPECT_EQ(capture.config.GetTargetCU(0), 2);
     EXPECT_EQ((masks[0] >> 4) & 0xf, 2u);
     EXPECT_EQ((masks[0] >> 9) & 1, 1u);
+    const auto sa0 = gfx11_cntx_prim::grbm_se_sh_index_value(0, 0);
+    const auto sa1 = gfx11_cntx_prim::grbm_se_sh_index_value(0, 1);
+    auto       selections =
+        programmed_values(info, capture.commands, gfx11_cntx_prim::GRBM_GFX_INDEX_ADDR);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa1), 2);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa0), 0);
+    capture.commands.Clear();
+    builder.End(&capture.commands, &capture.config);
+    selections = programmed_values(info, capture.commands, gfx11_cntx_prim::GRBM_GFX_INDEX_ADDR);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa1), 1);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa0), 0);
+    capture.commands.Clear();
+    builder.GetStatusPacket(&capture.commands, &capture.config, capture.controls[0], 0);
+    selections = programmed_values(info, capture.commands, gfx11_cntx_prim::GRBM_GFX_INDEX_ADDR);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa1), 1);
+    EXPECT_EQ(std::count(selections.begin(), selections.end(), sa0), 0);
 }
 
 TEST(SqttHarvestTest, MissingOrIncompleteTopologyPreservesSelection)
