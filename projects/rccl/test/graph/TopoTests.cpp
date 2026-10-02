@@ -848,6 +848,65 @@ TEST_F(TopoTest, MloPartSiblings_DoNotCountAsRomeHiveLinks) {
   ncclTopoFree(built);
 }
 
+// What the collective search makes of a node that is one device's partitions. Rating the
+// on-package hop at MLOPART_LOC_BW hands ncclTopoSearch a hop roughly 54 XGMI widths deep, and the
+// risk in that is the search spending it: followPath() charges every channel bwIntra against each
+// link it crosses, so a channel that claimed the hop's rating -- or anything near it -- would both
+// misdescribe what one channel can carry and let the count run on until the rating was used up,
+// which on this fixture is over a hundred channels before the hop pushes back at all. It must stay
+// bounded by the caller's cap instead, for the ring and the tree alike.
+TEST_F(TopoTest, MloPartSiblings_OneDeviceRingAndTreeStayWithinTheChannelCap) {
+  const uint64_t host = 0xc8;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  built->nRanks = nParts;
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+
+  // Several caps rather than one, all well under the hundred-odd the rating alone would allow, so
+  // that what is pinned is the count tracking the cap rather than one number that a count coming
+  // from somewhere else could still happen to match.
+  const int caps[] = {4, 8, 16, 32};
+  const float xgmiWidth = ncclTopoXGMISpeed("gfx942");
+  ASSERT_GT(MLOPART_LOC_BW / xgmiWidth, (float)caps[sizeof(caps) / sizeof(caps[0]) - 1]);
+
+  const int patterns[] = {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE};
+  for (int pattern : patterns) {
+    for (int cap : caps) {
+      struct ncclTopoGraph graph;
+      memset(&graph, 0, sizeof(graph));
+      graph.pattern = pattern;
+      graph.minChannels = 1;
+      graph.maxChannels = cap;
+      ASSERT_EQ(ncclTopoCompute(built, &graph), ncclSuccess) << "pattern " << pattern << " cap " << cap;
+
+      EXPECT_EQ(graph.nChannels, cap)
+        << "pattern " << pattern << ": channel count did not follow the cap";
+      // Each of them worth one XGMI hop, not a share of the hop's rating. speedArrayIntra tops out
+      // at the width, so a channel rated above it did not come from that array; one rated below it
+      // means the search could not lay the channel at full width and settled for less.
+      EXPECT_FLOAT_EQ(graph.bwIntra, xgmiWidth) << "pattern " << pattern << " cap " << cap;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
 // ncclTopoConnectMloPartSiblings() walks every DEV node and rewrites the bw of the links it finds,
 // so it has to be selective about which ones: a node with more than one physical device carries
 // inter-device XGMI links on the same DEV nodes, and those must keep the width sysfs reported for
