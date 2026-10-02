@@ -2126,8 +2126,8 @@ module hip
     function hipDeviceGetCacheConfig(cacheConfig) &
        result(DeviceGetCacheConfig) &
        bind(C, name="hipDeviceGetCacheConfig")
-       import :: c_ptr, hipSuccess
-       type(c_ptr), value :: cacheConfig
+       import :: hipFuncCachePreferNone, hipSuccess
+       integer(kind(hipFuncCachePreferNone)) :: cacheConfig
        integer(kind(hipSuccess)) :: DeviceGetCacheConfig
     end function hipDeviceGetCacheConfig
 
@@ -2161,8 +2161,8 @@ module hip
     function hipDeviceGetSharedMemConfig(pConfig) &
        result(DeviceGetSharedMemConfig) &
        bind(C, name="hipDeviceGetSharedMemConfig")
-       import :: c_ptr, hipSuccess
-       type(c_ptr), value :: pConfig
+       import :: hipSharedMemBankSizeDefault, hipSuccess
+       integer(kind(hipSharedMemBankSizeDefault)) :: pConfig
        integer(kind(hipSuccess)) :: DeviceGetSharedMemConfig
     end function hipDeviceGetSharedMemConfig
 
@@ -3338,8 +3338,8 @@ module hip
     function hipMemPoolGetAccess(flags, mem_pool, location) &
        result(MemPoolGetAccess) &
        bind(C, name="hipMemPoolGetAccess")
-       import :: c_ptr, hipMemLocation, hipSuccess
-       type(c_ptr), value :: flags
+       import :: hipMemAccessFlagsProtNone, c_ptr, hipMemLocation, hipSuccess
+       integer(kind(hipMemAccessFlagsProtNone)) :: flags
        type(c_ptr), value :: mem_pool
        type(hipMemLocation) :: location
        integer(kind(hipSuccess)) :: MemPoolGetAccess
@@ -4886,8 +4886,8 @@ module hip
     function hipCtxGetCacheConfig(cacheConfig) &
        result(CtxGetCacheConfig) &
        bind(C, name="hipCtxGetCacheConfig")
-       import :: c_ptr, hipSuccess
-       type(c_ptr), value :: cacheConfig
+       import :: hipFuncCachePreferNone, hipSuccess
+       integer(kind(hipFuncCachePreferNone)) :: cacheConfig
        integer(kind(hipSuccess)) :: CtxGetCacheConfig
     end function hipCtxGetCacheConfig
 
@@ -4919,8 +4919,8 @@ module hip
     function hipCtxGetSharedMemConfig(pConfig) &
        result(CtxGetSharedMemConfig) &
        bind(C, name="hipCtxGetSharedMemConfig")
-       import :: c_ptr, hipSuccess
-       type(c_ptr), value :: pConfig
+       import :: hipSharedMemBankSizeDefault, hipSuccess
+       integer(kind(hipSharedMemBankSizeDefault)) :: pConfig
        integer(kind(hipSuccess)) :: CtxGetSharedMemConfig
     end function hipCtxGetSharedMemConfig
 
@@ -6253,8 +6253,8 @@ module hip
     function hipTexRefGetAddressMode(pam, texRef, dim) &
        result(TexRefGetAddressMode) &
        bind(C, name="hipTexRefGetAddressMode")
-       import :: c_ptr, textureReference, c_int, hipSuccess
-       type(c_ptr), value :: pam
+       import :: hipAddressModeWrap, textureReference, c_int, hipSuccess
+       integer(kind(hipAddressModeWrap)) :: pam
        type(textureReference) :: texRef
        integer(c_int), value :: dim
        integer(kind(hipSuccess)) :: TexRefGetAddressMode
@@ -6266,8 +6266,8 @@ module hip
     function hipTexRefGetFilterMode(pfm, texRef) &
        result(TexRefGetFilterMode) &
        bind(C, name="hipTexRefGetFilterMode")
-       import :: c_ptr, textureReference, hipSuccess
-       type(c_ptr), value :: pfm
+       import :: hipFilterModePoint, textureReference, hipSuccess
+       integer(kind(hipFilterModePoint)) :: pfm
        type(textureReference) :: texRef
        integer(kind(hipSuccess)) :: TexRefGetFilterMode
     end function hipTexRefGetFilterMode
@@ -6290,8 +6290,8 @@ module hip
     function hipTexRefGetFormat(pFormat, pNumChannels, texRef) &
        result(TexRefGetFormat) &
        bind(C, name="hipTexRefGetFormat")
-       import :: c_ptr, textureReference, hipSuccess
-       type(c_ptr), value :: pFormat
+       import :: HIP_AD_FORMAT_UNSIGNED_INT8, c_ptr, textureReference, hipSuccess
+       integer(kind(HIP_AD_FORMAT_UNSIGNED_INT8)) :: pFormat
        type(c_ptr), value :: pNumChannels
        type(textureReference) :: texRef
        integer(kind(hipSuccess)) :: TexRefGetFormat
@@ -6315,8 +6315,8 @@ module hip
     function hipTexRefGetMipmapFilterMode(pfm, texRef) &
        result(TexRefGetMipmapFilterMode) &
        bind(C, name="hipTexRefGetMipmapFilterMode")
-       import :: c_ptr, textureReference, hipSuccess
-       type(c_ptr), value :: pfm
+       import :: hipFilterModePoint, textureReference, hipSuccess
+       integer(kind(hipFilterModePoint)) :: pfm
        type(textureReference) :: texRef
        integer(kind(hipSuccess)) :: TexRefGetMipmapFilterMode
     end function hipTexRefGetMipmapFilterMode
@@ -6552,9 +6552,9 @@ module hip
     function hipStreamGetCaptureInfo(stream, pCaptureStatus, pId) &
        result(StreamGetCaptureInfo) &
        bind(C, name="hipStreamGetCaptureInfo")
-       import :: c_ptr, hipSuccess
+       import :: c_ptr, hipStreamCaptureStatusNone, hipSuccess
        type(c_ptr), value :: stream
-       type(c_ptr), value :: pCaptureStatus
+       integer(kind(hipStreamCaptureStatusNone)) :: pCaptureStatus
        type(c_ptr), value :: pId
        integer(kind(hipSuccess)) :: StreamGetCaptureInfo
     end function hipStreamGetCaptureInfo
@@ -6566,9 +6566,9 @@ module hip
                                         dependencies_out, numDependencies_out) &
        result(StreamGetCaptureInfo_v2) &
        bind(C, name="hipStreamGetCaptureInfo_v2")
-       import :: c_ptr, hipSuccess
+       import :: c_ptr, hipStreamCaptureStatusNone, hipSuccess
        type(c_ptr), value :: stream
-       type(c_ptr), value :: captureStatus_out
+       integer(kind(hipStreamCaptureStatusNone)) :: captureStatus_out
        type(c_ptr), value :: id_out
        type(c_ptr) :: graph_out
        type(c_ptr) :: dependencies_out
@@ -6582,9 +6582,9 @@ module hip
     function hipStreamIsCapturing(stream, pCaptureStatus) &
        result(StreamIsCapturing) &
        bind(C, name="hipStreamIsCapturing")
-       import :: c_ptr, hipSuccess
+       import :: c_ptr, hipStreamCaptureStatusNone, hipSuccess
        type(c_ptr), value :: stream
-       type(c_ptr), value :: pCaptureStatus
+       integer(kind(hipStreamCaptureStatusNone)) :: pCaptureStatus
        integer(kind(hipSuccess)) :: StreamIsCapturing
     end function hipStreamIsCapturing
 
@@ -6736,9 +6736,9 @@ module hip
     function hipGraphNodeGetType(node, pType) &
        result(GraphNodeGetType) &
        bind(C, name="hipGraphNodeGetType")
-       import :: c_ptr, hipSuccess
+       import :: c_ptr, hipGraphNodeTypeKernel, hipSuccess
        type(c_ptr), value :: node
-       type(c_ptr), value :: pType
+       integer(kind(hipGraphNodeTypeKernel)) :: pType
        integer(kind(hipSuccess)) :: GraphNodeGetType
     end function hipGraphNodeGetType
 

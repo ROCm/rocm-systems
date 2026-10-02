@@ -72,6 +72,7 @@ endfunction()
 
 # Pure-Fortran tests: the binding plus the HIP runtime is all they need to link.
 set(HIP_FORTRAN_TESTS
+    cache_config
     device_management
     device_properties
     error_version
@@ -85,6 +86,7 @@ set(HIP_FORTRAN_TESTS
     host_register
     malloc_managed
     mem_advise
+    mem_pool
     memcpy2d
     memcpy_async
     memory_ops
@@ -93,6 +95,7 @@ set(HIP_FORTRAN_TESTS
     pointer_attributes
     stream
     stream_callback
+    stream_capture_info
     stream_flags
     virtual_memory)
 
