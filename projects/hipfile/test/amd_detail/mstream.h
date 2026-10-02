@@ -25,8 +25,6 @@ public:
     MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
     MOCK_METHOD(hipEvent_t, acquireEvent, (), (override));
     MOCK_METHOD(void, releaseEvent, (hipEvent_t event), (override));
-    MOCK_METHOD(bool, pushPending, (std::shared_ptr<AsyncOp> op), (override));
-    MOCK_METHOD(std::shared_ptr<AsyncOp>, popPendingOrDeactivate, (), (override));
 };
 
 }

@@ -160,31 +160,6 @@ Stream::releaseEvent(hipEvent_t event)
     event_pool.push_back(event);
 }
 
-bool
-Stream::pushPending(std::shared_ptr<AsyncOp> op)
-{
-    std::lock_guard<std::mutex> lock{pending_mutex};
-    pending.push_back(std::move(op));
-    if (!drainer_active) {
-        drainer_active = true;
-        return true;
-    }
-    return false;
-}
-
-std::shared_ptr<AsyncOp>
-Stream::popPendingOrDeactivate()
-{
-    std::lock_guard<std::mutex> lock{pending_mutex};
-    if (pending.empty()) {
-        drainer_active = false;
-        return nullptr;
-    }
-    auto op = std::move(pending.front());
-    pending.pop_front();
-    return op;
-}
-
 Stream::~Stream()
 {
     try {

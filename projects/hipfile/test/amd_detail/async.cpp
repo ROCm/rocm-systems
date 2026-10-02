@@ -100,7 +100,7 @@ testAsyncIoFn(void *)
 }
 }
 
-TEST_F(HipFileAsyncOp, submitDrainer_runs_drainer_on_pool)
+TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
 {
     StrictMock<MThreadPool> mpool;
     auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
@@ -110,44 +110,43 @@ TEST_F(HipFileAsyncOp, submitDrainer_runs_drainer_on_pool)
     EXPECT_CALL(*tg_raw, wait());
     StrictMock<MAsyncMonitor> mmon;
 
-    EXPECT_CALL(*tg_raw, run(_)).WillOnce([&captured](std::function<void()> work) {
-        captured = std::move(work);
-    });
-    mmon.AsyncMonitor::submitDrainer(stream);
-
-    EXPECT_CALL(*stream, popPendingOrDeactivate).WillOnce(Return(nullptr));
-    captured();
-}
-
-TEST_F(HipFileAsyncOp, drainStream_syncs_runs_io_signals_and_releases_in_order)
-{
-    StrictMock<MAsyncMonitor> mmon;
-    uint64_t                  slot_storage      = 0;
-    size_t                    size              = 100;
-    hoff_t                    file_offset       = 0;
-    hoff_t                    buffer_offset     = 0;
-    ssize_t                   bytes_transferred = 0;
-    auto                      fake_event        = reinterpret_cast<hipEvent_t>(0xE0E0);
+    uint64_t slot_storage      = 0;
+    size_t   size              = 100;
+    hoff_t   file_offset       = 0;
+    hoff_t   buffer_offset     = 0;
+    ssize_t  bytes_transferred = 0;
     EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
     auto op   = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
                                           &buffer_offset, &bytes_transferred);
     op->io_fn = testAsyncIoFn;
-    op->event = fake_event;
     g_test_io_fn_calls.store(0);
 
-    ::testing::InSequence seq;
-    EXPECT_CALL(*stream, popPendingOrDeactivate).WillOnce(Return(op));
-    EXPECT_CALL(mhip, hipEventSynchronize(fake_event));
+    EXPECT_CALL(mmon, submitIo(op.get())).WillOnce([&mmon](AsyncOp *o) { mmon.AsyncMonitor::submitIo(o); });
+    EXPECT_CALL(*tg_raw, run(_)).WillOnce([&captured](std::function<void()> work) {
+        captured = std::move(work);
+    });
     EXPECT_CALL(mmon, completeOp(op.get()));
-    EXPECT_CALL(*stream, releaseEvent(fake_event));
-    EXPECT_CALL(*stream, popPendingOrDeactivate).WillOnce(Return(nullptr));
+    mmon.submitIo(op.get());
 
-    drainStream(stream);
+    captured();
     ASSERT_EQ(g_test_io_fn_calls.load(), 1);
     ASSERT_EQ(slot_storage, 1u);
 }
 
-TEST_F(HipFileAsyncOp, drainStream_reports_internal_error_when_event_sync_fails)
+TEST_F(HipFileAsyncOp, async_dispatch_delegates_to_submitIo)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    size_t                    size              = 100;
+    hoff_t                    file_offset       = 0;
+    hoff_t                    buffer_offset     = 0;
+    ssize_t                   bytes_transferred = 0;
+    auto op = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                        &buffer_offset, &bytes_transferred);
+    EXPECT_CALL(mmon, submitIo(op.get()));
+    async_dispatch(op.get());
+}
+
+TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
 {
     StrictMock<MAsyncMonitor> mmon;
     uint64_t                  slot_storage      = 0;
@@ -155,27 +154,20 @@ TEST_F(HipFileAsyncOp, drainStream_reports_internal_error_when_event_sync_fails)
     hoff_t                    file_offset       = 0;
     hoff_t                    buffer_offset     = 0;
     ssize_t                   bytes_transferred = 0;
-    auto                      fake_event        = reinterpret_cast<hipEvent_t>(0xE0E0);
     EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
     auto op   = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
                                           &buffer_offset, &bytes_transferred);
     op->io_fn = testAsyncIoFn;
-    op->event = fake_event;
     g_test_io_fn_calls.store(0);
 
-    EXPECT_CALL(*stream, popPendingOrDeactivate).WillOnce(Return(op)).WillOnce(Return(nullptr));
-    EXPECT_CALL(mhip, hipEventSynchronize(fake_event))
-        .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
+    EXPECT_CALL(mmon, submitIo(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
     EXPECT_CALL(mmon, completeOp(op.get()));
-    EXPECT_CALL(*stream, releaseEvent(fake_event));
-
-    drainStream(stream);
-    ASSERT_EQ(g_test_io_fn_calls.load(), 0);
-    ASSERT_EQ(bytes_transferred, -hipFileInternalError);
+    async_dispatch(op.get());
+    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
     ASSERT_EQ(slot_storage, 1u);
 }
 
-TEST_F(HipFileAsyncOp, enqueueAsync_supported_records_event_waits_and_spawns_drainer)
+TEST_F(HipFileAsyncOp, enqueueAsync_supported_emits_dispatch_and_wait)
 {
     StrictMock<MAsyncMonitor> mmon;
     auto                      backend       = std::make_shared<StrictMock<MBackend>>();
@@ -185,50 +177,18 @@ TEST_F(HipFileAsyncOp, enqueueAsync_supported_records_event_waits_and_spawns_dra
     hoff_t                    buffer_offset = 0;
     ssize_t                   bytes         = 42;
     auto                      hip_stream    = reinterpret_cast<hipStream_t>(0xABCD);
-    auto                      fake_event    = reinterpret_cast<hipEvent_t>(0xE0E0);
 
     EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(hip_stream));
     EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(true));
+    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(5));
     EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
     EXPECT_CALL(*stream, getLock);
     EXPECT_CALL(mmon, addOp);
-
-    ::testing::InSequence seq;
-    EXPECT_CALL(*stream, acquireEvent).WillOnce(Return(fake_event));
-    EXPECT_CALL(mhip, hipEventRecord(fake_event, hip_stream));
-    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(5));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_dispatch), _));
     EXPECT_CALL(mhip, hipStreamWaitValue64(hip_stream, &slot_storage, 5u, hipStreamWaitValueGte, _));
-    EXPECT_CALL(*stream, pushPending).WillOnce(Return(true));
-    EXPECT_CALL(mmon, submitDrainer);
 
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
     ASSERT_EQ(bytes, 0);
-}
-
-TEST_F(HipFileAsyncOp, enqueueAsync_second_op_on_busy_stream_pushes_without_spawn)
-{
-    StrictMock<MAsyncMonitor> mmon;
-    auto                      backend       = std::make_shared<StrictMock<MBackend>>();
-    uint64_t                  slot_storage  = 0;
-    size_t                    size          = 100;
-    hoff_t                    file_offset   = 0;
-    hoff_t                    buffer_offset = 0;
-    ssize_t                   bytes         = 0;
-    auto                      hip_stream    = reinterpret_cast<hipStream_t>(0xABCD);
-    auto                      fake_event    = reinterpret_cast<hipEvent_t>(0xE0E0);
-
-    EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(hip_stream));
-    EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(true));
-    EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
-    EXPECT_CALL(*stream, getLock);
-    EXPECT_CALL(mmon, addOp);
-    EXPECT_CALL(*stream, acquireEvent).WillOnce(Return(fake_event));
-    EXPECT_CALL(mhip, hipEventRecord(fake_event, hip_stream));
-    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(2));
-    EXPECT_CALL(mhip, hipStreamWaitValue64(hip_stream, &slot_storage, 2u, hipStreamWaitValueGte, _));
-    EXPECT_CALL(*stream, pushPending).WillOnce(Return(false));
-
-    enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
 }
 
 TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline)
@@ -250,7 +210,7 @@ TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline)
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
 }
 
-TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_and_releases_event_when_wait_fails)
+TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
 {
     StrictMock<MAsyncMonitor> mmon;
     auto                      backend       = std::make_shared<StrictMock<MBackend>>();
@@ -260,57 +220,20 @@ TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_and_releases_event_when_w
     hoff_t                    buffer_offset = 0;
     ssize_t                   bytes         = 0;
     auto                      hip_stream    = reinterpret_cast<hipStream_t>(0xABCD);
-    auto                      fake_event    = reinterpret_cast<hipEvent_t>(0xE0E0);
 
     EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(hip_stream));
     EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(true));
+    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
     EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
     EXPECT_CALL(*stream, getLock);
     EXPECT_CALL(mmon, addOp);
-    EXPECT_CALL(*stream, acquireEvent).WillOnce(Return(fake_event));
-    EXPECT_CALL(mhip, hipEventRecord(fake_event, hip_stream));
-    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
-    EXPECT_CALL(mhip, hipStreamWaitValue64(hip_stream, &slot_storage, 1u, hipStreamWaitValueGte, _))
+    EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_dispatch), _))
         .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
-    EXPECT_CALL(*stream, releaseEvent(fake_event));
     EXPECT_CALL(mmon, completeOp(_));
 
     EXPECT_THROW(enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset,
                               &bytes, stream),
                  Hip::RuntimeError);
-    ASSERT_EQ(slot_storage, 1u);
-}
-
-TEST_F(HipFileAsyncOp, enqueueAsync_reclaims_op_when_drainer_spawn_fails)
-{
-    StrictMock<MAsyncMonitor> mmon;
-    auto                      backend       = std::make_shared<StrictMock<MBackend>>();
-    uint64_t                  slot_storage  = 0;
-    size_t                    size          = 100;
-    hoff_t                    file_offset   = 0;
-    hoff_t                    buffer_offset = 0;
-    ssize_t                   bytes         = 0;
-    auto                      hip_stream    = reinterpret_cast<hipStream_t>(0xABCD);
-    auto                      fake_event    = reinterpret_cast<hipEvent_t>(0xE0E0);
-
-    EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(hip_stream));
-    EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(true));
-    EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
-    EXPECT_CALL(*stream, getLock);
-    EXPECT_CALL(mmon, addOp);
-    EXPECT_CALL(*stream, acquireEvent).WillOnce(Return(fake_event));
-    EXPECT_CALL(mhip, hipEventRecord(fake_event, hip_stream));
-    EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
-    EXPECT_CALL(mhip, hipStreamWaitValue64(hip_stream, &slot_storage, 1u, hipStreamWaitValueGte, _));
-    EXPECT_CALL(*stream, pushPending).WillOnce(Return(true));
-    EXPECT_CALL(mmon, submitDrainer).WillOnce(Throw(std::runtime_error("no capacity")));
-    EXPECT_CALL(*stream, popPendingOrDeactivate).WillOnce(Return(nullptr));
-    EXPECT_CALL(*stream, releaseEvent(fake_event));
-    EXPECT_CALL(mmon, completeOp(_));
-
-    EXPECT_THROW(enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset,
-                              &bytes, stream),
-                 std::runtime_error);
     ASSERT_EQ(slot_storage, 1u);
 }
 

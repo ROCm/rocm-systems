@@ -70,26 +70,12 @@ signalOffloadComplete(AsyncOp *op)
 }
 
 void
-AsyncMonitor::submitDrainer(std::shared_ptr<IStream> stream)
+AsyncMonitor::submitIo(AsyncOp *op)
 {
-    task_group->run([stream = std::move(stream)]() { drainStream(stream); });
-}
-
-void
-drainStream(std::shared_ptr<IStream> stream)
-{
-    while (auto op = stream->popPendingOrDeactivate()) {
-        hipEvent_t event = op->event;
-        try {
-            Context<Hip>::get()->hipEventSynchronize(event);
-            op->io_fn(op.get());
-        }
-        catch (...) {
-            *op->bytes_transferred = -hipFileInternalError;
-        }
-        signalOffloadComplete(op.get());
-        stream->releaseEvent(event);
-    }
+    task_group->run([op]() {
+        op->io_fn(op);
+        signalOffloadComplete(op);
+    });
 }
 
 void
@@ -198,45 +184,30 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
     op->io_fn   = async_run_io;
     Context<AsyncMonitor>::get()->addOp(op);
 
-    auto        stream_lock = stream->getLock();
-    hipStream_t hip_stream  = stream->getHipStream();
-    bool        wait_value  = stream->canUseStreamWaitValue();
-    bool        targeted    = false;
-    bool        pushed      = false;
-    bool        committed   = false;
-    hipEvent_t  event       = nullptr;
+    auto        stream_lock     = stream->getLock();
+    hipStream_t hip_stream      = stream->getHipStream();
+    bool        wait_value      = stream->canUseStreamWaitValue();
+    bool        targeted        = false;
+    bool        runner_enqueued = false;
 
     try {
         if (wait_value) {
-            event     = stream->acquireEvent();
-            op->event = event;
-            Context<Hip>::get()->hipEventRecord(event, hip_stream);
             op->wait_target = stream->nextSignalTarget();
             targeted        = true;
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, op.get());
+            runner_enqueued = true;
             Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), op->wait_target,
                                                       hipStreamWaitValueGte, ~uint64_t{0});
-            bool spawn = stream->pushPending(op);
-            pushed     = true;
-            if (spawn) {
-                Context<AsyncMonitor>::get()->submitDrainer(stream);
-            }
-            committed = true;
         }
         else {
             Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_inline, op.get());
-            committed = true;
+            runner_enqueued = true;
         }
     }
     catch (...) {
-        if (!committed) {
-            if (pushed) {
-                stream->popPendingOrDeactivate();
-            }
+        if (!runner_enqueued) {
             if (targeted) {
                 std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
-            }
-            if (event) {
-                stream->releaseEvent(event);
             }
             try {
                 Context<AsyncMonitor>::get()->completeOp(op.get());
@@ -252,6 +223,20 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
 }
 
 extern "C" {
+void
+async_dispatch(void *userargs)
+{
+    using namespace hipFile;
+    auto op = static_cast<AsyncOp *>(userargs);
+    try {
+        Context<AsyncMonitor>::get()->submitIo(op);
+    }
+    catch (...) {
+        op->io_fn(op);
+        signalOffloadComplete(op);
+    }
+}
+
 void
 async_run_inline(void *userargs)
 {

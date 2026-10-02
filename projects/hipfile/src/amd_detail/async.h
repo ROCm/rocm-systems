@@ -9,7 +9,6 @@
 
 #include <condition_variable>
 #include <cstdint>
-#include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
 #include <sys/types.h>
@@ -49,7 +48,6 @@ public:
     void (*io_fn)(void *){nullptr};
     uint64_t                 wait_target{0};
     std::shared_ptr<Backend> backend{};
-    hipEvent_t               event{nullptr};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
@@ -69,7 +67,7 @@ public:
 
     virtual void addOp(std::shared_ptr<AsyncOp> op);
     virtual void completeOp(AsyncOp *op);
-    virtual void submitDrainer(std::shared_ptr<IStream> stream);
+    virtual void submitIo(AsyncOp *op);
 
 private:
     void                                                 completion_thread();
@@ -84,8 +82,6 @@ private:
 
 void async_run_io(void *userargs);
 
-void drainStream(std::shared_ptr<IStream> stream);
-
 void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFile> file,
                   std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p,
                   hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream);
@@ -93,4 +89,5 @@ void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr
 
 extern "C" {
 void async_run_inline(void *userargs);
+void async_dispatch(void *userargs);
 }
