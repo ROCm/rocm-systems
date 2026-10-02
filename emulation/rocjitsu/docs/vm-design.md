@@ -33,11 +33,11 @@ execution.
 | `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
 | `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
 | `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
-| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: per-queue ring traversal, retry, and cursor publication owned by the CP |
-| `amdgpu/pm4_queue_controller.h/cpp` | Pm4QueueController: CP-owned PM4 queue, VM snapshot, retry, and cursor-publication state |
+| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: standalone ring traversal helper; production compute queues execute in CommandProcessor |
+| `amdgpu/dispatch_entry.h` | ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication |
 | `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
 | `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
-| `amdgpu/aql_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the AQL command processor |
+| `amdgpu/compute_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the unified compute command processor |
 
 ---
 
@@ -85,10 +85,16 @@ VMID/PASID as lifetime identity.
 
 An address-space slot generation changes when a slot is destroyed and reused.
 Its translation epoch changes when a root is replaced or invalidated. A
-`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
-one lock for the duration of an operation. This prevents a multi-page access
-from combining an old root with a replacement backing and provides
-`VmCacheNamespace` for virtually indexed clean caches. Access results are
+`GpuVmAccess` selects an immutable translator/backing generation under the
+registry lock. Ordinary snapshots share its retirement state; each pinned
+snapshot has independent retirement state and survives root replacement.
+Invalidation and unregistration revoke both kinds. Access methods hold a shared
+revocation lease, allowing an in-flight access to finish without combining an
+old root with a replacement backing. The captured handle and epoch provide
+`VmCacheNamespace` for virtually indexed clean caches. Functional instruction
+fetch reuses an ordinary snapshot within a quantum and checks `is_current()`
+before reuse; the access method still takes a lease and checks for retirement.
+Access results are
 typed as complete, temporarily unavailable, faulted, or malformed; transport
 availability is not encoded as a fake mapping in `GpuMemory`.
 
@@ -350,6 +356,42 @@ have not been written back, so crediting it would be worse than losing it: the
 owner would retire the grid and fire the completion signal for workgroups that
 never executed. KFD teardown is what reaches this window, since it removes
 replicas in XCD order while a later owner is still registered.
+
+### Queue exceptions and debugger notification
+
+A trap exception has one owner for its complete mask. The send site records
+whether the debugger or ROCr owns it; trap completion preserves that decision.
+Runtime delivery freezes all replicas of the logical queue before publishing
+one shared exception status and interrupt. Status publication and acknowledgment
+polling use checked atomic memory accesses. An inaccessible status or an unchanged
+status at the runtime acknowledgment deadline is a failed delivery, so the
+exception remains available to a later debugger. When a debugger was attached at
+the send site, its retained queue status also survives a successful ROCr
+acknowledgment and becomes queryable when a matching exception bit is enabled.
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume.
+While the runtime ownership result is pending, resume reports a queue error and
+preserves the stopped waves, saved CWSR image, and exception gate. Once the result
+is committed, the debugger can retry recovery. Successful recovery clears the
+exception gate on every replica, preserves independent runtime and debugger
+suspension reasons, and schedules deferred queue work when all gates open.
+
+Debugger publication separates the event from the notifier transport. Queue
+status stays hidden while a write is in flight so a failed publication can roll
+back a debugger-only stop. If QUERY arrives after reading the wake but before
+that write commits, or while an overlapping ROCr reservation hides the event,
+the session records a replacement-wake obligation. Once
+status is visible, the retry worker sends that wake under the session lock,
+without hiding the event again. The recovery write is bounded and holds no CU
+or allocation lock. Retained events, including queue creation, survive transport
+failures until acknowledged. Process events are already queryable during a
+write; their claims record which bits QUERY consumed so completion cannot mark
+a later event as already notified.
+
+The notifier uses a disposable child because another holder of the shared file
+description can change its blocking mode. Application signal handlers are
+blocked before cloning and remain blocked in the child; the parent restores
+its original mask. A deadline bounds the parent's wait, and a process-owned
+reaper handles a child that has not exited after cancellation.
 
 ### Event-Driven Dispatch
 

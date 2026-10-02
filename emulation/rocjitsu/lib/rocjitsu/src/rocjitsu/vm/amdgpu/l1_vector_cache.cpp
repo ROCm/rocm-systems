@@ -76,6 +76,7 @@ void L1VectorCache::set_l2(L2Cache *l2) {
 void L1VectorCache::set_gpu_vm(GpuVm *gpu_vm) {
   invalidate_all_lines();
   gpu_vm_ = gpu_vm;
+  mtype_cache_ = {};
 }
 
 VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
@@ -269,19 +270,19 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
                                     uint32_t num_elems, uint8_t *dst, Mtype mtype,
                                     bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
                                     uint32_t vmid, uint32_t addr_stride, uint32_t addr_base_offset,
-                                    std::span<const uint64_t> element_lane_masks) {
+                                    std::span<const uint64_t> element_lane_masks,
+                                    uint32_t swizzle_unit) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, mtype);
   uint32_t stride = num_elems * elem_size;
-  // Scratch swizzle: consecutive dwords of one lane's private space sit
-  // addr_stride bytes apart, the hardware dword-interleaved layout rocm-dbgapi
-  // reads. Addresses are materialized per element, so this also honours
+  // Scratch and buffer swizzling: consecutive units of a lane sit
+  // addr_stride bytes apart. Addresses are materialized per element, so this honours
   // per-element lane validity: an element a lane is not valid for is skipped
   // rather than strided over. With no element masks this walks exactly the
   // lanes and bytes the uniform path would. addr_base_offset identifies the
-  // low bits added after swizzling so they do not move the logical dword boundary.
+  // low bits added after swizzling so they do not move the logical swizzle-unit boundary.
   if (addr_stride != 0) {
-    assert(addr_base_offset < sizeof(uint32_t));
+    assert((swizzle_unit == 4 || swizzle_unit == 16) && addr_base_offset < swizzle_unit);
     const uint32_t astride = addr_stride;
     for (uint32_t elem = 0; elem < num_elems; ++elem) {
       uint64_t mask =
@@ -290,15 +291,16 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
         const uint32_t lane = std::countr_zero(mask);
         mask &= mask - 1;
         const uint64_t base = addrs[lane];
-        const uint32_t first_byte_in_dword = static_cast<uint32_t>((base - addr_base_offset) & 3);
+        const uint32_t first_byte_in_unit =
+            static_cast<uint32_t>((base - addr_base_offset) % swizzle_unit);
         uint32_t copied = elem * elem_size;
         const uint32_t elem_end = copied + elem_size;
         while (copied < elem_end) {
-          const uint32_t logical_byte = first_byte_in_dword + copied;
-          const uint32_t byte_in_dword = logical_byte & 3;
-          const uint32_t chunk = std::min(elem_end - copied, 4 - byte_in_dword);
+          const uint32_t logical_byte = first_byte_in_unit + copied;
+          const uint32_t byte_in_unit = logical_byte % swizzle_unit;
+          const uint32_t chunk = std::min(elem_end - copied, swizzle_unit - byte_in_unit);
           const uint64_t ea =
-              base - first_byte_in_dword + logical_byte / 4 * astride + byte_in_dword;
+              base - first_byte_in_unit + logical_byte / swizzle_unit * astride + byte_in_unit;
           const VmAccessOutcome outcome = read_bytes(ea, dst + lane * stride + copied, chunk,
                                                      non_temporal, request_l1_bypass, vmid, mtypes);
           if (outcome != VmAccessOutcome::Complete)
@@ -348,23 +350,23 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
                                      uint32_t num_elems, const uint8_t *src, Mtype mtype,
                                      bool non_temporal, uint32_t wf_size, uint32_t vmid,
                                      uint32_t addr_stride, uint32_t addr_base_offset,
-                                     std::span<const uint64_t> element_lane_masks) {
+                                     std::span<const uint64_t> element_lane_masks,
+                                     uint32_t swizzle_unit) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, mtype);
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
-  // Scratch swizzle: consecutive dwords of one lane's private space sit
-  // addr_stride bytes apart, the hardware dword-interleaved layout rocm-dbgapi
-  // reads. Addresses are materialized per element, so this also honours
+  // Scratch and buffer swizzling: consecutive units of a lane sit
+  // addr_stride bytes apart. Addresses are materialized per element, so this honours
   // per-element lane validity: an element a lane is not valid for is skipped
   // rather than strided over. With no element masks this walks exactly the
   // lanes and bytes the uniform path would. addr_base_offset identifies the
-  // low bits added after swizzling so they do not move the logical dword boundary.
+  // low bits added after swizzling so they do not move the logical swizzle-unit boundary.
   if (addr_stride != 0) {
-    assert(addr_base_offset < sizeof(uint32_t));
+    assert((swizzle_unit == 4 || swizzle_unit == 16) && addr_base_offset < swizzle_unit);
     const uint32_t astride = addr_stride;
     for (uint32_t elem = 0; elem < num_elems; ++elem) {
       uint64_t mask =
@@ -374,15 +376,16 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
         const uint32_t lane = std::countr_zero(mask);
         mask &= mask - 1;
         const uint64_t base = addrs[lane];
-        const uint32_t first_byte_in_dword = static_cast<uint32_t>((base - addr_base_offset) & 3);
+        const uint32_t first_byte_in_unit =
+            static_cast<uint32_t>((base - addr_base_offset) % swizzle_unit);
         uint32_t copied = elem * elem_size;
         const uint32_t elem_end = copied + elem_size;
         while (copied < elem_end) {
-          const uint32_t logical_byte = first_byte_in_dword + copied;
-          const uint32_t byte_in_dword = logical_byte & 3;
-          const uint32_t chunk = std::min(elem_end - copied, 4 - byte_in_dword);
+          const uint32_t logical_byte = first_byte_in_unit + copied;
+          const uint32_t byte_in_unit = logical_byte % swizzle_unit;
+          const uint32_t chunk = std::min(elem_end - copied, swizzle_unit - byte_in_unit);
           const uint64_t ea =
-              base - first_byte_in_dword + logical_byte / 4 * astride + byte_in_dword;
+              base - first_byte_in_unit + logical_byte / swizzle_unit * astride + byte_in_unit;
           const VmAccessOutcome outcome =
               write_bytes(ea, src + lane * stride + copied, chunk, non_temporal, vmid, mtypes);
           if (outcome != VmAccessOutcome::Complete)

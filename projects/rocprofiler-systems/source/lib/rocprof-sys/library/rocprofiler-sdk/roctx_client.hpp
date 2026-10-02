@@ -18,9 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct roctx_client_config
@@ -29,7 +27,7 @@ struct roctx_client_config
     bool        use_perfetto{ false };
     bool        use_timemory{ false };
     bool        perfetto_annotations{ false };
-    std::string selected_trace_regions{};
+    std::string selected_trace_regions;
 };
 
 template <typename MarkerWriterPolicy = default_marker_policy>
@@ -114,5 +112,4 @@ roctx_client<MarkerWriterPolicy>::roctx_client(std::shared_ptr<control::session>
       m_session, roctx_cfg.selected_trace_regions) }
 {}
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

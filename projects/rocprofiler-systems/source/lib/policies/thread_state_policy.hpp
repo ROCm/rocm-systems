@@ -6,9 +6,7 @@
 #include <concepts>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace policies
+namespace rocprofsys::policies
 {
 // Structural concept, deliberately independent of any concrete state type
 // (e.g. rocprofsys::state::thread) so that lower-level code depending on this
@@ -19,5 +17,4 @@ concept thread_state_policy = requires(T::State state) {
     { T::Internal } -> std::convertible_to<typename T::State>;
     { T::scoped(state) } -> std::destructible;
 };
-}  // namespace policies
-}  // namespace rocprofsys
+}  // namespace rocprofsys::policies

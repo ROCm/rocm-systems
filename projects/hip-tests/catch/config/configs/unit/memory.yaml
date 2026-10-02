@@ -849,8 +849,6 @@ memory:
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_2
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_2
-    # ROCM-29275
-    disabled: [gfx1250]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast:
     <<: *level_2
@@ -862,13 +860,9 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
     <<: *level_2
-    # ROCM-29275
-    disabled: [gfx1250]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_P2P_Swap:
     <<: *level_2
-    # ROCM-29275
-    disabled: [gfx1250]
     tags: [transfer, multigpu]
   Unit_hipMemcpyBatchAsync_P2P_Multicast:
     <<: *level_2
@@ -2102,6 +2096,9 @@ memory:
   Unit_hipMemPrefetchAsync_Negative_Parameters:
     <<: *level_2
     tags: [query, P1]
+  Unit_hipMemPrefetchBatchAsync_Sync_Behavior:
+    <<: *level_2
+    tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
     tags: [query]
@@ -2138,6 +2135,7 @@ memory:
   Unit_hipMemDiscardBatchAsync_LargeCount: *level_2
   Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch: *level_2
   Unit_hipMemDiscardBatchAsync_StreamOrdering: *level_2
+  Unit_hipMemDiscardBatchAsync_Sync_Behavior: *level_2
   Unit_hipMemDiscardBatchAsync_SubrangeDiscard: *level_2
   Unit_hipMemDiscardBatchAsync_SamePointerTwice: *level_2
   Unit_hipMemDiscardBatchAsync_MinimalSize: *level_2

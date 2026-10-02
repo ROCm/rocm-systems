@@ -29,13 +29,6 @@ set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
 
 function(add_rocshmem_targets)
 
-    # Common dependency: libibverbs is required for all rocSHMEM paths
-    find_library(_IBVERBS ibverbs)
-    if(NOT _IBVERBS)
-        message(FATAL_ERROR "libibverbs not found (install rdma-core/libibverbs-dev)")
-    endif()
-    set(IBVERBS ${_IBVERBS} PARENT_SCOPE)
-
     # -----------------------------------------------------------------
     # Auto-detect ROCSHMEM_SOURCE_DIR if not provided.
     # Runs first so source headers are available regardless of whether
@@ -98,11 +91,15 @@ function(add_rocshmem_targets)
     # -----------------------------------------------------------------
     if(ROCSHMEM_INSTALL_DIR)
         list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+        # Set rocshmem_static_ROOT; variable read on enter, so must be set BEFORE find_package()
+        if(NOT rocshmem_static_ROOT)
+          set(rocshmem_static_ROOT "${ROCSHMEM_INSTALL_DIR}")
+        endif()
         find_package(rocshmem_static)
         if(rocshmem_static_FOUND)
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
-            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   PARENT_SCOPE)
+            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
             return()
         endif()
     endif()
@@ -155,6 +152,30 @@ function(add_rocshmem_targets)
         add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
     endif()
 
-    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
+    # CACHE INTERNAL (not PARENT_SCOPE): SOURCE_DIR is consumed by the
+    # top-level CMakeLists.txt install rules, outside add_subdirectory(src).
+    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
 
+endfunction()
+
+# copy files in the list-valued variable ${FILE_LIST_VAR} from ${SRC_DIR} to ${DST_DIR}
+# appends the destination file location to the list-valued variable ${OUTPUT_LIST_VAR}
+function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
+  foreach(file_name ${${FILE_LIST_VAR}})
+    set(src_file "${SRC_DIR}/${file_name}")
+    set(dst_file "${DST_DIR}/${file_name}")
+    get_filename_component(dst_file_dir "${dst_file}" DIRECTORY)
+    add_custom_command(
+      OUTPUT "${dst_file}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
+      # Qualify log.hpp include to prevent shadowing by consumer headers.
+      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
+      DEPENDS "${src_file}"
+      COMMENT "Copying ${src_file} -> ${dst_file}"
+      VERBATIM
+    )
+    list(APPEND ${OUTPUT_LIST_VAR} "${dst_file}")
+  endforeach()
+  set(${OUTPUT_LIST_VAR} ${${OUTPUT_LIST_VAR}} PARENT_SCOPE)
 endfunction()

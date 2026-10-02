@@ -131,7 +131,9 @@ struct nic_traits
 
         std::set<std::string> available_names;
         for(const auto& device : devices)
+        {
             available_names.insert(device->get_name());
+        }
 
         for(auto& device : devices)
         {
@@ -168,7 +170,7 @@ struct nic_traits
                 }
                 LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
                          device->get_index(), device->get_name());
-                auto supported = device->get_supported_metrics();
+                auto const supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
             else
@@ -199,7 +201,7 @@ struct nic_traits
         }
         for(const auto& requested : filter.names)
         {
-            if(available_names.find(requested) == available_names.end())
+            if(!available_names.contains(requested))
             {
                 LOG_WARNING("Requested AI NIC device '{}' not found. "
                             "Available device(s): [{}]",

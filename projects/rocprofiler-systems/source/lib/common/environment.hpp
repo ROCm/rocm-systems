@@ -30,9 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 /// @brief Production environment backend that forwards to the real POSIX
@@ -70,7 +68,10 @@ struct environment
 private:
     static const char* fetch_raw_env(const char* env_id)
     {
-        if(env_id == nullptr || env_id[0] == '\0') return nullptr;
+        if(env_id == nullptr || env_id[0] == '\0')
+        {
+            return nullptr;
+        }
         return EnvType::getenv(env_id);
     }
 
@@ -84,7 +85,10 @@ private:
     static bool get_env_bool(const char* env_id, bool fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         const std::string_view env_sv{ raw };
         if(env_sv.empty())
@@ -99,7 +103,10 @@ private:
     static Tp get_env_float(const char* env_id, Tp fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         // Trim surrounding whitespace so values such as " 1.5 " still parse.
         const auto token =
@@ -116,7 +123,10 @@ private:
         Tp          value{};
         const auto* end      = token.data() + token.size();
         const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end) return value;
+        if(ec == std::errc{} && ptr == end)
+        {
+            return value;
+        }
 #else
         // Fallback for standard libraries without floating-point from_chars
         // (libstdc++ < 11). std::stod is locale-sensitive (assumes C/POSIX locale).
@@ -138,7 +148,10 @@ private:
     static Tp get_env_integral(const char* env_id, Tp fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         // Trim surrounding whitespace so values such as " 42 " still parse.
         const auto token =
@@ -156,7 +169,10 @@ private:
         Tp          value{};
         const auto* end      = token.data() + token.size();
         const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end) return value;
+        if(ec == std::errc{} && ptr == end)
+        {
+            return value;
+        }
 
         LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
                   env_id, raw);
@@ -258,7 +274,7 @@ public:
     template <typename Tp>
     static auto get_env_choice(const char* env_id, Tp value_default, std::set<Tp> choices)
     {
-        auto value = get_env(env_id, value_default);
+        auto const value = get_env(env_id, value_default);
         if(choices.find(value) == choices.end())
         {
             const char* raw = fetch_raw_env(env_id);
@@ -277,15 +293,18 @@ public:
 template <typename EnvType = posix_env>
 struct ROCPROFSYS_INTERNAL_API env_config
 {
-    std::string m_env_name  = {};
-    std::string m_env_value = {};
-    int         m_override  = 0;
+    std::string m_env_name;
+    std::string m_env_value;
+    int         m_override = 0;
 
     /// @brief Apply the stored setenv command.
     /// @return The backend setenv result, or -1 when @c m_env_name is empty.
     auto operator()() const
     {
-        if(m_env_name.empty()) return -1;
+        if(m_env_name.empty())
+        {
+            return -1;
+        }
         LOG_DEBUG("setenv(\"{}\", \"{}\", {})", m_env_name, m_env_value, m_override);
         return EnvType::setenv(m_env_name.c_str(), m_env_value.c_str(), m_override);
     }
@@ -358,11 +377,13 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 {
     auto key = fmt::format("{}=", env_variable);
 
-    env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
-                                  [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.starts_with(key);
-                                  }),
-                   env_list.end());
+    env_list.erase(
+        std::ranges::remove_if(env_list,
+                               [&key](const std::string& entry) {
+                                   return std::string_view{ entry }.starts_with(key);
+                               })
+            .begin(),
+        env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
@@ -396,7 +417,7 @@ get_default_lib_search_paths()
 inline std::string
 discover_llvm_libdir_for_ompt()
 {
-    auto strip = [](std::string value_to_strip) {
+    auto const strip = [](std::string value_to_strip) {
         if(!value_to_strip.empty() && value_to_strip.back() == '/')
         {
             value_to_strip.pop_back();
@@ -413,9 +434,12 @@ discover_llvm_libdir_for_ompt()
     std::vector<std::string> candidates;
     candidates.reserve(number_of_candidates);
 
-    auto push_unique = [&](const std::string& candidate) {
-        if(candidate.empty()) return;
-        if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+    auto const push_unique = [&](const std::string& candidate) {
+        if(candidate.empty())
+        {
+            return;
+        }
+        if(std::ranges::find(candidates, candidate) == candidates.end())
         {
             candidates.emplace_back(candidate);
         }
@@ -439,13 +463,13 @@ discover_llvm_libdir_for_ompt()
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
 
-    auto has_libomptarget = [](const std::string& dir) {
+    auto const has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
         return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
-    auto result = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    auto const result = std::ranges::find_if(candidates, has_libomptarget);
     if(result != candidates.end())
     {
         LOG_DEBUG("Using LLVM libdir: {}", *result);
@@ -462,22 +486,31 @@ discover_llvm_libdir_for_ompt()
 inline bool
 is_python_interpreter(std::string_view executable)
 {
-    if(executable.empty()) return false;
+    if(executable.empty())
+    {
+        return false;
+    }
 
     const auto basename = path::filename(executable);
 
-    if(basename == "python" || basename == "python3") return true;
+    if(basename == "python" || basename == "python3")
+    {
+        return true;
+    }
 
     constexpr std::string_view python3_prefix = "python3.";
 
     const bool has_valid_prefix =
         basename.size() > python3_prefix.size() && basename.starts_with(python3_prefix);
-    if(!has_valid_prefix) return false;
+    if(!has_valid_prefix)
+    {
+        return false;
+    }
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
-    return std::all_of(version_digits.begin(), version_digits.end(),
-                       [](unsigned char c) { return std::isdigit(c); });
+    return std::ranges::all_of(version_digits,
+                               [](unsigned char c) { return std::isdigit(c); });
 }
 
 /// @brief Discover the PyTorch library directory for a given Python interpreter.
@@ -490,14 +523,20 @@ is_python_interpreter(std::string_view executable)
 inline std::string
 discover_torch_libpath(const std::string& python_binary)
 {
-    if(python_binary.empty()) return {};
+    if(python_binary.empty())
+    {
+        return {};
+    }
 
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
         for(const unsigned char c : path)
         {
-            if(std::isalnum(c) != 0) continue;
+            if(std::isalnum(c) != 0)
+            {
+                continue;
+            }
             switch(c)
             {
                 case '/':
@@ -534,7 +573,10 @@ discover_torch_libpath(const std::string& python_binary)
     {
         result.append(buffer);
         // stop if we've read the full line (torch path is printed on a single line)
-        if(!result.empty() && result.back() == '\n') break;
+        if(!result.empty() && result.back() == '\n')
+        {
+            break;
+        }
     }
 
     const int status = pclose(pipe);
@@ -551,7 +593,10 @@ discover_torch_libpath(const std::string& python_binary)
         result.pop_back();
     }
 
-    if(result.empty()) return {};
+    if(result.empty())
+    {
+        return {};
+    }
 
     std::string torch_libdir = result + "/lib";
 
@@ -589,11 +634,17 @@ to_env_string(Tp&& val)
     using T = std::decay_t<Tp>;
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
+    {
         return std::string{ val };
+    }
     else if constexpr(std::is_same_v<T, bool>)
+    {
         return val ? "true" : "false";
+    }
     else
+    {
         return std::to_string(val);
+    }
 }
 
 /// @brief Insert or update an "KEY=VALUE" entry in an environment vector.
@@ -623,7 +674,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
         return std::string_view{ entry }.starts_with(_key);
     };
 
-    auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
+    auto const first = std::find_if(_environ.begin(), _environ.end(), matches_key);
     if(first == _environ.end())
     {
         _environ.emplace_back(fmt::format("{}={}", _env_var, _env_val_str));
@@ -633,14 +684,20 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     switch(_mode)
     {
         case update_mode::weak:
-            if(_original_envs.find(*first) == _original_envs.end()) return;
+            if(_original_envs.find(*first) == _original_envs.end())
+            {
+                return;
+            }
             *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
         case update_mode::prepend:
         case update_mode::append:
         {
-            if(first->find(_env_val_str) != std::string::npos) return;
+            if(first->find(_env_val_str) != std::string::npos)
+            {
+                return;
+            }
             auto _val = first->substr(_key.size());
             *first =
                 (_mode == update_mode::prepend)
@@ -670,29 +727,44 @@ inline void
 add_torch_library_path(std::vector<std::string>& envp, std::string_view executable,
                        UpdatedEnvsT& updated_envs)
 {
-    if(executable.empty()) return;
-    if(!is_python_interpreter(executable)) return;
+    if(executable.empty())
+    {
+        return;
+    }
+    if(!is_python_interpreter(executable))
+    {
+        return;
+    }
 
-    auto torch_libpath = discover_torch_libpath(std::string{ executable });
-    if(torch_libpath.empty()) return;
+    auto const torch_libpath = discover_torch_libpath(std::string{ executable });
+    if(torch_libpath.empty())
+    {
+        return;
+    }
 
     std::unordered_set<std::string> seen{ torch_libpath };
     std::string                     result = torch_libpath;
 
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
-    auto is_ld_path = [&](const std::string& entry) {
+    auto const is_ld_path = [&](const std::string& entry) {
         return std::string_view{ entry }.starts_with(ld_prefix);
     };
 
     for(const auto& entry : envp)
     {
-        if(!is_ld_path(entry)) continue;
+        if(!is_ld_path(entry))
+        {
+            continue;
+        }
 
         std::istringstream stream{ entry.substr(ld_prefix.length()) };
         for(std::string path; std::getline(stream, path, ':');)
         {
-            if(!path.empty() && seen.insert(path).second) result += ":" + path;
+            if(!path.empty() && seen.insert(path).second)
+            {
+                result += ":" + path;
+            }
         }
     }
 
@@ -726,10 +798,12 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_PAPI_EVENTS: uses perf::EVENT_NAME or net:::interface:metric syntax
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
-    auto get_delimiter = [](std::string_view key) -> char {
+    auto const get_delimiter = [](std::string_view key) -> char {
         if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
            key == env_vars::ROCM_EVENTS)
+        {
             return ',';
+        }
         return ':';
     };
 
@@ -744,17 +818,22 @@ consolidate_env_entries(std::vector<std::string>& envp)
         void add_unique(std::string part)
         {
             if(!part.empty() && seen.insert(part).second)
+            {
                 parts.emplace_back(std::move(part));
+            }
         }
     };
 
     /// Parses an environment entry string into key and value components.
     /// @param entry String in "KEY=VALUE" format
     /// @return Optional pair of (key, value) views, or nullopt if no '=' found
-    auto parse_entry = [](std::string_view entry)
+    auto const parse_entry = [](std::string_view entry)
         -> std::optional<std::pair<std::string_view, std::string_view>> {
-        auto eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos) return std::nullopt;
+        auto const eq_pos = entry.find('=');
+        if(eq_pos == std::string_view::npos)
+        {
+            return std::nullopt;
+        }
         return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
     };
 
@@ -764,14 +843,17 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// @param delim The delimiter to use when joining parts
     /// @return String in "KEY=part1<delim>part2<delim>..." format, or "KEY="
     ///         when @p parts is empty.
-    auto join_parts = [](std::string_view key, const std::vector<std::string>& parts,
-                         char delim) {
+    auto const join_parts = [](std::string_view                key,
+                               const std::vector<std::string>& parts, char delim) {
         std::string result;
         result.reserve(key.size() + 1);
         result.append(key);
         result += '=';
 
-        if(parts.empty()) return result;
+        if(parts.empty())
+        {
+            return result;
+        }
 
         std::size_t total_parts_length = 0;
         for(const auto& part : parts)
@@ -784,7 +866,10 @@ consolidate_env_entries(std::vector<std::string>& envp)
         bool first = true;
         for(const auto& part : parts)
         {
-            if(!first) result += delim;
+            if(!first)
+            {
+                result += delim;
+            }
             result.append(part);
             first = false;
         }
@@ -827,7 +912,7 @@ consolidate_env_entries(std::vector<std::string>& envp)
     std::vector<std::string> result;
     result.reserve(key_order.size());
 
-    for(auto key : key_order)
+    for(auto const key : key_order)
     {
         const auto& data = key_map[key];
         result.emplace_back(join_parts(key, data.parts, data.delim));
@@ -836,5 +921,4 @@ consolidate_env_entries(std::vector<std::string>& envp)
     envp = std::move(result);
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

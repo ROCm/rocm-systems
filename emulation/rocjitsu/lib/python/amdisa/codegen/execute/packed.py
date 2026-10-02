@@ -13,6 +13,8 @@ op_sel_hi fields, derived from the ISA profile at call time.
 
 from __future__ import annotations
 
+from amdisa.isa_profile import FloatDotAccumulation
+
 from .vop3_modifiers import vop3_dst_mod, vop3_src_mod
 
 
@@ -117,7 +119,7 @@ def gen_pk_binop(
                     f'    if (inst_.{neg} & {1 << bit}u) {name}_{half} ^= 0x8000u;'
                 )
             L.append(
-                f'    const uint16_t r{half} = amdgpu::fp_mode::packed_binary_f16(amdgpu::fp_mode::PackedBinaryOp::{op.upper()}, a_{half}, b_{half}, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                f'    const uint16_t r{half} = amdgpu::fp_mode::packed_binary_f16(amdgpu::fp_mode::PackedBinaryOp::{op.upper()}, a_{half}, b_{half}, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
             )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
@@ -284,7 +286,7 @@ def gen_pk_ternary(
                         f'    if (inst_.{neg} & {1 << index}u) {name}_{half} ^= 0x8000u;'
                     )
                 L.append(
-                    f'    const uint16_t r{half} = amdgpu::fp_mode::packed_select3_f16(amdgpu::fp_mode::PackedBinaryOp::{selection}, first_{half}, second_{half}, third_{half}, wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+                    f'    const uint16_t r{half} = amdgpu::fp_mode::packed_select3_f16(amdgpu::fp_mode::PackedBinaryOp::{selection}, first_{half}, second_{half}, third_{half}, wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
                 )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
@@ -304,10 +306,10 @@ def gen_pk_ternary(
                     f'    uint16_t {name} = static_cast<uint16_t>({selector} ? ({raw} >> 16) : {raw});'
                 )
             L.append(
-                '    uint16_t rlo = amdgpu::fp_mode::fma_f16(a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                '    uint16_t rlo = amdgpu::fp_mode::fma_f16(a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
             )
             L.append(
-                '    uint16_t rhi = amdgpu::fp_mode::fma_f16(a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u, inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                '    uint16_t rhi = amdgpu::fp_mode::fma_f16(a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u, inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
             )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
@@ -555,8 +557,8 @@ def gen_pk_fmac_vop2(dst: list[str], src: list[str]) -> str:
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    const uint32_t omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -583,8 +585,8 @@ def gen_pk_fmac_vop3(dst: list[str], src: list[str]) -> str:
             f'      raw1 = (raw1 & 0xffffu) * 0x10001u;',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), true, inst_.omod);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -630,7 +632,7 @@ def gen_pk_binop_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     for half, result in (('lo', 'rlo'), ('hi', 'rhi')):
         L.append(
-            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
         )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
@@ -686,10 +688,10 @@ def gen_pk_ternary_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     L.append('    if (inst_.neg_hi & 4) c_hi = -c_hi;')
     L.append(
-        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
-        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
@@ -908,6 +910,7 @@ def gen_mad_mix_f32(
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
+    fused_result: bool = False,
 ) -> str:
     """Generate V_MAD_MIX_F32: mixed-precision FMA with op_sel selecting f16/f32 per src."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -965,9 +968,16 @@ def gen_mad_mix_f32(
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append(
-        f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
-    )
+    if fused_result:
+        L.extend(
+            [
+                '    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(',
+                '        a, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),',
+                '        wf.cu().arch(), wf.ieee_mode());',
+            ]
+        )
+    else:
+        L.append('    float result = a * b + c;')
     L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
@@ -983,6 +993,7 @@ def gen_mad_mix_lo_hi(
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
+    fused_result: bool = False,
 ) -> str:
     """Generate V_MAD_MIXLO_F16 / V_MAD_MIXHI_F16."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -1040,11 +1051,26 @@ def gen_mad_mix_lo_hi(
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append(
-        f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
-    )
-    L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
-    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
+    if fused_result:
+        L.extend(
+            [
+                '    amdgpu::fp_mode::ScopedEnvironment environment(0);',
+                '    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(',
+                '        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(),',
+                '        amdgpu::floating_clamp_nan_to_zero(wf));',
+            ]
+        )
+    else:
+        L.append(
+            f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
+        )
+        L.append(
+            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+        )
+        L.append('    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(')
+        L.append(
+            '        result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false);'
+        )
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
@@ -1154,7 +1180,7 @@ def gen_dot2(
     src: list[str],
     cls: str,
     opsel_exprs: tuple[str, str] = ('', ''),
-    replicate_inline: bool = False,
+    dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
 ) -> str:
     """Generate V_DOT2_F32_F16, V_DOT2_I32_I16, V_DOT2_U32_U16.
 
@@ -1171,17 +1197,62 @@ def gen_dot2(
     _append_pk16_src_reads(
         L, [s0, s1], {'dot2_f32_f16': 'f16', 'dot2_f32_bf16': 'bf16'}.get(cls)
     )
-    if replicate_inline and cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-        for index in range(2):
-            L.append(
-                f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
-            )
-            L.append(f'      raw{index} = (raw{index} & 0xffffu) * 0x10001u;')
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        dot_arch = (
+            'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
+        )
+        if dot_accumulation is not FloatDotAccumulation.GFX12:
+            L.append(
+                '    if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {'
+            )
+        if cls == 'dot2_f32_bf16':
+            # BF16 inline floats broadcast upper16(FP32), without rounding.
+            # GFX11 integers use that half too; GFX12 integers use low16.
+            for index, source in enumerate((s0, s1)):
+                L.append(
+                    f'      if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
+                )
+                if dot_accumulation is FloatDotAccumulation.GFX12:
+                    raw = f'amdgpu::RegisterAccess(wf).read_lane({source}, lane)'
+                    L.append(
+                        f'        raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? ({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;'
+                    )
+                else:
+                    L.append(
+                        f'        raw{index} = (amdgpu::RegisterAccess(wf).read_lane({source}, lane) >> 16) * 0x10001u;'
+                    )
+        for name, raw, selection in (
+            ('a0', 'raw0', 'sel0_lo'),
+            ('a1', 'raw0', 'sel0_hi'),
+            ('b0', 'raw1', 'sel1_lo'),
+            ('b1', 'raw1', 'sel1_hi'),
+        ):
+            L.append(
+                f'    uint16_t {name} = static_cast<uint16_t>({selection} ? ({raw} >> 16) : {raw});'
+            )
+        L.append('    if (inst_.neg & 1) a0 ^= 0x8000u;')
+        L.append('    if (inst_.neg & 2) b0 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 1) a1 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 2) b1 ^= 0x8000u;')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
+        L.append('    if (inst_.neg & 4) acc ^= 0x80000000u;')
+        bf16 = str(cls == 'dot2_f32_bf16').lower()
+        L.append(
+            f'    uint32_t result = amdgpu::{dot_arch}_dot2_f32<{bf16}>(a0, b0, a1, b1, acc);'
+        )
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
+        if dot_accumulation is FloatDotAccumulation.GFX12:
+            L.append('  }')
+            return '\n'.join(L)
+        L.append('      continue;')
+        L.append('    }')
     if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         # F16 and BF16 share the dot2 structure but widen differently: BF16 has
         # an 8-bit exponent and no denormal renormalization, so it must use

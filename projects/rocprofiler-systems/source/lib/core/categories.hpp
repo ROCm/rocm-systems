@@ -162,14 +162,11 @@ ROCPROFSYS_DEFINE_CATEGORY(category, overflow_sampling, ROCPROFSYS_CATEGORY_OVER
 ROCPROFSYS_DECLARE_CATEGORY(category, sampling, ROCPROFSYS_CATEGORY_SAMPLING, "sampling", "Host-side call-stack sampling")
 // clang-format on
 
-namespace tim
-{
-namespace trait
+namespace tim::trait
 {
 template <typename... Tp>
 using name = perfetto_category<Tp...>;
 }
-}  // namespace tim
 
 #define ROCPROFSYS_PERFETTO_CATEGORY(TYPE)                                               \
     ::perfetto::Category(::tim::trait::perfetto_category<::tim::TYPE>::value)            \

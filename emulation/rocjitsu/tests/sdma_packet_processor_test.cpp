@@ -47,7 +47,8 @@ public:
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return VmAccessOutcome::Complete;
   }
 
@@ -60,7 +61,7 @@ public:
     }
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
@@ -405,7 +406,7 @@ TEST(SdmaPacketProcessorTest, ProcessesOnlyTheDecodedPacketExtentFromALargeSuffi
       UINT32_MAX,
       0,
   };
-  std::copy(poll.begin(), poll.end(), unread_suffix.begin());
+  std::ranges::copy(poll, unread_suffix.begin());
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
 
   const SdmaPacketProcessResult first = processor.process({.available_dwords = unread_suffix,
