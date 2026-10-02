@@ -118,6 +118,7 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclPro
 static bool DefaultProfilerPluginLoaded() { return false; }
 std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
 bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
+bool ncclProfilerProxyDiagEnabled(void) { return false; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }

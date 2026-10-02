@@ -3746,3 +3746,146 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   ASSERT_NE(nullptr, t);
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
 }
+
+// ===========================================================================
+// addP2pToPlan (enqueue.cc:1334) -- gfx1250 SendRecv protocol selection.
+// GPU SendRecvTests skip off gfx1250, so host CI never reached this planner.
+// These tests fake cudaArch=1250 / nRanks=4 and inspect the emitted
+// ncclDevWorkP2p plus the kernel funcId (LL vs LL128).
+// ===========================================================================
+
+#if !defined(ENABLE_LL128)
+#error "rccl-UnitTestsMicroEnqueue must compile ENABLE_LL128 so addP2pToPlan's gfx1250 window is in this binary"
+#endif
+
+namespace {
+void InstallSendRecvDevFuncIds() {
+  auto key = [](int reg) -> uint64_t {
+    return (uint64_t(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+           (uint64_t(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+  };
+  ncclDevFuncNameToId[key(0)] = 100;  // legacy LL kernel
+  ncclDevFuncNameToId[key(1)] = 101;  // LL128 kernel
+}
+
+struct Gfx1250AddP2pScene {
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/1250};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char ll128Buf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+  ncclTaskP2p recvTask{};
+  ncclTaskP2p sendTask{};
+  int planTotalTasks[2]{1, 1};
+
+  Gfx1250AddP2pScene() {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 4;
+    c->nNodes = 1;
+    c->cudaArch = 1250;
+    c->p2pnChannels = 4;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 128 << 10;
+    c->ll128LineElems = 16;
+    c->ll128DataElems = 15;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    SetSingleGpuArch(topo.get(), "gfx1250");
+    topo->ll128Enabled = true;
+    c->topo = topo.get();
+
+    peers.resize(4);
+    peerSlots.resize(4);
+    for (int i = 0; i < 4; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
+    }
+    for (int ch = 0; ch < 4; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    recvTask.collAPI = ncclFuncRecv;
+    recvTask.func = ncclFuncRecv;
+    sendTask.collAPI = ncclFuncSend;
+    sendTask.func = ncclFuncSend;
+  }
+
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+    struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  int p2pWorkCount() {
+    int n = 0;
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) ++n;
+    }
+    return n;
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
+  // Argus hang: 2 KiB + 8 KiB used to be LL+LL128 and split into recv-then-send.
+  // ENABLE=1 windows start at 0, so both dirs stay LL128 in one work item.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount()) << "mixed round must not split into two work items";
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {
+  // Default ENABLE=-1: below P2P_LL_THRESHOLD stays legacy LL, not LL128.
+  SetParam("P2P_LL128_ENABLE", -1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId) << "default must not select the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
+  // 4-rank cap is 1 MiB. Above it ENABLE=1 is SIMPLE (protoLL=0) and the LL kernel.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/(1 << 20) + 1, /*recvBytes=*/(1 << 20) + 1));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(0, work->sendProtoLL);
+  EXPECT_EQ(0, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
