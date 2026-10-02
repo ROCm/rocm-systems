@@ -575,7 +575,7 @@ class ArtifactSplitter:
         for prefix, binary_paths in fat_binaries_by_prefix.items():
             prefix_dir = generic_artifact_dir / prefix
 
-            # Inject kpack search pattern in each binary
+            # Inject kpack search patterns in each binary
             for binary_path in binary_paths:
                 # Compute @GFXARCH@ search patterns from binary to .kpack directory
                 search_paths = self.compute_kpack_search_paths(binary_path, prefix_dir)
@@ -599,7 +599,7 @@ class ArtifactSplitter:
                     binary_relpath = binary_path.relative_to(prefix_dir).as_posix()
                     kernel_name = f"{prefix}/{binary_relpath}"
 
-                    # Add kpack search pattern and transform binary in one pass
+                    # Add kpack search patterns and transform binary in one pass
                     # (adds .rocm_kpack_ref, maps to PT_LOAD, rewrites magic, zero-pages .hip_fatbin)
                     kpack_offload_binary(
                         input_path=binary_path,
