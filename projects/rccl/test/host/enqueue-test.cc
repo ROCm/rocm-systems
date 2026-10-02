@@ -657,6 +657,50 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgScalesWithRankCount) {
   EXPECT_NE(a.scalarArg, b.scalarArg);
 }
 
+TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat8_PacksFloatReciprocalNotFp8Bits) {
+  // AICOMRCCL-1945. The fp8 arms used to pack 1/nRanks as a host (always OCP) fp8 byte,
+  // which gfx942 device code decodes as FNUZ, i.e. at half the value. The rank counts are
+  // ones an fp8 scalar cannot carry at all: 1/3 and 1/384 are not representable, and
+  // 1/1024 rounds to zero in OCP e4m3. The full 64 bits are compared, so no stray fp8 byte
+  // or poison may survive above the float.
+  for (int nRanks : {3, 8, 384, 1024}) {
+    AvgComm comm(nRanks);
+    float want = float(1.0 / nRanks);
+    uint32_t wantBits;
+    std::memcpy(&wantBits, &want, sizeof(wantBits));
+    for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+      auto out = MakeRedOpOut();
+      ASSERT_EQ(ncclSuccess, hostToDevRedOp(&out, ncclAvg, dt, comm.get())) << "dtype=" << int(dt);
+      EXPECT_EQ(ncclDevPreMulSum, out.op) << "dtype=" << int(dt);
+      EXPECT_EQ(uint64_t(wantBits), out.scalarArg) << "dtype=" << int(dt) << " nRanks=" << nRanks;
+      EXPECT_FALSE(out.scalarArgIsPtr) << "dtype=" << int(dt);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
+  // Mirrors rccl_float8.h: only these take the OCP typedef in device code.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1200"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1201"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942")) << "explicit FNUZ typedef";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx90a")) << "software fallback, which is FNUZ";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz(nullptr)) << "an unknown arch lands on the software fallback";
+  // comm->archName carries target features, and IsArchMatch is a prefix compare.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950:sramecc+:xnack-"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942:sramecc+:xnack-"));
+}
+
+TEST_F(EnqueueMicrotest, Fp8ToFloat_DecodesInTheRequestedEncoding) {
+  // 0x38 separates all four encodings: OCP and FNUZ differ by one in exponent bias, and
+  // e4m3 and e5m2 place the exponent differently.
+  EXPECT_EQ(1.0f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/false));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/true));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/false));
+  EXPECT_EQ(0.25f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/true));
+}
+
 // ---------------------------------------------------------------------------
 // NOT A BUG -- investigated and cleared. The ncclAvg inner datatype switch
 // (:3235-3275) has no `default:` arm, which reads like an uninitialised-`op`
@@ -1752,6 +1796,32 @@ TEST_F(EnqueueMicrotest, RedOpCreate_DeviceResidence_StoresPointerNotBytes) {
   const ncclUserRedOp& u = rc.get()->userRedOps[ix];
   EXPECT_TRUE(u.opFull.scalarArgIsPtr);
   EXPECT_EQ(reinterpret_cast<uint64_t>(&scalar), u.opFull.scalarArg);
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediateFp8_DecodesToFloatWithTheDeviceEncoding) {
+  // FuncPreMulSum<fp8> reads float bits, so the user's byte is promoted here. It must be
+  // read in the device's encoding, as the device reads the payload and an ncclScalarDevice
+  // scalar; the host typedef would be off by 2x wherever the device is FNUZ.
+  const uint8_t byte = 0x38;
+  const struct { ncclDataType_t dt; const char* arch; float want; } kCases[] = {
+      {ncclFloat8e4m3, "gfx950", 1.0f},  {ncclFloat8e4m3, "gfx942", 0.5f},
+      {ncclFloat8e4m3, "gfx90a", 0.5f},  {ncclFloat8e4m3, "gfx1201:xnack-", 1.0f},
+      {ncclFloat8e5m2, "gfx950", 0.5f},  {ncclFloat8e5m2, "gfx942", 0.25f}};
+  for (auto c : kCases) {
+    RedOpComm rc;
+    rc.get()->archName = const_cast<char*>(c.arch);
+    ncclRedOp_t op = ncclSum;
+    ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, const_cast<uint8_t*>(&byte), c.dt,
+                                                         ncclScalarHostImmediate, rc.get()))
+        << "arch=" << c.arch;
+    const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+    const ncclUserRedOp& u = rc.get()->userRedOps[ix];
+    EXPECT_FALSE(u.opFull.scalarArgIsPtr) << "arch=" << c.arch;
+    uint32_t want;
+    std::memcpy(&want, &c.want, sizeof(want));
+    EXPECT_EQ(uint64_t(want), u.opFull.scalarArg) << "dtype=" << int(c.dt) << " arch=" << c.arch;
+    rc.get()->archName = nullptr;  // not owned here
+  }
 }
 
 TEST_F(EnqueueMicrotest, RedOpCreate_MarksSlotAllocatedViaFreeNext) {

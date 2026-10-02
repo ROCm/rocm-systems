@@ -10,6 +10,7 @@
 #include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
+#include <algorithm>
 #include <fmt/format.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
@@ -85,9 +86,9 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     py::doc("ROCm Systems Profiler Python bindings for profiling, user API, and "
             "code coverage post-processing");
 
-    static bool _is_initialized = false;
-    static bool _is_finalized   = false;
-    static auto _get_use_mpi    = []() {
+    static bool       _is_initialized = false;
+    static bool       _is_finalized   = false;
+    static auto const _get_use_mpi    = []() {
         bool _use_mpi = false;
         try
         {
@@ -105,7 +106,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     // Deferred out of module init: this is the first call into the dl layer and it
     // dlopens librocprof-sys.so, so registering here would load the whole runtime on
     // `import rocprofsys`.
-    static auto _register_pause_callbacks = []() {
+    static auto const _register_pause_callbacks = []() {
         rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
                                                      &pyrocprofsys_resume_callback);
     };
@@ -186,7 +187,8 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
-        auto _msg = fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
+        auto const _msg =
+            fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -259,7 +261,7 @@ get_config()
     static auto*              _instance    = new config{};
     static thread_local auto* _tl_instance = []() {
         static std::atomic<std::uint32_t> _count{ 0 };
-        auto                              _cnt = _count++;
+        auto const                        _cnt = _count++;
         if(_cnt == 0)
         {
             return _instance;
@@ -348,7 +350,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
         return;
     }
 
-    static auto _rocprofsys_path = _config.base_module_path;
+    static auto const _rocprofsys_path = _config.base_module_path;
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
@@ -368,7 +370,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
         return;
     }
 
-    auto _update_ignore_stack_depth = [what]() {
+    auto const _update_ignore_stack_depth = [what]() {
         switch(what)
         {
             case PyTrace_CALL: ++_config.ignore_stack_depth; break;
@@ -405,7 +407,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
 
     // get the arguments
     auto _get_args = [&]() {
-        auto inspect = py::module::import("inspect");
+        auto const inspect = py::module::import("inspect");
         try
         {
             return py::cast<std::string>(
@@ -423,8 +425,8 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
     };
 
     // get the final label
-    auto _get_label = [&](auto& _funcname, auto& _filename, auto& _fullpath) {
-        auto _bracket = _config.include_filename;
+    auto const _get_label = [&](auto& _funcname, auto& _filename, auto& _fullpath) {
+        auto const _bracket = _config.include_filename;
         if(_bracket)
         {
             _funcname.insert(0, "[");
@@ -466,7 +468,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
         return _funcname;
     };
 
-    auto _find_matching = [](const strset_t& _expr, const std::string& _name) {
+    auto const _find_matching = [](const strset_t& _expr, const std::string& _name) {
         const auto _rconstants =
             std::regex_constants::egrep | std::regex_constants::optimize;
         for(const auto& itr : _expr)  // NOLINT
@@ -479,11 +481,11 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
         return false;
     };
 
-    bool  _force      = false;
-    auto& _only_funcs = _config.restrict_functions;
-    auto& _incl_funcs = _config.include_functions;
-    auto& _skip_funcs = _config.exclude_functions;
-    auto  _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
+    bool        _force      = false;
+    auto const& _only_funcs = _config.restrict_functions;
+    auto const& _incl_funcs = _config.include_functions;
+    auto const& _skip_funcs = _config.exclude_functions;
+    auto        _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
 
     if(!_only_funcs.empty())
     {
@@ -519,11 +521,11 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
         }
     }
 
-    auto& _only_files = _config.restrict_filenames;
-    auto& _incl_files = _config.include_filenames;
-    auto& _skip_files = _config.exclude_filenames;
-    auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
-    auto  _file       = rocprofsys::path::filename(_full);
+    auto const& _only_files = _config.restrict_filenames;
+    auto const& _incl_files = _config.include_filenames;
+    auto const& _skip_files = _config.exclude_filenames;
+    auto        _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
+    auto        _file       = rocprofsys::path::filename(_full);
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _rocprofsys_path.c_str(), _rocprofsys_path.length()) == 0)
@@ -568,7 +570,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
                                     _func.c_str(), _get_args().c_str(), _file.c_str(),
                                     _full.c_str());
 
-    auto _label = _get_label(_func, _file, _full);
+    auto const _label = _get_label(_func, _file, _full);
     if(_label.empty())
     {
         return;
@@ -579,7 +581,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
     auto                         _annotate  = _config.annotate_trace;
 
     // start function
-    auto _profiler_call = [&]() {
+    auto const _profiler_call = [&]() {
         int _lineno = 0;
         int _lasti  = 0;
         if(_annotate)
@@ -605,7 +607,7 @@ profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::obj
     };
 
     // stop function
-    auto _profiler_return = [&]() {
+    auto const _profiler_return = [&]() {
         if(!_config.records.empty())
         {
             _config.records.back()();
@@ -629,7 +631,7 @@ generate(py::module& _pymod)
 {
     py::module _prof = _pymod.def_submodule("profiler", "Profiling functions");
 
-    auto _init = []() {
+    auto const _init = []() {
         try
         {
             auto _file =
@@ -653,7 +655,7 @@ generate(py::module& _pymod)
         get_config().is_running       = true;
     };
 
-    auto _fini = []() {
+    auto const _fini = []() {
         if(!get_config().is_running)
         {
             return;
@@ -663,8 +665,8 @@ generate(py::module& _pymod)
         get_config().records.clear();
     };
 
-    auto _sys        = py::module::import("sys");
-    auto _setprofile = _sys.attr("setprofile");
+    auto const _sys        = py::module::import("sys");
+    auto const _setprofile = _sys.attr("setprofile");
 
     _prof.def("profiler_function", &profiler_function, "Profiling function");
     _prof.def("profiler_init", _init, "Initialize the profiler");
@@ -718,16 +720,16 @@ generate(py::module& _pymod)
     CONFIGURATION_PROPERTY("verbosity", std::int32_t, "Verbosity of the logging",
                            get_config().verbose)
 
-    static auto _get_strset = [](const strset_t& _targ) {
+    static auto const _get_strset = [](const strset_t& _targ) {
         auto _out = py::list{};
-        for(auto itr : _targ)
+        for(const auto& itr : _targ)
         {
             _out.append(itr);
         }
         return _out;
     };
 
-    static auto _set_strset = [](const py::list& _inp, strset_t& _targ) {
+    static auto const _set_strset = [](const py::list& _inp, strset_t& _targ) {
         for(const auto& itr : _inp)
         {
             _targ.insert(itr.cast<std::string>());
@@ -859,14 +861,15 @@ generate(py::module& _pymod)
     _pycov_details.def(py::self <= py::self);
     _pycov_details.def(py::self >= py::self);
 
-    auto _load_coverage = [](const std::string& _inp) {
+    auto const _load_coverage = [](const std::string& _inp) {
         coverage::code_coverage* _summary = nullptr;
         coverage_data_vector_t*  _details = nullptr;
         std::ifstream            ifs{ _inp };
         if(ifs)
         {
             namespace cereal = tim::cereal;
-            auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
+            auto const ar =
+                tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
             try
             {
@@ -886,12 +889,12 @@ generate(py::module& _pymod)
         return std::make_tuple(_summary, _details);
     };
 
-    auto _save_coverage = [](coverage::code_coverage* _summary,
-                             coverage_data_vector_t* _details, std::string _name) {
+    auto const _save_coverage = [](coverage::code_coverage* _summary,
+                                   coverage_data_vector_t* _details, std::string _name) {
         std::stringstream oss{};
         {
             namespace cereal = tim::cereal;
-            auto ar =
+            auto const ar =
                 tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
 
             ar->setNextName("rocprofsys");
@@ -922,11 +925,11 @@ generate(py::module& _pymod)
     _pycov.def("save", _save_coverage, "Save code coverage data", py::arg("summary"),
                py::arg("details"), py::arg("filename") = "coverage.json");
 
-    auto _concat_coverage = [](coverage_data_vector_t* _lhs,
-                               coverage_data_vector_t* _rhs) {
-        std::sort(_rhs->begin(), _rhs->end(), std::greater<coverage::coverage_data>{});
+    auto const _concat_coverage = [](coverage_data_vector_t* _lhs,
+                                     coverage_data_vector_t* _rhs) {
+        std::ranges::sort(*_rhs, std::greater<coverage::coverage_data>{});
 
-        auto _find = [_lhs](const auto& _v) {
+        auto const _find = [_lhs](const auto& _v) {
             for(auto iitr = _lhs->begin(); iitr != _lhs->end(); ++iitr)
             {
                 if(*iitr == _v)
@@ -941,7 +944,7 @@ generate(py::module& _pymod)
         _new_entries.reserve(_rhs->size());
         for(auto& itr : *_rhs)
         {
-            auto litr = _find(itr);
+            auto const litr = _find(itr);
             if(!litr.second)
             {
                 _new_entries.emplace_back(&itr);
@@ -959,7 +962,7 @@ generate(py::module& _pymod)
         }
         _rhs->clear();
 
-        std::sort(_lhs->begin(), _lhs->end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(*_lhs, std::greater<coverage::coverage_data>{});
         return _lhs;
     };
 
@@ -968,11 +971,11 @@ generate(py::module& _pymod)
     using coverage_data_map =
         uomap_t<std::string_view, uomap_t<std::string_view, std::map<size_t, size_t>>>;
 
-    auto _coverage_summary = [](coverage_data_vector_t* _data) {
+    auto const _coverage_summary = [](coverage_data_vector_t* _data) {
         coverage::code_coverage _summary{};
         coverage_data_map       _mdata{};
 
-        for(auto& itr : *_data)
+        for(auto const& itr : *_data)
         {
             _mdata[itr.module][itr.function][itr.address] += itr.count;
         }
@@ -1003,9 +1006,9 @@ generate(py::module& _pymod)
 
     _pycov.def("get_summary", _coverage_summary, "Generate a code coverage summary");
 
-    auto _get_top = [](coverage_data_vector_t* _data, size_t _n) {
+    auto const _get_top = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::greater<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::greater<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;
@@ -1014,9 +1017,9 @@ generate(py::module& _pymod)
     _pycov.def("get_top", _get_top, "Get the top covered functions", py::arg("details"),
                py::arg("n") = 10);
 
-    auto _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
+    auto const _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
         auto _ret = *_data;
-        std::sort(_ret.begin(), _ret.end(), std::less<coverage::coverage_data>{});
+        std::ranges::sort(_ret, std::less<coverage::coverage_data>{});
         _ret.resize(std::min<size_t>(_n, _ret.size()));
         _ret.shrink_to_fit();
         return _ret;

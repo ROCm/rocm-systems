@@ -28,6 +28,8 @@
 #include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
+#include "archinfo.h"
+#include "rccl_float8.h"
 #include "net.h"
 #include "compiler.h"
 #include "rma/rma.h"
@@ -3472,10 +3474,6 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
 #if defined(RCCL_BFLOAT16)
     hip_bfloat16 bf16;
 #endif
-#if defined(RCCL_FLOAT8)
-    rccl_float8 f8;
-    rccl_bfloat8 bf8;
-#endif
     void* ptr;
   };
   u64 = 0;
@@ -3521,12 +3519,12 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
       break;
 #if defined(RCCL_FLOAT8)
     case ncclFloat8e4m3:
-      opFull->op = ncclDevPreMulSum;
-      f8 = static_cast<rccl_float8>(float(1.0 / comm->nRanks));
-      break;
     case ncclFloat8e5m2:
+      // FuncPreMulSum<fp8> takes a float scalar (reduce_kernel.h). An fp8 scalar would
+      // be encoded with the host typedef, which is OCP even where the device decodes
+      // FNUZ, and 1/nRanks is not representable in fp8 for most rank counts.
       opFull->op = ncclDevPreMulSum;
-      bf8 = static_cast<rccl_bfloat8>(float(1.0 / comm->nRanks));
+      f32 = float(1.0 / comm->nRanks);
       break;
 #endif
     case ncclFloat16:
@@ -4733,6 +4731,16 @@ ncclResult_t ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDa
     if (size < 1) return ncclInternalError;
     user->opFull.scalarArgIsPtr = false;
     std::memcpy(&user->opFull.scalarArg, scalar, size);
+#if defined(RCCL_FLOAT8)
+    if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+      // FuncPreMulSum<fp8> takes a float scalar. The byte is in the device's fp8 encoding,
+      // like the payload and like an ncclScalarDevice scalar, so decode it as the device would.
+      float f = rcclFp8ToFloat(*static_cast<uint8_t const*>(scalar), datatype == ncclFloat8e5m2,
+                               rcclFp8DeviceIsFnuz(comm->archName));
+      user->opFull.scalarArg = 0;
+      std::memcpy(&user->opFull.scalarArg, &f, sizeof(f));
+    }
+#endif
   } else {
     user->opFull.scalarArgIsPtr = true;
     user->opFull.scalarArg = reinterpret_cast<uint64_t>(scalar);
