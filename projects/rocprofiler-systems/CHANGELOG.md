@@ -26,6 +26,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
+  so a process can be profiled to rocpd in one session and to Perfetto in the next.
 
 ### Resolved issues
 
