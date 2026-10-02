@@ -443,6 +443,11 @@ class IsaProfile(ABC):
         """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
         return True
 
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        """L2 ADD NaN order; indexed LDS always prefers the incoming operand."""
+        return False
+
     def scalar_atomic_denorm_modes(
         self, operation: str, elem_size: int, *, ds: bool
     ) -> tuple[str, str]:
@@ -554,6 +559,11 @@ class IsaProfile(ABC):
     @property
     def renders_gfx11_image_syntax(self) -> bool:
         """Whether GFX11 image operands and modifiers use canonical syntax."""
+        return False
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        """Whether MIMG NSA appends one DWORD of address-register selectors."""
         return False
 
     @property
@@ -880,6 +890,16 @@ class IsaProfile(ABC):
     def vop3_carry_mask_size_bits(self) -> int | None:
         """Explicit VOP3 carry input/output mask width, if target-specific."""
         return None
+
+    @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        """Mnemonic prefixes whose encoded destination is also an input."""
+        return ()
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        """True def widths for tied destinations whose encoded read is wider."""
+        return {}
 
     @property
     def waitcnt_decode(self) -> str:
@@ -1490,6 +1510,18 @@ class _AmdgpuProfileBase(IsaProfile):
                    ISAs: RDNA4, CDNA5.
         """
         return 'gfx9'
+
+    @property
+    def vmcnt_capacity(self) -> int:
+        """VMCNT's all-ones no-wait value and issue capacity, or zero if absent."""
+        return 0 if self.waitcnt_family == 'gfx12' else (1 << 6) - 1
+
+    @property
+    def lgkmcnt_capacity(self) -> int:
+        """LGKMCNT's all-ones no-wait value and issue capacity, or zero if absent."""
+        if self.waitcnt_family == 'gfx12':
+            return 0
+        return int(self.waitcnt_lgkmcnt_mask, 0)
 
     @property
     def vmem_stores_complete_in_order(self) -> bool:
@@ -2187,6 +2219,19 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
 
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # VINTERP uses the same 256..511 VGPR source selectors as VOP3.
+        # The GFX11 XML labels its nine-bit sources as unprefixed VGPR indices.
+        if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
+            return 'OPR_SRC_VGPR'
+        return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        return True
+
     @property
     def vmem_writes_use_expcnt(self) -> bool:
         return True
@@ -2527,6 +2572,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         # RDNA4 chapter 13 / CDNA5 chapter 12 operate on flushed inputs.
         return False
 
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        return True
+
     def scalar_atomic_denorm_modes(
         self, operation: str, elem_size: int, *, ds: bool
     ) -> tuple[str, str]:
@@ -2794,6 +2843,11 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     @property
+    def atomic_source_nan_first(self) -> bool:
+        # Preserve the existing L2 policy until qualified on CDNA5 hardware.
+        return False
+
+    @property
     def vmem_stores_complete_in_order(self) -> bool:
         return True
 
@@ -3011,6 +3065,19 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def vop3_carry_mask_size_bits(self) -> int | None:
         return 32
+
+    @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        # SWMMAC is a two-address operation: its encoded VDST supplies C as
+        # well as naming D. Keep the tied read implicit so disassembly prints
+        # the operand only once.
+        return ('V_SWMMAC_',)
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        # The MRISA encodes the largest (F32 accumulator) view. The BF16F32
+        # form actually writes a packed-BF16 matrix using half as many VGPRs.
+        return {'V_SWMMAC_BF16F32_16X16X64_BF16': 128}
 
     @property
     def supports_wgp_mode(self) -> bool:

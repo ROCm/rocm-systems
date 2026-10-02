@@ -63,7 +63,10 @@ std::vector<callchain::ts_entry_vec_t>
 callchain::get() const
 {
     std::vector<ts_entry_vec_t> _v = {};
-    if(size() == 0) return _v;
+    if(empty())
+    {
+        return _v;
+    }
 
     _v.reserve(size());
     auto _data = m_data;
@@ -71,10 +74,13 @@ callchain::get() const
     for(const auto& itr : _data)
     {
         auto _v2 = ts_entry_vec_t{ itr.timestamp, {} };
-        for(auto iitr : itr.data)
+        for(auto const iitr : itr.data)
         {
             auto _entry = binary::lookup_ipaddr_entry<true>(iitr);
-            if(_entry) _v2.second.emplace_back(*_entry);
+            if(_entry)
+            {
+                _v2.second.emplace_back(*_entry);
+            }
         }
 
         if(!_v2.second.empty())
@@ -90,9 +96,10 @@ callchain::get() const
     // remove some known functions which are by-products of interrupts
     for(auto& itr : _v)
     {
-        while(!itr.second.empty() &&
-              _known_excludes.find(itr.second.back().name) != _known_excludes.end())
+        while(!itr.second.empty() && _known_excludes.contains(itr.second.back().name))
+        {
             itr.second.pop_back();
+        }
     }
 
     std::sort(_v.begin(), _v.end(),
@@ -121,7 +128,10 @@ callchain::filter_and_patch(const std::vector<ts_entry_vec_t>& _data)
     for(const auto& itr : _data)
     {
         auto _v = backtrace::filter_and_patch(itr.second);
-        if(!_v.empty()) _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        if(!_v.empty())
+        {
+            _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        }
     }
 
     return _ret;
@@ -150,20 +160,26 @@ callchain::size() const
 void
 callchain::sample(int signo)
 {
-    if(signo != get_sampling_overflow_signal()) return;
+    if(signo != get_sampling_overflow_signal())
+    {
+        return;
+    }
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
     auto&                           _perf_event = perf::get_instance(_tid);
 
-    if(!_perf_event) return;
+    if(!_perf_event)
+    {
+        return;
+    }
 
     _perf_event->stop();
 
-    for(auto itr : *_perf_event)
+    for(auto const itr : *_perf_event)
     {
         if(itr.is_sample())
         {
@@ -172,17 +188,27 @@ callchain::sample(int signo)
             _data.timestamp = itr.get_time();
             _data.data.emplace_back(_ip);
             bool _skip_ip = true;
-            for(auto ditr : itr.get_callchain())
+            for(auto const ditr : itr.get_callchain())
             {
                 // skip the first instance of current IP but allow after that since this
                 // might be a recursive call
                 if(ditr == _ip && _skip_ip)
+                {
                     _skip_ip = false;
+                }
                 else
+                {
                     _data.data.emplace_back(ditr);
-                if(_data.data.size() == _data.data.capacity()) break;
+                }
+                if(_data.data.size() == _data.data.capacity())
+                {
+                    break;
+                }
             }
-            if(!_data.data.empty()) m_data.emplace_back(_data);
+            if(!_data.data.empty())
+            {
+                m_data.emplace_back(_data);
+            }
         }
     }
 

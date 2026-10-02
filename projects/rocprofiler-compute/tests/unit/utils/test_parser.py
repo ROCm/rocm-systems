@@ -341,6 +341,56 @@ class TestBuildDfs:
 
         assert set(ac.dfs.keys()) == expected_table_ids
 
+    def test_filter_block_3_does_not_auto_include_block_30(self):
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["3"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_no_auto_inject_when_filter_excludes_block_3(self):
+        ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"M1": {"value": "AVG(COUNTER_A)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["2"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 201 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_alias_filter_does_not_auto_include_block_30(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"memchart": "3"},
+        )
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["memchart"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+            arch="gfx950",
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
+
 
 # =============================================================================
 # expand_placeholder_ranges
@@ -424,6 +474,17 @@ def _filter_workload() -> SimpleNamespace:
     )
 
 
+def record_and_exit_stub():
+    """Return a calls list and a stub that records its args, then raises SystemExit."""
+    calls = []
+
+    def stub(*args, **_kwargs):
+        calls.append(args)
+        raise SystemExit(1)
+
+    return calls, stub
+
+
 def _kernel_filter_workload() -> SimpleNamespace:
     """Workload stub with dfs populated for apply_kernel_filter tests."""
     return SimpleNamespace(
@@ -488,12 +549,7 @@ class TestApplyFilters:
 
     def test_unknown_dispatch_id_errors(self, monkeypatch) -> None:
         """Dispatch 0 and other IDs absent from the column exit with a range hint."""
-        error_calls = []
-
-        def record_and_exit(*args, **_kwargs):
-            error_calls.append(args)
-            raise SystemExit(1)
-
+        error_calls, record_and_exit = record_and_exit_stub()
         common.patch_console(
             monkeypatch, "utils.parser", "error", error=record_and_exit
         )
@@ -516,6 +572,44 @@ class TestApplyFilters:
         workload = _filter_workload()
         workload.filter_dispatch_ids = [">4"]
         assert apply_filters(workload, "/tmp", False, False).empty
+
+    def test_dispatch_greater_than_threshold_keeps_sparse_ids(self) -> None:
+        """'> n' compares against dispatch ids, not the dispatch count."""
+        workload = _filter_workload()
+        workload.raw_pmc = pd.DataFrame({
+            "GPU_ID": [0, 0],
+            "Kernel_Name": ["vecCopy", "vecAdd"],
+            "Dispatch_ID": [1, 6],
+        })
+        workload.filter_dispatch_ids = [">4"]
+        filtered = apply_filters(workload, "/tmp", False, False)
+        assert list(filtered["Dispatch_ID"]) == [6]
+
+    def test_dispatch_greater_than_highest_id_errors(self, monkeypatch) -> None:
+        """'> n' past the highest dispatch id exits with a range hint."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">5"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False, False)
+        assert ">5 is an invalid dispatch id" in str(error_calls[0])
+        assert "from 1 to 4" in str(error_calls[0])
+
+    def test_dispatch_filter_without_dispatches_errors(self, monkeypatch) -> None:
+        """A dispatch filter on a workload with no dispatches exits."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.raw_pmc = workload.raw_pmc.iloc[0:0]
+        workload.filter_dispatch_ids = [">0"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False, False)
+        assert "This workload has no dispatches." in str(error_calls[0])
 
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""

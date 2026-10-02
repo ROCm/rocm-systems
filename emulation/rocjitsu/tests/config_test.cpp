@@ -10,8 +10,10 @@
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -1169,6 +1171,96 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
 }
 
+TEST(EffectiveConfigTest, ReplacesTheBudgetAndLeavesEveryOtherFieldAsWritten) {
+  const std::string json = R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 32,
+  "num_threads": 2
+})";
+
+  EXPECT_EQ(config::json_with_cpu_thread_budget(json, 4), R"({
+  "max_ticks": 4,
+  "cpu_thread_budget": 4,
+  "num_threads": 2
+})");
+}
+
+TEST(EffectiveConfigTest, AddsTheBudgetToConfigsThatDoNotAskForOne) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{}", 8), R"({"cpu_thread_budget": 8})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"num_threads": 2})", 8),
+            R"({"cpu_thread_budget": 8,"num_threads": 2})");
+}
+
+// The nested name is an unknown field the config parser discards, so only the scanner
+// can tell the two apart -- and picking the wrong one would silently launch under the
+// config's own budget instead of the requested one.
+TEST(EffectiveConfigTest, SetsTheTopLevelBudgetAndNotANestedFieldOfTheSameName) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"vm": {"cpu_thread_budget": 1}})", 6),
+            R"({"cpu_thread_budget": 6,"vm": {"cpu_thread_budget": 1}})");
+}
+
+TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{\n  // ceiling\n  cpu_thread_budget: 32\n}", 2),
+            "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
+}
+
+TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
+  EXPECT_THROW((void)config::json_with_cpu_thread_budget("[1]", 1), std::runtime_error);
+}
+
+TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  const std::string source = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source);
+
+  const std::string copy = config::write_effective_config(source, 12, getpid());
+
+  EXPECT_EQ(copy, rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
+  EXPECT_EQ(config::read_config_file(source), source_before);
+  EXPECT_EQ(config::load_execution_thread_settings(copy, rocjitsu::kEmbeddedSchema).request.budget,
+            12u);
+}
+
+TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-effective-config-write-failure-");
+  const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked_root) << "not a directory";
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+
+  EXPECT_THROW(
+      (void)config::write_effective_config(test::config_path("gfx942_cdna3.json"), 12, getpid()),
+      std::runtime_error);
+}
+
+// This case is registered as a native CLI test because it expects the launcher
+// to have created the invocation handoff before this child process starts.
+TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
+  const char *invocation_dir = std::getenv(rocjitsu::kRpcInvocationDirEnv);
+  ASSERT_NE(invocation_dir, nullptr);
+  ASSERT_NE(*invocation_dir, '\0');
+
+  const std::filesystem::path invocation_path(invocation_dir);
+  std::ifstream handoff(invocation_path / "config_path");
+  ASSERT_TRUE(handoff.is_open());
+
+  std::string effective_path;
+  ASSERT_TRUE(std::getline(handoff, effective_path));
+  ASSERT_FALSE(effective_path.empty());
+
+  EXPECT_EQ(std::filesystem::absolute(effective_path).lexically_normal(),
+            (invocation_path / config::kEffectiveConfigName).lexically_normal());
+  ASSERT_TRUE(std::filesystem::exists(effective_path));
+
+  const std::string source_path = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source_path);
+  const auto settings =
+      config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(settings.request.budget, 4u);
+  EXPECT_EQ(config::read_config_file(source_path), source_before);
+}
+
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
@@ -1609,6 +1701,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_NE(legacy_config, nullptr);
   EXPECT_FALSE(
       flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_SCRATCH_SLOTS_PER_CU));
   ASSERT_NE(checkpoint->compute_units(), nullptr);
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
@@ -1617,6 +1711,45 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  EXPECT_EQ(cu->scratch_slots_per_cu(), cu->num_wf_slots());
+}
+
+TEST(CheckpointTest, RoundTripsCdna5ScratchCapacity) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
+  ASSERT_EQ(source_cu->num_wf_slots(), 64u);
+  ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
+  ASSERT_EQ(source_cu->scratch_scoreboard_base(), 480u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-scratch-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored_cu = fb::GetSimulationCheckpoint(bytes.data())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine()
+                              ->compute_unit();
+  ASSERT_NE(stored_cu, nullptr);
+  EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_EQ(restored.soc()->num_xcds(), 8u);
+  for (auto *xcd : restored.soc()->xcds()) {
+    auto *cp = xcd->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), 32u);
+    for (const auto *cu : cus) {
+      EXPECT_EQ(cu->num_wf_slots(), 64u);
+      EXPECT_EQ(cu->scratch_slots_per_cu(), 32u);
+    }
+    EXPECT_EQ(cus[15]->scratch_scoreboard_base(), 480u);
+    EXPECT_EQ(cus[16]->scratch_scoreboard_base(), 0u);
+  }
 }
 
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
