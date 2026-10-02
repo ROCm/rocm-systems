@@ -173,6 +173,14 @@ public:
         return std::regex_search(m_content, re);
     }
 
+    // AlltoAll has no ring/tree kernel, so it never prints "AlltoAll: ... -> Algo".
+    // The selector logs this on the way to the direct p2p path. TUNING must be on.
+    bool usedDirectAlltoAll() const
+    {
+        return hasPattern("A2A CE-registered disqualified") ||
+               hasPattern("A2A DDA disqualified");
+    }
+
     bool usedNonSymmetricWindowRegistration() const
     {
         return hasPattern("windowRegisterNonSym:");
@@ -209,6 +217,15 @@ private:
 class RegistrationTestBase : public MPITestBase
 {
 protected:
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        // Later tests in this process append to the same rank log. Slice from
+        // here so an earlier numSegments line cannot satisfy this test.
+        logStartOffset_ = MPIHelpers::getFileSizeBytes(
+            MPIHelpers::getRankLogFilePath(getTestMpiRank()));
+    }
+
     struct RegInfo {
         void* buffer = nullptr;
         void* handle = nullptr;
@@ -322,10 +339,15 @@ protected:
 
     bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
 
+    std::uintmax_t logStartOffset_ = 0;
+
     // Log File Access
     std::string readRankLogFile()
     {
-        return MPIHelpers::readRankLogFile(getTestMpiRank());
+        const std::string full = MPIHelpers::readRankLogFile(getTestMpiRank());
+        if (logStartOffset_ >= full.size())
+            return {};
+        return full.substr(static_cast<std::size_t>(logStartOffset_));
     }
 
     REGLogChecker getLogChecker()
