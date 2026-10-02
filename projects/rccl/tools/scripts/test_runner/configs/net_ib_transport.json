@@ -1113,6 +1113,11 @@
           "test_filter": "RmaMultiSegmentMPITest.RankLocalRegistrationFailureRejectedCollectively"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_RegistrationAfterCollectiveRejection",
+          "description": "After a collectively rejected registration, 4-, 2- and 3-segment registrations on the same comm reuse the consensus buffer and each transfer intact",
+          "test_filter": "RmaMultiSegmentMPITest.RegistrationAfterCollectiveRejectionTransfers"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutOutOfRangeRejected",
           "description": "Negative: out-of-range iput offsets and sizes are rejected with ncclInvalidArgument, nothing is posted and the destination window is byte-for-byte intact",
           "test_filter": "RmaMultiSegmentMPITest.IPutOutOfRangeRejectedNoCorruption"

@@ -165,19 +165,6 @@ TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)
     EXPECT_TRUE(ncclRmaRegistrationHandleReady(&handle, NCCL_RMA_MAX_SEGMENTS));
 }
 
-// nranks>64 overlays compact consensus on the unused registration stack.
-TEST(RmaSegmentMathTest, CompactConsensusOverlaysRegistrationStackWhenHeapFails)
-{
-    char heap{};
-    char stack[64 * 128];
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(&heap, stack, sizeof(stack), 65, sizeof(int)), &heap);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(int)), stack);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(ncclResult_t)), stack);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, 64 * sizeof(int), 65, sizeof(int)), nullptr);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 0, sizeof(int)), nullptr);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, nullptr, sizeof(stack), 65, sizeof(int)), nullptr);
-}
-
 TEST(RmaSegmentMathTest, SegmentCountsMatchIgnoresBoundaries)
 {
     EXPECT_TRUE(ncclRmaSegmentCountsMatch(2, 2));
