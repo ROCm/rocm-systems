@@ -65,6 +65,10 @@ HOST_SRC = main.cpp
 # Output
 DEFAULT_TARGET = mega_kernel_test
 
+# Cluster launch API (hipLaunchAttributeClusterDimension) is opt-in for gfx1250
+# only; many HIP 7.2 installs lack the enumerator (breaks gfx90a host compile).
+CLUSTER_LAUNCH_FLAGS_gfx1250 := -DMEGA_KERNEL_ENABLE_CLUSTER_LAUNCH=1
+
 # Build rules
 .PHONY: all clean run run-gfx1250-health $(ARCHES) all-arch help
 
@@ -72,13 +76,13 @@ all: $(DEFAULT_TARGET)
 
 $(DEFAULT_TARGET): $(KERNEL_SRC) $(HOST_SRC)
 	@echo "Building for $(GPU_ARCH)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=$(GPU_ARCH) $(INCLUDES) -o $@ $^
+	$(HIPCC) $(HIPCC_FLAGS) $(CLUSTER_LAUNCH_FLAGS_$(GPU_ARCH)) --offload-arch=$(GPU_ARCH) $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
 # One pattern rule for all per-arch binaries (stem is full token, e.g. gfx950)
 $(ARCH_BINS): mega_kernel_test_%: $(KERNEL_SRC) $(HOST_SRC)
 	@echo "Building for $*..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=$* $(INCLUDES) -o $@ $^
+	$(HIPCC) $(HIPCC_FLAGS) $(CLUSTER_LAUNCH_FLAGS_$*) --offload-arch=$* $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
 # Symlink convenience: gfx950 -> mega_kernel_test_gfx950, etc.

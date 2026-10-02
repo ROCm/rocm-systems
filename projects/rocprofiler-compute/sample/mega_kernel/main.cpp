@@ -36,8 +36,12 @@
 #endif
 #include <vector>
 
-// Cluster launch requires HIP 7.2+ (hipLaunchKernelEx + clusterDim attribute).
-#if defined(HIP_VERSION) && (HIP_VERSION >= 70200000)
+// Cluster launch needs hipLaunchAttributeClusterDimension / clusterDim. That
+// attribute is not in every HIP 7.2 install (e.g. Alola ROCm 7.2.0 has
+// hipLaunchKernelEx but no ClusterDimension enumerator). HIP_VERSION alone is
+// not a valid probe, and host/device ifdefs still fail the host pass on gfx90a.
+// Opt in only via -DMEGA_KERNEL_ENABLE_CLUSTER_LAUNCH (Makefile: gfx1250).
+#if defined(MEGA_KERNEL_ENABLE_CLUSTER_LAUNCH)
 #    define MEGA_KERNEL_HAS_CLUSTER_LAUNCH 1
 #endif
 
@@ -249,6 +253,7 @@ static int g_arch_type = 0;
 
 namespace {
 
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
 constexpr unsigned kClusterDimX = 2;
 constexpr unsigned kClusterDimY = 1;
 constexpr unsigned kClusterDimZ = 1;
@@ -263,6 +268,7 @@ round_up_grid_x_for_cluster(int num_blocks)
     }
     return grid_x;
 }
+#endif
 
 void
 launch_mega_kernel(dim3                          grid,
@@ -393,9 +399,13 @@ main(int argc, char** argv)
     const int BUFFER_SIZE = config.batch_size;
     const int BLOCK_SIZE  = config.block_size;
     const int NUM_BLOCKS  = (BUFFER_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE;
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
     const unsigned GRID_X =
         (g_arch_type == 7) ? round_up_grid_x_for_cluster(NUM_BLOCKS)
                            : static_cast<unsigned>(NUM_BLOCKS > 0 ? NUM_BLOCKS : 1);
+#else
+    const unsigned GRID_X = static_cast<unsigned>(NUM_BLOCKS > 0 ? NUM_BLOCKS : 1);
+#endif
 
     // Global atomic scratch: sizes and index layout — see atomic_global_buffers.h
     const int GLOBAL_INT_SIZE    = MEGA_KERNEL_GLOBAL_INT_ELEMENTS;
@@ -406,10 +416,12 @@ main(int argc, char** argv)
     printf("  Batch/Buffer Size:     %d elements\n", BUFFER_SIZE);
     printf("  Block Size:            %d threads\n", BLOCK_SIZE);
     printf("  Number of Blocks:      %d", NUM_BLOCKS);
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
     if(g_arch_type == 7 && GRID_X != static_cast<unsigned>(NUM_BLOCKS))
     {
         printf(" (grid x padded to %u for cluster launch)", GRID_X);
     }
+#endif
     printf("\n");
     printf("  Total Threads:         %u\n", GRID_X * static_cast<unsigned>(BLOCK_SIZE));
 #if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
