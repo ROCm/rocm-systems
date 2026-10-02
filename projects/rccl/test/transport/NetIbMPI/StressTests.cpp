@@ -2353,14 +2353,7 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     const double serialized = measure(nThreads);
     serialize = false;
 
-    // Every check below used to run on each rank against its own timings, and only
-    // rank 0's stdout reaches the test report. An excursion on rank 1 therefore
-    // arrived as a bare non-zero exit code with no numbers anywhere: nightly
-    // 34075079156 failed exactly that way while rank 0 reported a healthy factor of
-    // 0.97 against a budget of 2.40, leaving nothing to act on. The phases are
-    // gathered and judged in one place now, so the rank that is actually read prints
-    // every rank's numbers and names the one that failed, and the two ranks cannot
-    // leave with different verdicts.
+    // Phases are gathered so the rank that is read prints every rank's numbers and both share one verdict.
     struct PhaseTimes {
         double singleBefore;
         double singleAfter;
@@ -2369,8 +2362,7 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     };
     const PhaseTimes mine{singleBefore, singleAfter, parallel, serialized};
     std::array<PhaseTimes, kExactTwoProcesses> gathered{};
-    // MPI_BYTE over a struct of doubles: both ranks are the same build, which is
-    // what validateTestPrerequisites above has already established.
+    // MPI_BYTE over doubles is safe: both ranks run the same build.
     const bool gatheredOk =
         MPI_Gather(&mine, sizeof(PhaseTimes), MPI_BYTE, gathered.data(), sizeof(PhaseTimes),
                    MPI_BYTE, 0, MPI_COMM_WORLD)
@@ -2413,10 +2405,7 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
                       r, nThreads, p.singleBefore, p.singleAfter, p.parallel, factor,
                       p.serialized, serializedFactor, drift, budget);
 
-            // Without this the gate could pass by being blind: a wait that sleeps, or a
-            // workload that spends its time off the progress path, would report a flat
-            // factor no matter what. The same measurement has to flag a lock it knows is
-            // there before its verdict on the plugin means anything.
+            // Control: the gate must flag a known lock before its verdict on the plugin means anything.
             if (!(serializedFactor > budget)) {
                 verdict = 0;
                 why += at + "the measurement did not notice a mutex held across every transfer "
@@ -2443,8 +2432,7 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
         }
     }
 
-    // Both ranks leave with the same verdict rather than one passing while the other
-    // fails on numbers only it could see.
+    // Both ranks leave with the same verdict.
     if (MPI_Bcast(&verdict, 1, MPI_INT, 0, MPI_COMM_WORLD) != MPI_SUCCESS) verdict = 0;
     EXPECT_EQ(verdict, 1)
         << (rank == 0 ? why

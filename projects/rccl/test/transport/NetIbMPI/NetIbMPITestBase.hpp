@@ -1918,12 +1918,7 @@ protected:
 
 
 #if defined(ENABLE_FAULT_INJECTION)
-    // ── Worker-safe IB-CAST fault injection ──────────────────────────
-    // The pre-call intercept hooks store their state in the communicator
-    // (faultQpDelayUs / faultQpError in ncclIbNetCommBase), so a worker can
-    // break its own connection without touching anybody else's. The
-    // libibverbs-level ops registry is process-global and deliberately not
-    // used here.
+    // ── Worker-safe IB-CAST fault injection: per-communicator hooks, not the global ops registry ──
 
     ThreadResult WorkerCastFaultArmError(void* sendComm, int nqps) {
         ThreadResult result;
@@ -1970,18 +1965,12 @@ protected:
         return result;
     }
 
-    // Post one send and poll it, treating both a failed isend and a fatal error
-    // count as an outcome rather than a test failure. Used by fault tests that
-    // accept either signal.
+    // Post one send and poll it; a failed isend and a fatal count are both outcomes, not failures.
     struct WorkerFaultSendOutcome {
         ncclResult_t sendRet = ncclSuccess;
         bool         completed = false;
         int          fatalCount = 0;
-        // Set when the work is known to be retired, which is any of three things: no
-        // request was ever created, the request was seen to finish, or every queue pair of
-        // this communicator was driven to error, which retires their work with a flush
-        // status. When it is false the caller must keep its buffer and registration, since
-        // something may still reference them.
+        // True when no work can still reference the caller's buffer; if false, keep buffer and registration.
         bool         retired = false;
     };
 
@@ -1996,9 +1985,7 @@ protected:
         }
         outcome.fatalCount = WorkerCastFatalCount(sendComm);
 
-        // The post never produced a request, so there is nothing that can reference the
-        // caller's buffer. That is retired by the field's own definition, and saying
-        // otherwise makes the caller keep memory alive for work that does not exist.
+        // No request was created, so nothing can reference the buffer.
         if (request == nullptr) outcome.retired = true;
 
         if (outcome.sendRet == ncclSuccess && request != nullptr) {
@@ -2012,9 +1999,7 @@ protected:
                 }
                 outcome.fatalCount = WorkerCastFatalCount(sendComm);
                 if (done) {
-                    // Observed finishing is the other way work retires, and the settle
-                    // loop below is skipped once completed is set -- so record it here or
-                    // it is never recorded at all.
+                    // Recorded here because the settle loop below is skipped once completed is set.
                     outcome.completed = true;
                     outcome.retired = true;
                     break;
@@ -2024,23 +2009,8 @@ protected:
             }
         }
 
-        // Never returns with the request still able to reference the caller's buffer: the
-        // three callers read an uncompleted outcome as the signal they were looking for
-        // and return, and their guards would then deregister and free that memory.
-        //
-        // Polling cannot establish retirement here, and an earlier version of this that
-        // read an error as "retired" was wrong. IbCastTest checks the communicator's fatal
-        // counter before it looks at the request at all (net_ib_cast/p2p.cc:1211) and
-        // returns on the first error CQE before the remaining devices are polled (:1248),
-        // so once the injected fault has been counted every call returns an error and done
-        // is never set -- whatever the work is doing.
-        //
-        // So retirement is caused rather than observed: driving every queue pair of this
-        // communicator to error makes the hardware retire their work with a flush status,
-        // which is what the abandoned-request helpers do. A short poll first, because a
-        // request that did complete costs nothing to notice. All three callers clear the
-        // fault and stop using this communicator for traffic afterwards, so breaking its
-        // queue pairs costs them nothing.
+        // Never return with the request able to touch the buffer. Polling cannot prove retirement once the fault
+        // is counted (IbCastTest errors first), so drive every QP to error to retire work with a flush status.
         if (request != nullptr && !outcome.completed) {
             static constexpr int kSettlePolls = 100;  // 100 * 10ms = 1s
             for (int poll = 0; poll < kSettlePolls; poll++) {
@@ -2054,11 +2024,7 @@ protected:
                 usleep(kPollIntervalUs);
             }
             if (!outcome.retired) {
-                // Whether the transitions actually happened is the whole guarantee, so it is
-                // checked rather than assumed: a count query that failed used to become
-                // nqps = 1, which on the multi-QP suites leaves work live on the others, and
-                // every transition's result was discarded. When either does not hold the
-                // caller is told, and it keeps its memory instead.
+                // Both the count and every transition are checked; if either fails the caller keeps its memory.
                 int nqps = 0;
                 const bool counted = WorkerCastLiveNqps(sendComm, &nqps).ok && nqps > 0;
                 if (!counted) nqps = 1;
@@ -2072,19 +2038,8 @@ protected:
         return outcome;
     }
 
-    // Shared worker body for the failover tests: drive the sender's QP 0 into
-    // the error state, then require the payload to still arrive over the
-    // surviving device of a fused NIC, with no fatal error and a device state
-    // that is no longer Ok.
-    //
-    // What the concurrency exercises here is overlapping failovers, not recovery:
-    // the suites that run this leave NCCL_IB_RESILIENCY_PORT_RECOVERY at its
-    // default of off, because these assertions require the device to stay
-    // not-Ok and recovery would undo that underneath them. Resiliency state is per
-    // communicator, so N workers drive their own links into error at the same
-    // moment on one fused device, and every one of them has to keep routing over
-    // the survivor. The process-global recovery thread is a different claim, and
-    // fault_recovery_multithread_2 is where it is made.
+    // Failover body: break the sender's QP 0; the payload must arrive over the surviving device, state not Ok.
+    // Port recovery stays off here; the global recovery thread is covered by fault_recovery_multithread_2.
     ThreadResult WorkerCastFailoverTransfer(int rank, ConnectionPair& pair, void* buffer,
                                             size_t size, int tag, void* mhandle, int seed,
                                             int messages = 1, std::atomic<int>* arrived = nullptr,
@@ -2093,12 +2048,7 @@ protected:
                                             HostBufferAutoGuard* allocation = nullptr,
                                             std::atomic<bool>* aborted = nullptr) {
         ThreadResult result;
-        // Without a gate here the failures are merely started from several workers,
-        // not overlapping: each worker allocates, registers and warms up first, so a
-        // fast one can be through failover before a slow one reaches this line, and
-        // simultaneous errors on the one fused device -- the thing this body claims
-        // to cover -- go untested. Bounded, and a timeout is reported rather than
-        // asserted, since a worker cannot fail the test alone.
+        // Bounded gate so the failures overlap on the fused device instead of merely starting from several workers.
         if (arrived && expected > 1
             && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
             result.ok = false;
@@ -2115,10 +2065,7 @@ protected:
                                            kLargeTransferTimeoutMs);
             if (!result.ok) {
                 result.msg = "after driving QP 0 to error: " + result.msg;
-                // A timed-out wait leaves the request posted: WorkerSendRecvPattern
-                // drops the pointer without cancelling it, so returning straight to
-                // the caller would let its guards free memory the NIC may still be
-                // writing into. Same treatment as WorkerTransferAcrossQpFailure.
+                // The timed-out request is still posted, so memory is retained as in WorkerTransferAcrossQpFailure.
                 if (registration || allocation)
                     return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration,
                                                              allocation);
@@ -2142,8 +2089,7 @@ protected:
             result.msg = "ncclIbCastGetResiliencyState failed";
             return result;
         }
-        // 0 is ncclIbResiliencyDevStateOk; anything else means the failure was
-        // registered (Error, RecoveryInProgress or Recovered).
+        // 0 is ncclIbResiliencyDevStateOk; anything else means the failure was registered.
         if (state.devState[0] == 0) {
             result.ok = false;
             result.msg = "device 0 still reports Ok after its QP was driven to error";
@@ -2151,19 +2097,8 @@ protected:
         return result;
     }
 
-    // Drives this rank's own side of the connection to error, which retires whatever work
-    // is outstanding on it with a flush status. Reports whether every queue pair it should
-    // have reached was reached: a queue pair that could not be driven still holds its work,
-    // so a caller that is about to release memory has to know.
-    //
-    // The two sides learn their count differently. The sender can be asked. The receiver
-    // cannot, so that walk reads the plugin's answers: ncclInvalidArgument means the index
-    // is past the count (net_ib_cast/p2p.cc:1320) and ends the walk, while any other error
-    // is a failed ibv_modify_qp on a queue pair that exists and must not be mistaken for
-    // the end of the range. It used to stop on either, and before that it walked a fixed
-    // eight -- exactly what NCCL_IB_QPS_PER_CONNECTION=4 gives on the two-member merged
-    // device these suites use, so raising that parameter left higher queue pairs holding
-    // the memory. The bound is still there for a plugin that answers every index.
+    // Drives this rank's side to error to flush outstanding work and reports whether every QP was reached.
+    // The receiver walks until ncclInvalidArgument (past the count); other errors are real transition failures.
     ThreadResult WorkerFlushOwnSideQps(ConnectionPair& pair, int rank) {
         ThreadResult result;
         auto note = [&](int qp, const std::string& why) {
@@ -2176,12 +2111,7 @@ protected:
             int nqps = 0;
             const ThreadResult counted = WorkerCastLiveNqps(pair.sendComm, &nqps);
             if (!counted.ok || nqps <= 0) {
-                // Falling back to nqps = 1 here used to make this call report success
-                // after driving only QP 0, while any higher queue pair a live-count
-                // failure hid kept its work outstanding -- the same defect
-                // WorkerCastFaultSend was fixed for above, just not carried over. Which
-                // queue pair still holds work is exactly what a failed count cannot say,
-                // so this reports the count failure itself rather than naming one.
+                // A failed count cannot say which QP still holds work, so report it instead of assuming nqps = 1.
                 result.ok = false;
                 result.msg = "could not learn how many queue pairs to drive to error ("
                              + (counted.ok
@@ -2206,13 +2136,7 @@ protected:
         return result;
     }
 
-    // For a failure where a request may still be live and the test cannot reach it:
-    // WorkerSendRecvPattern owns its request and a timed-out wait does not cancel the
-    // work, so the buffer and its registration must not be released as the worker
-    // unwinds. This side's queue pairs are driven to error first, which retires
-    // outstanding work with a flush status, and both guards are then retained because
-    // nothing here can prove the request is gone. Leaking one buffer on a failing test
-    // is the cheaper mistake.
+    // A request may still be live and unreachable: flush this side, then retain both guards rather than free.
     ThreadResult WorkerRetainAfterAbandonedRequest(ThreadResult failure, ConnectionPair& pair,
                                                    int rank, NetMHandleWorkerGuard* registration,
                                                    HostBufferAutoGuard* allocation) {
@@ -2225,13 +2149,8 @@ protected:
         return failure;
     }
 
-    // Bounded gate for the failure point: 30 s is well past the setup a sibling
-    // still has to finish, and a worker that already failed must not hang the rest.
 
-    // Failover with requests already in flight. isend only gets a request once the
-    // receiver has published a FIFO slot, so "all sends posted" implies "all receives
-    // posted" -- the ordering the serial test buys with a barrier a worker cannot use.
-    // buffer must hold messages * size bytes, one slice each.
+    // Failover with requests in flight; a posted isend implies a posted receive. buffer holds messages * size.
     ThreadResult WorkerCastFailoverInFlight(int rank, ConnectionPair& pair, void* buffer,
                                             size_t size, int tag, void* mhandle, int seed,
                                             int messages, std::atomic<int>* arrived = nullptr,
@@ -2243,13 +2162,7 @@ protected:
         ThreadResult result;
         std::vector<void*> requests(messages, nullptr);
 
-        // Every exit from the first successful post onwards goes through this: a request
-        // still posted keeps the NIC writing into the buffer the caller's guards are
-        // about to release. Waiting is tried first; anything that will not complete is
-        // flushed by driving this side's queue pairs to error, which retires outstanding
-        // work with a flush status. If even that leaves a request live, both the
-        // registration and the allocation are retained -- keeping the MR while the memory
-        // is freed would not be safer -- and the message says so.
+        // Every exit after the first post: wait, else flush by driving QPs to error, else retain both guards.
         auto finish = [&](ThreadResult failure) -> ThreadResult {
             auto waitAll = [&]() {
                 int live = 0;
@@ -2266,15 +2179,10 @@ protected:
             };
 
             if (waitAll() > 0) {
-                // Each rank flushes its own side. Only the sender can be asked for the
-                // live count, so the receiver walks the same span it was told to expect;
-                // driving a queue pair that does not exist is harmless here, and using
-                // the send-side call on a receive communicator would flush nothing.
+                // Each rank flushes its own side; the receiver walks the expected span since it cannot query the count.
                 const ThreadResult flushed = WorkerFlushOwnSideQps(pair, rank);
                 const int live = waitAll();
-                // A flush that could not reach a queue pair is its own reason to keep the
-                // memory: the requests may read as retired while that queue pair still
-                // holds work.
+                // A QP the flush could not reach may still hold work, so the memory is kept.
                 if (live > 0 || !flushed.ok) {
                     if (!flushed.ok) failure.msg += "; " + flushed.msg;
                     if (live > 0) {
@@ -2290,12 +2198,7 @@ protected:
             return failure;
         };
 
-        // Gate before posting, not after. A gate between the posts and the transition
-        // would have an early worker wait for its siblings with its work already
-        // posted, and hardware needs no polling to retire it -- so the wait itself
-        // would empty the queue pair this test wants broken while it is busy. Here it
-        // only lines the workers up, and each one then posts and breaks its own link
-        // without pausing in between.
+        // Gate before posting: a gate after the posts would let the hardware drain the QP while the worker waits.
         if (arrived && expected > 1
             && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
             result.ok = false;
@@ -2317,11 +2220,7 @@ protected:
             if (!result.ok) return finish(result);
         }
 
-        // Nothing is polled before the transition: polling would drain the
-        // communicator's shared completion queues and hurry the very requests this
-        // is about. The ordering is all that is arranged here -- posted, then broken,
-        // then waited on -- and the note above the count at the end of this function
-        // says why the stronger claim is not made.
+        // Nothing is polled before the transition: polling drains the shared CQs and would hurry these requests.
         if (rank == 1) {
             result = WorkerCastDriveQpToError(pair.sendComm, 0);
             if (!result.ok) return finish(result);
@@ -2350,25 +2249,8 @@ protected:
 
         if (rank != 1) return result;
 
-        // Reported, not asserted, and that is the end of a long thread. Four ways of
-        // establishing "the failure caught several requests in flight" were tried
-        // here and none of them holds with recovery off: the QP delay hook sleeps
-        // before post_send, so it only slows posting; outstandingRequests counts
-        // requests already registered as failed, which is zero before the failure;
-        // polling each request in turn is not a snapshot, because TestRequest drains
-        // the communicator's shared completion queues; and the repost counter stays
-        // at zero even in the serial body, which orders the break against a transfer
-        // with an MPI handshake and passes -- so it does not record this path at all
-        // without port recovery.
-        //
-        // What the threaded body does establish is the ordering: every message is
-        // posted, then this worker's QP 0 is driven to error, then every message must
-        // arrive intact with no fatal error, while the sibling workers do the same to
-        // their own connections. Whether a data work request was on the wire at the
-        // instant of the transition is not observable from here, and the serial body
-        // does not observe it either -- it arranges it with a handshake a worker
-        // cannot use. The count is handed back for the main thread to log: TEST_INFO
-        // reaches MPI_Comm_rank, which a worker must not call.
+        // Reported, not asserted: with recovery off nothing observable shows requests caught in flight, only the
+        // post-break-wait ordering. The main thread logs the count, since TEST_INFO calls MPI.
         if (repostsOut) {
             int reposts = -1;
             if (ncclIbCastGetRepostCount(pair.sendComm, &reposts) != ncclSuccess) reposts = -1;
@@ -2384,29 +2266,19 @@ protected:
         return result;
     }
 
-    // Resiliency device state constants (from ncclIbResiliencyDevState enum). Held
-    // here because WorkerWaitForRecovery below reads them.
+    // ncclIbResiliencyDevState values read by WorkerWaitForRecovery.
     static constexpr int kDevStateOk                 = 0;
     static constexpr int kDevStateRecoveryInProgress = 2;
     static constexpr int kDevStateRecoveryFailed     = 3;
     static constexpr int kDevStateRecovered          = 4;
     static constexpr int kDevStateErrorPermanent     = 5;
 
-    // The global recovery thread's own budget, and the first post-recovery message
-    // has to wait out that budget on top of its own: the kick that puts the restored
-    // queue pairs back in rotation is a message, and a worker cannot make the MPI
-    // handshake the serial bodies use to order it.
+    // Recovery thread budget; the first post-recovery message has to wait it out on top of its own.
     static constexpr int kRecoveryPollIterations = 6000;  // 6000 * 10ms = 60s
     static constexpr int kFirstPostRecoveryTimeoutMs =
         kRecoveryPollIterations * (kPollIntervalUs / 1000) + kLargeTransferTimeoutMs;
 
-    // Waits for the global recovery thread to bring device 0 back on this send
-    // communicator. Ok is also the device's state before anything happened, so
-    // accepting it alone would call a communicator recovered on a run where the
-    // injected failure was never observed, and the traffic a caller then runs would
-    // prove nothing -- recoveryCount separates the two. Recovered means the recovery
-    // thread is done, not that the queue pairs are back in rotation; the caller's
-    // first message is what finishes that.
+    // Waits for device 0 to recover; recoveryCount > 0 tells real recovery from the initial Ok state.
     ThreadResult WorkerWaitForRecovery(void* sendComm) {
         ThreadResult result;
         bool recovered = false;
@@ -2440,24 +2312,10 @@ protected:
         return result;
     }
 
-    // The API rejects an index past the connection's QP count, which is how the walks
-    // below learn where to stop; the bound is there for a plugin that does not.
-    //
-    // It has to be the transport's own maximum, not a smaller number picked here. A
-    // connection's count is qpsPerConnection * ndevs (IbCastCalculateNqps), so a fused
-    // two-device NIC at NCCL_IB_QPS_PER_CONNECTION=64 reaches the full 128 -- and a
-    // hand-rolled 64 then made the sender-side walk stop at QP 63 and still report
-    // success, releasing memory queue pairs 64..127 could still be writing into, while
-    // the receive-side walk never reached the out-of-range sentinel and reported a
-    // range it had actually covered as cut short.
+    // Must be the transport's maximum: a fused two-device NIC at 64 QPs per connection reaches 128.
     static constexpr int kQpProbeLimit = NCCL_IB_MAX_QPS;
 
-    // Tells the siblings that this worker is not coming. Constructed before anything
-    // that can fail -- the allocation and the registration included, which is what the
-    // local copies of this got wrong -- and disarmed on the line that reaches the gate,
-    // so no exit above the gate has to remember to report itself. Without it a worker
-    // that returns early never arrives, and the survivors spin the whole gate and report
-    // a rendezvous timeout on top of the real error.
+    // Tells the siblings this worker is not coming; built before anything that can fail, disarmed at the gate.
     struct WorkerGateAbort {
         std::atomic<bool>& flag;
         bool armed = true;
@@ -2479,27 +2337,15 @@ protected:
         return false;
     }
 
-    // Releases a receive the peer's injected send will never satisfy. It cannot be
-    // waited out -- the failed send consumed its FIFO slot -- and the work request holds
-    // the memory region until the queue pair dies, which is after the worker must
-    // deregister. Driving this side to error flushes it instead.
+    // Releases a receive the injected send will never satisfy by driving this side to error.
     ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request,
                                               NetMHandleWorkerGuard* registration = nullptr,
                                               HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         if (!request) return result;
 
-        // Only ncclInvalidArgument means "past the last queue pair": that is the code the
-        // API answers an out-of-range index with, and it is the sentinel this walk stops
-        // on. A transition that genuinely failed comes back differently -- the call ends
-        // in NCCLCHECK(wrap_ibv_modify_qp(...)) on an existing queue pair (p2p.cc) -- and
-        // treating that as the end would leave every higher member undriven while the
-        // wait below still saw an error from one that was. That is the case the whole
-        // safety argument turns on, so it is carried out rather than folded in.
-        // Probing one index past the bound, so the sentinel is reachable even for a
-        // connection holding exactly kQpProbeLimit queue pairs; without that, such a
-        // connection would exhaust the loop with every drive succeeding and be reported
-        // as short of the end when it was not.
+        // Only ncclInvalidArgument ends the walk (index past the count); other errors are real failures.
+        // Probes one past kQpProbeLimit so a full-size connection still reaches that sentinel.
         bool droveWholeRange = false;
         for (int qp = 0; qp <= kQpProbeLimit; qp++) {
             const ncclResult_t ret = ncclIbCastFaultDriveRecvQpToError(recvComm, qp);
@@ -2508,21 +2354,9 @@ protected:
             break;
         }
 
-        // A flush completion surfaces as an error, and that is the expected
-        // outcome here: all that matters is that the request stops being
-        // outstanding before the memory region goes away.
-        // What makes the error safe to accept is the walk above, not the error itself.
-        // IbCastTest returns ncclRemoteError on the first error CQE and never sets done
-        // afterwards, so an error is the only end this wait can ever see; treating it as
-        // the end is sound only because the loop drove every queue pair the connection
-        // has, so no member is left with work still able to touch the buffer. It walked a
-        // fixed eight before, which happened to equal the count these suites run with --
-        // and it is that, not the error status, that could have released memory a higher
-        // queue pair still referenced.
+        // A flush surfaces as an error; accepting it is safe only because the walk above drove every QP.
         if (!droveWholeRange) {
-            // The range was cut short by a real transition failure, so an error seen below
-            // would prove nothing about the members never reached. Report and retain
-            // rather than wait on a guarantee that was not established.
+            // The walk stopped on a real failure, so an error below proves nothing; report and retain.
             result.ok = false;
             result.msg = "driving the receive queue pairs to error stopped short of the end "
                          "of the range, so the abandoned receive cannot be assumed retired";
@@ -2542,10 +2376,7 @@ protected:
             if (done) return result;
             usleep(kPollIntervalUs);
         }
-        // This failure says precisely that the receive is still live, so releasing the
-        // memory now is the one thing that must not happen: the caller's guards would
-        // free a buffer the device can still write into. Keeping the registration
-        // without the allocation would not be safer, so both are retained.
+        // The receive is still live, so both the registration and the allocation are retained.
         result.ok = false;
         result.msg = "the abandoned receive was still outstanding after its queue pairs were "
                      "driven to error";
@@ -2558,18 +2389,8 @@ protected:
         return result;
     }
 
-    // Both sides lose QP 0 and the payload rides the surviving device. The serial test
-    // breaks the queue pairs mid-transfer, which needs an MPI handshake a worker cannot
-    // make; both in-flight orders left the two sides a message apart, so the break here
-    // happens while the connection is idle.
-    //
-    // The guards are taken rather than left to the caller because this helper is the one
-    // that knows a transfer was attempted. WorkerSendRecvPattern owns its request and a
-    // timed-out wait does not cancel it, so returning that failure straight up would let
-    // the caller's guards deregister and free memory the NIC may still be writing into --
-    // and a transfer that runs immediately after both queue pairs were driven to error is
-    // the likeliest one in the file to time out. Callers that pass no guards get the old
-    // behaviour, which is correct only when they hold no buffer of their own.
+    // Both sides lose QP 0 while idle and the payload rides the surviving device.
+    // Takes the guards so a timed-out transfer retains memory the NIC may still write.
     ThreadResult WorkerTransferAcrossQpFailure(int rank, ConnectionPair& pair, void* buffer,
                                                size_t size, int tag, void* mhandle, int seed,
                                                int timeoutMs,
@@ -2586,7 +2407,7 @@ protected:
             result = WorkerCastDriveQpToError(pair.sendComm, 0);
             if (!result.ok) return result;
         }
-        // Nothing has been posted yet on either exit above, so those return unchanged.
+        // Nothing has been posted on the exits above, so they return unchanged.
         result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
         if (!result.ok && (registration || allocation))
             return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration, allocation);
@@ -3140,10 +2961,7 @@ protected:
     // Timeout for stress tests
     static constexpr int kStressTimeoutMs  = 60000;   // 60s
 
-    // One name for the 30 s worker gate, shared by every rendezvous and flag wait in the
-    // suite, so raising it is one edit. Declared outside the fault-injection block that
-    // most of its users live in: the stress tests use it too and are compiled whenever
-    // MPI tests are, so a -DFAULT_INJECTION=OFF build had no declaration for it.
+    // Shared 30 s worker gate; outside the fault-injection block because the stress tests use it too.
     static constexpr int kWorkerGatePolls = 3000;    // 3000 * 10ms = 30s
 
     // ── RDMA resource leak detection ─────────────────────────────────
