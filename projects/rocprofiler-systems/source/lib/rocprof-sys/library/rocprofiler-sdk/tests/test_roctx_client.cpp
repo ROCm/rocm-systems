@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -46,7 +47,7 @@ public:
                  const std::vector<annotation_entry>& annotations));
     MOCK_METHOD(void, add_string, (std::string_view string_value));
     MOCK_METHOD(void, store_region, (const region_sample& sample));
-    MOCK_METHOD(void, add_thread_info,
+    MOCK_METHOD(void, ensure_thread,
                 (const rocprofsys::trace_cache::info::thread& thread_info));
 };
 
@@ -77,9 +78,11 @@ struct mock_marker_policy
         api->add_string(string_value);
     }
     static void store_region(const region_sample& sample) { api->store_region(sample); }
-    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
+    template <typename MakeFn>
+        requires std::is_invocable_r_v<rocprofsys::trace_cache::info::thread, MakeFn>
+    static void ensure_thread(std::uint64_t, MakeFn&& make)
     {
-        api->add_thread_info(thread_info);
+        api->ensure_thread(make());
     }
 };
 
@@ -742,7 +745,7 @@ TEST_F(marker_write_test, all_backends_with_annotations)
                                                .start             = 0,
                                                .end               = 0,
                                                .extdata           = "{}" };
-    EXPECT_CALL(mock, add_thread_info(thread_info));
+    EXPECT_CALL(mock, ensure_thread(thread_info));
     EXPECT_CALL(mock,
                 store_region(AllOf(Field(&region_sample::thread_id, 42u),
                                    Field(&region_sample::name, "my_region"),

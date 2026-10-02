@@ -178,9 +178,9 @@ TEST_F(common_tracing_callbacks_test,
     EXPECT_CALL(*g_metadata_registry_mock, add_string("rocm_hip_api"));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(k_ppid));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(k_pid));
-    EXPECT_CALL(*g_metadata_registry_mock,
-                add_thread_info(
-                    Eq(thread_info_data_t{ k_ppid, k_pid, k_thread_id, 0, 0, "{}" })));
+    EXPECT_CALL(
+        *g_metadata_registry_mock,
+        ensure_thread(Eq(thread_info_data_t{ k_ppid, k_pid, k_thread_id, 0, 0, "{}" })));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
         .WillOnce(Return(k_parent_stack_id));
     EXPECT_CALL(*g_buffer_storage_mock,
@@ -229,7 +229,7 @@ TEST_F(common_tracing_callbacks_test, exit_serializes_args_populated_via_iterate
     EXPECT_CALL(*g_metadata_registry_mock, add_string("rocm_hip_api"));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
     EXPECT_CALL(
         *g_buffer_storage_mock,

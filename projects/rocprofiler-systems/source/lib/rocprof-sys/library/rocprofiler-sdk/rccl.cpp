@@ -191,7 +191,9 @@ template <typename Track>
 void
 rccl_metadata_initialize_track()
 {
-    trace_cache::get_metadata_registry().add_track({ Track::label, std::nullopt, "{}" });
+    trace_cache::get_metadata_registry().ensure_track(Track::label, [&] {
+        return rocprofsys::trace_cache::info::track{ Track::label, std::nullopt, "{}" };
+    });
 }
 
 template <typename Tp, typename... Args>

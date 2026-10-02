@@ -116,8 +116,11 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
     auto& metadata_registry = Externals::get_metadata_registry();
     metadata_registry.add_string(Category<Externals>::k_name);
 
-    metadata_registry.add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}" });
+    metadata_registry.ensure_thread(record.thread_id, [&] {
+        return typename Externals::thread_info_t{
+            Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}"
+        };
+    });
 
     const std::string args_str = get_args_string(args);
 

@@ -25,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <sys/types.h>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -160,6 +161,51 @@ struct track
     }
 };
 
+/// Transparent comparators: lookups need only the key, not a fully built struct.
+struct thread_less
+{
+    using is_transparent = void;
+    bool operator()(const thread& lhs, const thread& rhs) const
+    {
+        return lhs.thread_id < rhs.thread_id;
+    }
+    bool operator()(const thread& lhs, std::uint64_t rhs) const
+    {
+        return lhs.thread_id < rhs;
+    }
+    bool operator()(std::uint64_t lhs, const thread& rhs) const
+    {
+        return lhs < rhs.thread_id;
+    }
+};
+
+/// Transparent hash so string lookups accept a string_view without building a string.
+struct string_hash
+{
+    using is_transparent = void;
+    std::size_t operator()(std::string_view value) const noexcept
+    {
+        return std::hash<std::string_view>{}(value);
+    }
+};
+
+struct track_less
+{
+    using is_transparent = void;
+    bool operator()(const track& lhs, const track& rhs) const
+    {
+        return lhs.track_name < rhs.track_name;
+    }
+    bool operator()(const track& lhs, std::string_view rhs) const
+    {
+        return lhs.track_name < rhs;
+    }
+    bool operator()(std::string_view lhs, const track& rhs) const
+    {
+        return lhs < rhs.track_name;
+    }
+};
+
 struct code_object_less
 {
     bool operator()(const rocprofiler_callback_tracing_code_object_load_data_t& lhs,
@@ -205,8 +251,37 @@ struct metadata_registry
 
     void set_process(const info::process& process);
     void add_pmc_info(const info::pmc& pmc_info);
-    void add_thread_info(const info::thread& thread_info);
-    void add_track(const info::track& track_info);
+
+    /// Registers the thread only if @p thread_id is unknown; @p make (-> info::thread)
+    /// is invoked under the write lock, so the known path builds nothing.
+    template <typename MakeFn>
+        requires std::is_invocable_r_v<info::thread, MakeFn>
+    void ensure_thread(std::uint64_t thread_id, MakeFn&& make)
+    {
+        m_threads.ulock(
+            [thread_id](const auto& _data) {
+                return _data.find(thread_id) != _data.end();
+            },
+            [&make](auto& _data) {
+                _data.emplace(make());
+                return true;
+            });
+    }
+
+    /// Registers the track only if @p name is unknown; @p make (-> info::track)
+    /// is invoked under the write lock, so the known path builds nothing.
+    template <typename MakeFn>
+        requires std::is_invocable_r_v<info::track, MakeFn>
+    void ensure_track(std::string_view name, MakeFn&& make)
+    {
+        m_tracks.ulock(
+            [name](const auto& _data) { return _data.find(name) != _data.end(); },
+            [&make](auto& _data) {
+                _data.emplace(make());
+                return true;
+            });
+    }
+
     void add_queue(const std::uint64_t& queue_handle);
     void add_stream(const std::uint64_t& stream_handle);
     void add_string(const std::string_view string_value);
@@ -254,13 +329,17 @@ private:
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>,
         state::thread>
-                                                                m_pmc_infos;
-    common::synchronized<std::set<info::thread>, state::thread> m_threads;
-    common::synchronized<std::set<info::track>, state::thread>  m_tracks;
+        m_pmc_infos;
+    common::synchronized<std::set<info::thread, info::thread_less>, state::thread>
+        m_threads;
+    common::synchronized<std::set<info::track, info::track_less>, state::thread> m_tracks;
 
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_streams;
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_queues;
-    common::synchronized<std::unordered_set<std::string>, state::thread> m_strings;
+    common::synchronized<std::set<std::uint64_t>, state::thread> m_streams;
+    common::synchronized<std::set<std::uint64_t>, state::thread> m_queues;
+    common::synchronized<
+        std::unordered_set<std::string, info::string_hash, std::equal_to<>>,
+        state::thread>
+        m_strings;
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>,
                          state::thread>

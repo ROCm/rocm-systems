@@ -45,36 +45,60 @@ struct cache_policy
     {
         const auto thread_id = std::nullopt;
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_gfx_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_umc_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_mm_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_power>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_temp>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_memory_usage>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_gfx_busy>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_gfx_busy>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_umc_busy>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_umc_busy>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_mm_busy>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name =
+                        trace_cache::info::format_track_name<category::amd_smi_mm_busy>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_power>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name =
+                        trace_cache::info::format_track_name<category::amd_smi_power>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_temp>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name =
+                        trace_cache::info::format_track_name<category::amd_smi_temp>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_memory_usage>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_memory_usage>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
 
         auto const add_vcn_track = [&](std::optional<int> xcp_idx) {
             for(size_t clk = 0; clk < MAX_NUM_VCN; ++clk)
@@ -82,8 +106,11 @@ struct cache_policy
                 auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { .track_name = name, .thread_id = thread_id, .extdata = "{}" });
+                trace_cache::get_metadata_registry().ensure_track(name, [&] {
+                    return rocprofsys::trace_cache::info::track{ .track_name = name,
+                                                                 .thread_id  = thread_id,
+                                                                 .extdata    = "{}" };
+                });
             }
         };
 
@@ -93,8 +120,11 @@ struct cache_policy
                 auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { .track_name = name, .thread_id = thread_id, .extdata = "{}" });
+                trace_cache::get_metadata_registry().ensure_track(name, [&] {
+                    return rocprofsys::trace_cache::info::track{ .track_name = name,
+                                                                 .thread_id  = thread_id,
+                                                                 .extdata    = "{}" };
+                });
             }
         };
 
@@ -104,24 +134,37 @@ struct cache_policy
             add_jpeg_track(xcp);
         }
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_xgmi_link_width>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_xgmi_link_speed>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_xgmi_link_width>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_xgmi_link_width>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_xgmi_link_speed>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
 
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto const vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                     std::nullopt, vcn);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = vcn_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(vcn_name, [&] {
+                return rocprofsys::trace_cache::info::track{ .track_name = vcn_name,
+                                                             .thread_id  = thread_id,
+                                                             .extdata    = "{}" };
+            });
         }
 
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
@@ -129,60 +172,101 @@ struct cache_policy
             auto const jpeg_name =
                 trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                     std::nullopt, jpeg);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = jpeg_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(jpeg_name, [&] {
+                return rocprofsys::trace_cache::info::track{ .track_name = jpeg_name,
+                                                             .thread_id  = thread_id,
+                                                             .extdata    = "{}" };
+            });
         }
 
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
             auto const read_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_read_data>::value, link);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = read_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(read_name, [&] {
+                return rocprofsys::trace_cache::info::track{ .track_name = read_name,
+                                                             .thread_id  = thread_id,
+                                                             .extdata    = "{}" };
+            });
 
             auto const write_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_write_data>::value, link);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = write_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(write_name, [&] {
+                return rocprofsys::trace_cache::info::track{ .track_name = write_name,
+                                                             .thread_id  = thread_id,
+                                                             .extdata    = "{}" };
+            });
         }
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_sdma_usage>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_mem_clock>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_gfx_clock>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_mem_clock>(), [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_mem_clock>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_link_width>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_link_speed>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_bandwidth_acc>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_bandwidth_inst>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_link_width>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_pcie_link_width>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_link_speed>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_pcie_link_speed>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_pcie_bandwidth_acc>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
+            [&] {
+                return rocprofsys::trace_cache::info::track{
+                    .track_name = trace_cache::info::format_track_name<
+                        category::amd_smi_pcie_bandwidth_inst>(),
+                    .thread_id = thread_id,
+                    .extdata   = "{}"
+                };
+            });
     }
 
     /**
