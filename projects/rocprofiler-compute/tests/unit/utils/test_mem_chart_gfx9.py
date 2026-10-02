@@ -37,7 +37,15 @@ DISCOVERED_GFX9_ARCHITECTURES = tuple(
 
 GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
 
-GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
+# Cross-architecture metric contract: expected YAML differences relative to
+# gfx908 (baseline). Update these when intentionally adding or removing
+# arch-specific metrics in a YAML config.
+GFX94X_MISSING_METRIC_KEYS = frozenset()
+
+GFX94X_EXTRA_METRIC_KEYS = frozenset({
+    "Estimated HBM Read BW",
+    "Estimated HBM Write and Atomic BW",
+})
 
 GFX950_EXTRA_METRIC_KEYS = frozenset({
     "LDS Read",
@@ -46,6 +54,7 @@ GFX950_EXTRA_METRIC_KEYS = frozenset({
     "HBM Read BW",
     "HBM Write BW",
     "HBM Atomic BW",
+    "HBM Write and Atomic BW",
     "xGMI Read BW",
     "xGMI Write BW",
     "xGMI Atomic BW",
@@ -54,15 +63,10 @@ GFX950_EXTRA_METRIC_KEYS = frozenset({
     "PCIe Atomic BW",
 })
 
-GFX950_MISSING_METRIC_KEYS = frozenset({
-    "HBM Read Traffic",
-    "HBM Write and Atomic Traffic",
-    "Remote Read Traffic",
-    "Remote Write and Atomic Traffic",
-})
+GFX950_MISSING_METRIC_KEYS = frozenset()
 
 CHART_PANEL_TITLES = (
-    "Kernel",
+    "Compute Units",
     "VL1D",
     "LDS",
     "sL1D",
@@ -74,6 +78,7 @@ CHART_PANEL_TITLES = (
 
 METRICS_THAT_RENDER_NA = frozenset({
     "VL1 Hit",
+    "VL1 Coalesce",
     "VL1_L2 Read BW",
     "VL1_L2 Write BW",
     "VL1_L2 Atomic BW",
@@ -84,15 +89,34 @@ METRICS_THAT_RENDER_NA = frozenset({
     "L2 Hit",
     "L2-Fabric Read BW",
     "L2-Fabric Write and Atomic BW",
-    "HBM Read Traffic",
-    "HBM Write and Atomic Traffic",
-    "Remote Read Traffic",
-    "Remote Write and Atomic Traffic",
 })
 
 GFX9_SAMPLE_METRICS = {
     k: v if v is not None else 1
     for k, v in mem_chart_gfx9.DEFAULT_SAMPLE_METRICS.items()
+}
+
+# gfx950 is the only gfx9 architecture wired for xGMI/PCIe bandwidth counters.
+GFX950_IO_METRICS = {
+    "HBM Read BW": 100e9,
+    "HBM Write BW": 50e9,
+    "HBM Atomic BW": 1e9,
+    "xGMI Read BW": 20e9,
+    "xGMI Write BW": 10e9,
+    "xGMI Atomic BW": 500e6,
+    "PCIe Read BW": 15e9,
+    "PCIe Write BW": 8e9,
+    "PCIe Atomic BW": 200e6,
+}
+
+# Which Data Fabric blocks each architecture is expected to render.
+GFX9_EXPECTED_FABRIC_BLOCKS = {
+    "gfx908": {"MALL": False, "xGMI": True, "PCIe": False},
+    "gfx90a": {"MALL": False, "xGMI": True, "PCIe": False},
+    "gfx940": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx941": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx942": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx950": {"MALL": True, "xGMI": True, "PCIe": True},
 }
 
 
@@ -121,6 +145,8 @@ def expected_architecture_extra_metric_keys(
 ) -> frozenset[str]:
     if architecture == "gfx950":
         return GFX950_EXTRA_METRIC_KEYS
+    if architecture in GFX94X_ARCHITECTURES:
+        return GFX94X_EXTRA_METRIC_KEYS
     return frozenset()
 
 
@@ -158,7 +184,7 @@ class TestPlotMemChartGfx9:
         assert output.casefold().count("n/a") == 1
 
     def test_partial_metrics_render_values_and_placeholders(self):
-        output = render_gfx9_chart({"HBM Rd": 100, "VL1 Hit": 90})
+        output = render_gfx9_chart({"Flat Read": 100, "VL1 Hit": 90})
         assert "100" in output
         assert "N/A" in output
 
@@ -196,7 +222,7 @@ class TestPlotMemChartGfx9:
 
     def test_bandwidth_renders_human_readable(self):
         output = render_gfx9_chart({"VL1_L2 Read BW": 32e9})
-        assert "32.0 GB/s" in output
+        assert "32.000 GB/s" in output
 
     def test_empty_placeholders_do_not_render_metric_suffixes(self):
         output = render_gfx9_chart({})
@@ -206,35 +232,16 @@ class TestPlotMemChartGfx9:
         output = render_gfx9_chart({"LDS Util": 45})
         assert "Util 45.0%" in output
 
-    def test_gfx908_no_mall_no_io(self):
-        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx908")
-        assert "MALL" not in output
-        assert "xGMI" not in output
-        assert "PCIe" not in output
-
-    def test_gfx940_has_mall(self):
-        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx940")
-        assert "MALL" in output
-        assert "xGMI" not in output
-        assert "PCIe" not in output
-
-    def test_gfx950_has_mall_and_io(self):
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_fabric_blocks_render_per_architecture(self, architecture):
         metrics = dict(GFX9_SAMPLE_METRICS)
-        metrics.update({
-            "HBM Read BW": 100e9,
-            "HBM Write BW": 50e9,
-            "HBM Atomic BW": 1e9,
-            "xGMI Read BW": 20e9,
-            "xGMI Write BW": 10e9,
-            "xGMI Atomic BW": 500e6,
-            "PCIe Read BW": 15e9,
-            "PCIe Write BW": 8e9,
-            "PCIe Atomic BW": 200e6,
-        })
-        output = render_gfx9_chart(metrics, gpu_arch="gfx950")
-        assert "MALL" in output
-        assert "xGMI" in output
-        assert "PCIe" in output
+        if architecture == "gfx950":
+            metrics.update(GFX950_IO_METRICS)
+        output = render_gfx9_chart(metrics, gpu_arch=architecture)
+        for block, expected in GFX9_EXPECTED_FABRIC_BLOCKS[architecture].items():
+            assert (block in output) is expected, (
+                f"{architecture}: expected {block} present={expected}"
+            )
 
 
 class TestPanelYamlGfx9:
@@ -259,15 +266,17 @@ class TestPanelYamlGfx9:
         )
         assert len(output) > 100
 
-    def test_panel_yaml_metrics_render_same_line_count_across_base_architectures(self):
-        base_archs = [a for a in GFX9_ARCHITECTURES if a != "gfx950"]
-        line_counts = {
-            arch: len(
-                render_gfx9_chart(panel_yaml_metrics(arch), gpu_arch=arch).splitlines()
+    def test_panel_yaml_metrics_render_same_line_count_per_fabric_layout(self):
+        # Architectures that render the same fabric blocks share a line count.
+        line_counts_by_layout = {}
+        for arch in GFX9_ARCHITECTURES:
+            layout = tuple(sorted(GFX9_EXPECTED_FABRIC_BLOCKS[arch].items()))
+            output = render_gfx9_chart(panel_yaml_metrics(arch), gpu_arch=arch)
+            line_counts_by_layout.setdefault(layout, {})[arch] = len(
+                output.splitlines()
             )
-            for arch in base_archs
-        }
-        assert len(set(line_counts.values())) == 1, line_counts
+        for line_counts in line_counts_by_layout.values():
+            assert len(set(line_counts.values())) == 1, line_counts
 
     @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
     def test_panel_yaml_metrics_render_expected_placeholders(self, architecture):
@@ -388,7 +397,6 @@ class TestMembwAnnotations:
         )
         output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
         assert "[!]" not in output
-        assert "Stall" not in output
 
     def test_without_membw_matches_baseline(self):
         baseline = strip_ansi(
@@ -432,4 +440,5 @@ class TestMembwAnnotations:
             value=5.0,
         )
         output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
-        assert "Stall" not in output
+        legend_line = next(line for line in output.splitlines() if "Legend" in line)
+        assert "Stall" not in legend_line

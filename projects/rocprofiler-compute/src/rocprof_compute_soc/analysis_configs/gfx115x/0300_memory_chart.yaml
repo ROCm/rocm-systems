@@ -244,7 +244,46 @@ Panel Config:
           value: 32 * SUM(GCEA_WDRAM_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
+  # =========================================================================
+  # Table 310: Workgroup Processors (WGPs)
+  # =========================================================================
+  - metric_table:
+      id: 310
+      title: "Workgroup Processors (WGPs)"
+      cli_style: mem_chart
+      comparable: false
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum), 0)
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size), 0)
+
   metrics_description:
+    Wavefront Occupancy: Wavefronts per active WGP.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory allocated for this kernel.
+    Scratch Allocation: >-
+      The number of bytes of scratch memory requested per work-item for this kernel.
+    Workgroups: The total number of workgroups forming this kernel launch.
     ICache Hit Rate: >-
       Percentage of instruction cache accesses that are serviced from cache without fetching
       from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates
