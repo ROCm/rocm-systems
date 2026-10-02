@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "util/simd.h"
 
@@ -22,10 +23,11 @@
 namespace {
 
 namespace cmp = rocjitsu::amdgpu::comparison;
+namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 
-constexpr cmp::Policy kKeep{false};
-constexpr cmp::Policy kFlush{true};
+constexpr denorm::Policy kKeep{false};
+constexpr denorm::Policy kFlush{true};
 
 // ---------------------------------------------------------------------------
 // Reference: decode to double, flush by hand, compare with host IEEE operators.
@@ -76,12 +78,12 @@ bool reference(unsigned opcode, double a, double b) {
   }
 }
 
-template <typename Fmt, typename Rel> bool scalar(uint64_t a, uint64_t b, cmp::Policy policy) {
+template <typename Fmt, typename Rel> bool scalar(uint64_t a, uint64_t b, denorm::Policy policy) {
   using L = typename Fmt::Lane;
   return cmp::evaluate<Fmt, Rel>(static_cast<L>(a), static_cast<L>(b), policy);
 }
 
-template <typename Fmt> using RelationFn = bool (*)(uint64_t, uint64_t, cmp::Policy);
+template <typename Fmt> using RelationFn = bool (*)(uint64_t, uint64_t, denorm::Policy);
 
 template <typename Fmt> std::array<RelationFn<Fmt>, 16> relations() {
   return {&scalar<Fmt, cmp::F>,   &scalar<Fmt, cmp::Lt>,  &scalar<Fmt, cmp::Eq>,
@@ -123,7 +125,7 @@ template <typename Fmt> void expect_matches_reference(uint64_t a, uint64_t b) {
     const double da = decode<Fmt>(static_cast<typename Fmt::Lane>(a), flush);
     const double db = decode<Fmt>(static_cast<typename Fmt::Lane>(b), flush);
     for (unsigned opcode = 0; opcode < 16; ++opcode)
-      ASSERT_EQ(fns[opcode](a, b, cmp::Policy{flush}), reference(opcode, da, db))
+      ASSERT_EQ(fns[opcode](a, b, denorm::Policy{flush}), reference(opcode, da, db))
           << "opcode " << opcode << " a 0x" << std::hex << a << " b 0x" << b << " flush " << flush;
   }
 }
@@ -210,17 +212,6 @@ TEST(ComparisonTest, AppliesModifiersBeforeTheFlush) {
   EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 2u, kKeep)));
 }
 
-TEST(ComparisonTest, FlushKeepsSignAndSpecials) {
-  EXPECT_EQ(cmp::flush_input<fmt::F32>(0x807fffffu, kFlush), 0x80000000u);
-  EXPECT_EQ(cmp::flush_input<fmt::F32>(0x007fffffu, kFlush), 0x00000000u);
-  EXPECT_EQ(cmp::flush_input<fmt::F32>(0x00800000u, kFlush), 0x00800000u);
-  EXPECT_EQ(cmp::flush_input<fmt::F32>(0x7f800001u, kFlush), 0x7f800001u);
-  EXPECT_EQ(cmp::flush_input<fmt::F32>(0x807fffffu, kKeep), 0x807fffffu);
-  EXPECT_EQ(cmp::flush_input<fmt::F16>(0x83ffu, kFlush), 0x8000u);
-  EXPECT_EQ(cmp::flush_input<fmt::F64>(uint64_t{0x800fffffffffffff}, kFlush),
-            uint64_t{0x8000000000000000});
-}
-
 TEST(ComparisonTest, NegatedRelationsAreTrueOnNaN) {
   constexpr uint32_t kQuiet = 0x7fc00000u;
   constexpr uint32_t kSignaling = 0xff800001u;
@@ -242,17 +233,6 @@ TEST(ComparisonTest, SignedZerosAreEqual) {
 }
 
 // ---------------------------------------------------------------------------
-// MODE gating.
-// ---------------------------------------------------------------------------
-
-TEST(ComparisonTest, FlushesWhenInputDenormalsAreDisabled) {
-  EXPECT_TRUE(cmp::Policy::make(0u).flush_inputs);
-  EXPECT_TRUE(cmp::Policy::make(2u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(1u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(3u).flush_inputs);
-}
-
-// ---------------------------------------------------------------------------
 // SIMD lanes evaluate the same relation as the scalar path.
 // ---------------------------------------------------------------------------
 
@@ -266,7 +246,7 @@ template <typename Fmt, typename Rel, typename V> void expect_simd_matches_scala
   std::mt19937_64 rng(0xc0ffee);
   while (values.size() % W != 0 || values.size() < 4 * W)
     values.push_back(static_cast<L>(rng()) & ~Fmt::kInfinity);
-  for (const cmp::Policy policy : {kKeep, kFlush})
+  for (const denorm::Policy policy : {kKeep, kFlush})
     for (std::size_t rotate = 0; rotate < W; ++rotate)
       for (std::size_t base = 0; base < values.size(); base += W) {
         alignas(64) std::array<L, W> a{};

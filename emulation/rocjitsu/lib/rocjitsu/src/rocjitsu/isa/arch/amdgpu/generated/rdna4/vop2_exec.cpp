@@ -996,15 +996,15 @@ void VMinNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>(
-            ([compare_policy =
-                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+            ([compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())](
+                 auto a, auto b) {
               return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1039,15 +1039,15 @@ RJ_NOINLINE void VMinNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>(
-            ([compare_policy =
-                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+            ([compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())](
+                 auto a, auto b) {
               return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1068,15 +1068,15 @@ void VMaxNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>(
-            ([compare_policy =
-                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+            ([compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())](
+                 auto a, auto b) {
               return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1111,15 +1111,15 @@ RJ_NOINLINE void VMaxNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>(
-            ([compare_policy =
-                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+            ([compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())](
+                 auto a, auto b) {
               return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

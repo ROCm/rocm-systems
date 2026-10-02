@@ -2222,7 +2222,7 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
-                          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
@@ -2241,7 +2241,7 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
-                          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
