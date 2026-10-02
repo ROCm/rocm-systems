@@ -23,7 +23,7 @@ enable_language(RCCLDEV)
 # main build, including its packaged device profile runtime.
 get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
 if(ENABLE_FULL_COVERAGE)
-  set(DL_CLANG "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "Device-linker clang driver" FORCE)
+  set(DL_CLANG "${CMAKE_CXX_COMPILER}")
   message(STATUS "Device Linker: DL_CLANG pinned to CMAKE_CXX_COMPILER for device coverage = ${DL_CLANG}")
 else()
   find_program(DL_CLANG NAMES amdclang++ clang++
@@ -36,12 +36,13 @@ get_filename_component(_dl_clang_dir "${_dl_clang_dir}" DIRECTORY)
 unset(DL_BUNDLER CACHE)
 unset(DL_BUNDLER)
 find_program(DL_BUNDLER NAMES clang-offload-bundler
-  HINTS "${_dl_clang_dir}"
-  NO_DEFAULT_PATH)
+  HINTS "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
+        "${ROCM_PATH}/llvm/bin")
 if(NOT DL_BUNDLER)
   message(FATAL_ERROR
     "Device Linker: clang-offload-bundler was not found next to the selected "
-    "compiler '${DL_CLANG}' in '${_dl_clang_dir}'. Refusing to mix LLVM toolchains.")
+    "compiler '${DL_CLANG}' (searched '${_dl_clang_dir}', "
+    "'${_dl_compiler_dir}/../lib/llvm/bin', '${ROCM_PATH}/llvm/bin').")
 endif()
 message(STATUS "Device Linker: clang-offload-bundler = ${DL_BUNDLER}")
 
@@ -905,7 +906,7 @@ if(ENABLE_ROCSHMEM_GIN)
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
