@@ -396,7 +396,14 @@ class IpcSdmaImpl : public IpcOnImpl {
     if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
-      if constexpr (is_blocking(Kind)) handle->quietAll();
+      if constexpr (is_blocking(Kind)) {
+        handle->quietAll();
+        // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
+        // stale L1 so the get returns fresh data (partner of sdmaCopy release).
+        if constexpr (!is_put(Kind))
+          atomic::threadfence<atomic::memory_scope::device,
+                              atomic::memory_order::acquire>();
+      }
       return;
     }
     memcpy_lane<Kind>(dst, src, size);
@@ -411,6 +418,16 @@ class IpcSdmaImpl : public IpcOnImpl {
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
       }
+      if constexpr (is_blocking(Kind) && !is_put(Kind)) {
+        // SDMA wrote dst to GL2, bypassing L1.  Only thread 0 drained, so the
+        // barrier orders that across waves before all lanes invalidate stale L1
+        // via a device-scope acquire.  Acquire must follow the barrier (a
+        // pre-barrier invalidate could be refilled with stale GL2) and be
+        // device scope (workgroup scope would not reach L1).
+        __builtin_amdgcn_s_barrier();
+        atomic::threadfence<atomic::memory_scope::device,
+                            atomic::memory_order::acquire>();
+      }
       return;
     }
     memcpy_wg<Kind>(dst, src, size);
@@ -424,6 +441,13 @@ class IpcSdmaImpl : public IpcOnImpl {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
+      }
+      if constexpr (is_blocking(Kind) && !is_put(Kind)) {
+        // SDMA wrote dst to GL2, bypassing L1.  Thread 0 drained; wave
+        // reconvergence orders that before all lanes invalidate stale L1 via a
+        // device-scope acquire (wave scope would not reach L1).
+        atomic::threadfence<atomic::memory_scope::device,
+                            atomic::memory_order::acquire>();
       }
       return;
     }
