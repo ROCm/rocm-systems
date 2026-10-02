@@ -1,6 +1,6 @@
 # AIPROFCOMP-865 Phase 2 — `WEIGHTED_AVG` design and implementation plan
 
-**Status:** Milestone A implemented on branch (parser, aggregation, analyze wiring); pilot YAML pending SLOT_LIMIT sign-off
+**Status:** Milestone A+B on branch — gfx942 SLOT_LIMIT parents converted to `COLLECT_SUM` / `COLLECT_RATIO` / `WEIGHTED_AVG` collectables (analyze path)
 **JIRA:** AIPROFCOMP-865 (bullet 2–3), parent AIPROFCOMP-864
 **Prerequisite:** Phase 1 Single-pass packable ships (see [single-pass packable plan](aiprofcomp-865-single-pass-packable-plan.md)); remaining gaps are `SLOT_LIMIT` only
 **Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows; former POLICY_GAP metrics (fixed by Phase 1 packing, not `WEIGHTED_AVG`); **[TCC series affinity + coverage](aiprofcomp-865-tcc-series-affinity-coverage.md)** (SPP packing harden — not `SLOT_LIMIT` / `WEIGHTED_AVG`)
@@ -133,8 +133,8 @@ Lower than `BOUND_RATIO` if weights are raw counters and submetrics are single-p
 
 ### Milestone B — Pilot YAML (1 PR, stacks on A)
 
-**Status:** test-only pilot under `tests/fixtures/weighted_avg/` (production gfx942
-YAML deferred until Phase 1 `SLOT_LIMIT` sign-off).
+**Status:** production gfx942 YAML converted for all 16 former SLOT_LIMIT parents
+(10 unique PMC sets) via `COLLECT_SUM` / `COLLECT_RATIO`; fixtures retained.
 
 | Task | Files | Tests |
 |------|-------|-------|

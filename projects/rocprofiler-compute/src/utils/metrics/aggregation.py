@@ -238,3 +238,45 @@ def merge_dispatch_collect_sum(ratio_series_list: list[pd.Series]) -> float:
     if not dispatch_values:
         return np.nan
     return float(to_avg(pd.Series(dispatch_values)))
+
+
+def merge_dispatch_collect_ratio(
+    numerator_series_list: list[pd.Series],
+    denominator_series_list: list[pd.Series],
+) -> float:
+    """Per dispatch (sum nums)/(sum dens), then run-level avg."""
+    if not numerator_series_list or not denominator_series_list:
+        return np.nan
+
+    all_series = numerator_series_list + denominator_series_list
+    index_sets = [set(series.index) for series in all_series]
+    common_idx = set.intersection(*index_sets) if index_sets else set()
+    if not common_idx:
+        return np.nan
+
+    dispatch_values: list[float] = []
+    for dispatch_id in sorted(common_idx, key=lambda x: (str(type(x)), x)):
+        numerator = 0.0
+        denominator = 0.0
+        skip_dispatch = False
+        for series in numerator_series_list:
+            val = series.loc[dispatch_id]
+            if pd.isna(val):
+                skip_dispatch = True
+                break
+            numerator += float(val)
+        if skip_dispatch:
+            continue
+        for series in denominator_series_list:
+            val = series.loc[dispatch_id]
+            if pd.isna(val):
+                skip_dispatch = True
+                break
+            denominator += float(val)
+        if skip_dispatch or denominator == 0.0:
+            continue
+        dispatch_values.append(numerator / denominator)
+
+    if not dispatch_values:
+        return np.nan
+    return float(to_avg(pd.Series(dispatch_values)))
