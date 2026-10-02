@@ -2,10 +2,14 @@
 cluster:
   Unit_cluster_coop_group_class:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_cluster_split_barrier:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipClusterLaunch_CompilerDirective_Basic:
     <<: *level_2
   Unit_hipClusterLaunch_LaunchApi_Basic:

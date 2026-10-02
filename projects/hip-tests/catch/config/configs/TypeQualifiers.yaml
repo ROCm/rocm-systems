@@ -3,7 +3,8 @@ TypeQualifiers:
   Unit_hipManagedKeyword_SingleGpu: *level_2
   Unit_hipManagedKeyword_MultiGpu:
     <<: *level_2
-    # SWDEV-396615 mGPUs not considered correctly
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "SWDEV-396615 mGPUs not considered correctly Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_2
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_2

@@ -22,7 +22,9 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_2
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -34,7 +36,9 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy2DAsync:
     <<: *level_2
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
@@ -67,8 +71,9 @@ errorHandling:
     tags: [multigpu]
   Unit_hipGetLastError_KernelFailure_TwoStreams:
     <<: *level_2
-    # Test causes error state in the runtime and prevents resource cleanup.
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "Test causes error state in the runtime and prevents resource cleanup. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtGetLastError_Positive_Basic:
     <<: *level_2
     tags: [P0]
@@ -79,7 +84,9 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_2
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -91,7 +98,9 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy2DAsync:
     <<: *level_2
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
@@ -101,9 +110,11 @@ errorHandling:
   Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_2
   Unit_hipDynamicLogging_Positive_Basic:
     <<: *level_2
-    # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Following tests disabled as it should be a local perf test Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_2
-    # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Following tests disabled as it should be a local perf test Needs to be re-triaged AIRUNTIME-2744"

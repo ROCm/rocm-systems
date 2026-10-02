@@ -12,7 +12,9 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
     <<: *level_2
   Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
@@ -59,7 +61,9 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
@@ -68,7 +72,9 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExecutionCtxRecordWaitEvent_Negative:
     <<: *level_2
   Unit_hipExecutionCtxWaitEvent_CrossCtx:
@@ -93,7 +99,9 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
     <<: *level_2
-    disabled: [nvidia_linux]
+    disabled:
+      targets: [nvidia_linux]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
     <<: *level_2
   Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:

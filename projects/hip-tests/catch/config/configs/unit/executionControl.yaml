@@ -2,8 +2,9 @@
 executionControl:
   Unit_hipFuncGetAttributes_Positive_Basic:
     <<: *level_2
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-242
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-242 Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncGetAttributes_Negative_Parameters:
     <<: *level_2
@@ -16,8 +17,9 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_2
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
@@ -57,8 +59,9 @@ executionControl:
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
     <<: *level_2
     tags: [kernel, launch]
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-244
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-244 Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [kernel, launch]
@@ -74,7 +77,9 @@ executionControl:
   Unit_hipLaunchByPtr_Verify_Capture: *level_2
   Unit_hipGetProcAddress_KernelLaunchApis:
     <<: *level_2
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [kernel]
   Unit_hipGetProcAddress_CallbackActivityAPIs:
     <<: *level_2
@@ -84,21 +89,24 @@ executionControl:
     tags: [kernel]
   Unit_hipFuncSetCacheConfig_Positive_Basic:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Negative_Parameters:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_2
     tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Negative_Parameters:
     <<: *level_2
@@ -111,8 +119,9 @@ executionControl:
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_Parameters:
     <<: *level_2

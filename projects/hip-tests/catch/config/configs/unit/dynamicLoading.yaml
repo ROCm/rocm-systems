@@ -2,8 +2,9 @@
 dynamicLoading:
   Unit_dynamic_loading_device_kernels_from_library:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
     <<: *level_2
@@ -14,24 +15,36 @@ dynamicLoading:
   Unit_hipGetProcAddress_Positive:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_Negative:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_spt_Positive:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_spt_Negative:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_With_spt_CompilerOption:
     <<: *level_2
     tags: [module]
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"

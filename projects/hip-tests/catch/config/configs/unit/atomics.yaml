@@ -234,8 +234,9 @@ atomics:
   Unit_atomicAdd_system_Positive_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_2
     tags: [deviceLib, system]
@@ -295,16 +296,18 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicExch_Positive_Same_Address_Compile_Time:
     <<: *level_2
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl, nvidia_linux]
+    disabled:
+      targets: [amd_wsl, nvidia_linux]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 01/12/23 Needs to be re-triaged AIRUNTIME-2744"
     tags: [deviceLib, ops]
   Unit_atomicExch_Positive:
     <<: *level_2
     tags: [deviceLib, ops]
   Unit_atomicExch_Positive_Multi_Kernel:
     <<: *level_2
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 01/12/23 Needs to be re-triaged AIRUNTIME-2744"
     tags: [deviceLib, ops]
   Unit_atomicExch_Negative_Parameters_RTC:
     <<: *level_2
@@ -312,18 +315,21 @@ atomics:
   Unit_atomicExch_system_Positive_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 01/12/23 Needs to be re-triaged AIRUNTIME-2744"
   Unit_atomicExch_system_Positive_Host_And_GPU:
     <<: *level_2
     tags: [deviceLib, system]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl, nvidia_linux]
+    disabled:
+      targets: [amd_wsl, nvidia_linux]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 01/12/23 Needs to be re-triaged AIRUNTIME-2744"
   Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
-    # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 01/12/23 Needs to be re-triaged AIRUNTIME-2744"
   Unit_atomicExch_system_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, system]

@@ -2,23 +2,28 @@
 channelDescriptor:
   Unit_ChannelDescriptor_Positive_Basic_1D:
     <<: *level_2
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 Needs to be re-triaged AIRUNTIME-2744"
   Unit_ChannelDescriptor_Positive_Basic_2D:
     <<: *level_2
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 Needs to be re-triaged AIRUNTIME-2744"
   Unit_ChannelDescriptor_Positive_Basic_3D:
     <<: *level_2
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 Needs to be re-triaged AIRUNTIME-2744"
   Unit_ChannelDescriptor_Positive_Basic_4D:
     <<: *level_2
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
-    disabled: [nvidia_windows]
+    disabled:
+      targets: [nvidia_windows]
+      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 Needs to be re-triaged AIRUNTIME-2744"
   Unit_ChannelDescriptor_Positive_FormatNone: *level_2
   Unit_ChannelDescriptor_Positive_16BitFloatingPoint:
     <<: *level_2
-    # (amd_wsl) Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "(amd_wsl) Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [texture]

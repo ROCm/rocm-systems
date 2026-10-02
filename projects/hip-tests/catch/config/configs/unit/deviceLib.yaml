@@ -41,63 +41,69 @@ deviceLib:
     tags: [synchronization, P0]
   Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
     <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocation_ComplexDataType:
     <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;; all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory]
   Unit_deviceAllocation_CodeObjects:
     <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;; all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory]
   Unit_deviceAllocation_Malloc_PerThread_Graph:
     <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;; all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocation_New_PerThread_Graph:
     <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;; all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocation_DeviceFunc:
     <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory]
   Unit_deviceAllocation_VirtualFunction:
     <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocation_SingKernels_MulThreads:
     <<: *level_2
     tags: [memory]
   Unit_deviceAllocation_Malloc_MulCodeObj:
     <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocation_New_MulCodeObj:
     <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_deviceAllocationFollowedByDeviceReset:
     <<: *level_2
     tags: [memory]
   Unit_deviceAllocationAfterDeviceReset:
     <<: *level_2
-    # AIRUNTIME-263: segfaults inside amdhip64 on Windows gfx110X PAL.
-    disabled: [amd_windows]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-263: segfaults inside amdhip64 on Windows gfx110X PAL. Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory]
   Unit_AtomicFunctions_Inc:
     <<: *level_2
@@ -230,8 +236,9 @@ deviceLib:
     tags: [types, P0]
   Unit_hipVectorTypes_test_on_device:
     <<: *level_2
-    # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "SWDEV-444987 - Below tests fail in stress testing on 25/01/2023 Needs to be re-triaged AIRUNTIME-2744"
     tags: [types, P0]
   Unit_hipTestHalf:
     <<: *level_2
@@ -247,8 +254,9 @@ deviceLib:
     tags: [types, P0]
   Unit_Test_makechar_functionality:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
     tags: [types, P0]
   Unit_bf16_basic:
     <<: *level_2
@@ -420,80 +428,117 @@ deviceLib:
     tags: [types]
   Unit_ext_ocp_fp8_roundtrip_host:
     <<: *level_2
-    # Sources compiled only on non-Windows (see unit/deviceLib/CMakeLists.txt)
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Sources compiled only on non-Windows (see unit/deviceLib/CMakeLists.txt) Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8_known_values_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8_scaled_decode_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8x2_scaled_roundtrip_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8_stochastic_rounding_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8_fp16_bf16_source_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp8_device_matches_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_roundtrip_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_known_values_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_scaled_roundtrip_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_stochastic_rounding_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_fp16_bf16_source_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_device_matches_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp4_nan_inf_bits_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_roundtrip_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_known_values_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_scaled_roundtrip_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_fp16_bf16_source_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_device_matches_host:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [types]
   Unit_AtomicAdd_Coherent:
     <<: *level_2
@@ -606,10 +651,9 @@ deviceLib:
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]
-    # "============================TheRock_Bump_Windows_timeout #4547==========================="
-    # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
-    # "=== during ASAN/memleak detection work on Linux ==="
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "\"============================TheRock_Bump_Windows_timeout #4547===========================\"; \"=== This is newly added test to check ASAN memory errors deduced from rocDecode ===\"; \"=== during ASAN/memleak detection work on Linux ===\" Needs to be re-triaged AIRUNTIME-2744"
   Unit_coop_memcpy_async_thread_block_tile_Basic:
     <<: *level_2
     tags: [cooperative, ops]

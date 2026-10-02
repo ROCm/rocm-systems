@@ -5,11 +5,13 @@ launchBounds:
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
     <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
     <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]

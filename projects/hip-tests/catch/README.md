@@ -72,6 +72,12 @@ Every test case has its own entry. Currently supported options are:
 - disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
 - unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
+Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
+non-empty `targets` list **must** carry a non-empty `reason`; this is enforced by
+`check_config.py` in CI. The bare flat-list form (`disabled: [amd_wsl]`) is no longer
+accepted for a non-empty skip. An empty section (`targets: []`) is a no-op and needs no
+reason. If a skip has not yet been triaged, use the placeholder reason
+`Needs to be re-triaged AIRUNTIME-2744`.
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
