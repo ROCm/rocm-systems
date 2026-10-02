@@ -166,6 +166,8 @@ void TestPciReadWrite::Run(void) {
         ret == amdsmi_status_t::AMDSMI_STATUS_NO_PERM) {
       // NOT_SUPPORTED: pp_dpm_pcie absent. NO_PERM: sysfs read-only (EROFS).
       auto status_string("");
+      DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       amdsmi_status_code_to_string(ret, &status_string);
       std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
       continue;

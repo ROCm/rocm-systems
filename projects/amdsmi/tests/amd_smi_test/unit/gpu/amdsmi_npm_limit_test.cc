@@ -53,6 +53,7 @@
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 #if defined(ENABLE_WSL_BACKEND)
 #include "amd_smi/impl/amd_smi_wsl_device.h"
@@ -118,6 +119,7 @@ TEST(GpuUnit, SetNpmLimitNullHandleIsInval) {
   ScopedAmdSmiInit init;
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "node=nullptr, limit=100", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(nullptr, 100), AMDSMI_STATUS_INVAL);
 }
 
@@ -137,6 +139,7 @@ TEST(GpuUnit, SetNpmLimitNonRootIsNoPerm) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=100, nonroot", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NO_PERM);
 }
 
@@ -161,6 +164,7 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, root success", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "250");
 }
@@ -189,6 +193,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, npm disabled", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_INVAL);
   // The write must not have happened.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "0");
@@ -220,6 +225,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsZero) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=0, rejects zero", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 0), AMDSMI_STATUS_INVAL);
   // The write must not have happened.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
@@ -241,6 +247,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsOverMax) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=6401, rejects over max", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 6401), AMDSMI_STATUS_INVAL);
   // The write must not have happened.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
@@ -264,6 +271,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxUnreadable) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, max unreadable", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
   // The write must not have happened.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
@@ -299,6 +307,7 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
   // get_npm_board_max_limit()/read_board_uint64() returns
   // RSMI_STATUS_UNEXPECTED_DATA, which rsmi_dev_npm_limit_set() propagates
   // as-is (fail closed) and which maps to AMDSMI_STATUS_UNEXPECTED_DATA.
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, max corrupted", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_UNEXPECTED_DATA);
   // The write must not have happened.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
@@ -320,6 +329,7 @@ TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=6400, accepts in range", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 6400), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6400");
 }
@@ -343,6 +353,7 @@ TEST(GpuUnit, SetNpmLimitRootMissingFileIsNotSupported) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, missing cur file", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
@@ -361,6 +372,7 @@ TEST(GpuUnit, SetNpmLimitRootMissingBoardDirIsNotSupported) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=250, missing board dir", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
@@ -404,6 +416,7 @@ TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_npm_info_t npm_info{};
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_info", "unregistered handle", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_get_npm_info(handle, &npm_info), AMDSMI_STATUS_INVAL);
 }
 
@@ -420,6 +433,7 @@ TEST(GpuUnit, SetNpmLimitRejectsUnregisteredHandle) {
   // AMDSMI_STATUS_INVAL must be returned regardless of caller privilege: the
   // registry check runs before REQUIRE_ROOT_ACCESS is ever reached, whether
   // or not this test process happens to be root.
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=100, unregistered handle", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_INVAL);
 }
 
@@ -443,6 +457,7 @@ TEST(GpuUnit, SetNpmLimitAcceptsHandleAfterTestRegistration) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=100, registered handle", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NO_PERM);
 }
 
@@ -473,6 +488,7 @@ TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_limit", "limit=100, WSL backend active", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 #endif  // ENABLE_WSL_BACKEND
@@ -520,12 +536,14 @@ TEST(GpuUnit, GetNpmInfoCurrentNodePowerRoundTrip) {
     }
     for (uint32_t p = 0; p < proc_count; ++p) {
       amdsmi_node_handle node_handle = nullptr;
+      DISPLAY_AMDSMI_API("amdsmi_get_node_handle", "proc=" + std::to_string(p), GetTestVerbosity() >= 1);
       if (amdsmi_get_node_handle(procs[p], &node_handle) != AMDSMI_STATUS_SUCCESS) {
         continue;
       }
 
       amdsmi_npm_info_t npm_info;
       std::memset(&npm_info, 0, sizeof(npm_info));
+      DISPLAY_AMDSMI_API("amdsmi_get_npm_info", "node round trip", GetTestVerbosity() >= 1);
       amdsmi_status_t r = amdsmi_get_npm_info(node_handle, &npm_info);
       if (r != AMDSMI_STATUS_SUCCESS) {
         continue;

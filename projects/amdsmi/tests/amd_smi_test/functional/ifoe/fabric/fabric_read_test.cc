@@ -214,6 +214,8 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
+            DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string",
+                               "id=" + std::to_string(it.id), VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
@@ -265,24 +267,32 @@ static constexpr uint64_t kLastTelemId = 0x6001011;
 
 TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
   const char* name = nullptr;
+  // Plain TEST()s: no TestBase, so gate on the global verbosity (VERBOSE_STANDARD == 1)
+  // rather than the VERB() macro.
+  const bool verbose = GetTestVerbosity() >= 1;
 
+  DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=kFirstTelemId", verbose);
   ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
   ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
 
+  DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=kMidTelemId", verbose);
   ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
   ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
 
+  DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=kLastTelemId", verbose);
   ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
   ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
 }
 
 TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+  DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "name=nullptr", GetTestVerbosity() >= 1);
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
   ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
   const char* name = nullptr;
+  DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=UINT64_MAX", GetTestVerbosity() >= 1);
   amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
   ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
   ASSERT_STREQ(name, "UNKNOWN");

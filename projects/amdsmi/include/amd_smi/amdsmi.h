@@ -7701,10 +7701,10 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * out-of-band and reported via this API. The returned amdsmi_npm_info_t::max_node_power_limit is
  * the platform max bound (sourced from board/max_node_power_limit) that ::amdsmi_set_npm_limit
  * itself validates requests against internally before issuing the write (mirroring
- * ::amdsmi_set_power_cap and ::amdsmi_get_power_cap_info); callers may still query it here ahead
+ * ::amdsmi_set_power_cap and ::amdsmi_get_power_cap_info). Callers may still query it here ahead
  * of time to fail fast / present a clean error without invoking the setter. The returned
  * amdsmi_npm_info_t::current_node_power is the current (instantaneous) node-level power reading in
- * Watts (sourced from board/node_power); it is node-handle scoped (queried once per node), unlike
+ * Watts (sourced from board/node_power), and it is node-handle scoped (queried once per node), unlike
  * amdsmi_power_info_t, which is scoped per GPU handle.
  *
  * @param[in]  node_handle Handle to the Node to query.
