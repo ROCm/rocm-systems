@@ -1856,8 +1856,10 @@ protected:
         ncclResult_t sendRet = ncclSuccess;
         bool         completed = false;
         int          fatalCount = 0;
-        // True when no work can still reference the caller's buffer; if false, keep buffer and registration.
+        // True only when completion was seen or no request exists; otherwise the caller must not free the buffer.
         bool         retired = false;
+        // Every QP of the connection was driven to error, so it starts no new work on the buffer.
+        bool         quiesced = false;
     };
 
     WorkerFaultSendOutcome WorkerCastFaultSend(void* sendComm, void* buffer, size_t size, int tag,
@@ -1895,8 +1897,8 @@ protected:
             }
         }
 
-        // Never return with the request able to touch the buffer. Polling cannot prove retirement once the fault
-        // is counted (IbCastTest errors first), so drive every QP to error to retire work with a flush status.
+        // Once the fault is counted IbCastTest errors before polling, so completion cannot be seen: drive every QP
+        // to error to stop the hardware, and leave retired false so the caller keeps the buffer.
         if (request != nullptr && !outcome.completed) {
             static constexpr int kSettlePolls = 100;  // 100 * 10ms = 1s
             for (int poll = 0; poll < kSettlePolls; poll++) {
@@ -1910,7 +1912,7 @@ protected:
                 usleep(kPollIntervalUs);
             }
             if (!outcome.retired) {
-                // Both the count and every transition are checked; if either fails the caller keeps its memory.
+                // Both the count and every transition are checked before quiesced is claimed.
                 int nqps = 0;
                 const bool counted = WorkerCastLiveNqps(sendComm, &nqps).ok && nqps > 0;
                 if (!counted) nqps = 1;
@@ -1918,7 +1920,7 @@ protected:
                 for (int qp = 0; qp < nqps; qp++) {
                     if (!WorkerCastDriveQpToError(sendComm, qp).ok) allDriven = false;
                 }
-                outcome.retired = allDriven;
+                outcome.quiesced = allDriven;
             }
         }
         return outcome;
@@ -2225,7 +2227,6 @@ protected:
 
     // Releases a receive the injected send will never satisfy by driving this side to error.
     ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request,
-                                              NetMHandleWorkerGuard* registration = nullptr,
                                               HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         if (!request) return result;
@@ -2240,38 +2241,30 @@ protected:
             break;
         }
 
-        // A flush surfaces as an error; accepting it is safe only because the walk above drove every QP.
+        // Unless the receive is seen to complete, the buffer is never freed; the MR still goes so the PD can close.
         if (!droveWholeRange) {
-            // The walk stopped on a real failure, so an error below proves nothing; report and retain.
             result.ok = false;
             result.msg = "driving the receive queue pairs to error stopped short of the end "
                          "of the range, so the abandoned receive cannot be assumed retired";
-            if (registration || allocation) {
-                result.msg += "; the buffer and its registration are retained, since the "
-                              "request may still reference them";
-                if (registration) registration->release();
-                if (allocation) allocation->release();
-            }
+            if (allocation) allocation->release();
             return result;
         }
         static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
         for (int poll = 0; poll < kFlushPolls; poll++) {
             int done = 0;
             int sizes[1] = {0};
-            if (TestRequest(request, &done, sizes) != ncclSuccess) return result;
+            // An error may come from the fatal-count check or the first flush CQE, neither of which retires it.
+            if (TestRequest(request, &done, sizes) != ncclSuccess) {
+                if (allocation) allocation->release();
+                return result;
+            }
             if (done) return result;
             usleep(kPollIntervalUs);
         }
-        // The receive is still live, so both the registration and the allocation are retained.
         result.ok = false;
         result.msg = "the abandoned receive was still outstanding after its queue pairs were "
                      "driven to error";
-        if (registration || allocation) {
-            result.msg += "; the buffer and its registration are retained, since the request "
-                          "may still reference them";
-            if (registration) registration->release();
-            if (allocation) allocation->release();
-        }
+        if (allocation) allocation->release();
         return result;
     }
 
