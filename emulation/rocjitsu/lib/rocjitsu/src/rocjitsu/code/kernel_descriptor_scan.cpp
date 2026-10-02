@@ -5,7 +5,9 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/register_set.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -241,6 +243,14 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
   }
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                   user_sgpr_count);
+}
+
+uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
+  const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
+  // The tail sits at the top of the allocation itself, so it comes off before
+  // the clamp to the addressable maximum, not after.
+  const uint32_t ordinary = kernel_sgpr_count > tail ? kernel_sgpr_count - tail : 0;
+  return std::min<uint32_t>(ordinary, REGISTER_SET_ALLOCATABLE_SGPRS);
 }
 
 uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
