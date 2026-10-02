@@ -298,7 +298,6 @@ def compute_medians_for_workload(
     filtered = parser.apply_filters(
         workload,
         str(wl_dir),
-        is_gui=False,
         debug=False,
     )
 
