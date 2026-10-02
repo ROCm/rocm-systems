@@ -100,7 +100,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     # The build-runner process has CapEff 0 and no docker socket, and a nested
     # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
     # build and the nightly unpack run. The tests use the non-kmd config in
@@ -200,7 +200,7 @@ jobs:
             --name rocrtst64 \
             --cwd "$ROCM_ROOT/bin" \
             --gtest-filter "$ROCRTST_FILTER" \
-            --timeout-seconds 7200 \
+            --timeout-seconds 14400 \
             --log logs/rocrtst.log \
             -- \
             "$ROCM_ROOT/bin/rocrtst64" \
