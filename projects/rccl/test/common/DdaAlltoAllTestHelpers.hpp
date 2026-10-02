@@ -56,6 +56,9 @@ struct DdaAlltoAllMockComm
     ncclComm comm{};
     char archNameBuf[64]{};
 
+    DdaAlltoAllMockComm(const DdaAlltoAllMockComm&)            = delete;
+    DdaAlltoAllMockComm& operator=(const DdaAlltoAllMockComm&) = delete;
+
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
     void reset(const char* archName)
@@ -75,6 +78,11 @@ struct DdaAlltoAllMockComm
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     4194304UL /
+    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB (gfx1250 LL128 ceiling).
+constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
+    1048576UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

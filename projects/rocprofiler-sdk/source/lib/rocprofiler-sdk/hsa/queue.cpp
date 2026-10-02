@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
@@ -295,6 +296,15 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
+        // PC sampling completion is no longer routed through the per-queue
+        // callback registry; invoke its hook explicitly.
+        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                                     packet.kernel_packet,
+                                                     _session,
+                                                     packet,
+                                                     packet.instrumentation_packets,
+                                                     dispatch_time);
+
         // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
         // it explicitly here.
         spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
@@ -447,6 +457,7 @@ WriteInterceptor(const void* packets,
         spm::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !spm_active &&
+         !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -525,8 +536,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // these are for the services (dispatch counter collection, pc sampling, ATT) which use
-    // the queue/queue_controller callback mechanism
+    // Services that attach packet instrumentation or need dispatch correlation data. Some are
+    // still routed through queue-controller callbacks while migrated services use explicit hooks.
     const auto queue_callback_context_filter = [](const context::context* ctx) {
         return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
                 ctx->dispatch_spm);

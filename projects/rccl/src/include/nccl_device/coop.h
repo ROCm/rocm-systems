@@ -40,6 +40,10 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) {
   return (int)__popc(x);
 }
 #endif
+// AMD uses a 64-bit mask for wave64 compatibility, but wave32 parts must
+// ignore bits that do not correspond to physical lanes.
+static constexpr ncclCoopMask_t ncclCoopLaneWindow =
+  ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
 #endif
 
 #if NCCL_CHECK_CUDACC
@@ -118,7 +122,7 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   }
 
   NCCL_DEVICE_INLINE ncclCoopMask_t laneMask() const {
-    return (ncclCoopMask_t(-1) >> (WARP_SIZE - nThreadsPow2)) << (nccl::utility::lane() & -nThreadsPow2);
+    return (ncclCoopLaneWindow >> (WARP_SIZE - nThreadsPow2)) << (nccl::utility::lane() & -nThreadsPow2);
   }
   NCCL_DEVICE_INLINE void sync() {
 #if ROCM_VERSION >= 70000
@@ -139,7 +143,8 @@ typedef ncclCoopTile<WARP_SIZE> ncclCoopWarp;
 struct ncclCoopLanes { // Some lanes of this warp.
   ncclCoopMask_t lmask;
 
-  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(ncclCoopMask_t lmask = ncclCoopFullMask) : lmask(lmask) {}
+  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(ncclCoopMask_t lmask = ncclCoopFullMask)
+    : lmask(lmask & ncclCoopLaneWindow) {}
 
   NCCL_DEVICE_INLINE int thread_rank() const {
     return ncclCoopPopc(lmask & static_cast<ncclCoopMask_t>(nccl::utility::lanemask_lt()));

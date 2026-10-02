@@ -84,7 +84,7 @@ panels:
     title: Utilization
   - type: metric_table
     id: 2
-    title: Wave Dispatch
+    title: Wavefront Dispatch
   - type: metric_table
     id: 3
     title: Resource Allocation
@@ -104,13 +104,13 @@ panels:
     title: Wavefront Launch Stats
   - type: metric_table
     id: 3
-    title: Wave Dispatch
+    title: Wavefront Dispatch
   - type: metric_table
     id: 4
-    title: Wave Life
+    title: Wavefront Life
   - type: metric_table
     id: 5
-    title: Wave Instruction Mix
+    title: Wavefront Instruction Mix
   - type: metric_table
     id: 6
     title: VMEM Instruction Mix

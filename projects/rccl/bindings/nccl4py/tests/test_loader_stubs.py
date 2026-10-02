@@ -28,6 +28,24 @@ def test_import_bindings_does_not_raise():
     import nccl.bindings  # noqa: F401
 
 
+def test_import_top_level_without_ep_bindings():
+    import nccl
+
+    version = nccl.get_version()
+    if version.nccl_ep is not None:
+        pytest.skip("libnccl_ep loaded on this host")
+    assert version.nccl.version is not None
+
+
+def test_import_top_level_with_ep_bindings():
+    import nccl
+
+    version = nccl.get_version()
+    if version.nccl_ep is None:
+        pytest.skip("libnccl_ep not available on this host")
+    assert version.nccl_ep.version is not None
+
+
 def test_comm_grow_raises_not_implemented():
     import nccl.bindings as b
 

@@ -47,6 +47,9 @@ extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 // The public entry point commFree recurses through for hierarchical sub-communicators.
 extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
 
+// rcclEnsureHierarchicalComms creates its two child communicators through this API.
+extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
+
 // src/channel.cc: the fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one;
 // callers must supply storage.
 extern ncclResult_t g_initChannelResult;
@@ -78,6 +81,10 @@ extern std::function<bool()> g_profilerPluginLoaded;
 
 // Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
+
+// src/misc/cudawrap.cc. ResetNcclStubs() restores this, so a raised version gate cannot leak forward.
+constexpr int kDefaultCudaDriverVersion = 12000;
+extern int ncclCudaDriverVersionCache;
 
 void ResetNcclStubs();
 

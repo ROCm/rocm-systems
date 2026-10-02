@@ -342,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -442,6 +443,11 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief returns true if agent uses MES scheduler
   __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
+
+  // @brief returns true for gfx12.5+ parts (used by the PC sampling drain path)
+  __forceinline bool is_gfx1250() const {
+    return supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5;
+  }
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
@@ -776,6 +782,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
 
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
+
   // @brief Create internal queues and blits.
   void InitDma();
 
@@ -1107,6 +1117,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
 
   std::atomic<bool> accelerator_ready_{false};
 

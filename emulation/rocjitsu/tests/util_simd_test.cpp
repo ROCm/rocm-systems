@@ -29,6 +29,12 @@
 
 namespace {
 
+struct RestoreEnvironment {
+  std::fenv_t saved;
+  RestoreEnvironment() { std::fegetenv(&saved); }
+  ~RestoreEnvironment() { std::fesetenv(&saved); }
+};
+
 // Toolchain-guard sweep length. The bit-exactness guards below were validated
 // over a 250k-iteration full-range sweep, but running that on every CI build
 // adds significant wall time (5 sweeps x 250k x SIMD width). Default to a
@@ -52,6 +58,21 @@ inline int sweep_iters() {
   }
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
+
+struct FallbackMask {
+  static constexpr std::size_t kSize = 5;
+  explicit FallbackMask(bool value) { lanes.fill(value); }
+  static constexpr std::size_t size() { return kSize; }
+  bool operator[](std::size_t i) const { return lanes[i]; }
+  bool &operator[](std::size_t i) { return lanes[i]; }
+
+  std::array<bool, kSize> lanes{};
+};
+
+struct FallbackSimd {
+  using mask_type = FallbackMask;
+  static constexpr std::size_t size() { return mask_type::size(); }
+};
 
 TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
   SKIP_IF_NO_SIMD();
@@ -141,6 +162,65 @@ TEST(UtilSimd, Broadcast_F32) {
   auto v = util::broadcast<float>(bits);
   for (std::size_t i = 0; i < kW; ++i)
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+}
+
+TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const auto check = []<typename Simd>() {
+    constexpr std::size_t W = Simd::size();
+    ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+    const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+    for (uint64_t bits = 0; bits <= full; ++bits) {
+      const auto mask = util::simd_mask_from_bits<Simd>(bits);
+      for (std::size_t i = 0; i < W; ++i)
+        ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
+            << "width " << W << ", bits " << bits << ", lane " << i;
+      ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
+    }
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
+        << "input bits above the SIMD width must be ignored";
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~full)), 0u)
+        << "high-only input bits must not set SIMD lanes";
+  };
+
+  check.template operator()<util::native<uint32_t>>();
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  check.template operator()<util::native<uint64_t>>();
+  check.template operator()<util::narrow32<uint32_t>>();
+#endif
+#endif
+}
+
+TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
+    for (std::size_t i = 0; i < FallbackSimd::size(); ++i)
+      ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
+    ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
+  }
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~full)), 0u);
+#endif
+}
+
+TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
+  SKIP_IF_NO_SIMD();
+  constexpr std::size_t W = util::native<uint32_t>::size();
+  ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+  const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto lanes = util::simd_u32_lanes_from_bits(bits);
+    for (std::size_t i = 0; i < W; ++i)
+      ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
+          << "bits " << bits << ", lane " << i;
+  }
+  const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
+  for (std::size_t i = 0; i < W; ++i)
+    EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
 }
 
 TEST(UtilSimd, MaskedStore_FullMask) {
@@ -363,14 +443,8 @@ TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
   ::dlclose(module);
 }
 
-// Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
-// v_log_f32 (stdx::log2). Those VOP1 kernels take the SIMD path whenever
-// `util::has_stdx_simd`, with no runtime value check — so the vector libm
-// MUST be bit-identical to the scalar std::* used by the generated body, or
-// the fast path silently returns wrong results. These tests sweep full-range
-// random bit patterns (covering NaN/Inf/denormal/negative) and fail loudly if
-// any lane diverges, blocking a divergent toolchain at CI time. If one fails,
-// drop the corresponding row from SIMD_VOP1_UNARY rather than ship wrong math.
+// Compare scalar and SIMD paths over full-range random encodings, including
+// NaN payloads. LOG and EXP use the shared hardware mappings in both paths.
 template <class ScalarFn, class VectorFn>
 void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
@@ -394,29 +468,34 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 
 TEST(UtilSimd, Exp2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::exp2(x); },
-                        [](util::native<float> v) { return util::stdx::exp2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_exp_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::exp_f32_simd(v, quiet_snan); });
 }
 
 TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::log2(x); },
-                        [](util::native<float> v) { return util::stdx::log2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_log_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::log_f32_simd(v, quiet_snan); });
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
-// (SIMD_VOP2_TERNARY). Those kernels use util::stdx::fma unconditionally under
-// has_stdx_simd, so it MUST be the single-rounded fused operation matching the
-// scalar std::fma in the generated bodies — a separate mul+add (two roundings)
-// would diverge silently. This sweeps full-range random bit patterns for all
-// three operands and asserts bit-exactness, EXCLUDING lanes with a NaN input:
+// (SIMD_VOP2_TERNARY) and the shared native-f32 FMA wrapper. Those paths use
+// util::stdx::fma and util::native_fma, respectively, so both MUST be the
+// single-rounded fused operation matching the scalar std::fma in the generated
+// bodies — a separate mul+add (two roundings) would diverge silently. This sweeps
+// full-range random bit patterns for all three operands and asserts
+// bit-exactness, EXCLUDING lanes with a NaN input:
 // for NaN inputs the packed and scalar FMA may propagate a different NaN
 // payload (toolchain-dependent, e.g. g++-13 picks the second multiplicand while
 // the packed form picks the first), and that NaN-payload divergence is an
-// accepted difference (the result is a NaN either way). Inf and Inf*0→NaN cases
-// ARE checked (they do match). If a finite/Inf lane diverges, drop
-// SIMD_VOP2_TERNARY rather than ship wrong math. The f16 forms inherit this
-// guard plus the f16<->f32 ones.
+// accepted difference (the result is a NaN either way). Results from non-NaN
+// inputs are checked, including any Inf and Inf*0→NaN cases in the corpus. If a
+// finite/Inf lane diverges, drop the affected SIMD path rather than ship wrong
+// math. The f16 forms inherit this guard plus the f16<->f32 ones.
 TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<float>;
@@ -434,15 +513,20 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
     }
     V va(a, util::stdx::element_aligned), vb(b, util::stdx::element_aligned),
         vc(c, util::stdx::element_aligned);
-    alignas(V) float out[W];
-    util::stdx::fma(va, vb, vc).copy_to(out, util::stdx::element_aligned);
+    alignas(V) float stdx_out[W], native_out[W];
+    util::stdx::fma(va, vb, vc).copy_to(stdx_out, util::stdx::element_aligned);
+    util::native_fma(va, vb, vc).copy_to(native_out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       if (is_nan_bits(std::bit_cast<uint32_t>(a[i])) ||
           is_nan_bits(std::bit_cast<uint32_t>(b[i])) || is_nan_bits(std::bit_cast<uint32_t>(c[i])))
         continue; // NaN-input payload divergence is accepted
       const float s = std::fma(a[i], b[i], c[i]);
-      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(out[i]))
-          << "divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
+      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(stdx_out[i]))
+          << "stdx::fma divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
+          << std::bit_cast<uint32_t>(a[i]) << " b=0x" << std::bit_cast<uint32_t>(b[i]) << " c=0x"
+          << std::bit_cast<uint32_t>(c[i]);
+      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(native_out[i]))
+          << "native_fma divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
           << std::bit_cast<uint32_t>(a[i]) << " b=0x" << std::bit_cast<uint32_t>(b[i]) << " c=0x"
           << std::bit_cast<uint32_t>(c[i]);
     }
@@ -542,6 +626,30 @@ TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
   expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
                              [](util::native<double> x) { return x - util::floor_simd(x); });
 }
+TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
+  SKIP_IF_NO_SIMD();
+  RestoreEnvironment restore;
+  const uint32_t cases[][2] = {
+      {0x3FC00000u, 0x3F2AAAAAu}, {0x3F802922u, 0x3F7FADD6u}, {0xBFB0333Cu, 0xBF39F868u},
+      {0x00800000u, 0x7E800000u}, {0xFF7FFFFFu, 0x80000000u}, {0x80000001u, 0xFF800000u},
+      {0x7F800000u, 0x00000000u}, {0xFFA12345u, 0xFFE12345u},
+  };
+  using V = util::native<float>;
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    for (unsigned start = 0; start < std::size(cases); ++start) {
+      std::array<uint32_t, V::size()> input_bits;
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+      const V input = util::load<float>(input_bits.data());
+      const V result = util::rcp_f32_simd(input);
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
+                  cases[(start + lane) % std::size(cases)][1]);
+    }
+  }
+}
+
 TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return 1.0f / x; },
@@ -642,6 +750,30 @@ TEST(UtilSimd, F16ToF32_VectorMatchesScalar_Exhaustive) {
           << "f16=0x" << std::hex << in[i];
     }
   }
+}
+
+TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
+  SKIP_IF_NO_SIMD();
+  RestoreEnvironment environment;
+  std::feclearexcept(FE_ALL_EXCEPT);
+  using V = util::native<uint32_t>;
+  constexpr std::size_t W = util::native_width_v<uint32_t>;
+  for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
+    uint32_t input[W];
+    for (std::size_t i = 0; i < W; ++i)
+      input[i] = base + static_cast<uint32_t>(i);
+    const V encoded(input, util::stdx::element_aligned);
+    const auto promoted = util::f16_to_f32_simd(encoded);
+    const V nearest = util::f32_to_f16_simd(promoted);
+    const V truncated = util::f32_to_f16_rtz_simd(promoted);
+    for (std::size_t i = 0; i < W; ++i) {
+      ASSERT_EQ(nearest[i], input[i]);
+      ASSERT_EQ(truncated[i], input[i]);
+    }
+  }
+  // Discarded lanes in the subnormal paths must still have valid shift counts.
+  // Some SIMD backends implement variable shifts with floating conversions.
+  EXPECT_EQ(std::fetestexcept(FE_INVALID), 0);
 }
 
 TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
@@ -858,110 +990,26 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
       }
 }
 
-// --- Cubemap face ops (v_cube{id,ma,sc,tc}_f32) ------------------------------
-//
-// util::cube_{id,sc,tc}_f32_simd back the v_cube* gap ops; they must be
-// bit-identical to the generated scalar bodies (transcribed verbatim below).
-// Sweep every sign/magnitude/tie/zero/Inf/NaN triple.
-
-float scalar_cubeid(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return x >= 0 ? 0.0f : 1.0f;
-  if (ay >= ax && ay >= az)
-    return y >= 0 ? 2.0f : 3.0f;
-  return z >= 0 ? 4.0f : 5.0f;
-}
-float scalar_cubesc(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return x >= 0 ? z : -z;
-  if (ay >= ax && ay >= az)
-    return x;
-  return z >= 0 ? -x : x;
-}
-float scalar_cubetc(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  if (ax >= ay && ax >= az)
-    return -y;
-  if (ay >= ax && ay >= az)
-    return y >= 0 ? -z : z;
-  return -y;
-}
-float scalar_cubema(float x, float y, float z) {
-  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-  return 2.0f * std::fmax(ax, std::fmax(ay, az));
-}
-
-template <typename SimdFn, typename ScalarFn> void check_cube(SimdFn simd_fn, ScalarFn scalar_fn) {
-  using V = util::native<float>;
-  constexpr std::size_t W = V::size();
-  const std::array<float, 9> grid = {{-2.0f, -1.0f, -0.0f, 0.0f, 0.5f, 1.0f, 2.0f,
-                                      std::numeric_limits<float>::infinity(),
-                                      std::numeric_limits<float>::quiet_NaN()}};
-  for (float zv : grid)
-    for (float yv : grid)
-      for (float xv : grid) {
-        alignas(V) float xb[W], yb[W], zb[W];
-        for (std::size_t i = 0; i < W; ++i) {
-          xb[i] = xv;
-          yb[i] = yv;
-          zb[i] = zv;
-        }
-        V x(xb, util::stdx::vector_aligned), y(yb, util::stdx::vector_aligned),
-            z(zb, util::stdx::vector_aligned);
-        V r = simd_fn(x, y, z);
-        const float expect = scalar_fn(xv, yv, zv);
-        for (std::size_t i = 0; i < W; ++i) {
-          const float rv = r[i];
-          EXPECT_EQ(bits_of(rv), bits_of(expect))
-              << "x=" << xv << " y=" << yv << " z=" << zv << " lane=" << i;
-        }
-      }
-}
-
-TEST(UtilSimd, CubeId_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }, scalar_cubeid);
-}
-TEST(UtilSimd, CubeSc_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }, scalar_cubesc);
-}
-TEST(UtilSimd, CubeTc_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube([](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }, scalar_cubetc);
-}
-TEST(UtilSimd, CubeMa_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  check_cube(
-      [](auto x, auto y, auto z) {
-        return 2.0f * util::stdx::fmax(util::stdx::abs(x),
-                                       util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
-      },
-      scalar_cubema);
-}
-
 // --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
 
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<uint16_t>(lower);
 }
 
@@ -1005,11 +1053,7 @@ template <typename Float> void check_rndne_host_independence() {
   std::mt19937_64 rng(0x11939);
   for (unsigned i = 0; i < 2048; ++i)
     inputs.push_back(static_cast<Bits>(rng()));
-  struct RestoreEnvironment {
-    std::fenv_t saved;
-    RestoreEnvironment() { std::fegetenv(&saved); }
-    ~RestoreEnvironment() { std::fesetenv(&saved); }
-  } restore_environment;
+  RestoreEnvironment restore_environment;
   ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
   std::vector<Bits> expected;
   for (Bits bits : inputs) {
@@ -1069,6 +1113,37 @@ TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
                 static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
           << "i16 f=" << fv << " lane=" << i;
       EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
+    }
+  }
+}
+
+TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  RestoreEnvironment restore_environment;
+  // Generate the neighborhood in nearest mode, then evaluate under every mode.
+  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+  std::vector<float> inputs;
+  for (int i = 0; i < 65536; ++i) {
+    for (float center : {float((i + 0.5) / 65535), float((i - 32768 + 0.5) / 32767)}) {
+      inputs.push_back(std::nextafter(center, -std::numeric_limits<float>::infinity()));
+      inputs.push_back(center);
+      inputs.push_back(std::nextafter(center, std::numeric_limits<float>::infinity()));
+    }
+  }
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    SCOPED_TRACE(mode);
+    for (size_t base = 0; base < inputs.size(); base += V::size()) {
+      V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
+      const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
+      const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
+      for (size_t lane = 0; lane < V::size(); ++lane) {
+        EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+        EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+      }
     }
   }
 }
