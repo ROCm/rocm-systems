@@ -187,7 +187,7 @@ namespace RcclUnitTesting
         EXPECT_EQ(destroy.type, rccl::rrRedOpDestroy);
         EXPECT_EQ(destroy.op, ncclMax);
         EXPECT_EQ(destroy.comm, comm.get());
-        // record() builds from the aggregate ncclInfo{.op, .comm}, so the fields Destroy must not set are value-initialised.
+        // record() builds from the aggregate ncclInfo{.op, .comm}, so fields Destroy must not set are zero.
         EXPECT_EQ(destroy.sendbuff, nullptr) << "Destroy must not record the scalar";
         EXPECT_EQ(destroy.datatype, ncclInt8) << "Destroy must not record the datatype";
         EXPECT_EQ(destroy.root, 0) << "Destroy must not record the residence";
