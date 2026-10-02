@@ -17,16 +17,9 @@ namespace hipFile {
 
 namespace {
 
-    std::mutex &taskPublicationMutex()
-    {
-        static auto *mutex = new std::mutex{};
-        return *mutex;
-    }
-
     class TaskflowTaskGroup final : public ITaskGroup {
     public:
-        explicit TaskflowTaskGroup(std::shared_ptr<tf::Executor> _executor)
-            : executor{std::move(_executor)}
+        explicit TaskflowTaskGroup(std::shared_ptr<tf::Executor> _executor) : executor{std::move(_executor)}
         {
         }
 
@@ -39,8 +32,7 @@ namespace {
         void run(std::function<void()> task) override
         {
             uint64_t task_generation = 0;
-            auto task_state       = &state;
-            auto publication_lock = std::unique_lock<std::mutex>{taskPublicationMutex()};
+            auto     task_state      = &state;
 
             {
                 std::lock_guard<std::mutex> lock{task_state->mutex};
@@ -51,9 +43,6 @@ namespace {
 
             try {
                 executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
-                    {
-                        std::lock_guard<std::mutex> lock{taskPublicationMutex()};
-                    }
                     Completion            completion{task_state};
                     std::function<void()> local_work;
                     local_work.swap(work);
@@ -67,7 +56,6 @@ namespace {
 
                     local_work();
                 });
-                publication_lock.unlock();
             }
             catch (...) {
                 finish(task_state);
