@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed dispatch IDs following kernel completion order instead of launch order on multi-GPU runs, which could merge counters from different launches of the same kernel.
+
 ### Upcoming changes
 
 ### Known issues

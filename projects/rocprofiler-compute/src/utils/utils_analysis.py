@@ -944,12 +944,13 @@ def join_native_counters(
 def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
     """Number one counter set's dispatches from 1 and its kernels from 0.
 
-    Ids follow first appearance and use the keys profile mode uses for
-    results_*.csv, so the same dispatch gets the same id in every counter set.
+    Rows are sorted by pid, then dispatch_id, so ids follow the order kernels
+    were launched, not the order they finished.
     """
-    dispatch_groups = counter_set.groupby(_DISPATCH_ID_KEYS, sort=False, dropna=False)
-    kernel_groups = counter_set.groupby(_KERNEL_ID_KEYS, sort=False, dropna=False)
-    numbered = counter_set.assign(
+    launch_order = counter_set.sort_values(["PID", "dispatch_id"], kind="stable")
+    dispatch_groups = launch_order.groupby(_DISPATCH_ID_KEYS, sort=False, dropna=False)
+    kernel_groups = launch_order.groupby(_KERNEL_ID_KEYS, sort=False, dropna=False)
+    numbered = launch_order.assign(
         Dispatch_ID=dispatch_groups.ngroup() + 1,
         Kernel_ID=kernel_groups.ngroup(),
     )
