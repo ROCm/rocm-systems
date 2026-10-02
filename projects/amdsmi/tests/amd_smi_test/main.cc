@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "functional/gpu/ampp/ampp_read_write.h"
 #include "functional/gpu/clock/clock_limit_read_write.h"
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
@@ -201,6 +202,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestAmppReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadOnly, TestErrCntRead) {

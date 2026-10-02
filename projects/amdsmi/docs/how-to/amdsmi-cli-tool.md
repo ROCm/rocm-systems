@@ -174,6 +174,7 @@ output](#cli-ex-static) for `amd-smi static`.
 ~$ amd-smi static --help
 usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
                       [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
+                      [-A]
                       [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
@@ -198,6 +199,9 @@ Static Arguments:
   -P, --soc-pstate         The available soc pstate policy
   -x, --xgmi-plpd          The available XGMI per-link power down policy
   -u, --numa               All numa node information
+  -A, --ampp               Display AMPP (amdsmi power profile) recipe table: per-profile
+                                version/active/writable/configured state and per-field
+                                name/unit/value/min/max.
 
 CPU Arguments:
   -s, --smu                All SMU FW information
@@ -630,6 +634,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
+                   [-A PROFILE_NAME] [--ampp-configure PROFILE_NAME [KEY=VALUE ...]]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -668,6 +673,16 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -A, --ampp-activate PROFILE_NAME            Activate an AMPP (amdsmi power profile) by name.
+                                                Use `amd-smi static --ampp` to see available profiles.
+  --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]
+                                               Configure an AMPP (amdsmi power profile) custom slot by staging one or
+                                                more KEY=VALUE fields, then committing them.
+                                                Use `amd-smi static --ampp` to see writable profiles and field names.
+                                                Example: --ampp-configure profile_2 PPT0_Limit=300
+                                                Alternatively, pass @<path> to restore every writable profile found
+                                                in a JSON file (as produced by `amd-smi static --ampp --json`).
+                                                Example: --ampp-configure @profiles.json
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -1691,3 +1706,61 @@ the fwupd prerequisite above.
 
 This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
 `amd-smi set --gtt` to tune shared GPU memory on those platforms instead.
+
+## AMPP: power profile activation and configuration
+
+`amd-smi static --ampp` / `amd-smi set --ampp-activate PROFILE_NAME` /
+`amd-smi set --ampp-configure PROFILE_NAME KEY=VALUE ...` let users inspect,
+activate, and (for writable custom slots) configure AMPP (amdsmi power
+profile) recipes -- predefined power/performance settings exposed by the
+driver under the kernel UAPI sysfs tree
+`/sys/class/drm/<device>/device/app_modes/` (not libdrm). Profiles, fields,
+and units are all dynamically enumerated at runtime; amd-smi does not assume
+a fixed profile count or field set. This is unrelated to the legacy
+`amd-smi set --profile` (power profile preset-mask) command.
+
+`amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi`
+version once, followed by, per profile: name, index, whether it is
+currently active, whether it is a writable custom slot, and whether a
+writable slot has been configured. For configured/active profiles it also
+lists each field's name, unit, current value, and (when published by the
+driver) guidance-only min/max bounds.
+
+```shell-session
+~$ sudo amd-smi set --ampp-activate profile_2
+```
+
+```shell-session
+~$ sudo amd-smi set --ampp-configure profile_5 PPT0_Limit=300
+```
+
+`--ampp-configure` also accepts `@<path>` in place of `PROFILE_NAME
+KEY=VALUE ...`, restoring every writable profile with staged fields found in
+a JSON file for the current GPU in one call. The file must be shaped like
+`amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
+per-GPU objects, each identified by an integer `"gpu"` index and containing
+an `"ampp"."profiles"` list.
+
+```shell-session
+~$ sudo amd-smi static --ampp --json --file profiles.json
+~$ sudo amd-smi set --gpu 0 --ampp-configure @profiles.json
+```
+
+Profiles are restored one at a time and independently: a failure on one
+profile (for example, a malformed `fields` entry, or the driver rejecting a
+value) is reported per-profile and does not stop the remaining profiles in
+the file from being applied, nor roll back ones already applied. The one
+exception is a permission error (not run with `sudo`), which aborts the
+whole `--ampp-configure @<path>` call immediately instead of continuing to
+the remaining profiles.
+
+### Prerequisites
+
+- Requires a driver build that publishes `app_modes/` under
+  `/sys/class/drm/<device>/device/`; on ASICs/VBIOS combinations that do not
+  publish it, `amd-smi static --ampp` reports
+  `N/A (AMPP is not supported on this ASIC/VBIOS)`.
+- `amd-smi set --ampp-activate` / `--ampp-configure` require root/`CAP_SYS_ADMIN`.
+- `--ampp-configure` may only target a slot listed in
+  `app_modes/config/writable_slot_mask`; use `amd-smi static --ampp` first to
+  find writable profiles and their field names.
