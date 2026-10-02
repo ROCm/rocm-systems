@@ -1078,6 +1078,11 @@
           "test_filter": "RmaMultiSegmentMPITest.IPutSignalMultiSegment"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_IPutSignalInLaterSegment",
+          "description": "Signal in a 3-segment window: straddling, misaligned and out-of-window atomics are rejected without writes; atomics in segments 0, 1 and 2 land only at their offsets",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSignalInLaterSegment"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutSizeSweepFromZero",
           "description": "IPut sweep from 0 to the full window over byte, word, page, 64K and segment-boundary sizes, checking nothing past the payload was touched",
           "test_filter": "RmaMultiSegmentMPITest.IPutSizeSweepFromZero"
