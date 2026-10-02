@@ -1575,7 +1575,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     bool nicFused;
   };
 
-  int nChannelsOrig;
   struct allGatherInfo* allGather3Data = NULL;
   struct ncclTopoRanks** allTopoRanks = NULL;
   int *nodesFirstRank = NULL, *nodesTreePatterns = NULL;
@@ -1864,8 +1863,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
        * is required during Preset. Therefore, nChannels cannot be auto-calculated
        * based on nNodes at this stage.
        * Recommended: Set nChannels via environment variable (e.g., 6 channels for
-       * optimal 4-node load balancing). Missing channel data is backfilled
-       * by repairMissingChannels() during Postset.
+       * optimal 4-node load balancing). Channels past the preset count are filled
+       * by expandTopoRanks() during Postset.
        *
        * In isGfx_110x_120x, defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian
        * cycles in graph K8 (8 GPU case) = 14, and 56 is 14*4.
@@ -2296,7 +2295,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     INFO(NCCL_INIT, "Cross-clique P2P enabled: nvlDomainSize=%d cliqueSize=%d", comm->nvlDomainSize, comm->clique.size);
   }
 
-  nChannelsOrig = comm->nChannels;
   comm->minNetBw = allGather3Data[rank].minNetBw;
   NCCLCHECKGOTO(ncclCalloc(&allTopoRanks, comm->nRanks), ret, fail);
   int nc;
@@ -2332,20 +2330,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     (comm->topo->nodes[GPU].count != comm->topo->nRanks && comm->topo->nodes[NET].count) ?
       std::min(treeGraph->nChannels, ringGraph->nChannels) :
       ringGraph->nChannels;
-  if (comm->nChannels < nChannelsOrig) {
-    // We started duplicating channels during Preset(), so we need to move the
-    // duplicated channels since we have removed some.
-    for (int i = 0; i < comm->nChannels; i++) {
-      memcpy(comm->channels + comm->nChannels + i, comm->channels + nChannelsOrig + i, sizeof(struct ncclChannel));
-    }
-  } else if (comm->nChannels > nChannelsOrig) {
-    // Preset() fills each channel's Tree, only for the channel count it sees at that point. 
-    // On a single node the channel count can grow afterwards, and Postset() rebuilds only the rings. 
-    // So the extra channels keep empty Trees. The else fills each added channel with a copy of an existing one.
-    for (int c = nChannelsOrig; c < comm->nChannels; c++) {
-      memcpy(comm->channels + c, comm->channels + c % nChannelsOrig, sizeof(struct ncclChannel));
-    }
-  }
 
   // Determine CollNet support after all-gather now that we know nNodes and each node localRanks
   if (comm->config.collnetEnable == 1) {
