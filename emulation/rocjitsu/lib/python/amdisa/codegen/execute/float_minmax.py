@@ -39,11 +39,6 @@ FORMATS: dict[str, str] = {
     'f64': 'F64',
 }
 
-OUTPUT_POLICY = 'output_policy'
-
-# Scalar expressions use inst_; shared-body generation qualifies it later.
-OUTPUT_MODIFIERS = ('inst_.omod', 'inst_.clamp')
-
 _TEMPLATE = re.compile(
     r'v_(?P<form>\w+)_(?P<dtype>f16|f32|f64)_(?P<encoding>vop2|vop3)'
 )
@@ -70,22 +65,6 @@ def operation_expr(dtype: str, form: str, policy: str) -> str:
     """Capture the input-flush policy in an operation free of instruction modifiers."""
     op, _ = FORMS[form]
     return f'{_NS}::Operation<{_format(dtype)}, {_NS}::{op}>{{{policy}}}'
-
-
-def output_policy_expr(dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS) -> str:
-    """Emit the effective OMOD/CLAMP policy using dtype's MODE fields.
-
-    ``fields`` holds the (OMOD, CLAMP) expressions from the instruction.
-    """
-    omod, clamp = fields
-    return f'amdgpu::output_modifier_policy<{_format(dtype)}>(wf, {omod}, {clamp})'
-
-
-def output_policy_decl(
-    dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS, indent: str = '  '
-) -> str:
-    """Declare the scalar output policy once, before the lane loop."""
-    return f'{indent}const auto {OUTPUT_POLICY} = {output_policy_expr(dtype, fields)};'
 
 
 def minmax_expr(

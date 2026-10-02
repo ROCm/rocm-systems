@@ -14,7 +14,7 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import float_compare, float_minmax, vop3_modifiers
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
@@ -1124,6 +1124,17 @@ def _lower_dst_write(
             output_fields if selection_node is not rhs_node else None,
         )
         needs_bitcast = 0
+    elif selection_node is not rhs_node and _is_integral_rounding(selection_node):
+        # The rounding operation already returns F32/F64. Apply output modifiers
+        # to those bits using GPU MODE, independently of the host rounding mode.
+        dtype = f'f{selection_node.ty.size}'
+        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+        if declaration not in ctx.vector_preamble:
+            ctx.vector_preamble.append(declaration)
+        rounded = _lower_expr(selection_node, ctx)
+        bits = f'std::bit_cast<uint{selection_node.ty.size}_t>({rounded})'
+        rhs = vop3_modifiers.apply_output(dtype, bits)
+        needs_bitcast = 0
     else:
         rhs = _lower_expr(rhs_node, ctx)
         needs_bitcast = _rhs_is_float_expr(rhs_node)
@@ -2093,6 +2104,14 @@ def _is_float_minmax(node: SemaNode) -> bool:
     )
 
 
+def _is_integral_rounding(node: SemaNode) -> bool:
+    """These operations produce a destination-format result before OMOD/CLAMP."""
+    return node.ty in (SemaType.F32, SemaType.F64) and (
+        node.kind in (SemaNodeKind.FLOOR, SemaNodeKind.TRUNC)
+        or (node.kind == SemaNodeKind.CALL and node.call_name in ('ceil', 'rndne'))
+    )
+
+
 def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:
     """Read through output-modifier wrappers without changing the AST.
 
@@ -2123,10 +2142,10 @@ def _float_minmax_selection(
     dtype, reads, modifiers = _raw_float_sources(node, ctx)
     output_policy = None
     if output_fields is not None:
-        declaration = float_minmax.output_policy_decl(dtype, output_fields)
+        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
         if declaration not in ctx.vector_preamble:
             ctx.vector_preamble.append(declaration)
-        output_policy = float_minmax.OUTPUT_POLICY
+        output_policy = vop3_modifiers.OUTPUT_POLICY
     return dtype, float_minmax.minmax_expr(
         dtype, form, reads, modifiers=modifiers, output_policy=output_policy
     )

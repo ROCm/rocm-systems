@@ -2442,6 +2442,32 @@ template <typename Inst, typename BinOp>
   return false;
 }
 
+/// @brief Run a unary F32/F64 operation that rounds before OMOD/CLAMP.
+/// @details Adapt the existing float functor to the common raw-bit modifier
+/// wrapper. The VOP1 helpers supply the same src0/vdst access and EXEC masking
+/// needed here; all VOP3 modifiers come from the wrapper.
+template <typename Float, typename Inst, typename UnOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_unary_vop3_rounded_simd(Inst &inst, Wavefront &wf,
+                                                              UnOp un_op) {
+  static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+  using Fmt = std::conditional_t<std::is_same_v<Float, float>, comparison::F32, comparison::F64>;
+  const auto raw_operation = [un_op](auto bits) {
+    const auto value = std::bit_cast<util::native<Float>>(bits);
+    return std::bit_cast<decltype(bits)>(un_op(value));
+  };
+  const auto operation = vop3_float_operation<Fmt>(inst, wf, raw_operation);
+  if constexpr (std::is_same_v<Float, float>)
+    return try_execute_unary_vop1_simd<uint32_t, uint32_t>(inst, wf, operation);
+  else
+    return try_execute_unary_vop1_f64_simd<uint64_t>(inst, wf, operation);
+}
+
+template <typename Float, typename Inst, typename UnOp>
+[[nodiscard]] bool try_execute_unary_vop3_rounded_simd(Inst &, Wavefront &, UnOp) {
+  return false;
+}
+
 /// VOP3 f64 unary SIMD fast path. 64-bit-lane counterpart of
 /// try_execute_unary_vop3_fp_simd: reads `src0` as `native<double>`, applies
 /// the src0 abs/neg modifiers (apply_vop3_src_mod_f64), runs `un_op`, applies
@@ -5030,6 +5056,18 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...)                                           \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_raw64_simd(                                      \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#endif
+
+/// Unary operations whose F32/F64 result is ready for the shared output modifiers.
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP32(...)                                             \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_rounded_simd<float>(inst, wf, __VA_ARGS__))       \
+  return
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64(...)                                             \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_rounded_simd<double>(inst, wf, __VA_ARGS__))      \
   return
 #endif
 

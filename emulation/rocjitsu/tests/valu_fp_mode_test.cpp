@@ -2230,6 +2230,85 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
   return cases;
 }
 
+// VOP3 integral rounding completes before the shared OMOD/CLAMP stages.
+// These are explicit wiring expectations, not additional hardware captures.
+std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
+  struct Form {
+    const char *name;
+    uint16_t op;
+    unsigned width;
+    double positive_halved;  // round(1.5) / 2
+    double negative_doubled; // round(-abs(-1.5)) * 2
+    bool ceil;
+  };
+  constexpr std::array<Form, 8> forms = {{
+      {"CeilF32", rdna4::kVCeilF32Vop3, 32, 1.0, -2.0, true},
+      {"FloorF32", rdna4::kVFloorF32Vop3, 32, 0.5, -4.0, false},
+      {"TruncF32", rdna4::kVTruncF32Vop3, 32, 0.5, -2.0, false},
+      {"RndneF32", rdna4::kVRndneF32Vop3, 32, 1.0, -4.0, false},
+      {"CeilF64", rdna4::kVCeilF64Vop3, 64, 1.0, -2.0, true},
+      {"FloorF64", rdna4::kVFloorF64Vop3, 64, 0.5, -4.0, false},
+      {"TruncF64", rdna4::kVTruncF64Vop3, 64, 0.5, -2.0, false},
+      {"RndneF64", rdna4::kVRndneF64Vop3, 64, 1.0, -4.0, false},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const auto &form : forms) {
+    const auto bits = [&](double value) -> uint64_t {
+      return form.width == 32 ? std::bit_cast<uint32_t>(static_cast<float>(value))
+                              : std::bit_cast<uint64_t>(value);
+    };
+    const uint64_t sign = form.width == 32 ? 0x80000000u : 0x8000000000000000ull;
+    const uint64_t infinity = form.width == 32 ? 0x7f800000u : 0x7ff0000000000000ull;
+    const uint64_t quiet = form.width == 32 ? 0x00400000u : 0x0008000000000000ull;
+    const auto add = [&](const std::string &name, uint64_t input, uint64_t result,
+                         rdna4::Vop3BuilderFields fields, uint32_t mode = 0xf0u,
+                         int host_rounding = FE_TONEAREST) {
+      fields.vdst = 6;
+      fields.src0 = 256;
+      const auto words = rdna4::build_vop3(form.op, fields);
+      std::vector<std::pair<uint32_t, uint32_t>> sources{{0, uint32_t(input)}};
+      std::vector<std::pair<uint32_t, uint32_t>> expected{{6, uint32_t(result)}};
+      if (form.width == 64) {
+        sources.emplace_back(1, uint32_t(input >> 32));
+        expected.emplace_back(7, uint32_t(result >> 32));
+      }
+      cases.push_back({std::string(form.name) + name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       mode,
+                       host_rounding});
+    };
+    add("RoundThenHalf", bits(1.5), bits(form.positive_halved), {.omod = 3});
+    add("AbsNegThenRound", bits(-1.5), bits(form.negative_doubled),
+        {.abs = 1, .omod = 1, .neg = 1});
+    add("ScaleThenClamp", bits(2.0), bits(1.0), {.clamp = 1, .omod = 3});
+    add("PreserveNegativeZero", sign, sign, {});
+    add("ScaleNegativeZero", sign, 0u, {.omod = 1});
+    add("QuietNanBeforeScale", infinity | 0x42u, infinity | quiet | 0x42u, {.omod = 2});
+    add("ClampNan", infinity | quiet | 0x42u, 0u, {.clamp = 1, .omod = 1});
+    // Integral rounding preserves input denormals even when MODE would flush
+    // arithmetic inputs: ceil(tiny) * 2 = 2, while the other operations give 0.
+    add("TinyInput", 1u, bits(form.ceil ? 2.0 : 0.0), {.omod = 1}, 0u);
+
+    for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+      // Give the other format a different rounding mode to catch field mixups.
+      const uint32_t other = (rounding + 1) % 4;
+      const uint32_t mode =
+          0xf0u | (form.width == 32 ? rounding | (other << 2) : other | (rounding << 2));
+      const int host = rounding == 0 ? FE_TOWARDZERO : FE_TONEAREST;
+      const uint64_t positive = rounding == 0 || rounding == 1 ? infinity : infinity - 1;
+      const uint64_t negative = rounding == 0 || rounding == 2 ? infinity : infinity - 1;
+      add("PositiveOverflowMode" + std::to_string(rounding), infinity - 1, positive, {.omod = 1},
+          mode, host);
+      add("NegativeOverflowMode" + std::to_string(rounding), sign | (infinity - 1), sign | negative,
+          {.omod = 1}, mode, host);
+    }
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2323,6 +2402,23 @@ TEST_P(ValuMinmaxFpModeTest, HonorsModeOnScalarAndSimdPaths) {
     expect_arithmetic_case(GetParam());
   }
 }
+
+class ValuIntegralRoundingModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuIntegralRoundingModeTest, ModifiersOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuIntegralRoundingModeTest,
+                         testing::ValuesIn(integral_rounding_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(TranscendentalPolicy, ValuFpModeTest,
                          testing::ValuesIn(transcendental_policy_cases()),
