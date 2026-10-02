@@ -23,14 +23,13 @@
 /// unsigned lanes, so selection preserves signs and NaN payloads.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 
 #include <cstdint>
 #include <functional>
 #include <type_traits>
 
 namespace rocjitsu::amdgpu::minmax {
-
-using comparison::Policy;
 
 /// @brief NaN handling for a binary selection.
 enum class Nan : uint8_t {
@@ -166,14 +165,14 @@ template <typename Fmt, typename Op, typename V> constexpr V apply(V a, V b, V c
 template <typename Fmt, typename Op, typename V, typename... Vs>
   requires(1 + sizeof...(Vs) == Op::kSources && (std::is_same_v<V, Vs> && ...) &&
            fp_format::is_lane_v<Fmt, V>)
-constexpr V evaluate(const Policy &policy, V a, Vs... rest) {
-  return detail::apply<Fmt, Op>(comparison::prepare<Fmt>(a, policy),
-                                comparison::prepare<Fmt>(rest, policy)...);
+constexpr V evaluate(const input_denormal::Policy &policy, V a, Vs... rest) {
+  return detail::apply<Fmt, Op>(input_denormal::prepare<Fmt>(a, policy),
+                                input_denormal::prepare<Fmt>(rest, policy)...);
 }
 
 /// @brief Input flushing and selection, independent of instruction modifiers.
 template <typename Fmt, typename Op> struct Operation {
-  Policy policy;
+  input_denormal::Policy policy;
 
   template <typename V, typename... Vs> constexpr V operator()(V a, Vs... rest) const {
     return evaluate<Fmt, Op>(policy, a, rest...);

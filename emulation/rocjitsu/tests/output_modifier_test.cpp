@@ -7,6 +7,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "util/simd.h"
@@ -22,7 +23,7 @@
 
 namespace {
 
-namespace cmp = rocjitsu::amdgpu::comparison;
+namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 namespace om = rocjitsu::amdgpu::output_modifier;
@@ -55,26 +56,26 @@ template <typename Fmt, typename V> void expect_modifier_stage_order() {
       std::array<V, 3> values{V(L{0}), V(L{0}), V(L{0})};
       values[source] = V(L{1});
       const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::Min3Num>> negative{
-          {0u, 1u << source}, {}, {cmp::Policy::make(mode)}};
+          {0u, 1u << source}, {}, {denorm::Policy::make(mode)}};
       expect_bits(negative(values[0], values[1], values[2]), Fmt::kSign | L(mode & 1u));
       values[source] = V(Fmt::kSign | L{1});
       const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::Max3Num>> positive{
-          {1u << source, 0u}, {}, {cmp::Policy::make(mode)}};
+          {1u << source, 0u}, {}, {denorm::Policy::make(mode)}};
       expect_bits(positive(values[0], values[1], values[2]), L(mode & 1u));
     }
   }
 
   // ABS on src1 and NEG on src2: max(0, abs(-1), -2) = 1.
   const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::Max3Num>> three_sources{
-      {2u, 4u}, {}, {cmp::Policy::make(3)}};
+      {2u, 4u}, {}, {denorm::Policy::make(3)}};
   expect_bits(three_sources(V(L{0}), V(Fmt::kSign | one), V(two)), one);
   const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::Med3Num>> median{
-      {0u, 1u}, {}, {cmp::Policy::make(3)}};
+      {0u, 1u}, {}, {denorm::Policy::make(3)}};
   expect_bits(median(V(one), V(two), V(three)), two);
 
   // ABS precedes NEG, and each applies once: min(-abs(-0.75), 0.5) = -0.75.
   const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::MinNum>> source_order{
-      {1u, 1u}, {}, {cmp::Policy::make(3)}};
+      {1u, 1u}, {}, {denorm::Policy::make(3)}};
   expect_bits(source_order(V(Fmt::kSign | three_quarters), V(half)), Fmt::kSign | three_quarters);
 
   // ABS -> min -> multiply by 2 -> clamp: min(abs(-0.75), 2) * 2 clamps to 1.
@@ -83,7 +84,7 @@ template <typename Fmt, typename V> void expect_modifier_stage_order() {
   output.omod = 1;
   output.clamp = true;
   const fp::WithModifiers<Fmt, mm::Operation<Fmt, mm::MinNum>> all_stages{
-      {1u, 0u}, output, {cmp::Policy::make(3)}};
+      {1u, 0u}, output, {denorm::Policy::make(3)}};
   expect_bits(all_stages(V(Fmt::kSign | three_quarters), V(two)), one);
 }
 
@@ -252,7 +253,7 @@ template <typename Fmt> struct Witness {
 template <typename Fmt> void expect_witnesses(const std::vector<Witness<Fmt>> &witnesses) {
   for (const Witness<Fmt> &w : witnesses) {
     const bool f32 = Fmt::kWidth == 32;
-    const auto input_policy = cmp::Policy::make(f32 ? (w.mode >> 4) & 3u : (w.mode >> 6) & 3u);
+    const auto input_policy = denorm::Policy::make(f32 ? (w.mode >> 4) & 3u : (w.mode >> 6) & 3u);
     // GFX12 CLAMP turns NaN into +0 regardless of MODE.DX10_CLAMP.
     const om::Policy output{w.omod, w.clamp, true, f32 ? w.mode & 3u : (w.mode >> 2) & 3u,
                             ((w.mode >> 23) & 1u) != 0};

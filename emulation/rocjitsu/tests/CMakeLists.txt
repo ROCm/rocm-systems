@@ -627,6 +627,7 @@ add_executable(
     scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    input_denormal_test.cpp
     minmax_test.cpp
     output_modifier_test.cpp
     amdgpu_elf_test_support.cpp

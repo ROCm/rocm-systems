@@ -4,8 +4,9 @@
 """Floating VOPC relations evaluated by shared/comparison.h.
 
 Scalar, SIMD and arch-local compare bodies all emit the same
-``comparison::evaluate`` call on raw source encodings, so source modifiers,
-MODE input flushing and NaN ordering stay in one place.
+``comparison::evaluate`` call on raw source encodings. Source modifiers and
+MODE input flushing use shared/source_modifier.h and shared/input_denormal.h;
+comparison.h owns the relation and NaN ordering.
 """
 
 from amdisa.semantics import FLOAT_COMPARE_RELATIONS, is_float_relation
@@ -48,7 +49,7 @@ def lane_type(dtype: str) -> str:
 
 def policy_expr(dtype: str) -> str:
     mode = 'f32' if dtype == 'f32' else 'f16_f64'
-    return f'{_NS}::Policy::make(wf.fp_denorm_mode_{mode}())'
+    return f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
 
 
 def policy_decl(dtype: str, indent: str = '  ') -> str:

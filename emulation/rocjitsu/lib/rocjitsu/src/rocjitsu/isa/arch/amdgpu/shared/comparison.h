@@ -30,8 +30,11 @@
 /// F16 occupies the low half of a 32-bit lane as in the VOPC SIMD path. Lane
 /// values above the format width are ignored. CLASS tests read the raw
 /// encoding and do not use these stages.
+/// Input flushing uses input_denormal.h; gfx1201 captures confirm the compare
+/// behavior across every MODE.FP_DENORM setting.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
 #include <cstdint>
@@ -39,17 +42,6 @@
 #include <type_traits>
 
 namespace rocjitsu::amdgpu::comparison {
-
-/// @brief Per-instruction compare policy, fixed before any lane is evaluated.
-struct Policy {
-  bool flush_inputs = false;
-
-  /// @details Every ISA manual applies the MODE denormal controls to all
-  /// floating-point operations, with no exception for compares; gfx1201
-  /// captures across every MODE.FP_DENORM setting confirm it.
-  /// @param denorm_mode MODE.FP_DENORM field of the source format; bit 0 allows input denormals.
-  static constexpr Policy make(uint32_t denorm_mode) { return {(denorm_mode & 1u) == 0}; }
-};
 
 /// @brief A relation: an operation on order keys, optionally negated.
 template <typename Op, bool Negated = false> struct Relation {
@@ -69,15 +61,6 @@ constexpr V choose(const Mask &take, V when_true, V when_false) {
     where(take, when_false) = when_true;
     return when_false;
   }
-}
-
-/// @brief All ones where the magnitude is below the smallest normal, zero elsewhere.
-/// @details The subtraction borrows into the lane's top bit exactly when the
-/// magnitude is smaller, which avoids a mask type.
-template <typename Fmt, typename V> constexpr V below_normal(V bits) {
-  using Lane = typename Fmt::Lane;
-  const V magnitude = bits & Fmt::kMagnitude;
-  return Lane{0} - ((magnitude - Fmt::kMinNormal) >> (8 * sizeof(Lane) - 1));
 }
 
 /// @brief All ones where the magnitude is nonzero, zero for either signed zero.
@@ -115,20 +98,6 @@ using Neq = Relation<std::equal_to<>, true>;
 using Nlt = Relation<std::less<>, true>;
 using T = Relation<detail::Never, true>;
 
-/// @brief Stage 2: flush a subnormal source to a zero of the same sign.
-/// @details NaN, infinity, zero and normal encodings pass through unchanged.
-template <typename Fmt, typename V> constexpr V flush_input(V bits, const Policy &policy) {
-  static_assert(fp_format::is_lane_v<Fmt, V>);
-  if (!policy.flush_inputs)
-    return bits;
-  return bits & (~detail::below_normal<Fmt>(bits) | Fmt::kSign);
-}
-
-/// @brief Mask to the source format and apply input flushing.
-template <typename Fmt, typename V> constexpr V prepare(V bits, const Policy &policy) {
-  return flush_input<Fmt>(bits & Fmt::kBits, policy);
-}
-
 /// @brief Whether a source encoding is NaN.
 template <typename Fmt, typename V> constexpr auto is_nan(V bits) {
   static_assert(fp_format::is_lane_v<Fmt, V>);
@@ -156,10 +125,10 @@ template <typename Fmt, typename V> constexpr V order_key(V bits) {
 /// @brief Evaluate a relation on two sources that already carry their modifiers.
 /// @returns bool for scalar lanes, or the key comparison's mask for SIMD lanes.
 template <typename Fmt, typename Rel, typename V>
-constexpr auto evaluate(V a, V b, const Policy &policy) {
+constexpr auto evaluate(V a, V b, const input_denormal::Policy &policy) {
   static_assert(fp_format::is_lane_v<Fmt, V>);
-  a = prepare<Fmt>(a, policy);
-  b = prepare<Fmt>(b, policy);
+  a = input_denormal::prepare<Fmt>(a, policy);
+  b = input_denormal::prepare<Fmt>(b, policy);
   const auto ordered = !(is_nan<Fmt>(a) || is_nan<Fmt>(b));
   const auto holds = ordered && typename Rel::Operation{}(order_key<Fmt>(a), order_key<Fmt>(b));
   if constexpr (Rel::kNegated)
@@ -172,7 +141,8 @@ constexpr auto evaluate(V a, V b, const Policy &policy) {
 /// @param abs VOP3 ABS field; bit 0 applies to src0 and bit 1 to src1.
 /// @param neg VOP3 NEG field, with the same bit assignment.
 template <typename Fmt, typename Rel, typename V>
-constexpr auto evaluate(V a, V b, uint32_t abs, uint32_t neg, const Policy &policy) {
+constexpr auto evaluate(V a, V b, uint32_t abs, uint32_t neg,
+                        const input_denormal::Policy &policy) {
   return evaluate<Fmt, Rel>(source_modifier::apply<Fmt>(a, 0, abs, neg),
                             source_modifier::apply<Fmt>(b, 1, abs, neg), policy);
 }

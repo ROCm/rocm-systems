@@ -5,6 +5,7 @@
 /// @brief Min/max selection rules, gfx1201 regression cases, and scalar/SIMD agreement.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "util/simd.h"
 
@@ -18,13 +19,13 @@
 
 namespace {
 
-namespace cmp = rocjitsu::amdgpu::comparison;
+namespace denorm = rocjitsu::amdgpu::input_denormal;
 namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 using mm::Nan;
 
-constexpr cmp::Policy kKeep{false};
-constexpr cmp::Policy kFlush{true};
+constexpr denorm::Policy kKeep{false};
+constexpr denorm::Policy kFlush{true};
 
 // ---------------------------------------------------------------------------
 // Reference model: compare decoded values, with gfx1201 NaN and signed-zero rules.
@@ -108,10 +109,10 @@ template <typename Fmt> struct Ref {
 };
 
 template <typename Fmt>
-using Fn2 = typename Fmt::Lane (*)(typename Fmt::Lane, typename Fmt::Lane, const cmp::Policy &);
+using Fn2 = typename Fmt::Lane (*)(typename Fmt::Lane, typename Fmt::Lane, const denorm::Policy &);
 
 template <typename Fmt, typename Op>
-typename Fmt::Lane evaluate2(typename Fmt::Lane a, typename Fmt::Lane b, const cmp::Policy &p) {
+typename Fmt::Lane evaluate2(typename Fmt::Lane a, typename Fmt::Lane b, const denorm::Policy &p) {
   return mm::evaluate<Fmt, Op>(p, a, b);
 }
 
@@ -156,7 +157,7 @@ template <typename Fmt> void expect_binary(typename Fmt::Lane a, typename Fmt::L
   const auto fns = ops2<Fmt>();
   for (const bool flush : {false, true})
     for (std::size_t i = 0; i < kOps.size(); ++i)
-      ASSERT_EQ(fns[i](a, b, cmp::Policy{flush}),
+      ASSERT_EQ(fns[i](a, b, denorm::Policy{flush}),
                 Ref<Fmt>::select(kOps[i].maximum, kOps[i].rule, a, b, flush))
           << "op " << i << " a 0x" << std::hex << a << " b 0x" << b << " flush " << flush;
 }
@@ -165,7 +166,7 @@ template <typename Fmt>
 void expect_ternary(typename Fmt::Lane a, typename Fmt::Lane b, typename Fmt::Lane c) {
   using R = Ref<Fmt>;
   for (const bool flush : {false, true}) {
-    const cmp::Policy p{flush};
+    const denorm::Policy p{flush};
     const auto nested = [&](bool first, bool second, Nan rule) {
       return R::select(second, rule, R::select(first, rule, a, b, flush), c, flush);
     };
@@ -277,7 +278,7 @@ template <typename Fmt, typename V> void expect_simd_matches_scalar() {
   std::mt19937_64 rng(0xc0ffee);
   while (values.size() % W != 0 || values.size() < 4 * W)
     values.push_back(static_cast<L>(rng()) & ~Fmt::kInfinity);
-  for (const cmp::Policy p : {kKeep, kFlush})
+  for (const denorm::Policy p : {kKeep, kFlush})
     for (std::size_t rotate = 0; rotate < W; ++rotate)
       for (std::size_t base = 0; base < values.size(); base += W) {
         alignas(64) std::array<L, W> a{}, b{}, c{};
