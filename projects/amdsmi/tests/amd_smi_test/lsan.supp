@@ -1,6 +1,3 @@
 # LeakSanitizer suppressions for amdsmitst (.github/workflows/amdsmi-asan.yml).
 # Known, unfixed leaks only: delete an entry with its fix. Entries that still
 # match are listed under "Suppressions used:" at the end of the test output.
-
-# Per-GPU compute-process cache: allocated into a global map, never freed.
-leak:AMDSmiGPUDevice::get_compute_process_list_impl
