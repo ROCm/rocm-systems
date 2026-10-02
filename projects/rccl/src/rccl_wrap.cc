@@ -1504,8 +1504,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable is the conjunction of the four
   // sub-conditions below; split out so the disqualification log can name the blocker.
-  // Forced CE on unregistered buffers also uses this path before ceARTmpBuf has
-  // been initialized (ceStagedUnregistered).
+  // Forced CE on unregistered buffers (!symkRequested, as in (3)) also uses this
+  // path before ceARTmpBuf has been initialized (ceStagedUnregistered).
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
@@ -1519,7 +1519,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   const bool ceRegisteredWindows = !symEligible && ceRegInWindow && ceAvailable &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force);
-  const bool ceStagedUnregistered = ncclGroupDepth == 0 && force && ceArGraphAllowed && ceUsable;
+  const bool ceStagedUnregistered = !symkRequested && ncclGroupDepth == 0 && force && ceArGraphAllowed && ceUsable;
   if (!hasSysmemSegment && (ceRegisteredWindows || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);

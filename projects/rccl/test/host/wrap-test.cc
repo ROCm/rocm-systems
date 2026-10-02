@@ -4034,6 +4034,69 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsCeDriver) {
       });
 }
 
+namespace {
+// FORCE with staging not yet allocated, on symmetric-window Sum operands (symkRequested).
+void SelectForcedRegisteredSum(int64_t ceArRegMax, const rcclArchThresholds* table, rcclCollDecision* decision) {
+  static int64_t s_ceArRegMax;
+  s_ceArRegMax = ceArRegMax;
+  g_loadParam = [](const char* env, int64_t deft) {
+    if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return s_ceArRegMax;
+    return deft;
+  };
+  g_ceImplemented = true;
+  ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                            size_t, const void*, void*, bool) { return true; });
+  ScopedHook ceAvailable(g_ceAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                                           struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook tuningCompute(g_tuningCompute,
+                           SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+  ncclComm* comm = MakeSelectComm();
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  comm->archThresholds = table;
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, decision));
+  DeleteCommWithArch(comm);
+}
+}  // namespace
+
+// The first-call staged CE arm is for unregistered operands only; symk still wins under FORCE.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum", []() {
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, nullptr, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+  });
+}
+
+// symMaxR2 = 0 withdraws symk; registered CE then takes the call within its cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, &table, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+  });
+}
+
+// RCCL_CE_AR_REG_MAX_MSG_BYTES=0 disables registered CE even under FORCE with 2-shot enabled.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(0, &table, &decision);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+  });
+}
+
 // DDA fabric LL: gfx1250 arch, rcclAllReduceShouldTakeDdaPath eligible
 // (seam), and the LL-specific eligibility check passes.
 TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
