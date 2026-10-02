@@ -9,7 +9,8 @@ never be published as real Rocjitsu results.
 The cases cover failures, timeouts, sanitizer comparisons, historical reruns,
 asserted baselines, and the change from five to seven catalog tests.
 
-The combined dataset has 83 runs: 79 Vanilla runs and four sanitizer runs. This
+The combined dataset has 83 runs: 78 automatic develop Vanilla runs, one manual
+Vanilla run available only in Run Comparison, and four sanitizer runs. This
 provides the same JSON loading path used by the normal dashboard while preserving
 the chart window, selector options, pagination, and reliability coverage.
 

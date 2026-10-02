@@ -17,6 +17,7 @@ function durationTotal(tests) {
 export function selectPluginComparisonGroups(data) {
   const groups = new Map();
   for (const run of data.pluginRuns ?? []) {
+    if (run.trigger !== 'auto' || run.branch !== 'develop') continue;
     const group = groups.get(run.comparisonId) ?? [];
     group.push(run);
     groups.set(run.comparisonId, group);

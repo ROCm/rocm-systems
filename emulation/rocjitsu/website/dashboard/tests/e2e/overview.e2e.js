@@ -165,8 +165,8 @@ test('recent runs waits for two selections before opening compare', async ({ pag
   const rowHeights = await recentRuns.locator('tbody tr').evaluateAll(
     (rows) => rows.slice(0, 3).map((row) => row.getBoundingClientRect().height),
   );
-  expect(Math.abs(rowHeights[0] - rowHeights[1])).toBeLessThanOrEqual(1);
-  expect(rowHeights[1] - rowHeights[2]).toBeGreaterThanOrEqual(24);
+  expect(rowHeights[0] - rowHeights[1]).toBeGreaterThanOrEqual(24);
+  expect(Math.abs(rowHeights[1] - rowHeights[2])).toBeLessThanOrEqual(1);
 
   await expect(page.getByLabel('Show runs')).toHaveText('8 runs');
   await expect(page.getByText('Push', { exact: true })).toHaveCount(0);
@@ -187,8 +187,8 @@ test('recent runs waits for two selections before opening compare', async ({ pag
   await runSelectors.nth(2).click();
 
   await expect(page.getByRole('tab', { name: 'Run Comparison' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('combobox', { name: 'Candidate run' })).toHaveValue(/8418072e/);
-  await expect(page.getByRole('combobox', { name: 'Baseline run' })).toHaveValue(/9f774d29/);
+  await expect(page.getByRole('combobox', { name: 'Candidate run' })).toHaveValue(/31369c4d/);
+  await expect(page.getByRole('combobox', { name: 'Baseline run' })).toHaveValue(/255eabe3/);
   await expect(page.getByText('Candidate vs baseline · Lower duration is faster')).toBeVisible();
 });
 
@@ -211,27 +211,19 @@ test('recent run baselines respect the active global test scope', async ({ page 
   await expect(comparison).not.toHaveAttribute('aria-label', initialComparison);
 });
 
-test('a manual rerun of an older commit is labelled without becoming the latest commit', async ({ page }) => {
+test('manual reruns stay out of official recent runs', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByTestId('latest-commit-run')).toContainText('31369c4d');
-  const newestExecution = page.getByTestId('recent-runs-table').locator('tbody tr').first();
-  await expect(newestExecution).toContainText('8418072e');
-  await expect(newestExecution).toContainText('Sep 1 · 01:15');
-  await expect(newestExecution).toContainText('Aug 15 · 05:30');
+  const recentRuns = page.getByTestId('recent-runs-table');
+  const newestExecution = recentRuns.locator('tbody tr').first();
+  await expect(newestExecution).toContainText('31369c4d');
+  await expect(newestExecution).toContainText('Aug 31 · 19:45');
   await expect(newestExecution.getByLabel('Most recent run')).toBeVisible();
-  await expect(newestExecution).toContainText('Most recent');
-  await expect(newestExecution).toContainText('Manual');
-  await expect(newestExecution.getByLabel('Historical rerun')).toBeVisible();
-  await expect(newestExecution).toContainText('Historical rerun');
-  await expect(newestExecution).not.toContainText('Reference');
-  await expect(newestExecution.locator('[title*="nearest earlier commit: f25f5a48"]')).toHaveCount(1);
-
-  const newestCommitRun = page.getByTestId('recent-runs-table').locator('tbody tr').filter({ hasText: '31369c4d' });
-  await expect(newestCommitRun).toHaveCount(1);
-  await expect(newestCommitRun.getByLabel('Latest commit')).toBeVisible();
-  await expect(newestCommitRun).toContainText('Latest commit');
-  await expect(newestCommitRun.locator('[title*="nearest earlier commit: 9f774d29"]')).toHaveCount(1);
+  await expect(newestExecution.getByLabel('Latest commit')).toBeVisible();
+  await expect(recentRuns).not.toContainText('Manual');
+  await expect(recentRuns).not.toContainText('Sep 1 · 01:15');
+  await expect(newestExecution.locator('[title*="nearest earlier commit: 9f774d29"]')).toHaveCount(1);
 });
 
 test('latest results can be sorted by every column', async ({ page }) => {

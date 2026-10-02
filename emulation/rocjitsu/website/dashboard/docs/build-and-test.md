@@ -150,3 +150,12 @@ Dependencies, generated fixture data, production/test build output, coverage, an
 are ignored by Git. Keep the source, lockfile, tests, and test fixtures under version
 control. Parent-repository automation should use `emulation/rocjitsu/website/dashboard` as its
 working directory and its `package-lock.json` as the npm cache key.
+
+### Enable manual branch publication
+
+Deploy the dashboard that accepts manual branch results before enabling their
+publication. Merge the corpus publisher update first, then deploy this dashboard,
+then enable workflow publication with the updated corpus pin. Topic branches used
+for future manual dispatches must contain that workflow and pin. Manual branch
+runs appear only in Run Comparison; tag dispatches remain artifact-only. Existing
+skipped artifacts are not imported by this change.

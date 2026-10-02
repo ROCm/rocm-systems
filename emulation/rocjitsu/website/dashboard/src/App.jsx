@@ -109,6 +109,9 @@ const emptyDashboardData = {
   isBeta: false,
   runs: [],
   pluginRuns: [],
+  comparisonRuns: [],
+  comparisonTargets: [],
+  comparisonSuites: [],
   testCatalog: [],
   targets: [],
   suites: [],
@@ -253,7 +256,7 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             </Alert>
           )}
 
-          <FiltersBar data={data} state={state} disabled={!hasData} />
+          <FiltersBar data={data} state={state} disabled={state.tab === 'compare' ? data.comparisonRuns.length === 0 : !hasData} />
 
           <Paper data-testid="dashboard-navigation" variant="outlined" sx={{ mt: 1.75, mb: 1.75, borderRadius: 3, overflow: 'hidden' }}>
             <Tabs

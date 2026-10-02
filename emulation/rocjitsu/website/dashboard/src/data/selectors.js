@@ -60,6 +60,19 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
   }).sort(compareRunsByCommit).at(-1) ?? null;
 }
 
+export function selectComparisonRuns(data, selectedCandidateId, selectedBaselineId, filters) {
+  const comparisonRuns = data.comparisonRuns;
+  const selectedCandidate = comparisonRuns.find((run) => run.runId === selectedCandidateId);
+  const candidate = selectedCandidate ?? comparisonRuns.at(-1) ?? null;
+  const defaultBaseline = candidate?.trigger === 'manual'
+    ? data.runs.filter((run) => isRunCompletedForFilters(run, filters)).at(-1) ?? null
+    : selectedCandidate
+      ? previousCompletedRunForFilters(data.runs, candidate, filters)
+      : data.runs.at(-2) ?? null;
+  const baseline = comparisonRuns.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
+  return { candidate, baseline };
+}
+
 function previousCompletedTestResult(runs, candidate, testId) {
   if (!candidate || !testId) return null;
   const earlierRuns = runs.filter((run) => (
