@@ -60,7 +60,7 @@ struct QueueState
     uint32_t ring_mask = 0;        ///< Mask for ring index wrapping (ring_size - 1)
     uint32_t pkt_size  = 64;       ///< AQL packet size in bytes
 
-bool ring_needs_store_fence = true;  ///< True when packet stores need PCIe ordering
+    bool ring_needs_store_fence = true;  ///< True when packet stores need PCIe ordering
 
     std::atomic<uint64_t> virtual_wptr{0};            ///< SDK-visible write index (virtualized)
     volatile uint64_t*    real_wdid       = nullptr;  ///< Pointer to actual queue write index
