@@ -6,6 +6,7 @@
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
+#include "utils/flags.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
 
@@ -362,10 +363,8 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
-  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
-
-  // First search the global map using upper_bound
+MemObjMap::GlobalRange MemObjMap::findGlobalRangeNoLock(uintptr_t key) {
+  // Global-map ranges don't overlap, so upper_bound - 1 is the only candidate.
   auto it = MemObjMap_.upper_bound(key);
   if (it != MemObjMap_.begin()) {
     --it;
@@ -374,8 +373,19 @@ MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      return {it->second, key - it->first};
+      return {mem, it->first, mem_size};
     }
+  }
+  return {nullptr, 0, 0};
+}
+
+MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
+
+  // First search the global (non-overlapping) map.
+  GlobalRange range = findGlobalRangeNoLock(key);
+  if (range.memory != nullptr) {
+    return {range.memory, key - range.base};
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
@@ -483,14 +493,96 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
 
   std::shared_lock lock(AllocatedLock_);
 
-  for (size_t i = 0; i < count; ++i) {
-    auto src_result = findMemObjNoLock(srcs[i], dev);
+  if (DEBUG_CLR_DISABLE_MEMOBJ_CACHE) {
+    for (size_t i = 0; i < count; ++i) {
+      auto s = findMemObjNoLock(srcs[i], dev);
+      src_memories[i] = s.memory;
+      src_offsets[i] = s.offset;
+      auto d = findMemObjNoLock(dsts[i], dev);
+      dst_memories[i] = d.memory;
+      dst_offsets[i] = d.offset;
+    }
+    return;
+  }
+
+  // Batched copies usually address only a few base allocations, so cache the
+  // resolved [base, end) ranges to skip the per-pointer map lookup. Safe because
+  // the shared_lock blocks Add/RemoveMemObj for the whole loop and global-map
+  // ranges never overlap, so a range hit is unambiguous. Only global-map hits are
+  // cached; the Windows overlapping VA map is reached only on a global miss below.
+  constexpr int kRangeCacheSize = 16;  // covers full all-to-all multi-GPU batches
+  constexpr int kWarmupProbes = 64;
+  struct RangeEntry {
+    uintptr_t base;
+    uintptr_t end;
+    amd::Memory* memory;
+  };
+  RangeEntry range_cache[kRangeCacheSize];
+  int cache_count = 0;
+  int cache_next = 0;
+  int probes = 0;
+  int hits = 0;
+  bool cache_active = true;
+
+  auto resolve = [&](const void* ptr) -> LookupResult {
+    const uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
+    LookupResult result;
+    bool resolved = false;
+
+    if (cache_active) {
+      ++probes;
+      for (int c = 0; c < cache_count; ++c) {
+        if (key >= range_cache[c].base && key < range_cache[c].end) {
+          result = {range_cache[c].memory, key - range_cache[c].base};
+          ++hits;
+          resolved = true;
+          break;
+        }
+      }
+    }
+
+    if (!resolved) {
+      GlobalRange range = findGlobalRangeNoLock(key);
+      if (range.memory != nullptr) {
+        if (cache_active) {
+          range_cache[cache_next] = {range.base, range.base + range.size, range.memory};
+          cache_next = (cache_next + 1) % kRangeCacheSize;
+          if (cache_count < kRangeCacheSize) {
+            ++cache_count;
+          }
+        }
+        result = {range.memory, key - range.base};
+      } else {
+        // Global miss: defer to the full resolver (Windows VA map / null result).
+        result = findMemObjNoLock(ptr, dev);
+      }
+    }
+
+    // Give up if the batch doesn't reuse allocations (<25% hits after warmup).
+    if (cache_active && probes >= kWarmupProbes && hits * 4 < probes) {
+      cache_active = false;
+    }
+    return result;
+  };
+
+  size_t i = 0;
+  for (; i < count && cache_active; ++i) {
+    auto src_result = resolve(srcs[i]);
     src_memories[i] = src_result.memory;
     src_offsets[i] = src_result.offset;
 
-    auto dst_result = findMemObjNoLock(dsts[i], dev);
+    auto dst_result = resolve(dsts[i]);
     dst_memories[i] = dst_result.memory;
     dst_offsets[i] = dst_result.offset;
+  }
+  // Once the cache self-disables, finish on the plain path (no probe overhead).
+  for (; i < count; ++i) {
+    auto s = findMemObjNoLock(srcs[i], dev);
+    src_memories[i] = s.memory;
+    src_offsets[i] = s.offset;
+    auto d = findMemObjNoLock(dsts[i], dev);
+    dst_memories[i] = d.memory;
+    dst_offsets[i] = d.offset;
   }
 }
 

@@ -1538,6 +1538,17 @@ class MemObjMap : public AllStatic {
     size_t offset;
   };
 
+  //!< A global-map allocation range [base, base+size) containing a pointer
+  //!< (memory is nullptr for none). Ranges don't overlap, so they are cacheable.
+  struct GlobalRange {
+    amd::Memory* memory;
+    uintptr_t base;
+    size_t size;
+  };
+
+  //!< Global (non-overlapping) allocation-map lookup. Caller must hold AllocatedLock_.
+  static GlobalRange findGlobalRangeNoLock(uintptr_t key);
+
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
   static LookupResult findMemObjNoLock(const void* ptr, Device* dev);
 
