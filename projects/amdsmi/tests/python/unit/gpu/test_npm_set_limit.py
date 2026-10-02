@@ -4,27 +4,11 @@
 
 """Unit tests for the amdsmi_set_npm_limit() Python wrapper.
 
-Uses the real compiled amdsmi package (resolved the same way test_check_res.py
-and test_apu_metrics.py do, via `from common.common import amdsmi`), but mocks
-the underlying ctypes call (`amdsmi_wrapper.amdsmi_set_npm_limit`) so no real
-hardware/root access is required -- these tests exercise only the Python-level
-parameter validation and status-to-exception mapping added around the new C
-API, per the frozen contract:
-
-    def amdsmi_set_npm_limit(node_handle: processor_handle_t, limit: int) -> None
-
-which:
-  * raises AmdSmiParameterException if node_handle is not an
-    amdsmi_wrapper.amdsmi_node_handle instance
-  * raises AmdSmiParameterException if limit is not an int
-  * otherwise calls amdsmi_wrapper.amdsmi_set_npm_limit(node_handle,
-    ctypes.c_uint64(limit)) and funnels the returned status code through the
-    standard _check_res() mapping (AmdSmiLibraryException with the propagated
-    error code on any non-SUCCESS status, e.g. AMDSMI_STATUS_NO_PERM or
-    AMDSMI_STATUS_NOT_SUPPORTED; no exception on AMDSMI_STATUS_SUCCESS)
+Uses the real compiled amdsmi package (via `from common.common import amdsmi`)
+but mocks the ctypes call (`amdsmi_wrapper.amdsmi_set_npm_limit`), so no
+hardware or root is needed. Covers the local parameter checks (node handle
+type; limit an int, not bool, in 1..2**64-1) and the _check_res() status mapping.
 """
-
-from __future__ import annotations
 
 import ctypes
 import unittest
@@ -58,6 +42,12 @@ class TestAmdSmiSetNpmLimitParameterValidation(unittest.TestCase):
         node_handle = _make_node_handle()
         with self.assertRaises(amdsmi.AmdSmiParameterException):
             amdsmi.amdsmi_set_npm_limit(node_handle, 100.5)
+
+    def test_rejects_bool_limit(self):
+        # bool is an int subclass; True must not be written as a 1 W limit.
+        node_handle = _make_node_handle()
+        with self.assertRaises(amdsmi.AmdSmiParameterException):
+            amdsmi.amdsmi_set_npm_limit(node_handle, True)
 
     def test_rejects_negative_limit(self):
         # A Python int can represent negative values a raw ctypes.c_uint64()

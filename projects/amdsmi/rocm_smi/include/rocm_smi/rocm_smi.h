@@ -628,8 +628,8 @@ typedef struct {
                                   //!< (board/max_node_power_limit).
   uint32_t current_node_power;    //!< The current (instantaneous) node power in Watts
                                   //!< (board/node_power).
-  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
-                                  //!< current_node_power.
+  uint64_t reserved[3];           //!< Reduced from reserved[5] to accommodate
+                                  //!< max_node_power_limit and current_node_power.
 } rsmi_npm_info_t;
 
 /**
