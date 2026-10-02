@@ -63,6 +63,13 @@ class ImageLoadPckVimage : public Vimage {
 public:
   ImageLoadPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -72,6 +79,13 @@ class ImageLoadPckSgnVimage : public Vimage {
 public:
   ImageLoadPckSgnVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -81,6 +95,13 @@ class ImageLoadMipPckVimage : public Vimage {
 public:
   ImageLoadMipPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -90,6 +111,13 @@ class ImageLoadMipPckSgnVimage : public Vimage {
 public:
   ImageLoadMipPckSgnVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -137,6 +165,13 @@ class ImageStorePckVimage : public Vimage {
 public:
   ImageStorePckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -146,6 +181,13 @@ class ImageStoreMipPckVimage : public Vimage {
 public:
   ImageStoreMipPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

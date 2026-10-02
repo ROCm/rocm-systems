@@ -41,6 +41,7 @@ namespace amdgpu {
 class ComputeUnitCore;
 class Pm4ScratchPool;
 struct Pm4FailureState;
+class GraphicsStage;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 
 /// @brief Validate the packet storage shared by AQL registration and update paths.
@@ -344,10 +345,13 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
-  /// Register-programmed compute launches use the PM4 user-data register ABI.
+  /// Register-programmed launches use PM4 state instead of an HSA descriptor.
   bool pm4_abi = false;
   /// DRM maps shader addresses in the high half at sign-extended VAs.
   bool drm_shader_addresses = false;
+  std::shared_ptr<GraphicsStage> graphics_stage{};
+  /// Next preferred SPI for graphics placement, independent of host thread count.
+  size_t graphics_spi_cursor = 0;
   std::shared_ptr<Pm4FailureState>
       pm4_failure{};                     ///< Shared with all waves and the owning submission.
   std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.

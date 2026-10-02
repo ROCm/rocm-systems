@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vinterp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_interp_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -19,6 +20,12 @@ namespace rocjitsu {
 namespace rdna3 {
 
 void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u},
+                                    false, inst_.neg, inst_.clamp, inst_.op_sel, false, false);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
@@ -28,6 +35,12 @@ void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u}, true,
+                                    inst_.neg, inst_.clamp, inst_.op_sel, false, false);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
@@ -37,6 +50,12 @@ void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u},
+                                    false, inst_.neg, inst_.clamp, inst_.op_sel, true, false);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
@@ -48,6 +67,12 @@ void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u}, true,
+                                    inst_.neg, inst_.clamp, inst_.op_sel, true, false);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
@@ -59,6 +84,12 @@ void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u},
+                                    false, inst_.neg, inst_.clamp, inst_.op_sel, true, true);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
@@ -70,6 +101,12 @@ void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
+  if (wf.is_graphics_wave()) {
+    amdgpu::execute_graphics_interp(wf, inst_.vdst,
+                                    {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u}, true,
+                                    inst_.neg, inst_.clamp, inst_.op_sel, true, true);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |

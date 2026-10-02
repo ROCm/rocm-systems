@@ -2233,7 +2233,7 @@ TEST_P(AllImageAccessTest, RdnaSrgbFormatsDecodeColorAndKeepLinearAlpha) {
   }
 }
 
-TEST_P(AllImageAccessTest, UnsupportedImageAtomicsDoNotIssueMemory) {
+TEST_P(AllImageAccessTest, ImageAtomicAddIssuesOnlyOnSupportedTargets) {
   bind_image(2);
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
@@ -2277,6 +2277,17 @@ TEST_P(AllImageAccessTest, UnsupportedImageAtomicsDoNotIssueMemory) {
   ASSERT_TRUE(decoded.succeeded());
   auto instruction = std::move(decoded).value();
   instruction->execute(*instruction, wf_);
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+      arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    ASSERT_FALSE(wf_->instruction_execution_failed());
+    ASSERT_NE(instruction->data(), nullptr);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+    ASSERT_EQ(pipeline.issue(instruction.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+    cu_->l1_vector().flush_all();
+    l2_.flush_all();
+    EXPECT_EQ(memory_.read32(kBase), 0x12345679u);
+    return;
+  }
   EXPECT_EQ(wf_->instruction_execution_error(),
             amdgpu::InstructionExecutionError::UnimplementedInstruction);
   EXPECT_FALSE(instruction->data());
@@ -2489,7 +2500,7 @@ INSTANTIATE_TEST_SUITE_P(Architectures, AllImageAccessTest,
                                          ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                                          ROCJITSU_CODE_ARCH_RDNA4));
 
-enum class SampleTestOperation { Zero, Lod, Gradients, Gather, Unsupported };
+enum class SampleTestOperation { Zero, Lod, Gradients, Gather, Offset };
 
 // Raw S# field encodings independent of the sampler decoder under test.
 enum class Clamp : uint32_t { Repeat = 0, Mirror = 1, Edge = 2, Border = 6 };
@@ -3741,11 +3752,17 @@ TEST_P(ImageSamplerControlTest, ClampedLinearTapsPreserveNegativeZero) {
   }
 }
 
-TEST_P(ImageSamplerControlTest, UnsupportedSampleFormsReportAnExecutionError) {
+TEST_P(ImageSamplerControlTest, OffsetSampleIssuesOnlyOnSupportedTargets) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
     GTEST_SKIP() << "The public CDNA2 ISA exposes only the base sample form";
   wf_->clear_instruction_execution_error();
-  EXPECT_FALSE(sample(SampleTestOperation::Unsupported));
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+      arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    EXPECT_TRUE(sample(SampleTestOperation::Offset));
+    EXPECT_FALSE(wf_->instruction_execution_failed());
+    return;
+  }
+  EXPECT_FALSE(sample(SampleTestOperation::Offset));
   EXPECT_EQ(wf_->instruction_execution_error(),
             amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }

@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -19,12 +20,14 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/graphics/gs_registers.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
 #include <algorithm>
 #include <bit>
 #include <cassert>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -41,7 +44,7 @@ namespace amdgpu {
 MemoryPipeline::~MemoryPipeline() {
   while (!issued_.empty()) {
     delete issued_.front().inst;
-    issued_.pop();
+    issued_.pop_front();
   }
   while (!returned_.empty()) {
     delete returned_.front().inst;
@@ -106,19 +109,38 @@ void MemoryPipeline::complete_entry(PipelineEntry entry) {
     finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
 }
 
+VmAccessOutcome MemoryPipeline::initiate_collected_access(Instruction &inst, Wavefront &wf,
+                                                          bool retain_unavailable) {
+  struct RestoreInstruction {
+    Instruction *&slot;
+    Instruction *previous;
+    ~RestoreInstruction() { slot = previous; }
+  } restore{deferable_instruction_, deferable_instruction_};
+  deferable_instruction_ = retain_unavailable ? &inst : nullptr;
+  return initiate_access(inst, wf);
+}
+
 VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                            bool retain_unavailable) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
-  const VmAccessOutcome access = initiate_access(*inst, wf);
+  const VmAccessOutcome access = collect_step_metadata_
+                                     ? initiate_collected_access(*inst, wf, retain_unavailable)
+                                     : initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
-    issued_.push({.inst = inst,
-                  .wf = &wf,
-                  .counters = counters,
-                  .wave_generation = wf.dispatch_generation(),
-                  .issue_pc = wf.pc});
+    const bool step_batch = step_staged_instruction_ == inst;
+    if (step_batch)
+      step_staged_instruction_ = nullptr;
+    issued_.push_back({.inst = inst,
+                       .wf = &wf,
+                       .counters = counters,
+                       .wave_generation = wf.dispatch_generation(),
+                       .issue_pc = wf.pc,
+                       .issue_id = next_issue_id(),
+                       .step_batch = step_batch});
     wf.set_state(WfState::VM_RETRY);
-    wf.cu().request_functional_yield();
+    if (!step_batch)
+      wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
@@ -156,11 +178,12 @@ VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf)
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
-  issued_.push({.inst = inst,
-                .wf = &wf,
-                .counters = counters,
-                .wave_generation = wf.dispatch_generation(),
-                .issue_pc = wf.pc});
+  issued_.push_back({.inst = inst,
+                     .wf = &wf,
+                     .counters = counters,
+                     .wave_generation = wf.dispatch_generation(),
+                     .issue_pc = wf.pc,
+                     .issue_id = next_issue_id()});
   wf.set_state(WfState::VM_RETRY);
   wf.cu().request_functional_yield();
 }
@@ -173,7 +196,7 @@ bool MemoryPipeline::rewind_unavailable_load(Wavefront &wf) {
     return false;
   Instruction *load = nullptr;
   PipelineEntry replay{};
-  for (auto entries = issued_; !entries.empty(); entries.pop()) {
+  for (auto entries = issued_; !entries.empty(); entries.pop_front()) {
     const auto &entry = entries.front();
     if (entry.wf != &wf || entry.wave_generation != wf.dispatch_generation())
       continue;
@@ -201,9 +224,9 @@ bool MemoryPipeline::rewind_unavailable_load(Wavefront &wf) {
   const size_t pending = issued_.size();
   for (size_t i = 0; i < pending; ++i) {
     auto entry = issued_.front();
-    issued_.pop();
+    issued_.pop_front();
     if (entry.inst != load) {
-      issued_.push(entry);
+      issued_.push_back(entry);
       continue;
     }
     wf.pc = entry.issue_pc;
@@ -241,41 +264,53 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
 }
 
 void MemoryPipeline::cancel(Wavefront &wf) {
-  std::queue<PipelineEntry> retained;
+  std::deque<PipelineEntry> retained;
   while (!issued_.empty()) {
     PipelineEntry entry = issued_.front();
-    issued_.pop();
+    issued_.pop_front();
     if (entry.wf == &wf && entry.wave_generation == wf.dispatch_generation()) {
       delete entry.inst;
       continue;
     }
-    retained.push(entry);
+    retained.push_back(entry);
   }
   issued_.swap(retained);
 }
 
-void MemoryPipeline::tick() { retry_entries(true, 0, 0); }
+void MemoryPipeline::tick() { tick_impl(false); }
+
+void MemoryPipeline::tick_impl(bool step_only) { retry_entries(true, 0, 0, step_only); }
 
 void MemoryPipeline::retry_for_queue(uint32_t process_id, uint32_t queue_id) {
   retry_entries(false, process_id, queue_id);
 }
 
-void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id) {
+void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id,
+                                   bool step_only) {
   const std::size_t pending = issued_.size();
   for (std::size_t index = 0; index < pending && !issued_.empty(); ++index) {
     PipelineEntry entry = issued_.front();
-    issued_.pop();
+    issued_.pop_front();
     if (!all_queues && (entry.wf->process_id() != process_id || entry.wf->queue_id() != queue_id)) {
-      issued_.push(entry);
+      issued_.push_back(entry);
       continue;
     }
     if (entry.wf->dispatch_generation() != entry.wave_generation) {
       delete entry.inst;
       continue;
     }
+    if (step_only && !entry.step_batch) {
+      issued_.push_back(entry);
+      continue;
+    }
+    entry.step_batch = false;
+    if (entry.transfer_ready) {
+      complete_entry(entry);
+      continue;
+    }
     const VmAccessOutcome access = initiate_access(*entry.inst, *entry.wf);
     if (access == VmAccessOutcome::Unavailable) {
-      issued_.push(entry);
+      issued_.push_back(entry);
       if (all_queues)
         entry.wf->cu().request_functional_yield();
       continue;
@@ -1378,6 +1413,37 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   const bool translated_address_space =
       d.translated.access && !d.translated.access->info().legacy_cache_compatible;
 
+  if (d.image_metadata)
+    return initiate_image_metadata_access(d, wf);
+  if (d.graphics_sample) {
+    const auto &sample = *d.graphics_sample;
+    const uint32_t tap_bytes = d.wf_size * d.elem_size;
+    if (translated_address_space) {
+      if (d.translated.requests.empty() && d.translated.request_index == 0) {
+        d.response_data.assign(sample.tap_count * tap_bytes, 0);
+        for (uint32_t tap = 0; tap < sample.tap_count; ++tap) {
+          const auto &request = sample.taps[tap];
+          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+            if (request.lane_mask & (uint64_t{1} << lane))
+              d.translated.requests.push_back({.address = request.addresses[lane],
+                                               .data_offset = tap * tap_bytes + lane * d.elem_size,
+                                               .size = d.elem_size});
+        }
+      }
+      return execute_translated_transfer(d);
+    }
+    d.response_data.assign(sample.tap_count * tap_bytes, 0);
+    for (uint32_t tap = 0; tap < sample.tap_count; ++tap) {
+      const auto &request = sample.taps[tap];
+      const auto outcome =
+          l1_->load(request.addresses.data(), request.lane_mask, d.elem_size, 1,
+                    d.response_data.data() + tap * tap_bytes, d.mtype, d.non_temporal,
+                    d.request_force_l1_bypass, d.wf_size, wf.process_id());
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+    }
+    return VmAccessOutcome::Complete;
+  }
   if (d.atomic_op != AtomicOp::NONE) {
     if (translated_address_space)
       return execute_translated_atomic_rmw(d, request_lanes);
@@ -1446,6 +1512,12 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   return VmAccessOutcome::Complete;
 }
 
+void GlobalMemPipeline::yield_unfinished_step() noexcept {
+  for (const auto &entry : issued_)
+    if (entry.step_batch)
+      entry.wf->cu().request_functional_yield();
+}
+
 MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                                           MemoryAccessDeferredCompletion complete) {
   auto &d = *inst.data_as<VectorMemState>();
@@ -1456,7 +1528,6 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
 
 VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
@@ -1464,6 +1535,19 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if (d.gs_registers) {
+    const uint32_t stride = d.num_elems * d.elem_size;
+    d.response_data.resize(d.wf_size * stride);
+    uint32_t operand = 0;
+    std::memcpy(&operand, d.store_data.data(), sizeof(operand));
+    const uint64_t previous =
+        d.gs_registers->modify(d.gs_register_index, operand, d.atomic_op == AtomicOp::SUB);
+    if (d.lane_mask)
+      std::memcpy(d.response_data.data() + std::countr_zero(d.lane_mask) * stride, &previous,
+                  stride);
+    return VmAccessOutcome::Complete;
+  }
+  auto &lds = wf.lds();
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;

@@ -52,6 +52,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_vm_graphics
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
@@ -553,6 +554,7 @@ add_executable(
     rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
     scalar_atomic_test.cpp
+    graphics_export_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_f16_constant_test.cpp
@@ -2489,9 +2491,11 @@ set(_rj_interposer_pm4_tests
     SubmissionFenceQueryRetiresOldHistory
     TransferWaitsForSubmissionWithoutWaitingForCompletion
     GraphicsRegistersRetainAllPacketForms
+    IndexedIndirectDrawsReadStridedArgumentsAndClampCount
     ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState
     DispatchInterleaveShadowIsQualifiedForGfx12
     ComputeTranslationPrefetchIgnoresPfpSelector
+    OcclusionQuerySamplesOnlyEnabledInstances
     StreamoutQuerySamplesAllFourMemoryCounterPairs
     StreamoutQueryEventMarksZeroCounterSamplesValid
     InterleavedDispatchExecutesDirectAndIndirectShaders

@@ -196,7 +196,8 @@ struct MemoryAccessObservation {
   /// @details Differs from @ref valid_lane_mask only for the wave64 transpose
   /// loads that issue through the low half -- a `WMMA_TR_B8`, or a global
   /// `TR16_B128` -- where one lane fetches on behalf of several. Every other
-  /// access, transpose or not, requests from every valid lane.
+  /// ordinary access requests from every valid lane. For an image filter this
+  /// is the primary tap's mask; additional_address_sets carries the other taps.
   uint64_t request_lane_mask = 0;
   /// @brief Lanes whose addresses are swizzled scratch; see
   ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
@@ -299,6 +300,15 @@ struct MemoryAccessObservation {
   /// uses the ordinary per-lane addresses span, empty footprints, and a zero
   /// request_lane_mask while retaining the instruction's completion counter.
   std::span<const ImageSampleFootprint> image_sample_footprints;
+
+  /// @brief An additional image-filter tap. Each set moves @ref bytes_per_lane() through
+  /// its own requesting lanes; border-color taps make no memory request.
+  struct AddressSet {
+    std::span<const uint64_t> addresses;
+    uint64_t lane_mask = 0;
+  };
+  /// @brief Image-filter taps beyond the primary address set.
+  std::span<const AddressSet> additional_address_sets;
 
   /// @brief Nominal bytes each participating lane requests through one address
   ///        set, before backing rejection. Double it when @ref

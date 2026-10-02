@@ -75,6 +75,13 @@ void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
   cu_.write_vgpr(vgpr_alloc_.base + reg, lane, value);
 }
 
+std::span<uint32_t> Wavefront::initialization_vgpr_lanes(uint32_t reg) {
+  if (reg >= vgpr_alloc_.count || !cu_.owns_vgpr_range(*this, vgpr_alloc_.base + reg, 1))
+    return {};
+  auto *lanes = reinterpret_cast<uint32_t *>(cu_.raw_vgpr_data(vgpr_alloc_.base + reg));
+  return lanes ? std::span<uint32_t>{lanes, wf_size_} : std::span<uint32_t>{};
+}
+
 void ComputeUnitCore::observe_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
   plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
 }
@@ -1610,6 +1617,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
                                            uint64_t flat_dds_lane_mask) {
   std::vector<ImageSampleFootprint> image_footprints;
   MemoryAccessObservation access;
+  std::array<MemoryAccessObservation::AddressSet, GraphicsSampleAccess::kMaxTaps - 1>
+      additional_address_sets{};
   access.mnemonic = inst.mnemonic();
   access.pc = wf.pc;
   access.compute_unit_id = id();
@@ -1680,8 +1689,22 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
       for (const auto &tap : state.image_sample->taps)
         image_footprints.push_back({std::span(tap.addresses).first(wf_size), tap.lane_mask});
       access.image_sample_footprints = image_footprints;
-    } else
+    } else if (state.graphics_sample) {
+      const auto &sample = *state.graphics_sample;
+      access.addresses = std::span<const uint64_t>(sample.taps[0].addresses.data(), wf_size);
+      access.request_lane_mask = sample.taps[0].lane_mask;
+      access.valid_lane_mask = sample.taps[0].lane_mask;
+      for (uint32_t tap = 1; tap < sample.tap_count; ++tap) {
+        const auto &request = sample.taps[tap];
+        additional_address_sets[tap - 1] = {
+            std::span<const uint64_t>(request.addresses.data(), wf_size), request.lane_mask};
+        access.valid_lane_mask |= request.lane_mask;
+      }
+      access.additional_address_sets =
+          std::span(additional_address_sets).first(sample.tap_count - 1);
+    } else {
       access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    }
     access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =
@@ -2391,9 +2414,17 @@ template <bool EnableAsync>
             if (tap.lane_mask & (uint64_t{1} << lane))
               dbg_addrs.push_back(tap.addresses[lane]);
       } else {
-        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-          if (d.lane_mask & (1ULL << lane))
-            dbg_addrs.push_back(d.per_lane_addr[lane]);
+        const uint32_t requests = d.graphics_sample ? d.graphics_sample->tap_count : 1;
+        dbg_addrs.reserve(d.wf_size * requests);
+        for (uint32_t request = 0; request < requests; ++request) {
+          const auto &addresses =
+              d.graphics_sample ? d.graphics_sample->taps[request].addresses : d.per_lane_addr;
+          const uint64_t mask =
+              d.graphics_sample ? d.graphics_sample->taps[request].lane_mask : d.lane_mask;
+          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+            if (mask & (1ULL << lane))
+              dbg_addrs.push_back(addresses[lane]);
+        }
       }
     }
   }
@@ -2561,6 +2592,12 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
   WaveStateGuard wave_state_lock(*this);
   tick_pipelines();
   update_wf_states();
+  const bool metadata_batch =
+      !EnableAsync &&
+      (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+      pool_driven() && !debug_active() && plugin_group().empty() &&
+      static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) > 1;
+  GlobalMemPipeline::StepBatch step_batch(global_mem_pipeline_, metadata_batch);
 
   for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
     auto &wf = wfs_[slot];
@@ -2598,6 +2635,7 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
   if (!gws_progress_batch_active_)
     publish_gws_instruction_progress();
 
+  step_batch.finish();
   ++step_count_;
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {

@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vdsdir.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -19,7 +20,7 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void DsParamLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_graphics_parameter_load(wf, inst_.vdst, inst_.attr, inst_.attr_chan);
 }
 
 void DsDirectLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {

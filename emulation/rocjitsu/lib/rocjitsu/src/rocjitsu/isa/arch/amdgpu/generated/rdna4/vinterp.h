@@ -18,6 +18,9 @@ class VInterpP10F32Vinterp : public Vinterp {
 public:
   VInterpP10F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -28,6 +31,9 @@ class VInterpP2F32Vinterp : public Vinterp {
 public:
   VInterpP2F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -38,6 +44,9 @@ class VInterpP10F16F32Vinterp : public Vinterp {
 public:
   VInterpP10F16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -48,6 +57,9 @@ class VInterpP2F16F32Vinterp : public Vinterp {
 public:
   VInterpP2F16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
@@ -59,6 +71,9 @@ class VInterpP10RtzF16F32Vinterp : public Vinterp {
 public:
   VInterpP10RtzF16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -69,6 +84,9 @@ class VInterpP2RtzF16F32Vinterp : public Vinterp {
 public:
   VInterpP2RtzF16F32Vinterp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.opsel;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;

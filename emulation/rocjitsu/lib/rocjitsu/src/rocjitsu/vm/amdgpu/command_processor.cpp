@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/graphics/graphics_stage.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -494,6 +495,11 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                       uint32_t global_wg_id,
                                                       uint32_t wf_index_in_wg) {
   using namespace rocjitsu::amdhsa;
+  if (pkt.graphics_stage) {
+    wf->set_graphics_stage(pkt.graphics_stage);
+    pkt.graphics_stage->initialize(*wf, global_wg_id, wf_index_in_wg);
+    return init_wavefront_scratch(cu, wf, pkt, global_wg_id, wf_index_in_wg, -1, 0);
+  }
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -709,6 +715,15 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     }
   }
 
+  return init_wavefront_scratch(cu, wf, pkt, global_wg_id, wf_index_in_wg, flat_scratch_init_sgpr,
+                                sys_idx);
+}
+
+VmAccessOutcome CommandProcessor::init_wavefront_scratch(
+    ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &pkt, uint32_t global_wg_id,
+    uint32_t wf_index_in_wg, int flat_scratch_init_sgpr, uint32_t sys_idx) {
+  const auto properties = isa_properties(cu->arch());
+  const uint32_t sbase = wf->sgpr_alloc().base;
   // Scratch (private segment) setup.
   // Runtime queues use their provisioned XCC/SE/scoreboard slots and byte
   // stride. Synthetic queues use dispatch-wide logical slots. Both keep each
@@ -845,7 +860,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     // per-wave byte offset. The prologue adds that offset to both FLAT_SCRATCH
     // and the private buffer V#, so supplying zero aliases every wave's spills.
     const bool wave_offset_sgpr =
-        pkt.enable_private_segment && arch_appends_private_segment_wave_offset_sgpr(arch);
+        pkt.enable_private_segment && arch_appends_private_segment_wave_offset_sgpr(cu->arch());
     if (wave_offset_sgpr) {
       const uint64_t offset = wave_scratch - scratch_pool;
       if (offset > std::numeric_limits<uint32_t>::max())
@@ -2383,6 +2398,13 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   if (entry.grid_faulted())
     return {.dispatched = 0, .outcome = VmAccessOutcome::Complete};
 
+  // Graphics WGs rotate across shader engines as well as CUs within each SPI.
+  // Keep the established placement for observers and debugger-controlled waves.
+  const bool rotate_graphics_spis =
+      entry.graphics_stage && !entry.has_workgroup_clusters() && spis_.size() > 1 &&
+      plugin_group_->empty() &&
+      std::ranges::none_of(cus_, [](const auto *cu) { return cu->debug_active(); });
+
   // All waves in one workgroup currently land on one physical CU so the
   // existing barrier implementation remains local. WGP mode additionally
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
@@ -2603,9 +2625,12 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // SPI selects the CU or sibling-CU WGP based on descriptor mode and
     // resource availability.
     std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
+    size_t selected_spi = 0;
     if (!spis_.empty()) {
-      for (auto *spi : spis_) {
-        placement = spi->allocate_workgroup(entry, global_wg_id);
+      const size_t first_spi = rotate_graphics_spis ? entry.graphics_spi_cursor : 0;
+      for (size_t attempt = 0; attempt < spis_.size(); ++attempt) {
+        selected_spi = rotate_graphics_spis ? (first_spi + attempt) % spis_.size() : attempt;
+        placement = spis_[selected_spi]->allocate_workgroup(entry, global_wg_id);
         if (placement)
           break;
       }
@@ -2636,6 +2661,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         dispatch_to_placement(local_wg_id, global_wg_id, *placement);
     if (placement_outcome != VmAccessOutcome::Complete)
       return {.dispatched = dispatched, .outcome = placement_outcome};
+    if (rotate_graphics_spis)
+      entry.graphics_spi_cursor = (selected_spi + 1) % spis_.size();
   }
   return {.dispatched = dispatched, .outcome = VmAccessOutcome::Complete};
 }
@@ -3211,6 +3238,37 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
   return true;
 }
 
+void CommandProcessor::init_pm4_scratch(DispatchEntry &dp, uint32_t ring_size, uint32_t base_lo,
+                                        uint32_t base_hi) {
+  dp.pm4_scratch_waves_per_se = ring_size & 0xfff;
+  const auto properties = isa_properties(cus_[0]->config().arch);
+  const uint32_t wave_bytes =
+      ((ring_size >> 12) & util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits)) *
+      properties.compute_tmpring_wavesize_granule;
+  // PAL may enable graphics scratch without allocating any when the shader
+  // does not spill. Leave those waves with no private storage.
+  if (!wave_bytes && dp.graphics_stage)
+    return;
+  if (!dp.pm4_scratch_waves_per_se || !wave_bytes)
+    throw std::runtime_error("PM4 scratch enabled with an empty descriptor");
+  dp.private_segment_fixed_size = wave_bytes / dp.kernel_wave_size;
+  dp.pm4_scratch_pool = std::make_shared<Pm4ScratchPool>(
+      dp.pm4_scratch_waves_per_se * std::max(scratch_wave_divisor_, scratch_shader_engine_count_));
+  uint64_t scratch = ((uint64_t{base_hi} << 32) | base_lo) << 8;
+  dp.scratch_backing_addr = static_cast<uint64_t>(static_cast<int64_t>(scratch << 16) >> 16);
+  if (dp.total_wgs) {
+    if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
+      throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
+    const uint64_t slots = uint64_t{dp.pm4_scratch_waves_per_se} *
+                           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+    const uint64_t bytes = slots * dp.private_segment_fixed_size * dp.kernel_wave_size;
+    const auto access = snapshot_gpu_access(dp.address_space);
+    if (!access || access->query_access(dp.scratch_backing_addr, bytes, VmAccessKind::Atomic) !=
+                       VmAccessOutcome::Complete)
+      throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
+  }
+}
+
 util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                                             const std::array<uint32_t, 4> &dimensions,
                                             util::DiagnosticEmitter emit_error) {
@@ -3431,6 +3489,7 @@ void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
     if (submission.complete)
       submission.complete(false);
   queue.commands.submissions.clear();
+  reset_graphics_pm4(queue.commands);
   queue.command_access.reset();
 }
 
@@ -3472,6 +3531,19 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
                 arm_stall_recheck(now);
               },
           .fault_queue = [this, &queue, &qs] { fail_pm4_queue(queue, qs); },
+          .advance_graphics =
+              [this, &queue, &qs](const GpuVmAccess &access) {
+                return advance_graphics_pm4(queue, qs, access);
+              },
+          .advance_indirect_graphics =
+              [this, &queue, &qs](const GpuVmAccess &access) {
+                return advance_indirect_graphics_pm4(queue, qs, access);
+              },
+          .execute_graphics =
+              [this, &queue, &qs](const GpuVmAccess &access, uint32_t opcode,
+                                  std::vector<uint32_t> &words) {
+                return execute_graphics_pm4(queue, qs, access, opcode, words);
+              },
       });
 }
 

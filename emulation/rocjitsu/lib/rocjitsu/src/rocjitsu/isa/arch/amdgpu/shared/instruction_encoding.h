@@ -174,6 +174,7 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf;
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
+  bool exec_parameter_quads = false;
 
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;

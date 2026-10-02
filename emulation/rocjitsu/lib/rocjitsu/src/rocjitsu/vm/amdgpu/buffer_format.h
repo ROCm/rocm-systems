@@ -28,6 +28,19 @@ enum class BufferNumberFormat { Unorm, Snorm, Uscaled, Sscaled, Uint, Sint, Floa
 struct BufferFormat {
   std::array<uint32_t, 4> widths{};
   BufferNumberFormat number = BufferNumberFormat::Uint;
+
+  uint32_t byte_size() const {
+    uint32_t bits = 0;
+    for (uint32_t width : widths)
+      bits += width;
+    return bits / 8;
+  }
+  uint32_t component_count() const {
+    uint32_t count = 0;
+    for (uint32_t width : widths)
+      count += width != 0;
+    return count;
+  }
 };
 
 /// @brief Whether an image store's descriptor selectors have measured inverse routing.
@@ -36,6 +49,8 @@ bool image_store_selectors_supported(const BufferFormat &format, uint32_t select
 /// @brief Decode @p state format/encoding, retaining channel widths and texel size.
 /// @returns False for an invalid resource format and failure for reserved encodings.
 util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &state);
+util::FailureOr<BufferFormat>
+decode_buffer_format(uint32_t format, BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 
 /// GFX9 combines DFMT | (NFMT << 4); RDNA uses its generation's FORMAT table.
 /// The memory footprint is independent of the instruction's VGPR count.
@@ -55,11 +70,16 @@ pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t
                    BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11,
                    BufferStoreMissingChannel missing = BufferStoreMissingChannel::Zero);
 
+/// Pack a color export using the color buffer's channel swap.
+util::Result pack_color_format(uint32_t format, uint32_t selectors,
+                               std::span<const uint32_t> components, std::span<uint8_t> bytes);
+
 /// Snapshot the descriptor before issuing the memory request. A negative format
 /// selects the resource's FORMAT/DST_SEL fields; MTBUF supplies its own format.
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &state, uint32_t resource,
                                             int format, uint32_t components);
-void capture_buffer_format_store(Wavefront &wf, VectorMemState &state, uint32_t data_base);
+void capture_buffer_format_store(Wavefront &wf, VectorMemState &state, uint32_t data_base,
+                                 bool raw = false);
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &state);
 } // namespace rocjitsu::amdgpu
 

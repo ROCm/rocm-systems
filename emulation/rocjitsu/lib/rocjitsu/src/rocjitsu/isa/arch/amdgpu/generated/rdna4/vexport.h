@@ -18,6 +18,9 @@ class ExportVexport : public Vexport {
 public:
   ExportVexport(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.control = inst_.en;
+  }
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;

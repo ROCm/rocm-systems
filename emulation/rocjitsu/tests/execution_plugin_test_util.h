@@ -309,6 +309,8 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<std::vector<uint64_t>> additional_addresses;
+  std::vector<uint64_t> additional_lane_masks;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -327,6 +329,10 @@ public:
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &) override {
     onAmdgpuMemoryAccessRouted(access);
+    for (const auto &set : access.additional_address_sets) {
+      accesses.back().additional_addresses.emplace_back(set.addresses.begin(), set.addresses.end());
+      accesses.back().additional_lane_masks.push_back(set.lane_mask);
+    }
     const auto counters = CounterObservingPipeline{}.issue_counters(inst);
     accesses.back().issued_counters.assign(counters.types.begin(),
                                            counters.types.begin() + counters.size);

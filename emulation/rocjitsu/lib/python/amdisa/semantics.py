@@ -2691,11 +2691,12 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'ds_permute')
     if upper == 'DS_SWIZZLE_B32':
         return InstructionSemantics(name, 'ds_swizzle')
-    # ── Explicit DS classifications ────────────────────────────────────
     # GS register operations — must precede the atomic fallback because
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(
+            name, 'ds_gs_register', operation='sub' if '_SUB_' in upper else 'add'
+        )
     # GWS (Global Wave Sync) classification. Map each of the six GWS DS opcodes
     # to its per-mnemonic operation so the generator can decode the operands and
     # the matching ComputeUnitCore hook can apply the right semantics.
@@ -2760,8 +2761,22 @@ def _derive_mimg(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'image_store')
     if upper.startswith('IMAGE_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper.startswith('IMAGE_ATOMIC'):
-        return InstructionSemantics(name, 'image_atomic')
+    if upper.startswith('IMAGE_ATOMIC_'):
+        suffix = upper.removeprefix('IMAGE_ATOMIC_')
+        # GFX12 image opcodes spell types differently from buffer atomics.
+        for image_type, buffer_type in (
+            ('_UINT', '_U32'),
+            ('_INT', '_I32'),
+            ('_FLT', '_F32'),
+        ):
+            if suffix.endswith(image_type):
+                suffix = suffix.removesuffix(image_type) + buffer_type
+                break
+        info = _derive_flat_atomic_info(suffix, False)
+        return InstructionSemantics(
+            name, 'image_atomic', operation=info[0] if info else None
+        )
+
     if upper.startswith('IMAGE_SAMPLE') or upper.startswith('IMAGE_GATHER'):
         return InstructionSemantics(name, 'image_sample')
     if upper.startswith('IMAGE_GET_RESINFO') or upper.startswith('IMAGE_GET_LOD'):

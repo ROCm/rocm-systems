@@ -18,6 +18,9 @@ class DsParamLoadVdsdir : public Vdsdir {
 public:
   DsParamLoadVdsdir(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_parameter_quads = true;
+  }
   Operand vdst;
   Operand attr;
   Operand dsmem;

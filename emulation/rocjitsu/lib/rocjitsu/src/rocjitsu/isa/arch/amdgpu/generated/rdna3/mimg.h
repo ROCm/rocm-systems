@@ -63,6 +63,14 @@ class ImageLoadPckMimg : public Mimg {
 public:
   ImageLoadPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -72,6 +80,14 @@ class ImageLoadPckSgnMimg : public Mimg {
 public:
   ImageLoadPckSgnMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -81,6 +97,14 @@ class ImageLoadMipPckMimg : public Mimg {
 public:
   ImageLoadMipPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -90,6 +114,14 @@ class ImageLoadMipPckSgnMimg : public Mimg {
 public:
   ImageLoadMipPckSgnMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -137,6 +169,14 @@ class ImageStorePckMimg : public Mimg {
 public:
   ImageStorePckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -146,6 +186,14 @@ class ImageStoreMipPckMimg : public Mimg {
 public:
   ImageStoreMipPckMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 1;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -320,6 +368,14 @@ class ImageMsaaLoadMimg : public Mimg {
 public:
   ImageMsaaLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = coordinates[inst_.dim & 7u] + 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
