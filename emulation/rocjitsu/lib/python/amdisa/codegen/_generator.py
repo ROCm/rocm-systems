@@ -6679,8 +6679,7 @@ class CodeGenerator:
                         for i in range(3)
                     )
                     src_mods = ''.join(
-                        f'    if (inst_.abs & (1u << {i})) src{i}_value = std::fabs(src{i}_value);\n'
-                        f'    if (inst_.neg & (1u << {i})) src{i}_value = -src{i}_value;\n'
+                        f'    src{i}_value = amdgpu::source_modifier::apply_to_float(src{i}_value, {i}, inst_.abs, inst_.neg);\n'
                         for i in range(3)
                     )
                     return (
@@ -6707,10 +6706,8 @@ class CodeGenerator:
                     finish = ''
                     if is_vop3:
                         src_mods = (
-                            '    if (inst_.abs & 1u) src0_value = std::fabs(src0_value);\n'
-                            '    if (inst_.abs & 2u) src1_value = std::fabs(src1_value);\n'
-                            '    if (inst_.neg & 1u) src0_value = -src0_value;\n'
-                            '    if (inst_.neg & 2u) src1_value = -src1_value;\n'
+                            '    src0_value = amdgpu::source_modifier::apply_to_float(src0_value, 0, inst_.abs, inst_.neg);\n'
+                            '    src1_value = amdgpu::source_modifier::apply_to_float(src1_value, 1, inst_.abs, inst_.neg);\n'
                         )
                         finish = (
                             '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'

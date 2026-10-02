@@ -25,6 +25,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -478,11 +479,7 @@ template <typename Op> inline uint64_t read_wave_mask_scalar(const Op &op, Wavef
 
 template <typename T>
 inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t src_idx) {
-  if (abs & (1u << src_idx))
-    value &= T(0x7fffffffu);
-  if (neg & (1u << src_idx))
-    value ^= T(0x80000000u);
-  return value;
+  return source_modifier::apply<fp_format::F32>(value, src_idx, abs, neg);
 }
 
 template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
@@ -546,37 +543,21 @@ inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t la
   amdgpu::RegisterAccess(wf).write_lane(dst, lane, dst_hi ? (src_half << 16) : src_half);
 }
 
-/// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
-/// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`
-/// (`-x`). `abs`/`neg` are the raw VOP3 modifier fields; the bit for source
-/// index `SrcIdx` selects whether the modifier applies. std::fabs clears the
-/// sign bit and unary minus flips it (both NaN-payload preserving), so the
-/// vector form is a pure sign-bit AND/XOR — bit-identical on every input.
+/// @brief Apply the shared ABS/NEG rules to floating-point SIMD lanes.
+/// @details Only the representation changes around the raw-bit helper.
 template <unsigned SrcIdx>
-util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs, uint32_t neg) {
-  using U = util::native<uint32_t>;
-  U b = std::bit_cast<U>(v);
-  if (abs & (1u << SrcIdx))
-    b = b & 0x7FFFFFFFu;
-  if (neg & (1u << SrcIdx))
-    b = b ^ 0x80000000u;
-  return std::bit_cast<util::native<float>>(b);
+util::native<float> apply_vop3_src_mod_f32(util::native<float> value, uint32_t abs, uint32_t neg) {
+  const auto bits = std::bit_cast<util::native<uint32_t>>(value);
+  return std::bit_cast<util::native<float>>(
+      source_modifier::apply<fp_format::F32>(bits, SrcIdx, abs, neg));
 }
 
-/// In-vector VOP3 source modifier (f64), the f64 counterpart of
-/// apply_vop3_src_mod_f32: abs first (std::fabs = sign-bit clear), then neg
-/// (unary minus = sign-bit flip). Both are sign-bit-only on IEEE binary64, so
-/// the vector form is a pure AND/XOR — bit-identical incl. NaN payload,
-/// matching the scalar lambda the f64 VOP3 bodies emit.
 template <unsigned SrcIdx>
-util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs, uint32_t neg) {
-  using U = util::native<uint64_t>;
-  U b = std::bit_cast<U>(v);
-  if (abs & (1u << SrcIdx))
-    b = b & 0x7FFFFFFFFFFFFFFFull;
-  if (neg & (1u << SrcIdx))
-    b = b ^ 0x8000000000000000ull;
-  return std::bit_cast<util::native<double>>(b);
+util::native<double> apply_vop3_src_mod_f64(util::native<double> value, uint32_t abs,
+                                            uint32_t neg) {
+  const auto bits = std::bit_cast<util::native<uint64_t>>(value);
+  return std::bit_cast<util::native<double>>(
+      source_modifier::apply<fp_format::F64>(bits, SrcIdx, abs, neg));
 }
 
 /// In-vector VOP3 destination modifier, bit-exact with the scalar tail: `omod`

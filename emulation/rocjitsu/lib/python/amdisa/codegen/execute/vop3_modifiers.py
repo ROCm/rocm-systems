@@ -14,24 +14,15 @@ from __future__ import annotations
 def vop3_src_mod(
     varname: str, src_idx: int, has_abs: bool, indent: str = '    '
 ) -> list[str]:
-    """Generate VOP3 input modifier lines (abs then neg) for a floating-point src.
+    """Apply shared ABS/NEG to a decoded float or double source.
 
-    Works for both float and double temporaries. The generated C++ uses
-    ``std::fabs`` and unary negation which are type-generic.
-
-    Args:
-        varname: C++ variable name to modify in-place.
-        src_idx: Source operand index (0, 1, or 2) for the modifier bitmask.
-        has_abs: Whether the encoding format has an ``abs`` field.
-        indent: Indentation prefix for each generated line.
+    An encoding without ABS passes a zero field; NEG always uses its source bit.
     """
-    lines = []
-    if has_abs:
-        lines.append(
-            f'{indent}if (inst_.abs & (1u << {src_idx})) {varname} = std::fabs({varname});'
-        )
-    lines.append(f'{indent}if (inst_.neg & (1u << {src_idx})) {varname} = -{varname};')
-    return lines
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    return [
+        f'{indent}{varname} = amdgpu::source_modifier::apply_to_float('
+        f'{varname}, {src_idx}, {abs_field}, inst_.neg);'
+    ]
 
 
 def vop3_dst_mod(

@@ -10,7 +10,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 
+#include <bit>
 #include <cstdint>
+#include <type_traits>
 
 namespace rocjitsu::amdgpu::source_modifier {
 
@@ -30,6 +32,16 @@ template <typename Fmt, typename V> constexpr V apply(V bits, bool absolute, boo
 template <typename Fmt, typename V>
 constexpr V apply(V bits, unsigned index, uint32_t abs, uint32_t neg) {
   return apply<Fmt>(bits, ((abs >> index) & 1u) != 0, ((neg >> index) & 1u) != 0);
+}
+
+/// @brief Adapt a host float/double to the shared sign-bit operation.
+/// @details Bit casts preserve the encoding, including a NaN's payload and quiet bit.
+template <typename Float>
+  requires(std::is_same_v<Float, float> || std::is_same_v<Float, double>)
+constexpr Float apply_to_float(Float value, unsigned index, uint32_t abs, uint32_t neg) {
+  using Fmt = std::conditional_t<std::is_same_v<Float, float>, fp_format::F32, fp_format::F64>;
+  const auto bits = std::bit_cast<typename Fmt::Lane>(value);
+  return std::bit_cast<Float>(apply<Fmt>(bits, index, abs, neg));
 }
 
 } // namespace rocjitsu::amdgpu::source_modifier

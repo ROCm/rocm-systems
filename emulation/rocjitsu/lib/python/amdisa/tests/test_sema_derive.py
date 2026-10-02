@@ -847,11 +847,14 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
-        assert cpp.index('sv = -sv') < cpp.index('util::rndne_scalar')
-        assert ('std::fabs(sv)' in cpp) == has_abs
-        if has_abs:
-            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        assert cpp.index('util::f16_to_f32') < cpp.index(
+            'source_modifier::apply_to_float(sv'
+        )
+        assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
+            'util::rndne_scalar'
+        )
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
         assert 'inst_.omod' not in cpp
         assert 'inst_.clamp' not in cpp
 
@@ -864,10 +867,11 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
-        assert ('std::fabs(sv)' in cpp) == has_abs
-        if has_abs:
-            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        assert cpp.index('util::f16_to_f32') < cpp.index(
+            'source_modifier::apply_to_float(sv'
+        )
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
         if suffix == 'F32':
             assert 'inst_.omod' in cpp
             assert 'inst_.clamp' in cpp
@@ -877,7 +881,9 @@ class TestDeriveVectorUnary:
         else:
             assert 'inst_.omod' not in cpp
             assert 'inst_.clamp' not in cpp
-            assert cpp.index('sv = -sv') < cpp.index('std::isnan(s)')
+            assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
+                'std::isnan(s)'
+            )
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
