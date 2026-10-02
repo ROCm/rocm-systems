@@ -14,7 +14,7 @@
 #include "RmaMultiSegmentHelpers.hpp"
 #include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
-#include "../../../src/transport/net_ib/gin.h"
+#include "transport/net_ib/gin.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -792,6 +792,56 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     EXPECT_EQ(req, nullptr);
     EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
     Barrier();
+}
+
+// findRemotePeerForLocalRank must return a rank on another node with the
+// requested local rank, or -1 when no node has one. Pure MPI topology, so it
+// runs even where the hybrid tests that use it are skipped.
+TEST_F(RmaMultiSegmentMPITest, FindRemotePeerForLocalRankTopology)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    int worldSize = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+    char localName[MPI_MAX_PROCESSOR_NAME] = {};
+    int nameLength = 0;
+    MPI_Get_processor_name(localName, &nameLength);
+    MPI_Comm localComm = MPI_COMM_NULL;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &localComm);
+    int localRank = -1;
+    MPI_Comm_rank(localComm, &localRank);
+    MPI_Comm_free(&localComm);
+
+    std::vector<char> names(static_cast<size_t>(worldSize) * MPI_MAX_PROCESSOR_NAME, 0);
+    std::vector<int> localRanks(static_cast<size_t>(worldSize), -1);
+    MPI_Allgather(localName, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
+                  names.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, MPI_COMM_WORLD);
+    MPI_Allgather(&localRank, 1, MPI_INT, localRanks.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Both lookups are collective; every rank makes them before checking.
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(localRank);
+    const int missing = MPIHelpers::findRemotePeerForLocalRank(worldSize);
+
+    auto nameOf = [&](int rank) {
+        return std::string(names.data() + static_cast<size_t>(rank) * MPI_MAX_PROCESSOR_NAME);
+    };
+    bool remoteMatchExists = false;
+    for (int rank = 0; rank < worldSize; ++rank)
+        if (nameOf(rank) != localName && localRanks[static_cast<size_t>(rank)] == localRank)
+            remoteMatchExists = true;
+
+    EXPECT_EQ(missing, -1) << "no node has local rank " << worldSize;
+    if (!remoteMatchExists)
+    {
+        EXPECT_EQ(peer, -1);
+    }
+    else
+    {
+        ASSERT_GE(peer, 0);
+        ASSERT_LT(peer, worldSize);
+        EXPECT_NE(nameOf(peer), localName) << "peer " << peer << " is on this node";
+        EXPECT_EQ(localRanks[static_cast<size_t>(peer)], localRank);
+    }
 }
 
 // Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1

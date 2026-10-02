@@ -1136,6 +1136,11 @@
           "name": "NetIB_RMA_MultiSeg_MultiNodeAsymmetricIGetStress",
           "description": "32 IGets, each crossing a different remote and local boundary, exercising rkey and lkey selection; skips unless there is exactly one rank on each of two nodes",
           "test_filter": "RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_FindRemotePeerTopology",
+          "description": "findRemotePeerForLocalRank returns a rank on another node with the same local rank, or -1 when none exists",
+          "test_filter": "RmaMultiSegmentMPITest.FindRemotePeerForLocalRankTopology"
         }
       ]
     },
