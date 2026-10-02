@@ -91,7 +91,7 @@ target_link_libraries(
 target_compile_definitions(
     rocprofiler-sdk-lib-tests-shared
     PRIVATE
-        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"\$ORIGIN/../lib/$<TARGET_FILE_NAME:rocprofiler-sdk-registration-attach-fixture>\""
+        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"$<TARGET_FILE_NAME:rocprofiler-sdk-registration-attach-fixture>\""
     )
 add_dependencies(rocprofiler-sdk-lib-tests-shared
                  rocprofiler-sdk-registration-attach-fixture)

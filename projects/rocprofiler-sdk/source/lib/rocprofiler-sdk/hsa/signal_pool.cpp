@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -54,7 +56,7 @@ ensure_hsa_signal(signal_t&          signal,
                   const hsa_agent_t* consumers,
                   uint64_t           attributes)
 {
-    if(signal.value.handle != 0)
+    if(signal.value != hsa_signal_t{})
     {
         ROCP_WARNING_IF(num_consumers != 0 || consumers != nullptr || attributes != 0)
             << "Ignoring HSA signal creation arguments when reusing an existing signal";

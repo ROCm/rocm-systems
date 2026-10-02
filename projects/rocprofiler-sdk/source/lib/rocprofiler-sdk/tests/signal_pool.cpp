@@ -24,6 +24,8 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 #include <gtest/gtest.h>
 
 namespace
@@ -82,6 +84,6 @@ TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
     }
 
     EXPECT_EQ(signal_allocations, 1);
-    EXPECT_EQ(last.handle, 1);
+    EXPECT_EQ(last, (hsa_signal_t{.handle = 1}));
     EXPECT_EQ(signal_resets, iterations);
 }
