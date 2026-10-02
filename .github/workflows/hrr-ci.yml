@@ -444,15 +444,18 @@ jobs:
           # Keep the runner's existing path: setup-python puts libpython there,
           # and replacing it makes python3 fail to start on some GPU machines.
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          # A GPU-labelled runner with no visible device is infrastructure
+          # A GPU-labelled runner with no usable device is infrastructure
           # failure, not 67 unsupported capabilities. Still run the four
           # CPU-only integration checks and publish their JUnit, then fail the
           # job so the table cannot make a broken runner look green.
-          # Exit 1 is "confirmed no device". Any other probe failure (broken
+          # Exit 1 is "confirmed no usable device". Any other probe failure (broken
           # ctypes, missing libpython) is not a device count and must not
           # skip the GPU suite.
+          # The probe also runs one memset on a stream: a wedged GPU hangs in
+          # the first queue creation, and every case after it would sit out
+          # the 20-minute limit. 124 is that hang.
           set +e
-          python3 - <<'PY'
+          timeout 300 python3 - <<'PY'
           import sys
 
           try:
@@ -464,12 +467,29 @@ jobs:
               print(f"GPU probe unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
               sys.exit(2)
           print(f"hipGetDeviceCount: status={status}, devices={count.value}")
-          sys.exit(0 if status == 0 and count.value > 0 else 1)
+          if status != 0 or count.value <= 0:
+              sys.exit(1)
+          stream, buf = ctypes.c_void_p(), ctypes.c_void_p()
+          status = hip.hipStreamCreate(ctypes.byref(stream))
+          status = status or hip.hipMalloc(ctypes.byref(buf), ctypes.c_size_t(4))
+          status = status or hip.hipMemsetAsync(buf, 0, ctypes.c_size_t(4), stream)
+          status = status or hip.hipStreamSynchronize(stream)
+          print(f"stream memset: status={status}")
+          sys.exit(0 if status == 0 else 1)
           PY
           probe_rc=$?
           set -e
-          if [ "$probe_rc" -eq 1 ]; then
-            echo "::error::GPU runner has no visible ROCm-capable device"
+          if [ "$probe_rc" -eq 1 ] || [ "$probe_rc" -eq 124 ]; then
+            if [ "$probe_rc" -eq 124 ]; then
+              echo "::error::GPU on ${RUNNER_NAME} hangs creating a stream; it needs a reset"
+            else
+              echo "::error::GPU runner ${RUNNER_NAME} has no usable ROCm-capable device"
+            fi
+            # Enough for the runner's owners to act on from the log alone.
+            id
+            env | grep -E '^(ROCR|HIP|GPU_DEVICE)_[A-Z_]*=' || true
+            ls -l /dev/kfd /dev/dri 2>&1 || true
+            cat /sys/class/kfd/kfd/topology/nodes/*/name 2>&1 || true
             python3 projects/hrr/tests/run_catch2.py \
               --xml integration-${{ matrix.family }}.xml \
               -- ./build/hrr/tests/integration/hrr-integration-tests "[cpu]"
