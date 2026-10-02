@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <numeric>
 #include <regex>
 #include <sstream>
@@ -203,8 +204,7 @@ static void clearDiagEnv()
 // ASSERT_NO_FATAL_FAILURE so that a failed init stops the case before the communicators are used.
 static void initAllCaptured(std::vector<ncclComm_t>& comms, int nGpus, std::string& captured)
 {
-    std::vector<int> devices(nGpus);
-    std::iota(devices.begin(), devices.end(), 0);
+    std::vector<int> devices = firstDevices(nGpus);
     comms.assign(nGpus, nullptr);
     testing::internal::CaptureStdout();
     const ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
@@ -476,8 +476,7 @@ TEST_F(Diagnostics, ReportOnStdoutOnly)
         clearDiagEnv();
         setenv("NCCL_RUN_DIAGNOSTICS", "1", 1);
         const int nGpus = usableGpus();
-        std::vector<int> devices(nGpus);
-        std::iota(devices.begin(), devices.end(), 0);
+        std::vector<int> devices = firstDevices(nGpus);
         std::vector<ncclComm_t> comms(nGpus, nullptr);
         testing::internal::CaptureStdout();
         testing::internal::CaptureStderr();
@@ -548,6 +547,32 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
     ASSERT_EQ(report.failures().size(), 1u) << report.dump();
     EXPECT_NE(report.failures().front().find("p2p: write mismatch"), std::string::npos);
     EXPECT_TRUE(parseDiagReport("no report here\n").lines.empty());
+
+    // One line per failure marker, in the product wording.
+    const std::string failing
+        = "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
+          "node01:4242 NCCL DIAG [INFO] transport detect returned 3\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: active check returned 3\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: setup failed on rank 2 result=1\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 dstRank=1 reason=noDescriptor\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: local CUDA setup failed srcRank=0 dstRank=1 reason=localCuda\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 dstRank=1 reason=import\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: read mismatch srcRank=0 dstRank=1 expected=0x1 got=0x0\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: topology check failed srcRank=0 dstRank=1 reason=topo\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: launch/check failed srcRank=0 dstRank=1 reason=writeLaunch\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: resource cleanup failed rank=0 result=1\n";
+    const DiagReport failReport             = parseDiagReport(failing);
+    const std::vector<std::string> failures = failReport.failures();
+    EXPECT_EQ(failures.size(), std::size(kDiagFailureMarkers)) << failReport.dump();
+    for(const char* marker : kDiagFailureMarkers)
+    {
+        EXPECT_EQ(std::count_if(failures.begin(),
+                                failures.end(),
+                                [&](const std::string& l) { return l.find(marker) != std::string::npos; }),
+                  1)
+            << marker;
+    }
 }
 
 } // namespace RcclUnitTesting

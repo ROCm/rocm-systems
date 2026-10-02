@@ -264,9 +264,10 @@ fields:
 
    NCCL INFO Diagnostics P2P write srcRank=6 srcCudaDev=6 srcNvmlDev=6 dstRank=5 dstCudaDev=5 dstNvmlDev=5 path=XGMI handle=LEGACY_CUDA_IPC topoRead=0
 
-A failed edge has no records for the phases after the failure. For example,
-when the import fails, the ``import`` record shows ``import=0`` and a
-``reason``, and no ``write`` or ``read`` record follows for that edge.
+An edge that fails before the write phase has no ``write`` or ``read``
+record. For example, when the import fails, the ``import`` record shows
+``import=0`` and a ``reason``, and no ``write`` or ``read`` record follows
+for that edge.
 
 .. _diagnostics-containers:
 
