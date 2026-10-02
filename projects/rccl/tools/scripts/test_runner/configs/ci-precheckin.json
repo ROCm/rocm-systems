@@ -86,6 +86,7 @@
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
         {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson", "timeout": 60},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary", "timeout": 60},
         {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
         {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},

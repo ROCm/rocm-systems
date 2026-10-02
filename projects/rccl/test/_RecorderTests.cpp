@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <thread>
 
 #define HIPCALL(cmd)                                                                          \
@@ -131,6 +132,66 @@ namespace RcclUnitTesting
         EXPECT_EQ(gotComm, static_cast<void*>(&comm));
       },
       {{"RCCL_REPLAY_FILE", "/tmp/test_redop.json"}}
+    );
+  }
+
+  /**
+   * \brief Verify binary mode writes PreMulSum scalar/datatype/residence as sendbuff/datatype/root; Destroy drops them
+   * ******************************************************************************************/
+  TEST(Recorder, RedOpRecordBinary)
+  {
+    RUN_ISOLATED_TEST_WITH_ENV(
+      "RedOpRecordBinary",
+      []()
+      {
+        int ranks[] = {2, 3, 5};
+        auto comm = std::make_unique<ncclComm>();
+        comm->nRanks = 4;
+        comm->localRank = 1;
+        comm->localRankToRank = ranks;
+        float scalar = 2.0f;
+        double ignored = 4.0;
+        // Non-default datatype and residence, so a dropped or inverted PreMulSum guard cannot match the defaults.
+        ASSERT_EQ(ncclSuccess, rccl::Recorder::instance().record(rccl::rrRedOpCreatePreMulSum, ncclMax, comm.get(),
+                                                                 ncclFloat32, ncclScalarHostImmediate, &scalar));
+        // Destroy gets non-default scalar arguments too, so a guard that always copies them is caught.
+        ASSERT_EQ(ncclSuccess, rccl::Recorder::instance().record(rccl::rrRedOpDestroy, ncclMax, comm.get(),
+                                                                 ncclFloat64, ncclScalarHostImmediate, &ignored));
+
+        char host[256];
+        gethostname(host, sizeof(host));
+        std::string filename = "/tmp/test_redop." + std::to_string(getpid()) + "." + std::string(host) + ".bin";
+        std::ifstream fp(filename, std::ios::binary);
+        ASSERT_TRUE(fp.is_open()) << "Recorder did not create expected file: " << filename;
+        // One spare slot so a stray extra record shows up in bytesRead.
+        rccl::rcclApiCall calls[3];
+        fp.read(reinterpret_cast<char*>(calls), sizeof(calls));
+        std::streamsize bytesRead = fp.gcount();
+        fp.close();
+        std::remove(filename.c_str());
+        // Binary mode writes exactly one raw struct per call and no header.
+        ASSERT_EQ(bytesRead, static_cast<std::streamsize>(2 * sizeof(rccl::rcclApiCall)));
+
+        const rccl::rcclApiCall& create = calls[0];
+        EXPECT_EQ(create.type, rccl::rrRedOpCreatePreMulSum);
+        EXPECT_EQ(create.op, ncclMax);
+        EXPECT_EQ(create.comm, comm.get());
+        // nRanks and globalRank are taken from the comm and only reach disk in binary mode.
+        EXPECT_EQ(create.nRanks, 4);
+        EXPECT_EQ(create.globalRank, 3);
+        EXPECT_EQ(create.sendbuff, static_cast<const void*>(&scalar)) << "sendbuff must come from scalar";
+        EXPECT_EQ(create.datatype, ncclFloat32) << "datatype must come from the datatype argument";
+        EXPECT_EQ(create.root, static_cast<int>(ncclScalarHostImmediate)) << "root must come from residence";
+
+        const rccl::rcclApiCall& destroy = calls[1];
+        EXPECT_EQ(destroy.type, rccl::rrRedOpDestroy);
+        EXPECT_EQ(destroy.op, ncclMax);
+        EXPECT_EQ(destroy.comm, comm.get());
+        EXPECT_NE(destroy.sendbuff, static_cast<const void*>(&ignored)) << "Destroy must not record the scalar";
+        EXPECT_NE(destroy.datatype, ncclFloat64) << "Destroy must not record the datatype";
+        EXPECT_NE(destroy.root, static_cast<int>(ncclScalarHostImmediate)) << "Destroy must not record the residence";
+      },
+      {{"RCCL_REPLAY_FILE", "/tmp/test_redop.bin"}}
     );
   }
 
