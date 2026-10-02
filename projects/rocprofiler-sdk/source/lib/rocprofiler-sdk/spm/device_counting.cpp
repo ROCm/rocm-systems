@@ -350,7 +350,10 @@ spm_start_agent_ctx(const context::context* ctx)
         {
             ROCP_ERROR << "SPM KFD start failed for device counting";
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
-            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+            if(counters::counter_collection_has_device_lock())
+            {
+                counters::counter_collection_device_unlock(agent->get_rocp_agent());
+            }
             if(hsa::use_ondemand_queue())
             {
                 if(callback_data.stop_signal.handle != 0)
