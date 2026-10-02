@@ -41,39 +41,44 @@ CLI_DIRS = (
     pathlib.Path(__file__).resolve().parents[1] / "amdsmi_cli",
 )
 
-# amdsmi_parser.py only registers an option group when the matching device is
-# present: --cpu/--core and the CPU Arguments groups sit behind
-# is_amd_hsmp_initialized(), the NIC/switch groups behind their own probes. On a
-# GPU-only host that hides 134 of 412 options, so measuring the surface on the
-# local machine would make the KPI denominator move from host to host. Forcing
-# these on measures the product's full surface instead, which is what a goal
-# should be measured against. OS/platform probes are left alone -- overriding
-# those trips help strings the parser only assigns on the matching platform.
-DEVICE_GATES = (
-    "is_amdgpu_initialized",
-    "is_amd_hsmp_initialized",
-    "is_brcm_nic_initialized",
-    "is_brcm_switch_initialized",
-    "is_ainic_initialized",
-)
+# amdsmi_parser.py hides commands/options behind device gates
+# (is_amdgpu_initialized, ...) and platform gates (is_baremetal,
+# is_virtual_os), so measuring on one real host/platform undercounts (e.g. a
+# GPU-only host drops 134 of 412 options; a guest VM drops a whole subcommand).
+# FORCED_GATES pins each to whichever value maximizes the *supported* surface
+# (bare metal, Linux guest, WSL -- not SR-IOV hypervisor, which this product
+# doesn't support), so the total is stable no matter what measures it.
+# is_hypervisor is left unforced: combined with is_amdgpu_initialized it trips
+# a pre-existing `-d` flag collision in the `static` subcommand, and hypervisor
+# isn't a configuration this tool needs to measure anyway.
+FORCED_GATES = {
+    "is_amdgpu_initialized": True,
+    "is_amd_hsmp_initialized": True,
+    "is_brcm_nic_initialized": True,
+    "is_brcm_switch_initialized": True,
+    "is_ainic_initialized": True,
+    "is_baremetal": True,
+    "is_virtual_os": False,
+}
 # Option groups that scope a command to a device class, reported separately
 # because they are what the local-host measurement silently drops.
 SCOPE_GROUPS = ("Device Arguments", "CPU Arguments", "CPU Core Arguments")
 
 
-class _AllDevicesPresent:
-    """Helpers proxy reporting every supported device as present."""
+class _FullSurfaceGates:
+    """Helpers proxy forcing every device/platform gate to its most-inclusive value."""
 
     def __init__(self, real):
         self._real = real
 
     def __getattr__(self, name):
-        if name in DEVICE_GATES:
-            return lambda *args, **kwargs: True
+        if name in FORCED_GATES:
+            value = FORCED_GATES[name]
+            return lambda *args, **kwargs: value
         return getattr(self._real, name)
 
 
-def load_parser(all_devices=True):
+def load_parser(force_full_surface=True):
     """Build the full parser. '--help' in argv makes it register every subcommand."""
     for path in CLI_DIRS:
         if not (path / "amdsmi_parser.py").exists():
@@ -84,8 +89,8 @@ def load_parser(all_devices=True):
             from amdsmi_parser import AMDSMIParser
 
             helpers = AMDSMIHelpers()
-            if all_devices:
-                helpers = _AllDevicesPresent(helpers)
+            if force_full_surface:
+                helpers = _FullSurfaceGates(helpers)
             noop = [lambda *a, **k: None] * 20
             return AMDSMIParser(*noop, sys_argv=["amd-smi", "--help"], helpers=helpers)
         except Exception:  # noqa: BLE001 - try the next candidate directory
@@ -158,7 +163,7 @@ def main():
     ap.add_argument("--total", action="store_true", help="print only the total, for scripting")
     args = ap.parse_args()
 
-    parser = load_parser(all_devices=True)
+    parser = load_parser(force_full_surface=True)
     if parser is None:
         print("error: could not import amdsmi_parser.py", file=sys.stderr)
         return 1
@@ -172,13 +177,13 @@ def main():
         print(result["total"])
         return 0
 
-    local = load_parser(all_devices=False)
+    local = load_parser(force_full_surface=False)
     local_opts = 0
     if local is not None:
         _, _, local_features, _ = measure(local)
         local_opts = sum(local_features.values())
 
-    print("amd-smi CLI surface (measured from amdsmi_parser.py, all devices present)\n")
+    print("amd-smi CLI surface (measured from amdsmi_parser.py, full product surface)\n")
     print(f"  base commands            {result['commands']:>6d}")
     print(f"  global output modifiers  {len(globals_):>6d}   {sorted(o[0] for o in globals_)}")
     print(f"  feature options          {result['feature_options']:>6d}")
