@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run one hip-tests or rocrtst command under rocJITsu and print a CTest -V log."""
+"""Run a suite under rocJITsu or on a native GPU and print a CTest -V log."""
 
 import argparse
 import os
@@ -111,6 +111,34 @@ def run_under_rocjitsu(
     gtest_filter: str = "",
 ) -> dict:
     launch = [rocjitsu, "--config", config, "--", *command]
+    return run_command(
+        launch, name, timeout_seconds, env, cwd, index, total, gtest_filter
+    )
+
+
+def native_test_env(base: dict) -> dict:
+    """Preload the artifact's ASAN runtime in the child, never in this driver."""
+    runtime = base.get("ASAN_RUNTIME_PATH", "")
+    if not runtime or not Path(runtime).is_file():
+        raise FileNotFoundError(
+            f"ASAN_RUNTIME_PATH must name an existing runtime file: {runtime!r}"
+        )
+    env = base.copy()
+    preload = env.get("LD_PRELOAD", "")
+    env["LD_PRELOAD"] = runtime + (os.pathsep + preload if preload else "")
+    return env
+
+
+def run_command(
+    launch: list[str],
+    name: str,
+    timeout_seconds: int,
+    env: dict,
+    cwd: str,
+    index: int = 1,
+    total: int = 1,
+    gtest_filter: str = "",
+) -> dict:
     header = [
         f"    Start {index}: {name}",
         "",
@@ -149,8 +177,10 @@ def run_under_rocjitsu(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rocjitsu", required=True)
-    parser.add_argument("--config", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--rocjitsu")
+    mode.add_argument("--native", action="store_true")
+    parser.add_argument("--config")
     parser.add_argument("--name", required=True)
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
@@ -160,6 +190,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    if args.rocjitsu and not args.config:
+        parser.error("--config is required with --rocjitsu")
     command = args.command
     if command and command[0] == "--":
         command = command[1:]
@@ -179,16 +211,22 @@ def main() -> int:
     log_path = Path(args.log)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        result = run_under_rocjitsu(
-            args.rocjitsu,
-            args.config,
-            command,
-            args.name,
-            args.timeout_seconds,
-            env,
-            args.cwd,
-            gtest_filter=args.gtest_filter,
-        )
+        if args.native:
+            result = run_command(
+                command, args.name, args.timeout_seconds, native_test_env(env),
+                args.cwd, gtest_filter=args.gtest_filter,
+            )
+        else:
+            result = run_under_rocjitsu(
+                args.rocjitsu,
+                args.config,
+                command,
+                args.name,
+                args.timeout_seconds,
+                env,
+                args.cwd,
+                gtest_filter=args.gtest_filter,
+            )
     except OSError as error:
         # A missing executable or working directory is a failed suite, with a
         # durable diagnostic just like a nonzero test process exit.

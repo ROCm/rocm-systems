@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent
 if SCRIPTS.name == "tests":
@@ -19,6 +20,66 @@ import rocjitsu_suite_runner  # noqa: E402
 
 
 class SuiteRunnerTest(unittest.TestCase):
+    def test_native_runs_command_directly_with_child_only_asan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp) / "libclang_rt.asan.so"
+            runtime.touch()
+            log = Path(tmp) / "native.log"
+            command = ["rocrtst64", "--gtest_filter=rocrtst.Test_Example"]
+            argv = [
+                "runner", "--native", "--name", "native-test", "--cwd", tmp,
+                "--gtest-filter", "rocrtst.Test_Example", "--log", str(log),
+                "--", *command,
+            ]
+            parent_env = {
+                "ASAN_RUNTIME_PATH": str(runtime), "LD_PRELOAD": "existing.so",
+                "HSA_ENABLE_SDMA": "0",
+            }
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(os.environ, parent_env, clear=True),
+                mock.patch.object(rocjitsu_suite_runner.subprocess, "Popen") as popen,
+                mock.patch.object(
+                    rocjitsu_suite_runner, "stream_output", return_value=(["native-ok"], 0, False)
+                ),
+            ):
+                self.assertEqual(rocjitsu_suite_runner.main(), 0)
+                self.assertEqual(dict(os.environ), parent_env)
+                self.assertEqual(popen.call_args.args[0], command)
+                child_env = popen.call_args.kwargs["env"]
+                self.assertEqual(child_env["LD_PRELOAD"], str(runtime) + os.pathsep + "existing.so")
+                self.assertEqual(child_env["GTEST_FILTER"], "rocrtst.Test_Example")
+                self.assertEqual(child_env["HSA_ENABLE_SDMA"], "0")
+            self.assertIn("native-ok", log.read_text())
+            self.assertIn("Passed", log.read_text())
+
+    def test_native_missing_asan_runtime_fails_without_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for runtime in ("", str(Path(tmp) / "missing.so"), tmp):
+                with self.subTest(runtime=runtime):
+                    log = Path(tmp) / "native.log"
+                    argv = [
+                        "runner", "--native", "--name", "native-test", "--cwd", tmp,
+                        "--log", str(log), "--", "rocrtst64",
+                    ]
+                    with (
+                        mock.patch.object(sys, "argv", argv),
+                        mock.patch.dict(os.environ, {"ASAN_RUNTIME_PATH": runtime}, clear=True),
+                        mock.patch.object(rocjitsu_suite_runner.subprocess, "Popen") as popen,
+                    ):
+                        self.assertEqual(rocjitsu_suite_runner.main(), 1)
+                        popen.assert_not_called()
+                    self.assertIn("ASAN_RUNTIME_PATH", log.read_text())
+
+    def test_cli_requires_exclusive_mode_and_simulator_config(self):
+        for mode in ([], ["--native", "--rocjitsu", "rj"], ["--rocjitsu", "rj"]):
+            with self.subTest(mode=mode):
+                result = subprocess.run([
+                    sys.executable, str(SCRIPTS / "rocjitsu_suite_runner.py"), *mode,
+                    "--name", "test", "--cwd", ".", "--log", "unused", "--", "unused",
+                ], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+
     @unittest.skipUnless(sys.platform == "linux", "Linux process-group contract")
     def test_timeout_kills_descendants_holding_stdout(self):
         with tempfile.TemporaryDirectory() as tmp:

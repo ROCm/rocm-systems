@@ -28,6 +28,10 @@ on:
         type: string
         description: "With run_rocjitsu, reuse this repository's host-ASAN runtime artifacts and skip rebuilding"
         default: ""
+      rocjitsu_native_comparison:
+        type: boolean
+        description: "With run_rocjitsu, execute the identical suites natively on gfx942 ASAN GPU runners"
+        default: false
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
@@ -130,6 +134,7 @@ jobs:
     with:
       therock_ref: e0e238c0323f76aeabdd348cfd3798a653820fdc
       artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
+      native_gpu: ${{ inputs.rocjitsu_native_comparison || false }}
 
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary

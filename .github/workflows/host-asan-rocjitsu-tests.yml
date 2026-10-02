@@ -15,6 +15,9 @@ on:
       artifacts_run_id:
         required: true
         type: string
+      native_gpu:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,8 +25,8 @@ permissions:
 
 jobs:
   simulator:
-    name: Host-ASAN rocJITsu / ${{ matrix.suite }}
-    runs-on: aws-linux-scale-rocm-large
+    name: Host-ASAN ${{ inputs.native_gpu && 'native gfx942' || 'rocJITsu' }} / ${{ matrix.suite }}
+    runs-on: ${{ inputs.native_gpu && 'linux-gfx942-8gpu-asan-sandbox-rocm' || 'aws-linux-scale-rocm-large' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -31,6 +34,8 @@ jobs:
         suite: [hip-tests, rocrtst]
     container:
       image: ubuntu:24.04
+      # Use the native CI device allocation; do not override its GPU isolation.
+      options: ${{ inputs.native_gpu && '--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST' || '' }}
     defaults:
       run:
         shell: bash
@@ -39,6 +44,7 @@ jobs:
       ROCM_ROOT: ${{ github.workspace }}/asan-rocm
       ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
       SUITE: ${{ matrix.suite }}
+      TEST_BACKEND: ${{ inputs.native_gpu && 'native-gfx942' || 'rocjitsu' }}
       ROCRTST_FILTER: rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test
     steps:
       - name: Install build and artifact tools
@@ -115,6 +121,7 @@ jobs:
           git -C TheRock rev-parse HEAD >> logs/provenance.txt
 
       - name: Build simulator with the artifact compiler and shared ASAN
+        if: ${{ !inputs.native_gpu }}
         run: |
           set -euo pipefail
           test -f "${ASAN_RUNTIME_PATH:?ASAN runtime was not resolved}"
@@ -133,7 +140,19 @@ jobs:
           test -x rj-build/tools/rocjitsu/rocjitsu
           test -f emulation/rocjitsu/configs/gfx942_cdna3.json
 
-      - name: Run selected systems suite in local simulator mode
+      - name: Verify native gfx942 device access
+        if: ${{ inputs.native_gpu }}
+        run: |
+          set -euo pipefail
+          test -c /dev/kfd
+          test -f "${ASAN_RUNTIME_PATH:?ASAN runtime was not resolved}"
+          export LD_LIBRARY_PATH="$(dirname "$ASAN_RUNTIME_PATH"):$LD_LIBRARY_PATH"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          timeout 120 env LD_PRELOAD="$ASAN_RUNTIME_PATH" \
+            "$ROCM_ROOT/bin/rocminfo" > logs/rocminfo.log 2>&1
+          grep -Eq 'Name: +gfx942' logs/rocminfo.log
+
+      - name: Run selected systems suite
         env:
           DEBUG_HIP_GRAPH_MIN_OVERLAP: "0"
           THEROCK_REQUIRE_HIP_YAML_ENTRIES: "1"
@@ -142,11 +161,15 @@ jobs:
           unset GTEST_FILTER
           # The ASAN-linked launcher preloads its matching runtime before its
           # interposer in the child. Do not preload ASAN into the Python driver.
-          launcher="$PWD/rj-build/tools/rocjitsu/rocjitsu"
-          config="$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json"
+          if [[ "$TEST_BACKEND" == native-gfx942 ]]; then
+            backend_args=(--native)
+          else
+            backend_args=(--rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
+              --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json")
+          fi
           if [[ "$SUITE" == hip-tests ]]; then
             python3 .github/scripts/rocjitsu_suite_runner.py \
-              --rocjitsu "$launcher" --config "$config" --name hip-tests-smoke \
+              "${backend_args[@]}" --name hip-tests-smoke \
               --cwd "$ROCM_ROOT/share/hip/catch_tests" --timeout-seconds 9000 \
               --log logs/hip-tests.log -- \
               ctest --test-dir "$ROCM_ROOT/share/hip/catch_tests" \
@@ -155,7 +178,7 @@ jobs:
                 --no-tests=error --output-on-failure --parallel 1 --timeout 3600 -V
           else
             python3 .github/scripts/rocjitsu_suite_runner.py \
-              --rocjitsu "$launcher" --config "$config" --name rocrtst-quick \
+              "${backend_args[@]}" --name rocrtst-quick \
               --cwd "$ROCM_ROOT/bin" --timeout-seconds 7200 \
               --gtest-filter "$ROCRTST_FILTER" --log logs/rocrtst.log -- \
               "$ROCM_ROOT/bin/rocrtst64" "--gtest_filter=$ROCRTST_FILTER"
@@ -172,9 +195,9 @@ jobs:
           result=failed
           if [[ -f "logs/$SUITE.result" ]]; then result=$(cat "logs/$SUITE.result"); fi
           {
-            echo "### Host-ASAN rocJITsu: $SUITE — $result"
+            echo "### Host-ASAN $TEST_BACKEND: $SUITE - $result"
             echo "Source build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$ARTIFACTS_RUN_ID"
-            echo 'Runner: aws-linux-scale-rocm-large; local gfx942_cdna3 simulation.'
+            echo "Backend: $TEST_BACKEND; runner: $RUNNER_NAME"
             echo 'Subset: HIP smoke excluding three printf stress cases, or ROCr QUICK_TESTS.'
             echo 'Math-library suites are excluded. Missing artifacts, empty selections and timeouts fail.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -184,7 +207,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: host-asan-rocjitsu-${{ matrix.suite }}-${{ github.run_attempt }}
+          name: host-asan-${{ env.TEST_BACKEND }}-${{ matrix.suite }}-${{ github.run_attempt }}
           path: |
             logs/
             rj-build/CMakeCache.txt
