@@ -313,6 +313,22 @@ in the following table.
           ``NCCL_IB_SUBNET_AWARE_ROUTING``.
       - | Integer value, bits (default: ``24``)
 
+    * - | ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
+        | Enables per-queue-pair CPU-side WQE post-to-poll latency monitoring
+          for the IB transports (``net_ib`` and ``net_ib_cast``). When set
+          above ``0``, each queue pair tracks post-to-completion latency with
+          running mean/stddev/max and P50/P90/P99/P99.9 percentile estimates,
+          and completions that exceed the threshold are counted separately
+          and rate-limit-logged as potential stalls.
+      - | Integer value, nanoseconds (default: ``0``, disabled)
+
+    * - | ``NCCL_IB_WQE_LATENCY_REPORT``
+        | Controls whether each queue pair's latency summary is logged once,
+          at communicator teardown, when ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
+          is enabled.
+      - | ``1``: Log a per-QP summary on comm close (default).
+        | ``0``: Disabled.
+
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
