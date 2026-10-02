@@ -121,15 +121,6 @@ static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-// Compact have/status recv: heap registrations, else the unused 64-record stack.
-static inline void* ncclRmaCompactConsensusRecv(void* heapRegs, void* stackRegs, size_t stackBytes, int nranks,
-                                                size_t elemBytes) {
-  if (heapRegs != NULL) return heapRegs;
-  if (stackRegs == NULL || nranks < 1 || elemBytes == 0) return NULL;
-  if ((size_t)nranks > stackBytes / elemBytes) return NULL;
-  return stackRegs;
-}
-
 // After a prefix post, keep the request and return success so Test() drains.
 // Callers NCCLCHECK the complete helper and never reach test() on error.
 static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
@@ -172,6 +163,8 @@ struct ncclGinIbCollComm {
   ncclResult_t (*allToAll)(struct ncclGinIbCollComm* cComm, void* srcBuf, void* recvBuf, size_t len);
   ncclResult_t (*getGidIndex)(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                               int* gidIndex);
+  // RMA only: per-rank symmetric-registration consensus records (see ncclRmaIbProxyConnect).
+  void* regConsensus;
 };
 
 #endif
