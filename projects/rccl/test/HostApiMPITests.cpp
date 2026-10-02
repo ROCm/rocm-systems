@@ -1706,7 +1706,8 @@ TEST_F(HostApiTest, PutSignalInvalidCtx)
  * @brief Stripe two puts across ctx 0 and ctx 1 on numRmaCtx=2.
  *
  * Rank 0 issues one put per context to distinct window offsets. Rank 1 waits
- * on matching per-descriptor ctx values, then verifies both payloads.
+ * once with nDesc=2 (ctx 0 and ctx 1) so the enqueue grouping loop emits one
+ * task per distinct descriptor ctx, then verifies both payloads.
  */
 TEST_F(HostApiMultiCtxTest, PutSignalMultiCtx)
 {
@@ -1756,11 +1757,11 @@ TEST_F(HostApiMultiCtxTest, PutSignalMultiCtx)
     ncclResult_t waitRes = ncclSuccess;
     if(myRank == 1)
     {
-        ncclWaitSignalDesc_t d0{/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/0};
-        ncclWaitSignalDesc_t d1{/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/1};
-        waitRes = ncclWaitSignal(/*nDesc=*/1, &d0, comm, stream);
-        if(waitRes == ncclSuccess)
-            waitRes = ncclWaitSignal(/*nDesc=*/1, &d1, comm, stream);
+        ncclWaitSignalDesc_t descs[2] = {
+            {/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/0},
+            {/*opCnt=*/1, /*peer=*/0, kSigIdx, /*ctx=*/1},
+        };
+        waitRes = ncclWaitSignal(/*nDesc=*/2, descs, comm, stream);
     }
     ASSERT_MPI_EQ(ncclSuccess, waitRes);
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));

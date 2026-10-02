@@ -2350,21 +2350,10 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupported_RejectsEveryRma
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_IsIgnoredOnHip) {
+  // The CUDA 12.5 driver gate is HIP-elided in postTuneRmaTaskAppend, and this
+  // binary always defines __HIP_PLATFORM_AMD__, so a too-old cache must not reject.
   TaskPostTuning_RmaScene rma;
   ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-#if defined(__HIP_PLATFORM_AMD__)
-  EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
-  EXPECT_EQ(1, rma.AppendedTaskCount());
-#else
-  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.PutSignal()));
-  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
-#endif
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverAtTheRmaMinimum_IsAccepted) {
-  TaskPostTuning_RmaScene rma;
-  ncclCudaDriverVersionCache = kSupportedDriverVersion;
 
   EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
   EXPECT_EQ(1, rma.AppendedTaskCount());
@@ -2403,6 +2392,15 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheTopOfTheRange_IsAc
 
   EXPECT_EQ(ncclSuccess, rma.Run(raw));
   EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = -1;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
@@ -2821,6 +2819,14 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsWaitForOneOpe
   EXPECT_EQ(kRmaSigIdx, lastCtxTask.signalIdxs[0]);
   EXPECT_EQ(kSecondSigIdx, lastCtxTask.signalIdxs[1]);
   EXPECT_EQ(2, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, -1)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
