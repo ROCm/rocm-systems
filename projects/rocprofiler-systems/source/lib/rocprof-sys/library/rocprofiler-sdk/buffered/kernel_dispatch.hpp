@@ -68,20 +68,22 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
 
     {
         auto& metadata_registry = Externals::get_metadata_registry();
-        metadata_registry.add_thread_info({
-            .parent_process_id = Externals::get_ppid(),
-            .process_id        = Externals::get_pid(),
-            .thread_id         = record->thread_id,
-            .start             = k_zero_start_timestamp,
-            .end               = k_zero_end_timestamp,
-            .extdata           = k_empty_json,
+        metadata_registry.ensure_thread(record->thread_id, [&] {
+            return typename Externals::thread_info_t{
+                .parent_process_id = Externals::get_ppid(),
+                .process_id        = Externals::get_pid(),
+                .thread_id         = record->thread_id,
+                .start             = k_zero_start_timestamp,
+                .end               = k_zero_end_timestamp,
+                .extdata           = k_empty_json,
+            };
         });
 
-        metadata_registry.add_track({
-            .track_name = fmt::format("GPU Kernel Dispatch [{}] Queue {}",
-                                      agent->device_id, queue_id.handle),
-            .thread_id  = record->thread_id,
-            .extdata    = k_empty_json,
+        auto const track_name = fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                            agent->device_id, queue_id.handle);
+        metadata_registry.ensure_track(track_name, [&] {
+            return typename Externals::track_t{ track_name, record->thread_id,
+                                                k_empty_json };
         });
 
         metadata_registry.add_queue(queue_id.handle);

@@ -51,6 +51,18 @@ get_type_info(const DataType& data, const Filter& filter)
     return result;
 }
 
+/// Shared-lock membership check first; the write lock is taken only for a new key.
+template <typename Synchronized, typename Key>
+void
+insert_if_absent(Synchronized& data, const Key& key)
+{
+    data.ulock([&key](const auto& _data) { return _data.find(key) != _data.end(); },
+               [&key](auto& _data) {
+                   _data.emplace(key);
+                   return true;
+               });
+}
+
 template <typename T>
 auto
 assign_set_to_vector(T& result)
@@ -408,12 +420,12 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("threads", [&_registry](const auto& item) {
         auto const thread = from_json_thread(item);
-        _registry.add_thread_info(thread);
+        _registry.ensure_thread(thread.thread_id, [&thread] { return thread; });
     });
 
     fill_from_json("tracks", [&_registry](const auto& item) {
         auto const track = from_json_track(item);
-        _registry.add_track(track);
+        _registry.ensure_track(track.track_name, [&track] { return track; });
     });
 
     fill_from_json("queues", [&_registry](const auto& item) {
@@ -463,73 +475,25 @@ metadata_registry::set_process(const info::process& process)
 void
 metadata_registry::add_pmc_info(const info::pmc& pmc_info)
 {
-    m_pmc_infos.wlock([&pmc_info](auto& _data) {
-        if(_data.count(pmc_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(pmc_info);
-    });
-}
-
-void
-metadata_registry::add_thread_info(const info::thread& thread_info)
-{
-    m_threads.wlock([&thread_info](auto& _data) {
-        if(_data.count(thread_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(thread_info);
-    });
-}
-
-void
-metadata_registry::add_track(const info::track& track_info)
-{
-    m_tracks.wlock([&track_info](auto& _data) {
-        if(_data.count(track_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(track_info);
-    });
+    insert_if_absent(m_pmc_infos, pmc_info);
 }
 
 void
 metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
-    m_queues.wlock([&queue_handle](auto& _data) {
-        if(_data.count(queue_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(queue_handle);
-    });
+    insert_if_absent(m_queues, queue_handle);
 }
 
 void
 metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
-    m_streams.wlock([&stream_handle](auto& _data) {
-        if(_data.count(stream_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(stream_handle);
-    });
+    insert_if_absent(m_streams, stream_handle);
 }
 
 void
 metadata_registry::add_string(const std::string_view string_value)
 {
-    m_strings.wlock([&string_value](auto& _data) {
-        std::string str{ string_value };
-        if(_data.count(str) == 0)
-        {
-            _data.emplace(std::move(str));
-        }
-    });
+    insert_if_absent(m_strings, string_value);
 }
 
 info::process
@@ -649,13 +613,7 @@ void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-    m_code_objects.wlock([&code_object](auto& _data) {
-        if(_data.count(code_object) > 0)
-        {
-            return;
-        }
-        _data.emplace(code_object);
-    });
+    insert_if_absent(m_code_objects, code_object);
 }
 
 void
@@ -663,13 +621,7 @@ metadata_registry::add_kernel_symbol(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
         kernel_symbol)
 {
-    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
-        if(_data.count(kernel_symbol) > 0)
-        {
-            return;
-        }
-        _data.emplace(kernel_symbol);
-    });
+    insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
