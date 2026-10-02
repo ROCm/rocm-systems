@@ -624,6 +624,7 @@ global:
     hipLibraryGetKernelCount;
     hipLibraryGetGlobal;
     hipLibraryGetManaged;
+    hipLibraryGetModule;
     hipStreamCopyAttributes;
     hipLibraryEnumerateKernels;
     hipKernelGetLibrary;

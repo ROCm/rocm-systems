@@ -1100,8 +1100,44 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 }
 
 // ================================================================================================
+hipError_t PlatformState::RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dynCO) {
+  if (hmod == nullptr || dynCO == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  std::scoped_lock lock(lock_);
+
+  const auto [it, inserted] = dynCO_map_.try_emplace(hmod, dynCO);
+  if (!inserted) {
+    return (it->second == dynCO) ? hipSuccess : hipErrorAlreadyMapped;
+  }
+  library_modules_.insert(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::UnregisterLibraryModule(hipModule_t hmod) {
+  std::scoped_lock lock(lock_);
+
+  if (library_modules_.erase(hmod) == 0) {
+    return;
+  }
+
+  dynCO_map_.erase(hmod);
+  RemoveTexRefs(hmod);
+}
+
+// ================================================================================================
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
   std::scoped_lock lock(lock_);
+
+  // Modules returned by hipLibraryGetModule() are owned by their library.
+  // Unloading them should be done via hipLibraryUnload(), which also tears down the library's DynCO.
+  if (library_modules_.find(hmod) != library_modules_.end()) {
+    LogPrintfError("Module %p is owned by a library, unload it with hipLibraryUnload", hmod);
+    return hipErrorIllegalState;
+  }
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
@@ -1110,7 +1146,13 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
     dynCO_map_.erase(it);  // Iterator-based erase avoids second lookup
   }
 
-  // Remove all texture references associated with this module
+  RemoveTexRefs(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::RemoveTexRefs(hipModule_t hmod) {
   for (auto tex_it = texRef_map_.begin(); tex_it != texRef_map_.end(); ) {
     if (tex_it->second.first == hmod) {
       tex_it = texRef_map_.erase(tex_it);
@@ -1118,8 +1160,6 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
       ++tex_it;
     }
   }
-
-  return hipSuccess;
 }
 
 // ================================================================================================

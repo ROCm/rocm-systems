@@ -2550,6 +2550,7 @@ TEST_CASE("Unit_HRR_Context_Direct", "[.][hrr-direct]") {
 // Exercises hipModuleUnload, hipModuleGetFunctionCount, hipFuncGetAttribute,
 // hipGetFuncBySymbol, hipModuleOccupancy*, hipLibraryLoadData,
 // hipLibraryUnload, hipLibraryGetKernel, hipLibraryGetKernelCount,
+// hipLibraryGetModule,
 // hipLibraryEnumerateKernels, hipKernelGetLibrary, hipKernelGetFunction,
 // hipKernelGetParamInfo, hipKernelGetAttribute, hipKernelSetAttribute.
 // All are NOOP at playback; D2H blob via hipMemsetD32 + hipMemcpyAsync.
@@ -2631,6 +2632,16 @@ TEST_CASE("Unit_HRR_ModuleExtra_Direct", "[.][hrr-direct]") {
   // hipLibraryGetKernelCount — needs valid lib; test with nullptr
   { unsigned int kc = 0;
     hipError_t e = hipLibraryGetKernelCount(&kc, nullptr);
+    REQUIRE((e == hipSuccess || e == hipErrorInvalidValue
+             || e == hipErrorInvalidHandle || e == hipErrorNotSupported)); }
+
+  // hipLibraryGetModule — needs valid lib; test with nullptr. This drives the
+  // capture shim's rejection path only: every generated shim records under
+  // `if (r == hipSuccess)`, so a failing call is deliberately not written to
+  // the archive. Unit_HRR_ModuleAPI_Direct owns the recorded call, where a
+  // real HIPRTC code object makes hipLibraryGetModule succeed.
+  { hipModule_t lm = nullptr;
+    hipError_t e = hipLibraryGetModule(&lm, nullptr);
     REQUIRE((e == hipSuccess || e == hipErrorInvalidValue
              || e == hipErrorInvalidHandle || e == hipErrorNotSupported)); }
 
@@ -3203,7 +3214,8 @@ TEST_CASE("Unit_HRR_HostRegLaunch_Direct", "[.][hrr][direct]") {
 
 // ---------------------------------------------------------------------------
 // Workload Z — hipModuleLoadData/DataEx/Load + hipModuleGetFunction +
-//              hipModuleLaunchKernel  (uses HIPRTC to compile kernel at runtime)
+//              hipModuleLaunchKernel + hipLibraryGetModule
+//              (uses HIPRTC to compile kernel at runtime)
 // ---------------------------------------------------------------------------
 static const char* k_fill_src = R"(
 extern "C" __global__ void rtc_fill(int* out, int val, int n) {
@@ -3292,6 +3304,29 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
     // directory will clean it up on next boot.
     std::error_code ec;
     fs::remove(tmp_co, ec);
+  }
+
+  // ---- hipLibraryGetModule -------------------------------------------------
+  // Load the same code object through the library entry point and pull the
+  // backing module out of it. The generated capture shim only records on
+  // hipSuccess, so this needs a real library rather than the nullptr-argument
+  // probes Workload T uses; the function lookup below proves the handle the
+  // shim recorded is the usable one. NOOP at playback.
+  {
+    hipLibrary_t lib = nullptr;
+    HRR_HIP_CHECK(hipLibraryLoadData(&lib, co.data(), nullptr, nullptr, 0,
+                                     nullptr, nullptr, 0));
+    hipModule_t mod_lib = nullptr;
+    HRR_HIP_CHECK(hipLibraryGetModule(&mod_lib, lib));
+    REQUIRE(mod_lib != nullptr);
+
+    hipFunction_t fn_lib = nullptr;
+    HRR_HIP_CHECK(hipModuleGetFunction(&fn_lib, mod_lib, "rtc_fill"));
+    REQUIRE(fn_lib != nullptr);
+
+    // The module belongs to the library, so hipLibraryUnload is what releases
+    // it; hipModuleUnload on it is refused by design.
+    HRR_HIP_CHECK(hipLibraryUnload(lib));
   }
 
   HRR_HIP_CHECK(hipModuleUnload(mod_data));

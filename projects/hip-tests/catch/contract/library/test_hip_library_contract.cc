@@ -370,6 +370,158 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGloba
   REQUIRE(module_bytes == library_bytes);
 }
 
+// @asserts: hipLibraryGetModule - a loaded library resolves to a non-null module handle
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // A loaded library must expose the module it was loaded into. The handle value
+  // itself is opaque; only its non-nullness is part of the contract.
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&module, library));
+  REQUIRE(module != nullptr);
+}
+
+// @asserts: hipLibraryGetModule - repeated queries on one library return the same stable module handle
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // The module belongs to the library, so querying it twice must yield the same
+  // handle rather than instantiating a second module per call.
+  hipModule_t first = nullptr;
+  hipModule_t second = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&first, library));
+  HIP_CHECK(hipLibraryGetModule(&second, library));
+  REQUIRE(first != nullptr);
+  REQUIRE(second == first);
+}
+
+// @asserts: hipLibraryGetModule - the returned module resolves a library kernel that launches and observably writes
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // This is the guarantee the API exists for: the handle must be accepted by the
+  // module-based entry points that have no library-level equivalent, and a
+  // function resolved that way must be a real, launchable device function.
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&module, library));
+  REQUIRE(module != nullptr);
+
+  hipFunction_t function = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&function, module, kWriteKernelName));
+  REQUIRE(function != nullptr);
+
+  int* device_value = nullptr;
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+
+  int value = kExpectedValue;
+  void* kernel_args[] = {&device_value, &value};
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, kernel_args, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, device_value, sizeof(result), hipMemcpyDeviceToHost));
+  REQUIRE(result == kExpectedValue);
+}
+
+// @asserts: hipLibraryGetModule - a global resolved through the library and through its own module reports the same size
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  void* library_address = nullptr;
+  size_t library_bytes = 0;
+  HIP_CHECK(hipLibraryGetGlobal(&library_address, &library_bytes, library, kGlobalName));
+  REQUIRE(library_address != nullptr);
+
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&module, library));
+  REQUIRE(module != nullptr);
+
+  // Both entry points describe the same symbol in the same loaded code object,
+  // so the reported size must agree and both addresses must be structurally
+  // valid. Pointer identity is deliberately not pinned here, matching the
+  // sibling hipLibraryGetGlobal/hipModuleGetGlobal contract above.
+  hipDeviceptr_t module_address = 0;
+  size_t module_bytes = 0;
+  HIP_CHECK(hipModuleGetGlobal(&module_address, &module_bytes, module, kGlobalName));
+  REQUIRE(module_address != 0);
+  REQUIRE(module_bytes == library_bytes);
+}
+
+// @asserts: hipLibraryGetModule - a null module out-parameter is rejected with a non-success status
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // A null destination must be reported rather than written through. The exact
+  // error code is backend-specific, so only a non-success status is required.
+  const hipError_t status = hipLibraryGetModule(nullptr, library);
+  REQUIRE(status != hipSuccess);
+  (void)hipGetLastError();
+}
+
+// @asserts: hipLibraryGetModule - a null library handle is rejected with a non-success status
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected) {
+  // Querying a module from a null library must fail rather than return a bogus
+  // handle. Backends may report an invalid-value or invalid-handle status; the
+  // contract only requires a non-success status.
+  HIP_CHECK(hipFree(0));
+  hipModule_t module = nullptr;
+  const hipError_t status = hipLibraryGetModule(&module, nullptr);
+  REQUIRE(status != hipSuccess);
+  (void)hipGetLastError();
+}
+
+// @asserts: hipLibraryGetModule - a module obtained from a library cannot be released with hipModuleUnload
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  hipModule_t module = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&module, library));
+  REQUIRE(module != nullptr);
+
+  // The module is owned by the library, not by the caller: releasing it through
+  // hipModuleUnload would leave the library holding a freed code object, so the
+  // runtime must refuse. hipLibraryUnload is the only way to release it.
+  //
+  // BACKEND-DIFF: the refusal is portable but the code is not. CUDA documents
+  // CUDA_ERROR_NOT_PERMITTED for cuModuleUnload on a library module; HIP has no
+  // NotPermitted code and AMD reports hipErrorIllegalState. Parity would need a
+  // shared error enumerator, so only the non-success outcome is pinned here.
+  const hipError_t status = hipModuleUnload(module);
+  REQUIRE(status != hipSuccess);
+  (void)hipGetLastError();
+
+  // Refusing must be non-destructive: the library and its module stay usable.
+  hipFunction_t function = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&function, module, kWriteKernelName));
+  REQUIRE(function != nullptr);
+}
+
 // @asserts: hipKernelGetLibrary - a kernel round-trips back to the exact library handle it was obtained from
 HIP_TEST_CASE(Contract_Library_HipKernelGetLibrary_Default_RoundTrips) {
   std::vector<char> code;
