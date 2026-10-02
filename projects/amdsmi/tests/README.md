@@ -570,7 +570,7 @@ Each run echoes the filter it used, e.g.
 
 Each run writes `api_coverage_trend.csv` into its own run directory, seeded
 with the rows of the newest earlier `api-coverage-results-*` directory beside it
-(override with `-H`, suppress with `--no_history`). See
+(override with `-H`, suppress entirely with `--no_history`). See
 [Where each number comes from](#where-each-number-comes-from) for which column
 feeds which Trend cell, and [How the trend carries across
 runs](#how-the-trend-carries-across-runs) for the inheritance rules.
