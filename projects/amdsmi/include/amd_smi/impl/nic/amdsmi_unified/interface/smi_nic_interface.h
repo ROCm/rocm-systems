@@ -119,6 +119,7 @@ typedef struct {
   char part_number[SMI_NIC_MAX_STRING_LENGTH];
   char serial_number[SMI_NIC_MAX_STRING_LENGTH];
   char vendor_name[SMI_NIC_MAX_STRING_LENGTH];
+  uint8_t type;        /**< SmiNicKind, mirrors the amdsmi asic type */
   uint32_t capability; /**< Capability bitmask (SmiNicCapability), mirrors amdsmi asic capability */
 } smi_nic_asic_info_t;
 

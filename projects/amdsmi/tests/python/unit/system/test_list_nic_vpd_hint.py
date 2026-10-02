@@ -41,6 +41,7 @@ def _load_list_devices():
 def _summary(product, part, serial):
     return {
         "bdf": "0000:a1:00.0",
+        "Type": "AINIC",
         "UUID": "N/A",
         "Permanent Address": "N/A",
         "Product Name": product,
