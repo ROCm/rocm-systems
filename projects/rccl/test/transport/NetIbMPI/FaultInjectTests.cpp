@@ -103,8 +103,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                     result = WorkerPostRecv(pair.recvComm, buffer, size, 301, mhandle, &request);
                     if (!result.ok) return result;
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
-                                                        &bufferGuard);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &bufferGuard);
                 }
 
                 int liveNqps = 0;
@@ -123,13 +122,14 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                     return result;
                 }
                 if (!outcome.retired) {
-                    // Work may still reference this memory, so it is kept rather than freed.
-                    result.ok = false;
-                    result.msg = "the injected-fault send left work that could not be retired, "
-                                 "so the buffer and its registration are retained";
-                    mhandleGuard.release();
+                    // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
                     bufferGuard.release();
-                    return result;
+                    if (!outcome.quiesced) {
+                        result.ok = false;
+                        result.msg = "the injected-fault send left work on queue pairs that could not all be "
+                                     "driven to error, so its buffer is kept";
+                        return result;
+                    }
                 }
                 return WorkerCastFaultClear(pair.sendComm);
             });
@@ -727,8 +727,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                                             &request);
                     if (!result.ok) return result;
                     if (!WorkerDrainRecv(request, 100)) {
-                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request,
-                                                              &faultedGuard, &bufferGuard);
+                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request, &bufferGuard);
                         if (!result.ok) return result;
                     }
                 } else {
@@ -747,13 +746,14 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                         return result;
                     }
                     if (!outcome.retired) {
-                        // Work may still reference this memory, so it is kept rather than freed.
-                        result.ok = false;
-                        result.msg = "the injected-fault send left work that could not be retired, "
-                                     "so the buffer and its registration are retained";
-                        faultedGuard.release();
+                        // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
                         bufferGuard.release();
-                        return result;
+                        if (!outcome.quiesced) {
+                            result.ok = false;
+                            result.msg = "the injected-fault send left work on queue pairs that could not all be "
+                                         "driven to error, so its buffer is kept";
+                            return result;
+                        }
                     }
                     result = WorkerCastFaultClear(faulted.sendComm);
                     if (!result.ok) return result;
@@ -1811,7 +1811,7 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
                 auto& bufferGuard = host.bufferGuard;
                 auto& mhandleGuard = host.mhandleGuard;
 
-                // Large-transfer budget: 64 MB per rank at four workers does not fit the 5 s default.
+                // Large-transfer budget: four workers moving 16 MB each at once do not fit the 5 s default.
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 1200, mhandle,
                                                WorkerSeed(threadIdx, 0), kLargeTransferTimeoutMs);
                 if (!result.ok)
@@ -4002,8 +4002,7 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     if (!result.ok) return result;
                     faultArmed.store(true, std::memory_order_release);
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
-                                                        &bufferGuard);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &bufferGuard);
                 }
 
                 int liveNqps = 0;
@@ -4022,13 +4021,14 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     return result;
                 }
                 if (!outcome.retired) {
-                    // Work may still reference this memory, so it is kept rather than freed.
-                    result.ok = false;
-                    result.msg = "the injected-fault send left work that could not be retired, "
-                                 "so the buffer and its registration are retained";
-                    mhandleGuard.release();
+                    // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
                     bufferGuard.release();
-                    return result;
+                    if (!outcome.quiesced) {
+                        result.ok = false;
+                        result.msg = "the injected-fault send left work on queue pairs that could not all be "
+                                     "driven to error, so its buffer is kept";
+                        return result;
+                    }
                 }
 
                 // Hold the fault until the bystanders finish, so their traffic shares the device with it.
