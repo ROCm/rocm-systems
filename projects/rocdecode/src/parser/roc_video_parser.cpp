@@ -199,6 +199,7 @@ ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytep
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000
                 if (streamBuffer_i + 1 == streamBuffer_end) {
+                    reduce_count++;  // discarded as well, so it is not part of the RBSP
                     break;
                 }
                 memmove(streamBuffer_i, streamBuffer_i + 1, streamBuffer_end-streamBuffer_i - 1);
@@ -216,7 +217,11 @@ ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytep
         }
         streamBuffer_i++;
     }
-    *p_rbsp_size = end_bytepos - begin_bytepos + reduce_count;
+    // Every discarded byte shortens the data, so the RBSP is the EBSP less reduce_count. Adding
+    // it instead reported more than the EBSP ever held: 00 00 03 01 is 3 bytes of RBSP but was
+    // reported as 5. For a full rbsp_buf_ that told the parse functions the buffer was larger
+    // than it is, which is exactly the kind of bound the rest of this change relies on.
+    *p_rbsp_size = end_bytepos - (begin_bytepos + reduce_count);
     return PARSER_OK;
 }
 
