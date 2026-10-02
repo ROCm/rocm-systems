@@ -18,6 +18,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
 
+**API:**
+
+- Added `pipe_id` to the kernel dispatch completion records, `rocprofiler_callback_tracing_kernel_dispatch_data_t` and `rocprofiler_buffer_tracing_kernel_dispatch_record_t`: the hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. It is reported for dispatches that complete through KFD dispatch-log signal-less completion (`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1`), and is `ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE` (-1) otherwise, including on every `ROCPROFILER_KERNEL_DISPATCH_ENQUEUE` callback.
+
 ### Changed
 
 - `rocprof-attach` and `rocprofv3 --attach` now profile the target process with the tool library of the rocprofiler-sdk installation that the target is running, located through `/proc/<pid>/maps`. When that library cannot be found, they fall back to the tool library of the attaching installation and print a warning. With `--attach-children`, every process in the tree uses the selection made for the target PID.
