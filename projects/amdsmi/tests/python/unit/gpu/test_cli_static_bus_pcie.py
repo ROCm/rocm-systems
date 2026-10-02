@@ -277,7 +277,7 @@ class TestCliStaticDriverVersions(unittest.TestCase):
         cls.interface.amdsmi_get_gpu_driver_info = lambda _handle: {
             "driver_name": "amdgpu",
             "driver_kernel_version": "6.19.14",
-            "driver_version": "31400000",
+            "driver_version": "6.19.14.31400000",
             "driver_build_version": "2370381",
             "driver_full_version": "6.19.14.31400000-2370381",
         }

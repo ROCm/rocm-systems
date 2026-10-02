@@ -162,6 +162,7 @@ impl_cstr_getters!(
     driver_date,
     driver_name,
     driver_kernel_version,
+    amdgpu_driver_version,
     driver_build_version,
     driver_full_version
 );

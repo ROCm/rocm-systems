@@ -3906,6 +3906,7 @@ def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str
         "driver_version": info.driver_version.decode("utf-8"),
         "driver_date": info.driver_date.decode("utf-8"),
         "driver_kernel_version": info.driver_kernel_version.decode("utf-8"),
+        "amdgpu_driver_version": info.amdgpu_driver_version.decode("utf-8"),
         "driver_build_version": info.driver_build_version.decode("utf-8"),
         "driver_full_version": info.driver_full_version.decode("utf-8"),
     }

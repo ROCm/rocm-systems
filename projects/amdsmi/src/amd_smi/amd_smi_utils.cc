@@ -1496,7 +1496,8 @@ constexpr std::string_view kDkmsAmdgpuDkmsConfPackageVersion = "PACKAGE_VERSION"
 // Ubuntu appends ".<os_release>" (e.g. "-2370381.24.04"); other distros'
 // PACKAGE_VERSION may end at the build number, so only that part is required.
 const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+(\..*)?$)"};
-const auto kAmdgpuModuleVersionRegex = std::regex{R"(^\d+\.\d+\.\d+\.\d+$)"};
+// Custom and older amdgpu builds report only major.minor.patch.
+const auto kAmdgpuModuleVersionRegex = std::regex{R"(^(\d+\.\d+\.\d+)(?:\.(\d+))?$)"};
 
 using smi_amdgpu_dkms_conf_t = std::pair<std::string, std::string>;
 
@@ -1799,39 +1800,38 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
     return AMDSMI_STATUS_INVAL;
   }
 
+  const auto module_version_string = std::string{module_version};
+  smi_clear_char_and_reinitialize(info->driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                  module_version_string);
   info->driver_kernel_version[0] = '\0';
-  info->driver_version[0] = '\0';
+  info->amdgpu_driver_version[0] = '\0';
   info->driver_build_version[0] = '\0';
   info->driver_full_version[0] = '\0';
 
-  const auto module_version_string = std::string{module_version};
-  if (!std::regex_match(module_version_string, kAmdgpuModuleVersionRegex)) {
+  if (module_version.empty() || (module_version == "N/A")) {
     return AMDSMI_STATUS_SUCCESS;
   }
 
-  const auto separator = module_version.rfind('.');
-  const auto kernel_version = module_version.substr(0, separator);
-  const auto driver_version = module_version.substr((separator + 1));
-  auto build_version = std::string_view{};
-  if (is_amdgpu_dkms_version_dir_name(package_version)) {
-    const auto build_start = (package_version.find('-') + 1);
-    const auto build_end = package_version.find('.', build_start);
-    build_version = package_version.substr(build_start, (build_end - build_start));
-  }
-
-  smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
-                                  std::string{kernel_version});
-  smi_clear_char_and_reinitialize(info->driver_version, AMDSMI_MAX_STRING_LENGTH,
-                                  std::string{driver_version});
-  smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
-                                  std::string{build_version});
-
-  auto full_version = std::string{kernel_version};
-  full_version.push_back('.');
-  full_version.append(driver_version);
-  if (!build_version.empty()) {
-    full_version.push_back('-');
-    full_version.append(build_version);
+  auto full_version = module_version_string;
+  auto match = std::smatch{};
+  if (std::regex_match(module_version_string, match, kAmdgpuModuleVersionRegex)) {
+    const auto kernel_version = match[1].str();
+    smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
+                                    kernel_version);
+    smi_clear_char_and_reinitialize(info->amdgpu_driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                    match[2].str());
+    // A module built outside this DKMS package (custom kernel) must not report its build.
+    if (is_amdgpu_dkms_version_dir_name(package_version) &&
+        (package_version.substr(0, package_version.find('-')) == kernel_version)) {
+      const auto build_start = (package_version.find('-') + 1);
+      const auto build_end = package_version.find('.', build_start);
+      const auto build_version =
+          std::string{package_version.substr(build_start, (build_end - build_start))};
+      smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
+                                      build_version);
+      full_version.push_back('-');
+      full_version.append(build_version);
+    }
   }
   smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
                                   full_version);

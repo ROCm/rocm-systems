@@ -5759,6 +5759,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   drm_free_version(version);
   libdrm.unload();
   ss << __PRETTY_FUNCTION__ << " | Driver kernel version: " << info->driver_kernel_version << "\n"
+     << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
      << " | Driver version: " << info->driver_version << "\n"
      << " | Driver build version: " << info->driver_build_version << "\n"
      << " | Driver full version: " << info->driver_full_version << "\n"
