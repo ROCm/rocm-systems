@@ -18,6 +18,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Perfetto trace output now defaults to the `.pftrace` extension instead of
   `.proto`, and `--output-format pftrace` is the canonical token for
   requesting it (`proto` is kept as a permanent backward-compatible alias).
+- Remove oneTBB as a Dyninst dependency by replacing TBB concurrent containers
+  with C++ standard library equivalents; the bundled oneTBB submodule and the
+  `ROCPROFSYS_BUILD_TBB` CMake option are removed.
 
 ### Resolved issues
 
