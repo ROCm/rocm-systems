@@ -698,7 +698,17 @@ device_counting_service_hsa_registration()
 
 agent_callback_data::~agent_callback_data()
 {
-    if(completion.handle != 0) hsa::get_core_table()->hsa_signal_destroy_fn(completion);
+    if(completion.handle == 0) return;
+
+    // Guarded the same way as hsa::active_signals::destroy(). The owning context is not
+    // guaranteed to be destroyed while HSA is still up -- teardown can reach here after the
+    // runtime has been shut down, and the table pointer is also null under unit test -- so
+    // reaching through the table unconditionally faults instead of leaking a signal.
+    const auto* _core_table = hsa::get_core_table();
+    if(hsa::get_hsa_ref_count() > 0 && _core_table && _core_table->hsa_signal_destroy_fn)
+    {
+        _core_table->hsa_signal_destroy_fn(completion);
+    }
 }
 }  // namespace counters
 }  // namespace rocprofiler
