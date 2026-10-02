@@ -43,6 +43,13 @@ TEST(ApiStringTest, AllInfoStrings)
             .find("incomplete"),
         std::string::npos
     );
+    EXPECT_NE(
+        std::string(
+            rocprof_trace_decoder_get_info_string(ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS)
+        )
+            .find("capture"),
+        std::string::npos
+    );
     EXPECT_STREQ(rocprof_trace_decoder_get_info_string(ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST), "INFO_LAST");
     EXPECT_STREQ(
         rocprof_trace_decoder_get_info_string(static_cast<rocprofiler_thread_trace_decoder_info_t>(9999)),
