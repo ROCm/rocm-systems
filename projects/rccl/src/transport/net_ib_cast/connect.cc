@@ -1494,7 +1494,6 @@ ib_recv_dev_list:
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
 
-  meta.optRecvCompletion = comm->base.optRecvCompletion;
   memcpy(stage->buffer, &meta, sizeof(meta));
 
 ib_send:
@@ -1935,7 +1934,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
 
   struct IbCastSharedQp* recvExistingSlot = IbCastFindSharedQp(&recvProbeKey);
 
-  // QP sharing is mutually exclusive with CTS offload; both roles force it off.
+  // QP sharing disables CTS offload.
   rComm->useCtsOffload = false;
   IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
 

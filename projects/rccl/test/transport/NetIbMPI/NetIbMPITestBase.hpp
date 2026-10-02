@@ -84,12 +84,11 @@ inline bool IsRealRequest(void* request) {
         }                                                                                \
     } while (0)
 
-// Optional recv completion: control on, QP sched off. Distinct from CAST_ENV_CHECK_OR_SKIP
-// (that table requires the scheduler on). Same getenv/required-value loop.
+// RCCL_IB_OPTIONAL_RECV_COMPLETION=1 and QP sched off.
 #define OPT_RECV_ENABLED_ENV_CHECK_OR_SKIP()                                             \
     do {                                                                                 \
         struct { const char* name; const char* required; } _vars[] = {                  \
-            { "RCCL_IB_OPT_RECV_COMPLETION", "1" },                                     \
+            { "RCCL_IB_OPTIONAL_RECV_COMPLETION", "1" },                                \
             { "RCCL_IB_QP_SCHED_ENABLE",     "0" },                                     \
         };                                                                               \
         for (auto& _v : _vars) {                                                         \
@@ -97,7 +96,8 @@ inline bool IsRealRequest(void* request) {
             bool _missing = !_val || _val[0] == '\0';                                    \
             bool _wrong   = _v.required && (!_val || strcmp(_val, _v.required) != 0);   \
             if (_missing || _wrong) {                                                    \
-                GTEST_SKIP() << "Requires " << _v.name << "=" << _v.required            \
+                GTEST_SKIP() << "Requires " << _v.name << "="                           \
+                             << (_v.required ? _v.required : "<any>")                   \
                              << " (use cast_opt_recv in net_ib_transport.json)";         \
             }                                                                            \
         }                                                                                \
@@ -333,15 +333,14 @@ protected:
         return net_->deregMr(comm, mhandle);
     }
 
-    // Helper: Post send operation. When optRecvHint is true, seed *request with
-    // NCCL_NET_OPTIONAL_RECV_COMPLETION so the plugin may skip the remote CQ.
+    // optRecvHint seeds the optional-recv sentinel.
     ncclResult_t PostSend(void* sendComm, void* data, size_t size, int tag,
                          void* mhandle, void** request, bool optRecvHint = false) {
         if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->isend(sendComm, data, size, tag, mhandle, nullptr, request);
     }
 
-    // Helper: Post recv operation. See PostSend for optRecvHint.
+    // See PostSend for optRecvHint.
     ncclResult_t PostRecv(void* recvComm, int n, void** data, size_t* sizes,
                          int* tags, void** mhandles, void** request, bool optRecvHint = false) {
         if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
@@ -447,8 +446,7 @@ protected:
         return ncclSuccess;
     }
 
-    // Helper: Retry until the receiver's FIFO slot is ready.
-    // Re-seed the optional-recv hint on every attempt: a NULL return overwrites it.
+    // Retry until the FIFO slot is ready. Re-seed the hint; a NULL isend clears it.
     void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
                            void* mhandle, void** request, bool optRecvHint = false) {
         int attempts = 0;

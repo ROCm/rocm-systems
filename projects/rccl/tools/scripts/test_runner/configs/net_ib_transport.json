@@ -1200,11 +1200,11 @@
     "cast_opt_recv": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPT_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPTIONAL_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "0",
-        "RCCL_IB_OPT_RECV_COMPLETION": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
         "RCCL_CTS_OFFLOAD_ENABLED": "0",
         "NCCL_IB_QPS_PER_CONNECTION": "1",
         "NCCL_DEBUG": "INFO",
@@ -1262,13 +1262,18 @@
         "NCCL_NET": "IB-CAST",
         "NCCL_IB_QPS_PER_CONNECTION": "2",
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
       },
       "tests": [
         {
           "name": "Cast_OptRecv_FlagDisabledByQpSched",
           "description": "White-box: commBase.optRecvCompletion is 0 when QP scheduling is enabled",
           "test_filter": "NetIbMPITest.OptRecvCompletionFlagDisabledByQpSched"
+        },
+        {
+          "name": "Cast_OptRecv_DisabledKeepsRecvSize",
+          "description": "1-req hinted send/recv with the gate forced off: receiver reports the posted size, not the skip path's 0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionDisabledKeepsRecvSize"
         }
       ]
     },

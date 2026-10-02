@@ -23,7 +23,8 @@ ncclProfilerCallback_t IbCastProfilerFunction;
 NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
-RCCL_PARAM(IbCastOptRecvCompletion, "IB_OPT_RECV_COMPLETION", 0);
+RCCL_PARAM(IbCastOptionalRecvCompletion, "IB_OPTIONAL_RECV_COMPLETION", 0);
+extern int64_t ncclParamNetOptionalRecvCompletion();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
@@ -68,17 +69,22 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   return ncclSuccess;
 }
 
+// Resiliency and QP scheduling need receiver completions.
+static bool IbCastOptRecvCompletionBlocked(const struct ncclIbNetCommBase* baseComm) {
+  return baseComm->resiliency != nullptr || castGlobalQpSchedParms.enable;
+}
+
 void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload) {
-  // Optional recv completion: control is off by default. Per-comm CTS offload
-  // enables it; resiliency and QP scheduling require remote completions and
-  // force it off.
-  bool optRecvCompletion = rcclParamIbCastOptRecvCompletion();
+  // On from the control or CTS offload. Off if blocked, or if this rank will not send the hint.
+  const bool blocked = IbCastOptRecvCompletionBlocked(baseComm);
+  const bool netHint = ncclParamNetOptionalRecvCompletion() != 0;
+  bool optRecvCompletion = rcclParamIbCastOptionalRecvCompletion() != 0;
   if (useCtsOffload) optRecvCompletion = true;
-  if (baseComm->resiliency || castGlobalQpSchedParms.enable) optRecvCompletion = false;
+  if (!netHint || blocked) optRecvCompletion = false;
   baseComm->optRecvCompletion = optRecvCompletion;
-  INFO(NCCL_NET, "NET/IB: %s: optRecvCompletion=%d (useCtsOffload=%d resiliency=%d qpSched=%d control=%ld)", __func__,
-       (int)baseComm->optRecvCompletion, (int)useCtsOffload, baseComm->resiliency != nullptr,
-       (int)castGlobalQpSchedParms.enable, rcclParamIbCastOptRecvCompletion());
+  INFO(NCCL_NET, "NET/IB: %s: optRecvCompletion=%d (useCtsOffload=%d blocked=%d control=%ld netHint=%d)", __func__,
+       (int)baseComm->optRecvCompletion, (int)useCtsOffload, (int)blocked,
+       rcclParamIbCastOptionalRecvCompletion(), (int)netHint);
 }
 
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {

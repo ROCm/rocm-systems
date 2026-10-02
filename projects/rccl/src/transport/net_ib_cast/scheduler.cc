@@ -509,8 +509,6 @@ extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastG
   return ncclSuccess;
 }
 
-// ncclIbCastGetOptRecvCompletion — read commBase.optRecvCompletion from a
-// connected send or recv comm (both start with ncclIbNetCommBase).
 extern "C" ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out) {
   if (!comm || !out) return ncclInvalidArgument;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;

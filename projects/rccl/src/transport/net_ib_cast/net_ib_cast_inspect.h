@@ -42,9 +42,7 @@ struct ncclIbCastSchedState {
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out);
 
-/* Read commBase.optRecvCompletion from a connected send or recv comm.
- * *out is 1 if optional recv completion is enabled, 0 otherwise.
- * Returns ncclInvalidArgument on null pointers. */
+/* *out is 1 when optional recv completion is enabled. */
 ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out);
 
 /* Force-initialize the WRR token table, bypassing RTT-driven scheduling.

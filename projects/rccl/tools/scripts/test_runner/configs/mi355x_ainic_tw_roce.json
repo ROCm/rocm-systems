@@ -640,14 +640,14 @@
     "opt_recv_completion": {
       "extends": "rccl_tests_base",
       "timeout": 600,
-      "description": "Optional recv completion with CTS offload on (AINIC auto-enable path). QP sched off. Allreduce pins NCCL_PROTO so net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION.",
+      "description": "Optional recv completion with CTS offload on. RCCL_IB_OPTIONAL_RECV_COMPLETION=0 so CTS offload is the only thing that enables the skip. QP sched off. Allreduce pins NCCL_PROTO so net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION.",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "0",
         "RCCL_CTS_OFFLOAD_ENABLED": "1",
         "RCCL_IB_P2P_DISABLE_CTS": "0",
         "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
-        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "0"
       },
       "tests": [
         { "name": "B13_alltoall_optRecvCompletion", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall with optional recv completion enabled (P2P/CTS-offload comms)." },
@@ -665,7 +665,7 @@
         "RCCL_IB_QP_SCHED_ENABLE": "0",
         "RCCL_CTS_OFFLOAD_ENABLED": "0",
         "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
-        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
       },
       "tests": [
         { "name": "B13_alltoall_optRecvCompletion_noCts", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall optional recv completion with software CTS (offload off)." },
