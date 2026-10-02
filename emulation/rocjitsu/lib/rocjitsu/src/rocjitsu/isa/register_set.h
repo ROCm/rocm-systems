@@ -403,7 +403,8 @@ public:
 
   /// @brief Add `ref`. For ordinary classes this marks every 32-bit lane it
   /// covers; for special classes it marks the singleton (index/width ignored).
-  void expand(RegisterRef ref);
+  // Keep constant register classes and widths visible in iteration callbacks.
+  [[gnu::always_inline]] inline void expand(RegisterRef ref);
 
   /// @brief Remove `ref`. For ordinary classes this clears every lane it
   /// covers; for special classes it clears the singleton (index/width ignored).
@@ -414,9 +415,9 @@ public:
 
   /// @brief Return true if `ref` is present. For ordinary classes every covered
   /// lane must be present; for special classes only membership is checked.
-  // Expose the read-only contract across translation units so inlined
+  // Inline the class/width dispatch and expose the read-only contract so
   // iteration can omit mutation checks around callbacks using contains().
-  [[nodiscard, gnu::pure]] bool contains(RegisterRef ref) const;
+  [[nodiscard, gnu::pure, gnu::always_inline]] inline bool contains(RegisterRef ref) const;
 
   /// @brief Return true if any lane covered by `ref` is present.
   ///
