@@ -225,6 +225,28 @@
         }
       ]
     },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent IB-CAST connections, each auditing its own WRR token ledger",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -3151,6 +3173,50 @@
         }
       ]
     },
+    "mpi_8rank_single_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "DDA_ForeignCurrentDevice_8Ranks",
+          "description": "AllReduce issued with another device current runs on the communicator's device and leaves the caller's current device unchanged",
+          "test_filter": "DdaMPI_AllReduce.ForeignCurrentDeviceUngrouped"
+        },
+        {
+          "name": "DDA_StreamAlternation_8Ranks",
+          "description": "Consecutive AllReduces alternating between two streams on one communicator stay ordered; a missing done-event edge lets them overlap and corrupt the result",
+          "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
+        },
+        {
+          "name": "DDA_CapturedForkJoin_8Ranks",
+          "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
+          "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
+        },
+        {
+          "name": "DDA_CapturedReplayOrdered_8Ranks",
+          "description": "A collective issued after a graph replay stays ordered behind it through an event the application records outside the capture",
+          "test_filter": "DdaMPI_AllReduce.CapturedReplayOrderedByAppEvent"
+        },
+        {
+          "name": "DDA_CapturedForkedStreamsSerialized_8Ranks",
+          "description": "Two AllReduces captured on pre-forked streams of one graph are serialized through deviceStream: every pair of their work nodes is ordered",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnForkedStreamsSerializedInGraph"
+        },
+        {
+          "name": "DDA_CapturedJoinsSerialEvent_8Ranks",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0: a captured AllReduce waits on deviceStream.serialEvent and records it into the graph exactly once",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        }
+      ]
+    },
     "ce_internal": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -4377,8 +4443,18 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes",
-          "test_filter": "GinMPIDeviceTests.*",
+          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
           "timeout": 600
+        },
+        {
+          "name": "GIN_Signal_ExplicitWeak",
+          "description": "Weak GIN signal publishes its bundled put over the IB proxy",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitWeak"
+        },
+        {
+          "name": "GIN_Signal_ExplicitStrong",
+          "description": "IB proxy (NCCL_GIN_TYPE=2) drops the strong bit; a pass shows same-QP order, not strong-signal enforcement",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong"
         },
         {
           "name": "GIN_MultiContext_NonPowerOf2",
@@ -4514,6 +4590,12 @@
       "name": "NET IB - Multithread Independent Connections (4)",
       "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread",
       "enabled": true
     },
     {
@@ -4874,6 +4956,12 @@
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
       "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
+      "enabled": true
+    },
+    {
+      "name": "MPI Tests (8-rank, single-node)",
+      "description": "MPI unit tests that need eight ranks on one node, one rank per process",
+      "config": "mpi_8rank_single_node",
       "enabled": true
     },
     {

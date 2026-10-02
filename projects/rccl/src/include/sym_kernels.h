@@ -247,7 +247,7 @@ constexpr int ncclSymkAlign256BDeepBytePerChunk =
   ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkAlign256BDeepUnrollPacks);
 
 // [RCCL] Core asserts for TDM-powered kernels.  Do not remove the static asserts.
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 constexpr int ncclSymkTileSmemBudget = 320 << 10; // gfx1250 has 320KiB of LDS
 static_assert(ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize() <= ncclSymkTileSmemBudget,
               "async-tile staging windows do not fit gfx1250's per-block LDS budget");

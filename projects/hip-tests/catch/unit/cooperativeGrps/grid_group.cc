@@ -61,8 +61,8 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* per_l
       // until all of the other wavefronts have incremented the
       // per-loop atomic and hit the grid.sync()
 #if HT_AMD
-      while (__hip_atomic_load(&per_loop_atomic[iter], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) <
-             (grid_blocks - 1)) {
+      while (__scoped_atomic_load_n(&per_loop_atomic[iter], __ATOMIC_RELAXED,
+                                    __MEMORY_SCOPE_DEVICE) < (grid_blocks - 1)) {
         __builtin_amdgcn_s_sleep(127);
       }
 
