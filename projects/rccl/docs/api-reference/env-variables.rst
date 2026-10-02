@@ -111,6 +111,17 @@ in the following table.
         | ``1``: Build them on the first AllGather eligible for hierarchical
           AllGather, outside graph capture.
 
+    * - | ``NCCL_NVLS_ENABLE``
+        | Controls NVLink SHARP (NVLS), an NVIDIA NVSwitch multicast feature.
+          RCCL accepts this variable for compatibility with NCCL but does not
+          implement NVLS, so it has no effect on AMD GPUs. Because RCCL never
+          creates NVLS multicast buffers, the multicast bind failure that NCCL
+          2.29 and later reports as a ``WARN`` and an initialization error
+          cannot occur in RCCL.
+      - | ``0``, ``1``, ``2``: All values behave the same. Communicator
+          initialization does not use NVLS and does not fail because of it.
+        | Default: ``2``
+
 Logging and debugging
 =====================
 

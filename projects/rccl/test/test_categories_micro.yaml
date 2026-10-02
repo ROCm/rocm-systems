@@ -79,6 +79,9 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
+      - "NvlsEnableValues/NvlsHipStubTest.*"
+      - "NvlsHipStubTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

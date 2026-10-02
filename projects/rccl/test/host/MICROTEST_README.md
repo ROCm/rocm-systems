@@ -143,6 +143,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `getRequirements_gin`'s large tuning/GIN dependency surface is never called
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
+- **`rccl-UnitTestsMicroNvls`** — the REAL `src/transport/nvls.cc` (via
+  `NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*` and its
+  `NvlsEnableValues/` instantiations. RCCL always compiles the NVLS stub branch
+  (the multicast code needs `CUDART_VERSION >= 12010`), and the suite checks
+  that no `NCCL_NVLS_ENABLE` value turns NVLS on. Its own binary, not shared with
+  `rccl-UnitTestsMicro`: `fakes/transport_stubs.cc` and
+  `fakes/collective_stubs.cc` fake the `ncclNvls*` symbols the real file defines.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
@@ -730,6 +737,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroNvls               # transport/nvls.cc (HIP stubs) tests
 ./build/rccl-HostUnitTests
 ```
 
