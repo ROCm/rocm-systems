@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -177,6 +178,36 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         _, result, _argv = self.run_host_probe(create_runtime=False)
 
         self.assertEqual(result, "")
+
+    def test_host_probe_finds_legacy_arch_suffixed_runtime(self):
+        # Compilers built without a per-target runtime dir ship only
+        # lib/linux/libclang_rt.profile_rocm-<arch>.a. Missing it links the
+        # generic profile runtime's ROCm collector without its interception
+        # objects, and the instrumented librccl.so fails to load.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime = root / f"libclang_rt.profile_rocm-{platform.machine()}.a"
+            runtime.touch()
+            compiler_body = (
+                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
+                'case "$1" in\n'
+                f"  -print-file-name={runtime.name}) printf '%s\\n' '{runtime}' ;;\n"
+                '  *) printf "%s\\n" "${1#-print-file-name=}" ;;\n'
+                "esac\n"
+            )
+            probe_call = (
+                "rccl_find_host_rocm_profile_runtime("
+                '"${COMPILER}" runtime)\n'
+                'file(WRITE "${RESULT_FILE}" "${runtime}")\n'
+            )
+            _root, result, argv, _completed = self._run_cmake_probe(
+                compiler_body, probe_call
+            )
+
+        self.assertEqual(result, str(runtime))
+        flat_argv = argv.replace("\n", " ")
+        self.assertIn("-print-file-name=libclang_rt.profile_rocm.a", flat_argv)
+        self.assertIn(f"-print-file-name={runtime.name}", flat_argv)
 
     def _resolve(self, request, linker, rocm_ok, rocm_version, pretty,
                  cap_error, check=True):
