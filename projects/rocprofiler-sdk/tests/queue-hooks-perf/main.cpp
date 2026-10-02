@@ -33,17 +33,17 @@ touch(float* buf, int n, int* counter)
 int
 main(int argc, char** argv)
 {
+    int ballast_mb = 8;
+    int launches   = 32;
+    if(argc > 1) ballast_mb = std::atoi(argv[1]);
+    if(argc > 2) launches = std::atoi(argv[2]);
+    if(ballast_mb < 1) ballast_mb = 1;
+    if(launches < 1) launches = 1;
     // warmup: dispatches run before timing starts. The first dispatch pays for ballast page
     // faults, code-object load and profiler attach, none of which repeat, so timing them makes
     // the sample depend on how the run started rather than on per-dispatch cost.
-    int ballast_mb = 8;
-    int launches   = 32;
     int warmup     = 1;
-    if(argc > 1) ballast_mb = std::atoi(argv[1]);
-    if(argc > 2) launches = std::atoi(argv[2]);
     if(argc > 3) warmup = std::atoi(argv[3]);
-    if(ballast_mb < 1) ballast_mb = 1;
-    if(launches < 1) launches = 1;
     if(warmup < 0) warmup = 0;
 
     const size_t ballast_bytes = static_cast<size_t>(ballast_mb) * 1024U * 1024U;
@@ -64,7 +64,6 @@ main(int argc, char** argv)
     }
     // The counter is the dispatch-accounting check below, so warmup must not be in it.
     HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
-
     using clock      = std::chrono::steady_clock;
     const auto start = clock::now();
     for(int i = 0; i < launches; ++i)
