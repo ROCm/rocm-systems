@@ -426,6 +426,12 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_SaturateDividesByMaxP2pPeers)
 // until the declared peers fit the channel pool in one round. Checks the postcondition the
 // loop establishes and that it divides by the declared peer count rather than nRanks. Only
 // runs where the loop does, which is MLOPart comms -- see the gate in paths.cc.
+//
+// That gate means this skips wherever the ranks are not partitions, which is most CI: the
+// loop's arithmetic is covered without hardware by
+// P2pMaxNchannelsSingleNodeTests.Gfx950_SingleNode8Rank_MloPartFitsPeersInOneRound. What
+// this adds is that a real partitioned comm reaches the loop at all, and reaches it with
+// the peer count and pool the fixture only assumes.
 // ---------------------------------------------------------------------------
 TEST_F(MaxP2pPeersMPITest, SingleNode_PerPeerChannelsFitPeersInOneRound)
 {
@@ -464,8 +470,17 @@ TEST_F(MaxP2pPeersMPITest, SingleNode_PerPeerChannelsFitPeersInOneRound)
     // it bottomed out at a single channel per peer first.
     ASSERT_MPI_TRUE(perpeer_declared == 1 || perpeer_declared * rounds <= pool);
 
-    // Declaring fewer peers can only stop the reduction earlier, never later -- which is
-    // what distinguishes dividing by maxP2pPeers from dividing by nRanks.
+    // Two declared peers need one round, so the loop's condition is false on entry and the
+    // count comes through untouched. Declaring fewer peers must therefore never reduce more,
+    // and must leave the pool itself alone.
+    //
+    // Which divisor the loop uses is not decidable from here: on real hardware nRanks is
+    // fixed by the launch, so a build dividing by it would reduce both legs identically and
+    // every relation between them -- exact or not -- would still hold. Separating the two
+    // needs p2pMaxPeers moved while nRanks stays put, which is
+    // P2pMaxNchannelsSingleNodeTests.Gfx950_SingleNode8Rank_MloPartFitsPeersInOneRound: at
+    // nRanks=8 it pins 2 declared peers to the full 64 and 8 to 16, and dividing by nRanks
+    // puts the first at 16.
     configured_value_ = 2;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, 2);
