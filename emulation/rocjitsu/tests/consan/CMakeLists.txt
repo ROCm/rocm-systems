@@ -5,10 +5,23 @@
 # shared rocjitsu test manifest remains independent of ConSan's growth.
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_rj_consan_independent_workgroups_witness_regex
+    "ConSan conflict [^\n]*workgroup=\\(0,0,0\\)"
+)
+set(_rj_consan_independent_workgroups_witness_regex_file
+    "${CMAKE_CURRENT_BINARY_DIR}/consan-independent-workgroups-witness-regex.txt"
+)
+file(
+    WRITE "${_rj_consan_independent_workgroups_witness_regex_file}"
+    "${_rj_consan_independent_workgroups_witness_regex}"
+)
 add_test(
     NAME ConSanCheckedRunnerUnitTest
     COMMAND
         ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
+        --witness-regex-file
+        "${_rj_consan_independent_workgroups_witness_regex_file}"
+        --ctest-directory "${CMAKE_BINARY_DIR}"
 )
 
 set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
@@ -1281,7 +1294,10 @@ function(rj_add_consan_device_conformance_cases)
                 if(
                     NOT (
                         _mode_value STREQUAL "default"
-                        AND _workload_name STREQUAL "TwoQueueDispatchIdentity"
+                        AND (
+                            _workload_name STREQUAL "TwoQueueDispatchIdentity"
+                            OR _workload_name STREQUAL "IndependentWorkgroups"
+                        )
                     )
                 )
                     list(
@@ -1305,19 +1321,6 @@ function(rj_add_consan_device_conformance_cases)
                     APPEND _incorrect_pass_regex_args
                     PASS_REGEX
                     "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
-                )
-            elseif(
-                _mode_value STREQUAL "default"
-                AND _workload_name STREQUAL "IndependentWorkgroups"
-            )
-                # The designated single-workgroup phase makes the diagnostic
-                # independent of which workgroups win the bounded windows.
-                # Require its concrete same-workgroup witness so relaxing the
-                # process-exit diagnostic guard cannot make this test pass.
-                list(
-                    APPEND _incorrect_pass_regex_args
-                    PASS_REGEX
-                    "ConSan conflict .*workgroup=\\(0,0,0\\)"
                 )
             endif()
 
@@ -1524,6 +1527,56 @@ function(rj_add_consan_device_conformance_cases)
                 LABELS ${_incorrect_labels}
             )
             list(APPEND _instrumented_tests "${_incorrect_test_name}")
+
+            if(
+                _mode_value STREQUAL "default"
+                AND _workload_name STREQUAL "IndependentWorkgroups"
+            )
+                # Bounded first-publication retention can select different
+                # workgroups at the two sites in the 2x2x2 identity case. Keep
+                # that coverage, but give the diagnostic contract a separate
+                # process containing only one designated workgroup.
+                set(_witness_correct_test_name
+                    "${_device_PREFIX}.${_mode_name}${_workload_name}Witness.Correct"
+                )
+                rj_add_consan_hip_case(
+                    NAME "${_witness_correct_test_name}"
+                    TARGET
+                        hip_consan_device_${_workload_target}_${_device_TARGET}_test
+                    FILTER "${_workload_suite}.WitnessCorrect"
+                    ${_config_args}
+                    ${_resource_lock_args}
+                    TIMEOUT ${_workload_timeout}
+                    ENVIRONMENT ${_correct_environment}
+                    LABELS ${_labels} "${_mode_value}" clean
+                )
+                list(APPEND _instrumented_tests "${_witness_correct_test_name}")
+
+                set(_witness_incorrect_environment
+                    ${_incorrect_environment}
+                    "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
+                )
+                set(_witness_incorrect_test_name
+                    "${_device_PREFIX}.${_mode_name}${_workload_name}Witness.Incorrect"
+                )
+                rj_add_consan_hip_case(
+                    NAME "${_witness_incorrect_test_name}"
+                    TARGET
+                        hip_consan_device_${_workload_target}_${_device_TARGET}_test
+                    FILTER "${_workload_suite}.WitnessIncorrect"
+                    ${_config_args}
+                    ${_resource_lock_args}
+                    TIMEOUT ${_workload_timeout}
+                    PASS_REGEX
+                        "${_rj_consan_independent_workgroups_witness_regex}"
+                    ENVIRONMENT ${_witness_incorrect_environment}
+                    LABELS ${_labels} "${_mode_value}" incorrect racy
+                )
+                list(
+                    APPEND _instrumented_tests
+                    "${_witness_incorrect_test_name}"
+                )
+            endif()
         endforeach()
     endforeach()
 
