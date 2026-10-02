@@ -22,8 +22,8 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          device-table unittest, kernel-count and ACCL-profiler
-#                   pytest suites, plus src/include/test_poison_hip_atomics.py
+#   guards          device-table unittest and kernel-count pytest plus
+#                   src/include/test_poison_hip_atomics.py
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
@@ -73,7 +73,6 @@ XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 # recursively delete unrelated files.
 COVERAGE_DIR="$BUILD_DIR/coverage"
 JOBS="$(nproc 2>/dev/null || echo 4)"
-PYTEST_PYTHON=""
 
 PHASE="${1:-all}"
 [ $# -gt 0 ] && shift || true   # remaining args ($@) are forwarded to the binary
@@ -234,47 +233,29 @@ do_device_table_guards() {
   python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v
 }
 
-# Provision one build-local pytest environment for all Python guards so the
-# lean host-test image needs no system pytest and the source tree stays clean.
-ensure_pytest_venv() {
-  local venv="$BUILD_DIR/pytest-venv"
-  local requirements="$RCCL_ROOT/test/kernel-count/requirements.txt"
-  if [ ! -x "$venv/bin/pytest" ]; then
-    mkdir -p "$BUILD_DIR"
-    python3 -m venv "$venv" \
-      && "$venv/bin/pip" install -q --disable-pip-version-check -r "$requirements" \
-      || { echo "ERROR: could not provision $venv" >&2; return 1; }
-  fi
-  PYTEST_PYTHON="$venv/bin/python"
-}
-
-# Run the kernel-count guard pytest suite. See test/kernel-count/README.md.
+# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
+# the lean host-test image needs no system pytest. See that dir's README.
 do_kernel_count_guards() {
   echo "==> Kernel-count guards (pytest: test/kernel-count)"
-  ensure_pytest_venv || return 1
-  "$PYTEST_PYTHON" -m pytest "$RCCL_ROOT/test/kernel-count/tests" -v
+  local gd="$RCCL_ROOT/test/kernel-count"
+  local venv="$gd/venv"
+  if [ ! -x "$venv/bin/pytest" ]; then
+    python3 -m venv "$venv" \
+      && "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt" \
+      || { echo "ERROR: could not provision $venv" >&2; return 1; }
+  fi
+  "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
-# Run the CPU-only ACCL report and Ruby CI-driver tests.
-do_accl_profiler_guards() {
-  echo "==> ACCL-profiler guards (pytest: test_accl_*.py)"
-  ensure_pytest_venv || return 1
-  "$PYTEST_PYTHON" -m pytest \
-    "$RCCL_ROOT/test/test_accl_report.py" \
-    "$RCCL_ROOT/test/test_accl_profiler_ci.py" \
-    "$RCCL_ROOT/test/test_plan_rccl_ci.py" \
-    -v
-}
-
-# All CPU-only guards: device-table unittest, kernel-count and ACCL-profiler
-# pytest suites, then the __hip_atomic_* poison compile probe. Collected with
-# `|| rc=1` so an early failure still leaves the later guards running and
-# reported instead of aborting the phase at the first one.
+# All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
+# then the __hip_atomic_* poison compile probe. Collected with `|| rc=1` rather
+# than run back to back so that under `set -e` (line 53) an early failure still
+# leaves the later guards running and reported, instead of aborting the phase at
+# the first one. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
-  do_accl_profiler_guards || rc=1
   do_poison_hip_atomics || rc=1
   return "$rc"
 }

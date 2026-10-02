@@ -6,6 +6,10 @@ ACCL profiler, and accl_report.py. It submits one allocation, runs the five
 collectives sequentially, validates every JSONL file, and writes a manifest and
 human-readable decomposition report.
 
+This driver validates CI execution and captured output, not the accuracy of
+profiler timings. Profiler/report correctness fixes are owned by PR #11881 and
+separate follow-ups; failed output checks remain visible here.
+
 AllToAll is intentionally excluded. Its current fallback is represented as
 grouped P2P Send/Recv tasks, while the ACCL plugin currently correlates only
 collective event parents. That work belongs in a separate RCCL/profiler ticket.

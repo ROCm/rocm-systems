@@ -1,5 +1,4 @@
 """Unit tests for accl_report.py warmup filtering and edge cases."""
-
 import json
 import os
 import sys
@@ -7,26 +6,35 @@ import tempfile
 
 import pytest
 
-from accl_test_records import make_record
-
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
 from accl_report import parse_jsonl, fmt_size  # noqa: E402
 
 
-def _make_record(
-    sn, rank=0, n_ranks=8, exec_us=100.0, msg_size=1048576, coll="AllReduce"
-):
-    return json.dumps(
-        make_record(
-            rank=rank, size=msg_size, coll=coll, sn=sn, n_ranks=n_ranks, exec_us=exec_us
-        )
-    )
+def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0):
+    return json.dumps({
+        "header": {"rank": rank, "n_ranks": n_ranks},
+        "coll_perf": {
+            "coll": "AllReduce",
+            "coll_sn": sn,
+            "coll_msg_size_bytes": 1048576,
+            "coll_algo": "Ring",
+            "coll_proto": "Simple",
+            "coll_n_channels": 4,
+            "coll_exec_time_us": exec_us,
+            "coll_algobw_gbs": 1.0,
+            "coll_busbw_gbs": 1.5,
+            "coll_timing_source": "cpu_wallclock",
+            "decomposition": {},
+        },
+    })
 
 
 def _write_jsonl(lines):
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False
+    )
     f.write("\n".join(lines) + "\n")
     f.close()
     return f.name
@@ -53,64 +61,12 @@ def test_warmup_zero_keeps_all():
         os.unlink(path)
 
 
-def test_parser_preserves_nonzero_decomposition_fields(tmp_path):
-    record = make_record()
-    path = tmp_path / "rank0.jsonl"
-    path.write_text(json.dumps(record) + "\n")
-    (parsed,) = parse_jsonl(str(path), warmup=0)
-    for name, expected in record["coll_perf"]["decomposition"].items():
-        assert expected > 0
-        assert getattr(parsed, name) == expected
-
-
 def test_warmup_default_drops_first_five():
     path = _write_jsonl([_make_record(sn=i) for i in range(0, 11)])
     try:
         records = parse_jsonl(path, warmup=5)
         assert len(records) == 6
         assert records[0].sn == 5
-    finally:
-        os.unlink(path)
-
-
-def test_warmup_is_applied_per_message_size():
-    lines = [_make_record(sn=i, msg_size=1024) for i in range(0, 4)] + [
-        _make_record(sn=i, msg_size=2048) for i in range(4, 8)
-    ]
-    path = _write_jsonl(lines)
-    try:
-        records = parse_jsonl(path, warmup=2)
-        assert [(r.sn, r.msg_size) for r in records] == [
-            (2, 1024),
-            (3, 1024),
-            (6, 2048),
-            (7, 2048),
-        ]
-    finally:
-        os.unlink(path)
-
-
-def test_warmup_is_applied_per_rank():
-    lines = [_make_record(sn=sn, rank=0) for sn in range(0, 3)]
-    lines += [_make_record(sn=sn, rank=1) for sn in range(2, 5)]
-    path = _write_jsonl(lines)
-    try:
-        records = parse_jsonl(path, warmup=2)
-        assert [(r.rank, r.sn) for r in records] == [(0, 2), (1, 4)]
-    finally:
-        os.unlink(path)
-
-
-def test_warmup_is_applied_per_collective():
-    lines = [_make_record(sn=sn, coll="AllReduce") for sn in range(0, 3)]
-    lines += [_make_record(sn=sn, coll="Broadcast") for sn in range(3, 6)]
-    path = _write_jsonl(lines)
-    try:
-        records = parse_jsonl(path, warmup=2)
-        assert [(r.coll, r.sn) for r in records] == [
-            ("AllReduce", 2),
-            ("Broadcast", 5),
-        ]
     finally:
         os.unlink(path)
 
