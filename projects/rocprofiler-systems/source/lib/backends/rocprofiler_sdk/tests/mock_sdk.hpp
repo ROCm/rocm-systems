@@ -61,6 +61,9 @@ struct callback_thread_id
     std::uint64_t handle{};
     bool          operator==(const callback_thread_id&) const = default;
 };
+// Real SDK defines rocprofiler_thread_id_t as plain std::uint64_t; match that
+// so backend<mock_sdk> type-checks cleanly.
+using thread_id = std::uint64_t;
 // Real SDK defines rocprofiler_counter_instance_id_t as plain std::uint64_t;
 // match that so backend<mock_sdk> type-checks cleanly.
 using counter_instance_id = std::uint64_t;
@@ -177,6 +180,52 @@ struct kfd_event_page_migrate_record
 {};
 struct kfd_event_page_fault_record
 {};
+
+// ─── kernel_dispatch stand-ins ──────────────────────────────────────────────
+//
+// backend<Sdk> unconditionally re-exports these three as type aliases, so
+// every Sdk stand-in must supply them even when a given test never exercises
+// kernel-dispatch behavior. Field-level detail is added only as tests need it.
+struct async_correlation_id_t
+{
+    std::uint64_t internal{};
+};
+struct kernel_dispatch_record
+{
+    async_correlation_id_t correlation_id{};
+};
+struct memory_copy_record
+{
+    async_correlation_id_t correlation_id{};
+};
+struct correlation_id_t
+{
+    std::uint64_t internal{};
+    std::uint64_t ancestor{};
+};
+struct memory_alloc_record
+{
+    correlation_id_t correlation_id{};
+};
+struct scratch_memory_record
+{
+    async_correlation_id_t correlation_id{};
+    std::uint64_t          allocation_size{};
+};
+struct stream_id
+{
+    std::uint64_t handle{};
+};
+// Real SDK defines rocprofiler_hip_stream_operation_t as an enum; a plain int
+// satisfies every comparison/assignment backend<mock_sdk> performs on it.
+using hip_stream_operation_t = int;
+struct hip_stream_data
+{
+    std::uint64_t size{};
+    struct stream_id stream_id
+    {};
+    std::uint64_t stream_value{};
+};
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
 //
@@ -388,6 +437,7 @@ struct mock_sdk
     using callback_tracing_kind                = testing::tracing_kind_cb;
     using buffer_tracing_kind                  = testing::tracing_kind_buf;
     using tracing_operation                    = testing::tracing_op;
+    using thread_id                            = testing::thread_id;
     using callback_thread_id                   = testing::callback_thread_id;
     using runtime_library_t                    = testing::runtime_library;
     using external_correlation_request_kind    = testing::ext_corr_kind;
@@ -413,6 +463,14 @@ struct mock_sdk
     using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
     using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
     using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
+    using kernel_dispatch_record               = testing::kernel_dispatch_record;
+    using memory_copy_record                   = testing::memory_copy_record;
+    using async_correlation_id_t               = testing::async_correlation_id_t;
+    using memory_alloc_record                  = testing::memory_alloc_record;
+    using scratch_memory_record                = testing::scratch_memory_record;
+    using hip_stream_data                      = testing::hip_stream_data;
+    using hip_stream_operation_t               = testing::hip_stream_operation_t;
+    using stream_id                            = testing::stream_id;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;

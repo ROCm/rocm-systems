@@ -78,7 +78,7 @@ protected:
      */
     void expect_specific_gpu_registrations(const std::vector<std::uint32_t>& gpu_indices)
     {
-        for(auto idx : gpu_indices)
+        for(auto const idx : gpu_indices)
         {
             EXPECT_CALL(*m_mock_registrar, register_gpu_pmc(idx)).Times(1);
         }
@@ -97,7 +97,7 @@ class rccl_type_size_test : public ::testing::TestWithParam<rccl_type_size_param
 
 TEST_P(rccl_type_size_test, returns_correct_size)
 {
-    auto param = GetParam();
+    auto const param = GetParam();
     EXPECT_EQ(rccl_type_size(param.datatype), param.expected_size);
 }
 
@@ -158,7 +158,7 @@ TEST_F(rccl_test, tracking_state_constructor_with_null_registrar)
 
 TEST_F(rccl_test, tracking_state_constructor_with_mock_registrar)
 {
-    auto state = create_tracking_state_with_mock();
+    auto const state = create_tracking_state_with_mock();
 
     EXPECT_FALSE(state.is_registered(0));
     EXPECT_EQ(state.get_bytes(0), 0u);
@@ -166,7 +166,7 @@ TEST_F(rccl_test, tracking_state_constructor_with_mock_registrar)
 
 TEST_F(rccl_test, tracking_state_is_registered_returns_false_initially)
 {
-    auto state = create_tracking_state_null();
+    auto const state = create_tracking_state_null();
     EXPECT_FALSE(state.is_registered(0));
     EXPECT_FALSE(state.is_registered(1));
 }
@@ -256,13 +256,13 @@ TEST_F(rccl_test, tracking_state_add_bytes_large_value)
 
 TEST_F(rccl_test, tracking_state_get_bytes_returns_zero_for_unknown_device)
 {
-    auto state = create_tracking_state_null();
+    auto const state = create_tracking_state_null();
     EXPECT_EQ(state.get_bytes(99), 0u);
 }
 
 TEST_F(rccl_test, tracking_state_get_bytes_before_any_add)
 {
-    auto state = create_tracking_state_null();
+    auto const state = create_tracking_state_null();
 
     for(std::uint32_t i = 0; i < 10; ++i)
     {

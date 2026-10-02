@@ -9,6 +9,7 @@
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
@@ -57,6 +58,7 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    void handle(const hipfile_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 
@@ -96,7 +98,7 @@ private:
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
-    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
+    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

@@ -1,9 +1,10 @@
 # Building rocrtst
 
 ## Library dependencies
-rocrtst needs hwloc and libnuma to build and run. On Debian systems, for example, you would need to get them like so:
+rocrtst optionally uses libnuma when the NUMA async-copy test is enabled.
+On Debian systems, for example:
 ```sh
-sudo apt-get install libhwloc-dev libnuma-dev
+sudo apt-get install libnuma-dev
 ```
 ## CMake option values
 When building rocrtst, several cmake command line options are available--some mandatory, some optional. These are described here:

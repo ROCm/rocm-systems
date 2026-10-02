@@ -32,6 +32,13 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
+# Real NCCL_PARAM lives in enqueue.cc; init.cc only has the extern. MicroInit
+# does not compile enqueue.cc, so init_fakes.cc supplies the body.
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "NCCL_PARAM(P2pLL128Enable, \"P2P_LL128_ENABLE\", -1)" "fakes/init_fakes.cc: ncclParamP2pLL128Enable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "int64_t ncclParamP2pLL128Enable() { return g_loadParam(\"P2P_LL128_ENABLE\", -1); }"
+  "the P2pLL128Enable fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -65,6 +72,7 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
+    tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     ras-client-test.cc
     group-test.cc
@@ -720,6 +728,10 @@ endif()
 # Shared micro-test binary definitions (identical for BOTH build paths).
 # =====================================================================
 rccl_define_micro_source_lists()
+# rocshmem.hpp is only on the include path under ENABLE_ROCSHMEM.
+if(ENABLE_ROCSHMEM)
+  list(APPEND TEST_MICRO_INIT_SOURCE_FILES fakes/rocshmem_fakes.cc)
+endif()
 
 # Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
 # The property is directory-scoped and idempotent, so one call up front covers
@@ -739,6 +751,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
+    # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
+    TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
@@ -828,6 +842,10 @@ set(_enq_common_args
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
+    # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
+    # gfx1250 ENABLE=1 window is unreachable there.
+    ENABLE_LL128
     ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 

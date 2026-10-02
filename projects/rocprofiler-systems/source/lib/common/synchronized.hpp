@@ -98,8 +98,8 @@ decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::rlock(FuncT&& lambda,
                                                                   Args&&... args) const
 {
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-    auto lock  = std::shared_lock{ m_mutex };
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const lock  = std::shared_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
@@ -111,8 +111,8 @@ decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
                                                                   Args&&... args)
 {
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-    auto lock  = std::unique_lock{ m_mutex };
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const lock  = std::unique_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
@@ -150,17 +150,17 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::ulock(ReadFuncT&&  r
     static_assert(std::is_same<read_return_type, bool>::value,
                   "read/write functions must return bool");
 
-    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto const guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
 
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto const lock = std::shared_lock{ m_mutex };
         if(read(m_data, std::forward<Args>(args)...))
         {
             return true;
         }
     }
 
-    auto lock = std::unique_lock{ m_mutex };
+    auto const lock = std::unique_lock{ m_mutex };
     return write(m_data, std::forward<Args>(args)...);
 }
 }  // namespace rocprofsys::inline common

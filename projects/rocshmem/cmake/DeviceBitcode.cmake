@@ -106,6 +106,15 @@ if(${ROCM_MAJOR_VERSION} LESS 7)
   list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
 endif()
 
+# This path invokes clang directly and so inherits nothing from
+# CMAKE_CXX_FLAGS. The compile below skips the pass pipeline, so this only
+# marks functions sanitize_address; the asan pass runs in the opt step.
+set(_BITCODE_OPT_PASSES -O3)
+if(ASAN)
+  list(APPEND BITCODE_COMPILE_FLAGS_BASE -fsanitize=address)
+  set(_BITCODE_OPT_PASSES "-passes=default<O3>,asan")
+endif()
+
 # Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
 # when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
 if(MPI_CXX_FOUND)
@@ -226,7 +235,7 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
 
   add_custom_command(
     OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
-    COMMAND ${LLVM_OPT} -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
+    COMMAND ${LLVM_OPT} ${_BITCODE_OPT_PASSES} -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
             ${_UNOPT_BC} -o ${BITCODE_OUTPUT_${gpu_arch}}
     DEPENDS ${_UNOPT_BC}
     COMMENT "Optimizing device bitcode for ${gpu_arch}"
