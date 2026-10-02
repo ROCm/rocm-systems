@@ -8,11 +8,78 @@ package amdsmi
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"unsafe"
 )
+
+func TestCoreExportedDocumentation(t *testing.T) {
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types, functions, constants int
+	check := func(name string, doc *ast.CommentGroup) {
+		t.Helper()
+		if doc == nil || !strings.HasPrefix(doc.Text(), name+" ") {
+			t.Errorf("%s needs godoc beginning with its name", name)
+		}
+	}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range file.Decls {
+			switch decl := declaration.(type) {
+			case *ast.FuncDecl:
+				if decl.Name.IsExported() {
+					functions++
+					check(decl.Name.Name, decl.Doc)
+				}
+			case *ast.GenDecl:
+				exportedConstants := false
+				for _, spec := range decl.Specs {
+					switch value := spec.(type) {
+					case *ast.TypeSpec:
+						if value.Name.IsExported() {
+							types++
+							doc := value.Doc
+							if doc == nil {
+								doc = decl.Doc
+							}
+							check(value.Name.Name, doc)
+						}
+					case *ast.ValueSpec:
+						for _, name := range value.Names {
+							if decl.Tok == token.CONST && name.IsExported() {
+								exportedConstants = true
+								if decl.Doc == nil && value.Doc == nil {
+									t.Errorf("%s needs a constant-group doc", name.Name)
+								}
+							}
+						}
+					}
+				}
+				if exportedConstants {
+					constants++
+				}
+			}
+		}
+	}
+	if types == 0 || functions == 0 || constants == 0 {
+		t.Fatal("empty exported documentation inventory")
+	}
+	t.Logf("documented inventory: %d types, %d functions/methods, %d constant groups", types, functions, constants)
+}
 
 func TestCoreStatuses(t *testing.T) {
 	mockReset()
@@ -195,6 +262,139 @@ func TestCoreStatusesBoundedString(t *testing.T) {
 	})
 }
 
+func TestCoreLifecycleVersionQueryFailure(t *testing.T) {
+	resetCoreFixture(t)
+	nativeState.mu.Lock()
+	generation := nativeState.generation
+	nativeState.mu.Unlock()
+	mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_IO, 0)
+	assertNativeError(t, Init(AMDSMI_INIT_AMD_GPUS), "amdsmi_get_lib_version", AMDSMI_STATUS_IO)
+	if mockCalls("amdsmi_get_lib_version") != 1 || mockCalls("amdsmi_init") != 0 || mockNativeRefs() != 0 {
+		t.Fatal("version query failure acquired a native reference or skipped the query")
+	}
+	nativeState.mu.Lock()
+	refs, current := nativeState.refs, nativeState.generation
+	nativeState.mu.Unlock()
+	if refs != 0 || current != generation {
+		t.Fatal("version query failure changed Go lifecycle state")
+	}
+	got, err := GetLibVersion()
+	assertNativeError(t, err, "amdsmi_get_lib_version", AMDSMI_STATUS_IO)
+	assertZero(t, got)
+	mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_SUCCESS, 0)
+	if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+		t.Fatal(err)
+	}
+	if mockCalls("amdsmi_get_lib_version") != 3 || mockCalls("amdsmi_init") != 1 || mockNativeRefs() != 1 {
+		t.Fatal("version query recovery did not acquire exactly one native reference")
+	}
+}
+
+func TestCoreLifecycleIncompatibleVersion(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		mode  uint32
+		major uint32
+		minor uint32
+	}{
+		{"NewerMajor", 2, compiledMajor + 1, compiledMinor},
+		{"OlderMajor", 3, compiledMajor - 1, compiledMinor},
+		{"OlderMinor", 4, compiledMajor, compiledMinor - 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resetCoreFixture(t)
+			mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_SUCCESS, test.mode)
+			got, err := GetLibVersion()
+			if err != nil || got.Major != test.major || got.Minor != test.minor {
+				t.Fatalf("uninitialized diagnostic version: %+v, %v", got, err)
+			}
+			nativeState.mu.Lock()
+			generation := nativeState.generation
+			nativeState.mu.Unlock()
+			err = Init(AMDSMI_INIT_AMD_GPUS)
+			assertNativeError(t, err, "amdsmi_init", AMDSMI_STATUS_NOT_SUPPORTED)
+			for _, text := range []string{
+				fmt.Sprintf("runtime %d.%d.%d", got.Major, got.Minor, got.Release),
+				fmt.Sprintf("major %d", compiledMajor), fmt.Sprintf("minor >= %d", compiledMinor),
+			} {
+				if !strings.Contains(err.Error(), text) {
+					t.Fatalf("missing compatibility detail %q: %v", text, err)
+				}
+			}
+			if mockCalls("amdsmi_get_lib_version") != 2 || mockCalls("amdsmi_init") != 0 || mockNativeRefs() != 0 {
+				t.Fatal("incompatible version reached native Init or skipped version lookup")
+			}
+			nativeState.mu.Lock()
+			refs, current := nativeState.refs, nativeState.generation
+			nativeState.mu.Unlock()
+			if refs != 0 || current != generation {
+				t.Fatal("incompatible version changed Go lifecycle state")
+			}
+			mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_SUCCESS, 0)
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+				t.Fatal(err)
+			}
+			if mockCalls("amdsmi_get_lib_version") != 3 || mockCalls("amdsmi_init") != 1 || mockNativeRefs() != 1 {
+				t.Fatal("compatible version recovery did not acquire exactly one native reference")
+			}
+			if err := ShutDown(); err != nil {
+				t.Fatal(err)
+			}
+			if mockCalls("amdsmi_shut_down") != 1 || mockNativeRefs() != 0 {
+				t.Fatal("compatible version recovery left a native reference")
+			}
+		})
+	}
+}
+
+func TestCoreLifecycleCompatibleVersion(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		mode    uint32
+		minor   uint32
+		release uint32
+	}{
+		{"Exact", 0, compiledMinor, compiledRelease},
+		{"NewerMinor", 5, compiledMinor + 1, compiledRelease},
+		{"MaxRelease", 6, compiledMinor, ^uint32(0)},
+		{"ZeroRelease", 7, compiledMinor, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resetCoreFixture(t)
+			mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_SUCCESS, test.mode)
+			got, err := GetLibVersion()
+			if err != nil || got.Major != compiledMajor || got.Minor != test.minor || got.Release != test.release {
+				t.Fatalf("diagnostic version: %+v, %v", got, err)
+			}
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+				t.Fatal(err)
+			}
+			if mockCalls("amdsmi_get_lib_version") != 2 || mockCalls("amdsmi_init") != 1 || mockNativeRefs() != 1 {
+				t.Fatal("first Init did not query the version and acquire one native reference")
+			}
+			mockConfigure("amdsmi_get_lib_version", AMDSMI_STATUS_IO, 0)
+			if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
+				t.Fatal(err)
+			}
+			if mockCalls("amdsmi_get_lib_version") != 2 || mockCalls("amdsmi_init") != 2 || mockNativeRefs() != 2 {
+				t.Fatal("nested Init queried the version or failed to acquire one native reference")
+			}
+			for _, want := range []uint32{1, 0} {
+				if err := ShutDown(); err != nil {
+					t.Fatal(err)
+				}
+				if mockNativeRefs() != want {
+					t.Fatalf("unbalanced shutdown: want %d native references", want)
+				}
+			}
+			assertNativeError(t, Init(AMDSMI_INIT_AMD_GPUS), "amdsmi_get_lib_version", AMDSMI_STATUS_IO)
+			if mockCalls("amdsmi_get_lib_version") != 3 || mockCalls("amdsmi_init") != 2 || mockNativeRefs() != 0 {
+				t.Fatal("Init after final shutdown did not recheck the version")
+			}
+		})
+	}
+}
+
 func TestCoreLifecycleInitFlags(t *testing.T) {
 	resetCoreFixture(t)
 	if uint64(AMDSMI_INIT_AMD_GPUS) != 2 {
@@ -205,10 +405,11 @@ func TestCoreLifecycleInitFlags(t *testing.T) {
 		generation := nativeState.generation
 		nativeState.mu.Unlock()
 		calls, statusCalls := mockCalls("amdsmi_init"), mockCalls("amdsmi_status_code_to_string")
+		versionCalls := mockCalls("amdsmi_get_lib_version")
 		for _, flags := range []InitFlags{0, 1, 3, 1 << 63, InitFlags(^uint64(0))} {
 			assertNativeError(t, Init(flags), "amdsmi_init", AMDSMI_STATUS_INVAL)
 			if mockCalls("amdsmi_init") != calls || mockNativeRefs() != held ||
-				mockCalls("amdsmi_status_code_to_string") != statusCalls {
+				mockCalls("amdsmi_status_code_to_string") != statusCalls || mockCalls("amdsmi_get_lib_version") != versionCalls {
 				t.Fatalf("invalid flags %d reached native code", flags)
 			}
 			nativeState.mu.Lock()
@@ -304,6 +505,9 @@ func TestCoreLifecycleInitFailure(t *testing.T) {
 		if err := Init(AMDSMI_INIT_AMD_GPUS); err != nil {
 			t.Fatal(err)
 		}
+		if mockCalls("amdsmi_get_lib_version") != 2 {
+			t.Fatal("failed first Init must recheck the version; nested Init must not")
+		}
 	}
 	if refs := mockNativeRefs(); refs != 2 {
 		t.Fatalf("recovery references: %d", refs)
@@ -325,6 +529,7 @@ func TestCoreLifecycleOverflow(t *testing.T) {
 		nativeState.mu.Unlock()
 	})
 	calls := mockCalls("amdsmi_init")
+	versionCalls := mockCalls("amdsmi_get_lib_version")
 	err := Init(AMDSMI_INIT_AMD_GPUS)
 	if err == nil {
 		if cleanupErr := ShutDown(); cleanupErr != nil {
@@ -332,8 +537,8 @@ func TestCoreLifecycleOverflow(t *testing.T) {
 		}
 	}
 	assertNativeError(t, err, "amdsmi_init", AMDSMI_STATUS_REFCOUNT_OVERFLOW)
-	if mockCalls("amdsmi_init") != calls || mockNativeRefs() != refs {
-		t.Fatal("reference overflow reached native Init")
+	if mockCalls("amdsmi_init") != calls || mockNativeRefs() != refs || mockCalls("amdsmi_get_lib_version") != versionCalls {
+		t.Fatal("reference overflow reached native Init or version lookup")
 	}
 	nativeState.mu.Lock()
 	currentRefs, currentGeneration := nativeState.refs, nativeState.generation
@@ -481,6 +686,39 @@ func TestCoreLifecycleWithProcessor(t *testing.T) {
 				t.Fatalf("renewed processor callback: %d, %v, calls=%d", got, err, calls)
 			}
 		})
+	}
+}
+
+func TestCoreLifecycleConcurrentFirstInit(t *testing.T) {
+	resetCoreFixture(t)
+	const count = 32
+	start := make(chan struct{})
+	results := make(chan error, count)
+	for i := 0; i < count; i++ {
+		go func() {
+			<-start
+			results <- Init(AMDSMI_INIT_AMD_GPUS)
+		}()
+	}
+	close(start)
+	for i := 0; i < count; i++ {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	if mockCalls("amdsmi_get_lib_version") != 1 || mockCalls("amdsmi_init") != count || mockNativeRefs() != count {
+		t.Fatal("concurrent first Init did not query once and acquire one native reference per call")
+	}
+	if mockMaxActive() != 1 {
+		t.Fatal("concurrent first Init overlapped native calls")
+	}
+	for i := 0; i < count; i++ {
+		if err := ShutDown(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mockCalls("amdsmi_shut_down") != count || mockNativeRefs() != 0 {
+		t.Fatal("concurrent first Init left unbalanced native references")
 	}
 }
 

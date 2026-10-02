@@ -3,7 +3,7 @@
 
 //go:build linux && cgo
 
-// Package amdsmi provides read-only Linux GPU queries through AMD SMI 27.1 and CGO.
+// Package amdsmi provides read-only bare-metal (BM) GPU queries on Linux with CGO.
 // Calls are serialized. Balance Init with ShutDown and rediscover handles after final shutdown.
 package amdsmi
 
@@ -76,8 +76,10 @@ func boundedString(p *C.char, capacity int) string {
 	return C.GoStringN(p, C.int(n))
 }
 
+// Status is a native AMD SMI result code, usable with errors.Is.
 type Status uint32
 
+// StatusError records the operation, result code, symbolic name, and diagnostic message.
 type StatusError struct {
 	Op      string
 	Code    Status
@@ -85,14 +87,17 @@ type StatusError struct {
 	Message string
 }
 
+// Error formats the numeric status without calling the native library.
 func (s Status) Error() string {
 	return fmt.Sprintf("AMD SMI status %d (0x%08x)", uint32(s), uint32(s))
 }
 
+// Error formats the captured operation and status details without native calls.
 func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s: %s: %s: %s", e.Op, e.Code.Error(), e.Name, e.Message)
 }
 
+// Unwrap exposes the status code for errors.Is.
 func (e *StatusError) Unwrap() error { return e.Code }
 
 func statusStringLocked(code Status) (string, error) {
@@ -110,6 +115,7 @@ func statusStringLocked(code Status) (string, error) {
 	return boundedString(text, nativeStringCapacity), nil
 }
 
+// StatusCodeToString queries the native status description without requiring Init.
 func StatusCodeToString(code Status) (string, error) {
 	nativeState.mu.Lock()
 	defer nativeState.mu.Unlock()
@@ -139,6 +145,7 @@ func checkedCount(op string, count uint64, capacity int) (int, error) {
 	return int(count), nil
 }
 
+// Native status codes retain their AMD SMI numeric values.
 const (
 	AMDSMI_STATUS_SUCCESS             Status = C.AMDSMI_STATUS_SUCCESS
 	AMDSMI_STATUS_INVAL               Status = C.AMDSMI_STATUS_INVAL
@@ -258,11 +265,14 @@ var nativeState = struct {
 	generation uint64
 }{generation: 1}
 
+// InitFlags selects processors to initialize; this binding accepts only AMD GPUs.
 type InitFlags uint64
 
+// AMDSMI_INIT_AMD_GPUS initializes GPU discovery without requesting CPU support.
 const AMDSMI_INIT_AMD_GPUS InitFlags = C.AMDSMI_INIT_AMD_GPUS
 
-// Init accepts only AMDSMI_INIT_AMD_GPUS. Balance each successful call with ShutDown.
+// Init accepts only AMDSMI_INIT_AMD_GPUS and acquires one native reference to balance with ShutDown.
+// First Init requires the compiled major and at least its minor (any release), else AMDSMI_STATUS_NOT_SUPPORTED.
 func Init(flags InitFlags) error {
 	nativeState.mu.Lock()
 	defer nativeState.mu.Unlock()
@@ -274,6 +284,19 @@ func Init(flags InitFlags) error {
 		return &StatusError{Op: "amdsmi_init", Code: AMDSMI_STATUS_REFCOUNT_OVERFLOW, Name: statusName(AMDSMI_STATUS_REFCOUNT_OVERFLOW),
 			Message: "initialization reference limit reached"}
 	}
+	if nativeState.refs == 0 {
+		version, err := getLibVersionLocked()
+		if err != nil {
+			return err
+		}
+		if version.Major != compiledMajor || version.Minor < compiledMinor {
+			return &StatusError{Op: "amdsmi_init", Code: AMDSMI_STATUS_NOT_SUPPORTED,
+				Name: statusName(AMDSMI_STATUS_NOT_SUPPORTED),
+				Message: fmt.Sprintf("runtime %d.%d.%d is incompatible with compiled headers %d.%d.%d; require major %d and minor >= %d",
+					version.Major, version.Minor, version.Release, compiledMajor, compiledMinor, compiledRelease,
+					compiledMajor, compiledMinor)}
+		}
+	}
 	status := C.amdsmi_init(C.uint64_t(flags))
 	if err := nativeErrorLocked("amdsmi_init", status); err != nil {
 		return err
@@ -282,6 +305,8 @@ func Init(flags InitFlags) error {
 	return nil
 }
 
+// ShutDown releases one Init reference, even if native cleanup returns an error.
+// Releasing the final reference invalidates all handles, including on cleanup failure.
 func ShutDown() error {
 	nativeState.mu.Lock()
 	defer nativeState.mu.Unlock()
@@ -326,6 +351,7 @@ const (
 	compiledRelease uint32 = C.AMDSMI_LIB_VERSION_RELEASE
 )
 
+// Version identifies the loaded native library, including its build string.
 type Version struct {
 	Major   uint32
 	Minor   uint32
@@ -333,10 +359,15 @@ type Version struct {
 	Build   string
 }
 
-// GetLibVersion does not require initialization or access any processors.
+// GetLibVersion returns the loaded version without Init, including incompatible versions for diagnostics.
+// It returns a zero Version on failure and does not access processors or acquire a native reference.
 func GetLibVersion() (Version, error) {
 	nativeState.mu.Lock()
 	defer nativeState.mu.Unlock()
+	return getLibVersionLocked()
+}
+
+func getLibVersionLocked() (Version, error) {
 	var out C.amdsmi_version_t
 	if err := nativeErrorLocked("amdsmi_get_lib_version", C.amdsmi_get_lib_version(&out)); err != nil {
 		return Version{}, err
@@ -371,11 +402,14 @@ func fetchHandlesLocked(op string,
 	return pointers[:n], nil
 }
 
+// GetProcessorHandles discovers AMD GPUs in the current native socket/processor order.
+// An empty successful result means no AMD GPUs were discovered; indices are not stable identities.
 func GetProcessorHandles() ([]ProcessorHandle, error) {
 	return withLibrary("amdsmi_get_socket_handles", getProcessorHandlesLocked)
 }
 
 // GetProcessorHandleFromIndex uses the current filtered GPU discovery order.
+// Its index need not match CLI -g; use GetGpuDeviceBdf to correlate devices across tools.
 func GetProcessorHandleFromIndex(index uint32) (ProcessorHandle, error) {
 	return withLibrary("amdsmi_get_socket_handles", func() (ProcessorHandle, error) {
 		handles, err := getProcessorHandlesLocked()
@@ -433,17 +467,27 @@ func getProcessorHandlesLocked() ([]ProcessorHandle, error) {
 	return handles, nil
 }
 
+// Bdf packs a PCI address as a 48-bit domain, 8-bit bus, 5-bit device, and 3-bit function.
 type Bdf uint64
 
+// Function returns the PCI function number.
 func (b Bdf) Function() uint8 { return uint8(b & 7) }
-func (b Bdf) Device() uint8   { return uint8(b >> 3 & 31) }
-func (b Bdf) Bus() uint8      { return uint8(b >> 8 & 255) }
-func (b Bdf) Domain() uint64  { return uint64(b >> 16) }
 
+// Device returns the PCI device number.
+func (b Bdf) Device() uint8 { return uint8(b >> 3 & 31) }
+
+// Bus returns the PCI bus number.
+func (b Bdf) Bus() uint8 { return uint8(b >> 8 & 255) }
+
+// Domain returns the full native PCI domain number without narrowing it to 16 bits.
+func (b Bdf) Domain() uint64 { return uint64(b >> 16) }
+
+// String formats the PCI address as domain:bus:device.function in hexadecimal.
 func (b Bdf) String() string {
 	return fmt.Sprintf("%04x:%02x:%02x.%x", b.Domain(), b.Bus(), b.Device(), b.Function())
 }
 
+// GetGpuDeviceBdf returns the GPU's PCI address for correlation with other tools.
 func GetGpuDeviceBdf(h ProcessorHandle) (Bdf, error) {
 	const op = "amdsmi_get_gpu_device_bdf"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (Bdf, error) {
@@ -457,6 +501,7 @@ func GetGpuDeviceBdf(h ProcessorHandle) (Bdf, error) {
 	})
 }
 
+// GetProcessorHandleFromBdf finds an AMD GPU by PCI address in the initialized library.
 func GetProcessorHandleFromBdf(b Bdf) (ProcessorHandle, error) {
 	const op = "amdsmi_get_processor_handle_from_bdf"
 	return withLibrary(op, func() (ProcessorHandle, error) {
@@ -485,6 +530,8 @@ func GetProcessorHandleFromBdf(b Bdf) (ProcessorHandle, error) {
 
 const gpuUUIDSize int = C.AMDSMI_GPU_UUID_SIZE
 
+// AsicInfo contains GPU identity and chip metadata, preserving native unavailable values.
+// ExternalRevId is family-scoped; interpret it together with DeviceID.
 type AsicInfo struct {
 	MarketName            string
 	VendorID              uint32
@@ -503,12 +550,14 @@ type AsicInfo struct {
 	ExternalRevId         uint32
 }
 
+// DriverInfo contains the loaded GPU driver's reported name, version, and date.
 type DriverInfo struct {
 	DriverVersion string
 	DriverDate    string
 	DriverName    string
 }
 
+// BoardInfo contains board identity strings; fields may be unavailable on some GPUs.
 type BoardInfo struct {
 	ModelNumber      string
 	ProductSerial    string
@@ -517,6 +566,7 @@ type BoardInfo struct {
 	ManufacturerName string
 }
 
+// FwBlock identifies a native firmware component.
 type FwBlock int32
 
 var fwBlockNames = map[FwBlock]string{
@@ -602,6 +652,7 @@ var fwBlockNames = map[FwBlock]string{
 	AMDSMI_FW_ID__MAX:                     "FW_ID__MAX",
 }
 
+// String returns the firmware component name or UNKNOWN with its numeric value.
 func (b FwBlock) String() string {
 	if name, ok := fwBlockNames[b]; ok {
 		return name
@@ -609,16 +660,19 @@ func (b FwBlock) String() string {
 	return fmt.Sprintf("UNKNOWN(%d)", int32(b))
 }
 
+// FwInfoList pairs a firmware component with its native, component-specific version value.
 type FwInfoList struct {
 	FwID      FwBlock
 	FwVersion uint64
 }
 
+// FwInfo contains firmware versions; only the first NumFwInfo entries of FwList are populated.
 type FwInfo struct {
 	NumFwInfo uint8
 	FwList    [AMDSMI_FW_ID__MAX]FwInfoList
 }
 
+// VbiosInfo contains reported VBIOS identity and boot firmware strings.
 type VbiosInfo struct {
 	Name         string
 	BuildDate    string
@@ -629,6 +683,7 @@ type VbiosInfo struct {
 
 const maxFirmwareEntries int = C.AMDSMI_FW_ID__MAX
 
+// Firmware component identifiers mirror the native enum, including aliases and bounds.
 const (
 	AMDSMI_FW_ID_SMU                      FwBlock = C.AMDSMI_FW_ID_SMU
 	AMDSMI_FW_ID_FIRST                    FwBlock = C.AMDSMI_FW_ID_FIRST
@@ -713,6 +768,7 @@ const (
 	AMDSMI_FW_ID__MAX                     FwBlock = C.AMDSMI_FW_ID__MAX
 )
 
+// GetGpuDeviceUuid returns the GPU UUID reported by the native library.
 func GetGpuDeviceUuid(h ProcessorHandle) (string, error) {
 	const op = "amdsmi_get_gpu_device_uuid"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (string, error) {
@@ -729,6 +785,7 @@ func GetGpuDeviceUuid(h ProcessorHandle) (string, error) {
 	})
 }
 
+// GetGpuAsicInfo returns GPU identity and chip metadata without replacing unavailable values.
 func GetGpuAsicInfo(h ProcessorHandle) (AsicInfo, error) {
 	const op = "amdsmi_get_gpu_asic_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (AsicInfo, error) {
@@ -752,6 +809,7 @@ func GetGpuAsicInfo(h ProcessorHandle) (AsicInfo, error) {
 	})
 }
 
+// GetGpuDriverInfo returns the GPU driver's reported name, version, and date.
 func GetGpuDriverInfo(h ProcessorHandle) (DriverInfo, error) {
 	const op = "amdsmi_get_gpu_driver_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (DriverInfo, error) {
@@ -767,6 +825,7 @@ func GetGpuDriverInfo(h ProcessorHandle) (DriverInfo, error) {
 	})
 }
 
+// GetGpuBoardInfo returns the available board identity strings for the GPU.
 func GetGpuBoardInfo(h ProcessorHandle) (BoardInfo, error) {
 	const op = "amdsmi_get_gpu_board_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (BoardInfo, error) {
@@ -784,6 +843,7 @@ func GetGpuBoardInfo(h ProcessorHandle) (BoardInfo, error) {
 	})
 }
 
+// GetFwInfo returns firmware versions with NumFwInfo limiting the populated list entries.
 func GetFwInfo(h ProcessorHandle) (FwInfo, error) {
 	const op = "amdsmi_get_fw_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (FwInfo, error) {
@@ -807,6 +867,7 @@ func GetFwInfo(h ProcessorHandle) (FwInfo, error) {
 	})
 }
 
+// GetGpuVbiosInfo returns the GPU's reported VBIOS and boot firmware identity.
 func GetGpuVbiosInfo(h ProcessorHandle) (VbiosInfo, error) {
 	const op = "amdsmi_get_gpu_vbios_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (VbiosInfo, error) {
@@ -824,13 +885,21 @@ func GetGpuVbiosInfo(h ProcessorHandle) (VbiosInfo, error) {
 	})
 }
 
+// TemperatureType selects a temperature sensor; availability depends on the GPU and driver.
 type TemperatureType int32
+
+// TemperatureMetric selects a current reading, limit, or historical temperature metric.
 type TemperatureMetric int32
+
+// ClkType selects a native GPU clock domain.
 type ClkType int32
+
+// MemoryType selects VRAM, CPU-visible VRAM, or graphics translation table memory.
 type MemoryType uint32
 
 const maxFrequencies int = C.AMDSMI_MAX_NUM_FREQUENCIES
 
+// Temperature sensor identifiers mirror the native enum; not all sensors exist on every GPU.
 const (
 	AMDSMI_TEMPERATURE_TYPE_EDGE                             TemperatureType = C.AMDSMI_TEMPERATURE_TYPE_EDGE
 	AMDSMI_TEMPERATURE_TYPE_FIRST                            TemperatureType = C.AMDSMI_TEMPERATURE_TYPE_FIRST
@@ -907,6 +976,7 @@ const (
 	AMDSMI_TEMPERATURE_TYPE__MAX                             TemperatureType = C.AMDSMI_TEMPERATURE_TYPE__MAX
 )
 
+// Temperature metric identifiers include readings and thresholds supported by the native API.
 const (
 	AMDSMI_TEMP_CURRENT        TemperatureMetric = C.AMDSMI_TEMP_CURRENT
 	AMDSMI_TEMP_FIRST          TemperatureMetric = C.AMDSMI_TEMP_FIRST
@@ -927,6 +997,7 @@ const (
 	AMDSMI_TEMP_LAST           TemperatureMetric = C.AMDSMI_TEMP_LAST
 )
 
+// Clock domain identifiers mirror the native enum, including aliases and bounds.
 const (
 	AMDSMI_CLK_TYPE_SYS   ClkType = C.AMDSMI_CLK_TYPE_SYS
 	AMDSMI_CLK_TYPE_FIRST ClkType = C.AMDSMI_CLK_TYPE_FIRST
@@ -943,6 +1014,7 @@ const (
 	AMDSMI_CLK_TYPE__MAX  ClkType = C.AMDSMI_CLK_TYPE__MAX
 )
 
+// Memory pool identifiers select the native total and usage queries.
 const (
 	AMDSMI_MEM_TYPE_FIRST    MemoryType = C.AMDSMI_MEM_TYPE_FIRST
 	AMDSMI_MEM_TYPE_VRAM     MemoryType = C.AMDSMI_MEM_TYPE_VRAM
@@ -986,20 +1058,24 @@ type ClkInfo struct {
 	ClkDeepSleepRaw uint8
 }
 
+// Frequencies contains BM clock levels in Hz; NumSupported equals len(Values).
+// Current is a native index and may be UINT32_MAX or outside Values when unavailable.
 type Frequencies struct {
 	HasDeepSleep bool
 	NumSupported uint32
-	Current      uint32 // May be UINT32_MAX or outside Values.
+	Current      uint32
 	Values       []uint64
 }
 
+// EngineUsage contains GPU engine activity percentages without replacing unavailable values.
+// GfxActivity can be 65535 when unavailable, not a percentage or UINT32_MAX.
 type EngineUsage struct {
-	GfxActivity uint32 // 65535 can indicate unavailable data.
+	GfxActivity uint32
 	UmcActivity uint32
 	MmActivity  uint32
 }
 
-// VramInfo retains native MB and GB/s units.
+// VramInfo retains native size in MB, interface width in bits, and bandwidth in GB/s.
 type VramInfo struct {
 	VramType         VramType
 	VramVendor       string
@@ -1008,6 +1084,7 @@ type VramInfo struct {
 	VramMaxBandwidth uint64
 }
 
+// VramType identifies the GPU's reported memory technology.
 type VramType int32
 
 var vramTypeNames = map[VramType]string{
@@ -1033,6 +1110,7 @@ var vramTypeNames = map[VramType]string{
 	AMDSMI_VRAM_TYPE_LPDDR5:  "LPDDR5",
 }
 
+// String returns the memory technology name or UNKNOWN with its numeric value.
 func (v VramType) String() string {
 	if name, ok := vramTypeNames[v]; ok {
 		return name
@@ -1040,6 +1118,7 @@ func (v VramType) String() string {
 	return fmt.Sprintf("UNKNOWN(%d)", int32(v))
 }
 
+// VRAM technology identifiers mirror the native enum.
 const (
 	AMDSMI_VRAM_TYPE_UNKNOWN VramType = C.AMDSMI_VRAM_TYPE_UNKNOWN
 	AMDSMI_VRAM_TYPE_HBM     VramType = C.AMDSMI_VRAM_TYPE_HBM
@@ -1065,6 +1144,7 @@ const (
 )
 
 // GetTempMetric returns whole degrees Celsius, preserving negative values.
+// Sensor and metric support depends on the GPU; the native query is unavailable in VM guests.
 func GetTempMetric(h ProcessorHandle, sensor TemperatureType, metric TemperatureMetric) (int64, error) {
 	const op = "amdsmi_get_temp_metric"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (int64, error) {
@@ -1078,6 +1158,8 @@ func GetTempMetric(h ProcessorHandle, sensor TemperatureType, metric Temperature
 	})
 }
 
+// GetPowerInfo returns BM power in W, voltages in mV, and PowerLimit in uW.
+// Native unavailable values are preserved; fields supported by one GPU may be absent on another.
 func GetPowerInfo(h ProcessorHandle) (PowerInfo, error) {
 	const op = "amdsmi_get_power_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (PowerInfo, error) {
@@ -1098,6 +1180,8 @@ func GetPowerInfo(h ProcessorHandle) (PowerInfo, error) {
 	})
 }
 
+// GetPowerCapInfo returns power caps in uW and DpmCap as a BM level index, not MHz.
+// sensorIndex is zero-based, normally zero; auxiliary fields may be zero after partial native success.
 func GetPowerCapInfo(h ProcessorHandle, sensorIndex uint32) (PowerCapInfo, error) {
 	const op = "amdsmi_get_power_cap_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (PowerCapInfo, error) {
@@ -1116,6 +1200,8 @@ func GetPowerCapInfo(h ProcessorHandle, sensorIndex uint32) (PowerCapInfo, error
 	})
 }
 
+// GetClockInfo returns native clock measurements in MHz; UINT32_MAX can indicate unavailable clocks.
+// BM Boolean fields remain false/unavailable; ClkLockedRaw and ClkDeepSleepRaw preserve native bytes.
 func GetClockInfo(h ProcessorHandle, clock ClkType) (ClkInfo, error) {
 	const op = "amdsmi_get_clock_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (ClkInfo, error) {
@@ -1160,6 +1246,7 @@ func GetClockFrequencies(h ProcessorHandle, clock ClkType) (Frequencies, error) 
 	})
 }
 
+// GetGpuActivity returns engine activity percentages, retaining native unavailable values.
 func GetGpuActivity(h ProcessorHandle) (EngineUsage, error) {
 	const op = "amdsmi_get_gpu_activity"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (EngineUsage, error) {
@@ -1201,6 +1288,7 @@ func GetMemoryUsage(h ProcessorHandle, memory MemoryType) (uint64, error) {
 	})
 }
 
+// GetGpuVramInfo returns memory identity, size in MB, width in bits, and bandwidth in GB/s.
 func GetGpuVramInfo(h ProcessorHandle) (VramInfo, error) {
 	const op = "amdsmi_get_gpu_vram_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (VramInfo, error) {
@@ -1218,13 +1306,17 @@ func GetGpuVramInfo(h ProcessorHandle) (VramInfo, error) {
 	})
 }
 
+// KFDInfo contains KFD and partition identifiers, preserving native unavailable values.
 type KFDInfo struct {
 	KFDID              uint64
 	NodeID             uint32
 	CurrentPartitionID uint32
 }
 
+// MemoryPartitionType identifies a native memory partition mode such as NPS1 or NPS4.
 type MemoryPartitionType int32
+
+// AcceleratorPartitionType identifies a native compute partition mode such as SPX or CPX.
 type AcceleratorPartitionType int32
 
 var acceleratorPartitionTypeNames = map[AcceleratorPartitionType]string{
@@ -1236,6 +1328,7 @@ var acceleratorPartitionTypeNames = map[AcceleratorPartitionType]string{
 	AMDSMI_ACCELERATOR_PARTITION_CPX:     "CPX",
 }
 
+// String returns the compute partition mode name or UNKNOWN with its numeric value.
 func (a AcceleratorPartitionType) String() string {
 	if name, ok := acceleratorPartitionTypeNames[a]; ok {
 		return name
@@ -1243,6 +1336,7 @@ func (a AcceleratorPartitionType) String() string {
 	return fmt.Sprintf("UNKNOWN(%d)", int32(a))
 }
 
+// NpsCaps reports known memory partition capabilities and preserves all native bits in RawMask.
 type NpsCaps struct {
 	Nps1Cap bool
 	Nps2Cap bool
@@ -1261,6 +1355,7 @@ func npsCaps(value C.amdsmi_nps_caps_t) NpsCaps {
 	}
 }
 
+// Supported returns enabled known modes in NPS1, NPS2, NPS4, NPS8 order, omitting unknown bits.
 func (n NpsCaps) Supported() []MemoryPartitionType {
 	var result []MemoryPartitionType
 	for _, cap := range []struct {
@@ -1279,8 +1374,10 @@ func (n NpsCaps) Supported() []MemoryPartitionType {
 	return result
 }
 
+// String formats the supported known memory partition modes.
 func (n NpsCaps) String() string { return fmt.Sprint(n.Supported()) }
 
+// String returns the memory partition mode name or UNKNOWN with its numeric value.
 func (m MemoryPartitionType) String() string {
 	for _, mode := range []struct {
 		value MemoryPartitionType
@@ -1298,12 +1395,14 @@ func (m MemoryPartitionType) String() string {
 	return fmt.Sprintf("UNKNOWN(%d)", int32(m))
 }
 
+// NumaRange preserves native NUMA memory range endpoints and memory type.
 type NumaRange struct {
 	MemoryType VramType
 	Start      uint64
 	End        uint64
 }
 
+// MemoryPartitionConfig contains the active mode and supported modes; only NumNumaRanges entries are populated.
 type MemoryPartitionConfig struct {
 	PartitionCaps NpsCaps
 	Mode          MemoryPartitionType
@@ -1311,6 +1410,8 @@ type MemoryPartitionConfig struct {
 	NumaRanges    [AMDSMI_MAX_NUM_NUMA_NODES]NumaRange
 }
 
+// AcceleratorPartitionProfile contains the current compute profile; BM resource metadata may be empty.
+// NumPartitions may be UINT32_MAX when unavailable; it is not always a usable Resources length.
 type AcceleratorPartitionProfile struct {
 	ProfileType   AcceleratorPartitionType
 	NumPartitions uint32
@@ -1321,6 +1422,7 @@ type AcceleratorPartitionProfile struct {
 	Resources [][]uint32
 }
 
+// Native partition limits bound NUMA range and resource storage.
 const (
 	AMDSMI_MAX_NUM_NUMA_NODES     = C.AMDSMI_MAX_NUM_NUMA_NODES
 	maxNUMARanges             int = C.AMDSMI_MAX_NUM_NUMA_NODES
@@ -1328,6 +1430,7 @@ const (
 	maxProfileResources       int = C.AMDSMI_MAX_CP_PROFILE_RESOURCES
 )
 
+// Memory partition mode identifiers mirror the native enum.
 const (
 	AMDSMI_MEMORY_PARTITION_UNKNOWN MemoryPartitionType = C.AMDSMI_MEMORY_PARTITION_UNKNOWN
 	AMDSMI_MEMORY_PARTITION_NPS1    MemoryPartitionType = C.AMDSMI_MEMORY_PARTITION_NPS1
@@ -1336,6 +1439,7 @@ const (
 	AMDSMI_MEMORY_PARTITION_NPS8    MemoryPartitionType = C.AMDSMI_MEMORY_PARTITION_NPS8
 )
 
+// Compute partition mode identifiers mirror the native enum.
 const (
 	AMDSMI_ACCELERATOR_PARTITION_INVALID AcceleratorPartitionType = C.AMDSMI_ACCELERATOR_PARTITION_INVALID
 	AMDSMI_ACCELERATOR_PARTITION_SPX     AcceleratorPartitionType = C.AMDSMI_ACCELERATOR_PARTITION_SPX
@@ -1346,6 +1450,7 @@ const (
 	AMDSMI_ACCELERATOR_PARTITION_MAX     AcceleratorPartitionType = C.AMDSMI_ACCELERATOR_PARTITION_MAX
 )
 
+// GetKFDInfo returns the GPU's KFD, node, and current partition identifiers on BM.
 func GetKFDInfo(h ProcessorHandle) (KFDInfo, error) {
 	const op = "amdsmi_get_gpu_kfd_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (KFDInfo, error) {
@@ -1358,6 +1463,7 @@ func GetKFDInfo(h ProcessorHandle) (KFDInfo, error) {
 	})
 }
 
+// GetGpuMemoryPartitionConfig returns the active memory mode, capabilities, and populated NUMA ranges.
 func GetGpuMemoryPartitionConfig(h ProcessorHandle) (MemoryPartitionConfig, error) {
 	const op = "amdsmi_get_gpu_memory_partition_config"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (MemoryPartitionConfig, error) {
@@ -1430,9 +1536,13 @@ func GetGpuAcceleratorPartitionProfile(h ProcessorHandle) (AcceleratorPartitionP
 	return profile, ids, err
 }
 
+// GpuBlock identifies a GPU hardware block by its native RAS bit mask.
 type GpuBlock uint64
+
+// RASState is the native RAS feature state of a GPU block, not an overall health result.
 type RASState uint32
 
+// ErrorCount contains native correctable, uncorrectable, and deferred ECC event counts.
 type ErrorCount struct {
 	CorrectableCount   uint64
 	UncorrectableCount uint64
@@ -1445,6 +1555,7 @@ type RasFeatureInfo struct {
 	EccCorrectionSchemaFlag uint32
 }
 
+// GPU block masks mirror the native enum, including its reserved high bit.
 const (
 	AMDSMI_GPU_BLOCK_INVALID    GpuBlock = C.AMDSMI_GPU_BLOCK_INVALID
 	AMDSMI_GPU_BLOCK_FIRST      GpuBlock = C.AMDSMI_GPU_BLOCK_FIRST
@@ -1491,6 +1602,7 @@ const (
 	AMDSMI_GPU_BLOCK_RESERVED   GpuBlock = C.AMDSMI_GPU_BLOCK_RESERVED
 )
 
+// RAS feature states mirror the native enum.
 const (
 	AMDSMI_RAS_ERR_STATE_NONE     RASState = C.AMDSMI_RAS_ERR_STATE_NONE
 	AMDSMI_RAS_ERR_STATE_DISABLED RASState = C.AMDSMI_RAS_ERR_STATE_DISABLED
@@ -1522,6 +1634,7 @@ func GetGpuEccEnabled(h ProcessorHandle) (map[GpuBlock]bool, error) {
 	})
 }
 
+// GetGpuEccCount returns native ECC event counts for one hardware block, if supported.
 func GetGpuEccCount(h ProcessorHandle, block GpuBlock) (ErrorCount, error) {
 	const op = "amdsmi_get_gpu_ecc_count"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (ErrorCount, error) {
@@ -1548,6 +1661,7 @@ func GetGpuTotalEccCount(h ProcessorHandle) (ErrorCount, error) {
 	})
 }
 
+// GetRASBlockState returns one GPU block's native RAS feature state, not overall GPU health.
 func GetRASBlockState(h ProcessorHandle, block GpuBlock) (RASState, error) {
 	const op = "amdsmi_get_gpu_ras_block_features_enabled"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (RASState, error) {
@@ -1560,6 +1674,7 @@ func GetRASBlockState(h ProcessorHandle, block GpuBlock) (RASState, error) {
 	})
 }
 
+// GetGpuRasFeatureInfo returns available native RAS metadata without inferring a health assessment.
 func GetGpuRasFeatureInfo(h ProcessorHandle) (RasFeatureInfo, error) {
 	const op = "amdsmi_get_gpu_ras_feature_info"
 	return withProcessor(h, op, func(p C.amdsmi_processor_handle) (RasFeatureInfo, error) {

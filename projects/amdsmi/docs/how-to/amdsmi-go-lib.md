@@ -10,8 +10,8 @@ myst:
 The read-only Linux Go module provides GPU discovery, identity, telemetry,
 current partition metadata, and ECC/RAS queries directly through CGO and
 `libamd_smi`. It does not use Python, a CLI subprocess, or the legacy Go shim.
-See the [standalone module guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md) and
-[API reference](../reference/amdsmi-go-api.md).
+See the [API reference](../reference/amdsmi-go-api.md) and the standalone guide
+installed at `share/amd_smi/go/README.md` alongside the matching module sources.
 
 (go_prereqs)=
 ## Read-only module requirements
@@ -22,7 +22,11 @@ See the [standalone module guide](https://github.com/ROCm/rocm-systems/blob/deve
 | AMD SMI 27.1 public development header and matching shared library | Matching `libamd_smi.so`, not `libamdsmi.so` |
 | Compilation and mock tests need no GPU/root | Go adds no root requirement |
 
-Follow the [AMD SMI installation guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
+Other operating systems and `CGO_ENABLED=0` are unsupported. The production
+file's `linux && cgo` constraint excludes the binding in those configurations,
+which is why Go reports that build constraints exclude all Go files.
+
+Follow the [AMD SMI installation guide](../install/install.md)
 for native dependencies. The module path is
 `github.com/ROCm/rocm-systems/projects/amdsmi/go`; import its `amdsmi` package:
 
@@ -45,10 +49,11 @@ export GOTOOLCHAIN=local GOWORK=off GOPROXY=off GOSUMDB=off
 go build ./...
 ```
 
-Development packages install source assets under `share/amd_smi/go`, without
-tests, fixtures, native binaries, or a Go toolchain in that directory. With the
-native environment configured, consume checkout or installed sources from an
-existing application module:
+The `amd-smi-lib` package ships source assets under `share/amd_smi/go`, grouped
+in the CMake/CPack `dev` component, not a separate development package. That
+directory contains no tests, fixtures, native binaries, or Go toolchain.
+With the native environment configured, consume checkout or installed sources
+from an existing application module:
 
 ```bash
 : "${AMDSMI_GO_SOURCE:?Set the checkout go directory or installed share/amd_smi/go directory}"
@@ -59,12 +64,20 @@ go build ./...
 
 The local `v0.0.0` requirement is only a replacement key. For remote consumption,
 pin an immutable published revision containing this module and pair it with the
-native 27.1 release. Future module tags need the prefix `projects/amdsmi/go/`;
-native major 27 does not determine the Go module version. Use a local
-replacement for unpublished source changes.
-The standalone guide gives the separate network-enabled acquisition command.
+native 27.1 release for compilation. Any v0 module tag must have the form
+`projects/amdsmi/go/v0.X.Y`; this convention does not assert that a tag exists.
+Native major 27 does not determine the Go module version. Use a local replacement
+for unpublished source changes. The installed module guide gives the separate
+network-enabled acquisition command.
 
 ## Lifecycle and data handling
+
+Before acquiring the first package reference, `Init` checks the loaded native
+version against the compiled header. A different major or older minor returns
+`AMDSMI_STATUS_NOT_SUPPORTED`; a newer minor in the same major is allowed, and
+release differences are ignored. Version-query failures propagate without
+acquiring a native reference. `GetLibVersion` and `StatusCodeToString` remain
+available without initialization, including for incompatible-version diagnostics.
 
 Balance every successful `amdsmi.Init(amdsmi.AMDSMI_INIT_AMD_GPUS)` with
 `amdsmi.ShutDown()`. Final package shutdown invalidates handles even on cleanup
@@ -80,15 +93,23 @@ results, including `nil` slices/maps; success can still include unavailable valu
 or partial native data. `StatusCodeToString` returns `(string, error)` and propagates
 lookup failures without replacing the original status of a query error.
 The API reference lists field types, units, and native
-limitations. The [telemetry example](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/examples/telemetry/main.go) balances
-shutdown and reports per-query failures without replacing them with zero readings.
+limitations. The telemetry example installed at
+`share/amd_smi/go/examples/telemetry/main.go` balances shutdown and reports
+per-query failures without replacing them with zero readings.
 
 ## Shared read-only API shape
 
 The common names, signatures, and fields follow the Host declarations; this module
 remains a bare-metal (BM) implementation, not a combined backend.
-`GetProcessorHandleFromIndex(uint32)` selects from the current GPU discovery order.
-It is not a persistent device identifier; use BDF lookup when selecting a known GPU.
+Common spellings such as `Id`, `Gpu`, `Fw`, and `Clk` are deliberately retained.
+BM-only names use conventional Go initialisms such as `RAS` and `KFD`, without
+aliases or renames.
+
+`GetProcessorHandleFromIndex(uint32)` selects from the current filtered AMD-GPU
+discovery order, which need not match CLI `-g`. Use `GetGpuDeviceBdf` to correlate
+devices across tools and BDF lookup when selecting a known GPU. For a full
+traversal, call `GetProcessorHandles` once and iterate its result; repeated index
+lookups rediscover every device and make an N-device traversal O(N²).
 
 | Contract | Bare-metal behavior |
 | --- | --- |
@@ -101,8 +122,6 @@ It is not a persistent device identifier; use BDF lookup when selecting a known 
 | `GetGpuAcceleratorPartitionProfile(handle)` | Returns `(AcceleratorPartitionProfile, []uint32, error)`; BM returns one current ID, not one per partition |
 | `GetGpuEccEnabled(handle)` | Returns `map[GpuBlock]bool`; unknown/reserved enabled bits remain map keys |
 
-This is a direct pre-release rename, not an alias layer. The module guide lists
-the [migration mapping](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#pre-release-api-migration).
 Shared source shape does not imply runtime parity or unit conversion:
 
 | Area | Units or limit |
@@ -116,10 +135,20 @@ Shared source shape does not imply runtime parity or unit conversion:
 No Host runtime parity is claimed. Consult the API reference before interpreting
 unavailable values or moving consumers between backends.
 
+## Repository checks
+
+Use the repository's `tests/go/run_tests.py` runner for mock checks; the
+`amdsmi_mock` tag is not a standalone test setup or a production option.
+Raw `go test -tags=amdsmi_mock` does not build or link the required fixture.
+The installed source directory excludes those tests and fixtures. See the
+[Go test design](../conceptual/test-design.md#go-checks) for commands and CI coverage.
+
 ## Legacy Go interface
 
 The existing `goamdsmi` API and shim remain unchanged. The new module is additive,
 not a source-compatible replacement; it does not include legacy CPU or setter APIs.
+Use the new module for new read-only GPU integrations; existing consumers keep
+their current API and shim path.
 The following instructions apply only to the legacy interface.
 
 ```{seealso}

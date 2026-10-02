@@ -12,14 +12,17 @@ myst:
 Import `github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi`. Requires Linux,
 CGO, Go 1.20+, a C compiler, and the AMD SMI 27.1 public header and matching
 `libamd_smi` shared library. See the [setup guide](../how-to/amdsmi-go-lib.md)
-and [standalone module guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md). CPU, NIC, set/reset,
-all-profile configuration, and event APIs are not included.
+and the standalone guide installed at `share/amd_smi/go/README.md`. CPU, NIC,
+set/reset, all-profile configuration, and event APIs are not included.
+Other operating systems and `CGO_ENABLED=0` are unsupported; `linux && cgo`
+constraints exclude the production binding and produce Go's build-constraints error.
 
 Common read-only names, signatures, and fields follow the Host declarations.
 The implementation remains bare metal (BM); matching source shape does not imply
 identical units, availability, or runtime behavior. No Host runtime parity is claimed.
-See the [pre-release migration table](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#pre-release-api-migration)
-for direct replacements without compatibility aliases.
+Common spellings such as `Id`, `Gpu`, `Fw`, and `Clk` are retained deliberately;
+BM-only names use conventional Go initialisms such as `RAS` and `KFD`. No aliases
+or renames are introduced.
 
 Results use Go-owned scalars, strings, arrays, slices, and maps. No public field
 exposes a C type or borrowed buffer. Errors return zero Go results, including
@@ -61,26 +64,25 @@ lifetime and first-initializer flags; later initialization does not change those
 flags. No external concurrent lifecycle, driver reload, partition change, or
 hotplug recovery is supported while initialized.
 
-Queries without a package reference return `AMDSMI_STATUS_NOT_INIT`; with a
-reference, zero or stale handles return `AMDSMI_STATUS_INVAL`. Formatting a query
+Before the first package reference, `Init` rejects a native major different from
+the compiled header or an older minor with `AMDSMI_STATUS_NOT_SUPPORTED`. Newer
+minors in the same major are allowed; release differences are ignored. A native
+version-query error is propagated. Neither failure acquires a native reference.
+
+Go indices refer only to the current filtered AMD-GPU list and need not match
+CLI `-g`. Correlate devices across tools with `GetGpuDeviceBdf`. To visit every
+GPU, call `GetProcessorHandles` once and iterate its result instead of repeatedly
+calling `GetProcessorHandleFromIndex`, which rediscovers the whole list each time.
+
+Except for version and status-string lookup, queries without a package reference
+return `AMDSMI_STATUS_NOT_INIT`; with a reference, zero or stale handles return
+`AMDSMI_STATUS_INVAL`. Formatting a query
 error never replaces its original status if message lookup fails, and does not
 recurse through status lookup. Successful data is not a health assessment.
 
-This excerpt assumes a valid `handle` and imports `errors`, `fmt`, and `amdsmi`:
-
-```go
-power, err := amdsmi.GetPowerInfo(handle)
-if errors.Is(err, amdsmi.AMDSMI_STATUS_NOT_SUPPORTED) {
-   fmt.Println("power query is not supported")
-} else if err != nil {
-   var native *amdsmi.StatusError
-   if errors.As(err, &native) {
-      fmt.Printf("%s failed with %s (status %d)\n", native.Op, native.Name, native.Code)
-   }
-} else {
-   fmt.Printf("raw power fields: %+v\n", power)
-}
-```
+See [lifecycle and error handling](../how-to/amdsmi-go-lib.md#lifecycle-and-data-handling)
+and the {download}`telemetry example <../../go/examples/telemetry/main.go>`, also
+installed at `share/amd_smi/go/examples/telemetry/main.go`, for a complete example.
 
 ### Identity and firmware
 

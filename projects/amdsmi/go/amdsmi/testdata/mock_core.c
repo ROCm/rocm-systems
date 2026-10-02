@@ -280,13 +280,32 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
 
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* out) {
   amdsmi_status_t status = mock_begin(__func__, NULL);
-  if (status != AMDSMI_STATUS_SUCCESS) return mock_finish(status);
   if (!out || !mock_is_zero(out, sizeof(*out))) return mock_finish(AMDSMI_STATUS_UNEXPECTED_DATA);
   out->major = AMDSMI_LIB_VERSION_MAJOR;
   out->minor = AMDSMI_LIB_VERSION_MINOR;
   out->release = AMDSMI_LIB_VERSION_RELEASE;
   out->build = mock_mode(__func__) == 1 ? NULL : AMDSMI_LIB_VERSION_STRING;
-  return mock_finish(AMDSMI_STATUS_SUCCESS);
+  switch (mock_mode(__func__)) {
+    case 2:
+      out->major++;
+      break;
+    case 3:
+      out->major--;
+      break;
+    case 4:
+      out->minor--;
+      break;
+    case 5:
+      out->minor++;
+      break;
+    case 6:
+      out->release = UINT32_MAX;
+      break;
+    case 7:
+      out->release = 0;
+      break;
+  }
+  return mock_finish(status);
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t code, const char** out) {

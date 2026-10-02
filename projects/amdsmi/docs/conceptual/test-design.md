@@ -530,6 +530,56 @@ install(
 
 The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/python")`.
 
+## Auxiliary suites
+
+Alongside the C++ and Python device suites, the third test family covers Go/CGO,
+packaging, builds, and ABI checks without GPUs. Go's Python stdlib tooling lives
+under `tests/go/`; wrapper tests and C fixtures live under `go/amdsmi/`.
+
+| Suite | Location | Runner / scope |
+| :--- | :--- | :--- |
+| Go/CGO unit tests | `go/amdsmi/*_test.go`, `go/amdsmi/testdata/mock_*.c` | `tests/go/run_tests.py`: public-header native fixtures, lifecycle/version checks, discovery, field conversion, and errors |
+| Go API contract | `tests/go/test_api_contract.py`, `go/amdsmi/contract_test.go` | C-bound enum coverage and external-package source contracts |
+| Go tooling/workflow tests | `tests/go/test_*.py` | Python `unittest` discovery: runner, contract guard, install rules, and CI job checks |
+| Go staged consumer | `tests/go/test_install.py` | Temporary `DESTDIR`, installed source verification, independent consumer build, and native version lookup without initialization |
+| Packaging and builds | `tests/amdsmi_build/`, `tests/python/test_*_guard.py`, `tests/run_amdsmi_*.py` | Build-driver tests, static package guards, and package-manager harnesses |
+| ABI checks | `tests/abi_check/` | Header ABI comparisons and verifier tests |
+
+### Go checks
+
+Run from the AMD SMI project root on Linux with Go 1.20+ and a C compiler.
+The fixture runner enables CGO and uses local tools with downloads disabled;
+mock tests require neither an installed AMD SMI library nor root.
+
+```shell
+python3 -B -m unittest discover -s tests/go -p 'test_*.py' -v
+python3 -B tests/go/test_api_contract.py
+python3 -B tests/go/run_tests.py
+python3 -B tests/go/run_tests.py --race
+python3 -B tests/go/run_tests.py --checkptr
+python3 -B tests/go/run_tests.py --cgocheck2
+python3 -B tests/go/run_tests.py --asan
+python3 -B tests/go/run_tests.py --vet
+python3 -B tests/go/run_tests.py --build-example
+```
+
+`--cgocheck2` requires Go 1.21+. `--asan` instruments the Go binary and C fixture
+with AddressSanitizer, selects GCC, and is mutually exclusive with `--race`.
+Use the `amdsmi_mock` build tag only through the runner: raw
+`go test -tags=amdsmi_mock` does not build or link the fixture library. Neither
+the mock bridge nor fixtures are installed with the module.
+
+The existing `amdsmi-build.yml` workflow has a separate `go-tests` job on
+`ubuntu-24.04`, selecting Go 1.20.14 and 1.24.1. Both run tooling/workflow tests,
+API contracts, default/race/checkptr fixtures, vet, and example builds. Go 1.24.1
+also runs cgocheck2 and ASAN. Each matrix entry builds the native shared library
+with ESMI, CLI, C++ tests, and ldconfig disabled, then checks native version
+lookup, vet, example linking, and a staged-source consumer. The job installs
+native build dependencies first; these checks run without root or GPU access.
+Examples are built, not run. The installed module guide at
+`share/amd_smi/go/README.md` lists the native and staged check commands to run
+from a source checkout.
+
 ## Migration reference
 
 ### C++ file mapping

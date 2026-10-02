@@ -41,6 +41,15 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-gcflags=all=-d=checkptr=2", command)
         self.assertEqual(command[-4:], ["-run", "^TestCore", "-v", "./amdsmi"])
 
+    def test_asan_uses_gcc_and_go_instrumentation(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                args = run_tests.parse_args(["--asan"])
+            except SystemExit:
+                self.fail("runner does not accept --asan")
+        self.assertEqual(args.cc, "gcc")
+        self.assertIn("-asan", run_tests.go_command(args=args, output=Path("telemetry")))
+
     def test_native_has_no_mock_tag(self) -> None:
         args = run_tests.parse_args(
             ["--native", "--include-dir", "/include", "--library-dir", "/lib", "--vet"]
@@ -63,6 +72,8 @@ class CommandTests(unittest.TestCase):
             ["--native", "--library-dir", "/lib"],
             ["--library-dir", "/lib"],
             ["--vet", "--build-example"],
+            ["--race", "--asan"],
+            ["--asan", "--cc", "clang"],
         ):
             with self.subTest(arguments=arguments), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
@@ -283,6 +294,19 @@ class ExecutionTests(unittest.TestCase):
         self.version = subprocess.CompletedProcess(
             ["go", "version"], 0, stdout="go version go1.24.1 linux/amd64"
         )
+
+    def test_asan_instruments_fixture_and_go_with_gcc(self) -> None:
+        args = run_tests.parse_args(["--asan"])
+        with patch("run_tests.shutil.which", return_value="tool"):
+            with patch("run_tests.subprocess.run", return_value=self.version) as run:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    run_tests.run_fixture(project=self.project, args=args)
+        compiler, go = run.call_args_list[1:]
+        self.assertEqual(compiler[0][0][0], "gcc")
+        self.assertIn("-fsanitize=address", compiler[0][0])
+        self.assertIn("-fno-omit-frame-pointer", compiler[0][0])
+        self.assertIn("-asan", go[0][0])
+        self.assertEqual(go[1]["env"]["CC"], "gcc")
 
     def test_fixture_compilation_precedes_go_test(self) -> None:
         args = run_tests.parse_args(["--cc", "custom-cc", "--run", "^TestNativeVersion$"])

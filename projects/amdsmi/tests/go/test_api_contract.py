@@ -12,7 +12,9 @@ ENUM_MEMBERS = re.compile(r"(?:^|,)\s*(AMDSMI_[A-Z0-9_]+)\b")
 SOURCE_TOKENS = re.compile(
     r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`", re.S
 )
-CONST_DECLARATIONS = re.compile(r"\bconst\s+(?:\(([^()]*)\)|([^\n;]+))")
+CONST_DECLARATIONS = re.compile(r"\bconst\s+(?:\((.*?)\)|([^\n;]+))", re.S)
+VALUE_DECLARATIONS = re.compile(r"\b(?:const|var)\s+(?:\((.*?)\)|([^\n;]+))", re.S)
+CONSTANT_TYPES = re.compile(r"(?:^|[;\n])\s*(AMDSMI_[A-Z0-9_]+)\b(?:[ \t]+(\w+))?")
 DIRECT_BINDINGS = re.compile(
     r"(?:^|[;\n])\s*(AMDSMI_[A-Z0-9_]+)\s+(\w+)\s*=\s*"
     r"C\.(AMDSMI_[A-Z0-9_]+)[ \t]*(?=[;\n]|$)"
@@ -21,20 +23,18 @@ C_IMPORT = re.compile(r'\s*import\s+"C"')
 GO_CALLS = re.compile(r"\bC\s*\.\s*(amdsmi_[a-z0-9_]+)\s*\(")
 C_CALLS = re.compile(r"\b(amdsmi_[a-z0-9_]+)\s*\(")
 MODULE_DEPENDENCIES = re.compile(r"^\s*(require|replace|exclude|toolchain)\b", re.M)
-ENUM_OWNERS = {
-    "amdsmi_interface.go": (
-        ("amdsmi_status_t", "Status"),
-        ("amdsmi_vram_type_t", "VramType"),
-        ("amdsmi_fw_block_t", "FwBlock"),
-        ("amdsmi_temperature_type_t", "TemperatureType"),
-        ("amdsmi_temperature_metric_t", "TemperatureMetric"),
-        ("amdsmi_clk_type_t", "ClkType"),
-        ("amdsmi_memory_type_t", "MemoryType"),
-        ("amdsmi_memory_partition_type_t", "MemoryPartitionType"),
-        ("amdsmi_accelerator_partition_type_t", "AcceleratorPartitionType"),
-        ("amdsmi_gpu_block_t", "GpuBlock"),
-        ("amdsmi_ras_err_state_t", "RASState"),
-    )
+REQUIRED_ENUMS = {
+    "amdsmi_status_t": "Status",
+    "amdsmi_vram_type_t": "VramType",
+    "amdsmi_fw_block_t": "FwBlock",
+    "amdsmi_temperature_type_t": "TemperatureType",
+    "amdsmi_temperature_metric_t": "TemperatureMetric",
+    "amdsmi_clk_type_t": "ClkType",
+    "amdsmi_memory_type_t": "MemoryType",
+    "amdsmi_memory_partition_type_t": "MemoryPartitionType",
+    "amdsmi_accelerator_partition_type_t": "AcceleratorPartitionType",
+    "amdsmi_gpu_block_t": "GpuBlock",
+    "amdsmi_ras_err_state_t": "RASState",
 }
 ALLOWED_NATIVE_CALLS = {
     "amdsmi_init",
@@ -95,6 +95,34 @@ def check_constants(*, header: str, source: str, native_type: str, go_type: str)
             raise ValueError("missing direct constant binding: " + name + " (" + go_type + ")")
 
 
+def check_enums(*, header: str, source: str, available_only: bool) -> None:
+    declared = {}
+    for block, single in VALUE_DECLARATIONS.findall(source_code(source)):
+        for name, go_type in CONSTANT_TYPES.findall(block or single):
+            declared.setdefault(name, set()).add(go_type)
+    for native_type, go_type in REQUIRED_ENUMS.items():
+        if not available_only or declared.keys() & set(enum_members(header, native_type)):
+            check_constants(header=header, source=source, native_type=native_type, go_type=go_type)
+    for body, native_type in ENUM_BLOCKS.findall(COMMENTS.sub(" ", header)):
+        members = ENUM_MEMBERS.findall(body)
+        mirrored = declared.keys() & set(members)
+        if not mirrored or native_type in REQUIRED_ENUMS:
+            continue
+        if native_type == "amdsmi_init_flags_t":
+            # The Go lifecycle accepts AMD GPUs only.
+            members = ["AMDSMI_INIT_AMD_GPUS"]
+            go_type = "InitFlags"
+            if mirrored - set(members):
+                raise ValueError("only AMDSMI_INIT_AMD_GPUS may be exported")
+        else:
+            types = {go_type for name in mirrored for go_type in declared[name]}
+            if len(types) != 1 or "" in types:
+                raise ValueError("inconsistent constant binding types: " + native_type)
+            go_type = types.pop()
+        subset = "typedef enum { " + ", ".join(members) + " } " + native_type + ";"
+        check_constants(header=subset, source=source, native_type=native_type, go_type=go_type)
+
+
 def check_module(source: str) -> None:
     source = COMMENTS.sub(" ", source)
     if MODULE_DEPENDENCIES.search(source):
@@ -112,24 +140,20 @@ def check_project(*, project: Path, available_only: bool) -> None:
     check_module((project / "go" / "go.mod").read_text(encoding="utf-8"))
     header = (project / "include" / "amd_smi" / "amdsmi.h").read_text(encoding="utf-8")
     package = project / "go" / "amdsmi"
-    missing = [filename for filename in ENUM_OWNERS if not (package / filename).is_file()]
-    if missing and not available_only:
-        raise ValueError("missing enum owner files: " + ", ".join(missing))
-    for filename, enums in ENUM_OWNERS.items():
-        if filename in missing:
-            continue
-        source = (package / filename).read_text(encoding="utf-8")
-        for native_type, go_type in enums:
-            check_constants(header=header, source=source, native_type=native_type, go_type=go_type)
-    calls = set()
-    for path in sorted((project / "go").rglob("*.go")):
-        if (
+    sources = {
+        path: path.read_text(encoding="utf-8")
+        for path in sorted((project / "go").rglob("*.go"))
+        if not (
             path.name.endswith("_test.go")
             or path.name == "mock_bridge_linux.go"
             or "testdata" in path.relative_to(project / "go").parts
-        ):
-            continue
-        calls.update(native_calls(path.read_text(encoding="utf-8")))
+        )
+    }
+    source = "\n".join(text for path, text in sources.items() if path.parent == package)
+    check_enums(header=header, source=source, available_only=available_only)
+    calls = set()
+    for text in sources.values():
+        calls.update(native_calls(text))
     check_native_calls(calls, available_only=available_only)
 
 

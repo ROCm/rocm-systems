@@ -6,7 +6,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added a read-only Linux Go module**.
+  - Provides GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
+
 ### Resolved Issues
+
+- **Fixed nearest-GPU topology results**.
+  - Orders by ascending hop count, then ascending link weight; reports only the stored count and resets discovery capacity for each socket.
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
@@ -14,8 +22,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
-
-- Added a read-only Linux Go module for GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS queries through the AMD SMI native library.
 
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
@@ -43,8 +49,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
 ### Changed
-
-- Aligned the pre-release Go common read-only API with Host declarations, including `Init(AMDSMI_INIT_AMD_GPUS)`, `GetGpuAsicInfo`, packed `Bdf`, `StatusError`, fixed firmware/NUMA arrays, ECC maps, and the profile/IDs result tuple. Replace previous names using the [migration table](go/README.md#pre-release-api-migration); no compatibility aliases are provided. BM units and extensions remain explicit: clock Boolean fields are false/unavailable, and profile IDs contain only the current ID. This does not establish Host runtime parity.
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
@@ -146,10 +150,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
-
-- Allocated the full native partition-ID array in the Go profile getter; its returned IDs slice contains one current partition ID on BM, regardless of the partition count.
-
-- Fixed nearest-GPU topology ordering to sort by hop count, then link weight, with equal pairs treated as equivalent.
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.

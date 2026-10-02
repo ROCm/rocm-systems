@@ -18,7 +18,9 @@ def parse_args(argv: list) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run AMD SMI Go checks without GPU access")
     parser.add_argument("--run", default=".")
     parser.add_argument("--package", default="./...")
-    parser.add_argument("--race", action="store_true")
+    sanitizers = parser.add_mutually_exclusive_group()
+    sanitizers.add_argument("--race", action="store_true")
+    sanitizers.add_argument("--asan", action="store_true")
     parser.add_argument("--checkptr", action="store_true")
     parser.add_argument("--cgocheck2", action="store_true")
     actions = parser.add_mutually_exclusive_group()
@@ -27,8 +29,12 @@ def parse_args(argv: list) -> argparse.Namespace:
     parser.add_argument("--native", action="store_true")
     parser.add_argument("--include-dir")
     parser.add_argument("--library-dir")
-    parser.add_argument("--cc", default="cc")
+    parser.add_argument("--cc")
     args = parser.parse_args(argv)
+    if args.cc is None:
+        args.cc = "gcc" if args.asan else "cc"
+    if args.asan and Path(args.cc).name != "gcc":
+        parser.error("--asan requires --cc gcc")
     if args.native and (not args.include_dir or not args.library_dir):
         parser.error("--native requires --include-dir and --library-dir")
     if not args.native and args.library_dir:
@@ -112,6 +118,8 @@ def go_command(*, args: argparse.Namespace, output: Path) -> list:
         command += ["-tags=amdsmi_mock"]
     if args.race:
         command += ["-race"]
+    if args.asan:
+        command += ["-asan"]
     if args.checkptr:
         command += ["-gcflags=all=-d=checkptr=2"]
     if args.build_example:
@@ -180,6 +188,8 @@ def run_fixture(*, project: Path, args: argparse.Namespace) -> None:
                 "-o",
                 str(root / "libamd_smi.so"),
             ]
+            if args.asan:
+                command += ["-fsanitize=address", "-fno-omit-frame-pointer", "-g"]
             subprocess.run(command + [str(path) for path in sources], env=env, check=True)
         subprocess.run(
             go_command(args=args, output=root / "telemetry"),

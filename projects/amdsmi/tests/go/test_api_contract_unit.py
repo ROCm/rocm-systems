@@ -267,7 +267,7 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)
-        self.assertIn("missing enum owner files: amdsmi_interface.go", result.stderr)
+        self.assertIn("missing direct constant binding: AMDSMI_STATUS_T_VALUE", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertNotIn("passed", result.stdout)
         (self.project / "go" / "go.mod").unlink()
@@ -293,6 +293,131 @@ class ProjectTests(unittest.TestCase):
                         contract.check_project(project=self.project, available_only=False)
                 path.write_text(source, encoding="utf-8")
 
+    def test_enum_declarations_can_move_between_package_files(self) -> None:
+        owner = self.package / "amdsmi_interface.go"
+        source = owner.read_text(encoding="utf-8")
+        owner.unlink()
+        blocks = source.split("\n\n")
+        for index, block in enumerate(blocks):
+            (self.package / ("constants_" + str(index) + ".go")).write_text(block, encoding="utf-8")
+        for available_only in (False, True):
+            with self.subTest(available_only=available_only):
+                contract.check_project(project=self.project, available_only=available_only)
+
+    def test_new_partial_enum_is_rejected_in_each_mode(self) -> None:
+        header = self.project / "include" / "amd_smi" / "amdsmi.h"
+        header.write_text(header.read_text(encoding="utf-8") + HEADER, encoding="utf-8")
+        (self.package / "extra_linux.go").write_text(
+            bindings(MEMBERS[:-1], "TestCode"), encoding="utf-8"
+        )
+        for available_only in (False, True):
+            with self.subTest(available_only=available_only):
+                with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_TEST_LAST"):
+                    contract.check_project(project=self.project, available_only=available_only)
+
+    def test_new_enum_requires_direct_constants_not_variables(self) -> None:
+        header = self.project / "include" / "amd_smi" / "amdsmi.h"
+        header.write_text(header.read_text(encoding="utf-8") + HEADER, encoding="utf-8")
+        (self.package / "extra.go").write_text(
+            bindings(MEMBERS, "TestCode").replace("const", "var"), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_TEST_FIRST"):
+            contract.check_project(project=self.project, available_only=False)
+
+    def test_new_enum_rejects_missing_wrong_type_and_indirect_bindings(self) -> None:
+        header = self.project / "include" / "amd_smi" / "amdsmi.h"
+        header.write_text(header.read_text(encoding="utf-8") + HEADER, encoding="utf-8")
+        source = bindings(MEMBERS, "TestCode")
+        path = self.package / "extra.go"
+        path.write_text(source, encoding="utf-8")
+        contract.check_project(project=self.project, available_only=False)
+        for invalid in (
+            bindings(MEMBERS[1:], "TestCode"),
+            source.replace("AMDSMI_TEST_LAST TestCode", "AMDSMI_TEST_LAST uint32"),
+            source.replace("C.AMDSMI_TEST_FIRST", "0"),
+            source.replace("C.AMDSMI_TEST_ALIAS", "C.AMDSMI_TEST_FIRST"),
+            source.replace("C.AMDSMI_TEST_LAST", "C.AMDSMI_TEST_LAST + 1"),
+            source.replace("C.AMDSMI_TEST_FIRST", "TestCode(C.AMDSMI_TEST_FIRST)"),
+        ):
+            path.write_text(invalid, encoding="utf-8")
+            for available_only in (False, True):
+                with self.subTest(source=invalid, available_only=available_only):
+                    with self.assertRaisesRegex(ValueError, "constant binding"):
+                        contract.check_project(project=self.project, available_only=available_only)
+
+    def test_copied_owner_is_checked_after_original_declarations_removed(self) -> None:
+        owner = self.package / "amdsmi_interface.go"
+        copied = self.package / "copied.go"
+        source = owner.read_text(encoding="utf-8")
+        copied.write_text(source, encoding="utf-8")
+        owner.write_text("package amdsmi\n", encoding="utf-8")
+        contract.check_project(project=self.project, available_only=False)
+        for invalid in (
+            source.replace("AMDSMI_STATUS_T_VALUE Status = C.AMDSMI_STATUS_T_VALUE", ""),
+            source.replace("AMDSMI_STATUS_T_VALUE Status", "AMDSMI_STATUS_T_VALUE uint32"),
+            source.replace("C.AMDSMI_STATUS_T_VALUE", "0"),
+        ):
+            copied.write_text(invalid, encoding="utf-8")
+            with self.subTest(source=invalid):
+                with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_STATUS_T_VALUE"):
+                    contract.check_project(project=self.project, available_only=False)
+
+    def test_test_only_constants_cannot_supply_required_enum(self) -> None:
+        owner = self.package / "amdsmi_interface.go"
+        source = owner.read_text(encoding="utf-8")
+        owner.unlink()
+        for relative in ("constants_test.go", "mock_bridge_linux.go", "testdata/constants.go"):
+            path = self.package / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_STATUS_T_VALUE"):
+            contract.check_project(project=self.project, available_only=False)
+
+    def test_unmirrored_and_test_only_new_enums_are_ignored(self) -> None:
+        header = self.project / "include" / "amd_smi" / "amdsmi.h"
+        header.write_text(header.read_text(encoding="utf-8") + HEADER, encoding="utf-8")
+        source = bindings(MEMBERS[:1], "TestCode")
+        for relative in (
+            "go/amdsmi/constants_test.go",
+            "go/amdsmi/mock_bridge_linux.go",
+            "go/amdsmi/testdata/constants.go",
+            "go/examples/constants.go",
+        ):
+            path = self.project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding="utf-8")
+        (self.package / "notes.go").write_text(
+            "/*\n" + source + "*/\nvar note = `" + source + "`\n", encoding="utf-8"
+        )
+        for available_only in (False, True):
+            contract.check_project(project=self.project, available_only=available_only)
+
+    def test_only_named_init_enum_allows_gpu_subset(self) -> None:
+        header = self.project / "include" / "amd_smi" / "amdsmi.h"
+        original = header.read_text(encoding="utf-8")
+        init_header = (
+            "typedef enum { AMDSMI_INIT_AMD_GPUS, AMDSMI_INIT_AMD_CPUS } amdsmi_init_flags_t;"
+        )
+        header.write_text(original + init_header, encoding="utf-8")
+        path = self.package / "init.go"
+        path.write_text(bindings(["AMDSMI_INIT_AMD_GPUS"], "InitFlags"), encoding="utf-8")
+        contract.check_project(project=self.project, available_only=False)
+        for invalid in (
+            bindings(["AMDSMI_INIT_AMD_GPUS", "AMDSMI_INIT_AMD_CPUS"], "InitFlags"),
+            bindings(["AMDSMI_INIT_AMD_GPUS"], "uint64"),
+            bindings(["AMDSMI_INIT_AMD_GPUS"], "InitFlags").replace("C.AMDSMI_INIT_AMD_GPUS", "2"),
+        ):
+            path.write_text(invalid, encoding="utf-8")
+            with self.subTest(source=invalid), self.assertRaises(ValueError):
+                contract.check_project(project=self.project, available_only=False)
+        path.write_text(bindings(["AMDSMI_INIT_AMD_GPUS"], "InitFlags"), encoding="utf-8")
+        header.write_text(
+            original + init_header.replace("amdsmi_init_flags_t", "amdsmi_other_flags_t"),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_INIT_AMD_CPUS"):
+            contract.check_project(project=self.project, available_only=False)
+
     def test_available_only_skips_missing_owners_but_final_requires_them(self) -> None:
         for filename in ENUM_OWNERS:
             path = self.package / filename
@@ -303,7 +428,7 @@ class ProjectTests(unittest.TestCase):
                     contract.check_project(project=self.project, available_only=True)
                 except (FileNotFoundError, ValueError) as error:
                     self.fail("available-only rejected absent owner: " + str(error))
-                with self.assertRaisesRegex(ValueError, "missing enum owner files:.*" + filename):
+                with self.assertRaisesRegex(ValueError, "missing direct constant binding:"):
                     contract.check_project(project=self.project, available_only=False)
             path.write_text(source, encoding="utf-8")
 
