@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -60,8 +61,7 @@ RUBY_RCCL_ENV = {
     "NCCL_NET": "IB",
     "NCCL_IB_DISABLE": "0",
     "NCCL_IB_HCA": (
-        "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
-        "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7"
+        "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3," "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7"
     ),
     "NCCL_IB_GID_INDEX": "3",
     "NCCL_IB_TC": "104",
@@ -153,8 +153,8 @@ class RunConfig:
     min_bytes: str = "1K"
     max_bytes: str = "256M"
     step_factor: int = 2
-    iterations: int = 20
-    warmup_iterations: int = 5
+    iterations: int = 5
+    warmup_iterations: int = 2
     mpi_root: Path = Path("/apps/sp/ompi-install")
 
     @property
@@ -168,6 +168,36 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def message_sizes(config: RunConfig, collective: str) -> set[int]:
+    """Profiler descriptor bytes, not rccl-tests' aggregate send/receive bytes.
+
+    The sweep uses float. AllGather and ReduceScatter divide the buffer by
+    rank count and align each rank's contribution down to 16 bytes.
+    """
+
+    def parse_size(value: str) -> int:
+        match = re.fullmatch(r"([0-9]+)([KMG]?)", value.upper())
+        if not match:
+            raise ValueError(f"Invalid byte size: {value!r}")
+        return int(match[1]) * {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3}[match[2]]
+
+    size, maximum = parse_size(config.min_bytes), parse_size(config.max_bytes)
+    if size < 4 or maximum < size or config.step_factor != 2:
+        raise ValueError(
+            "The profiler sweep requires 4 <= min_bytes <= max_bytes and step_factor=2"
+        )
+    sizes = set()
+    while size <= maximum:
+        count = size // 4
+        if collective in {"AllGather", "ReduceScatter"}:
+            count = (count // config.ranks) & ~3
+        if count == 0:
+            raise ValueError("Minimum size is too small for the requested rank count")
+        sizes.add(count * 4)
+        size *= config.step_factor
+    return sizes
 
 
 def _find_artifact(root: Path, relative_path: str, name: str) -> Path:
@@ -261,7 +291,7 @@ def validate_kpack_layout(paths: ArtifactPaths) -> None:
 
 def render_node_preflight_script() -> str:
     """Render the compute-node payload passed to ``srun ... bash -c``."""
-    return r'''set -eu
+    return r"""set -eu
 host=$(hostname -s)
 resolved_rccl=$(ldd "$ACCL_PREFLIGHT_BINARY" | awk '/librccl[.]so/{print $3; exit}')
 test -n "$resolved_rccl"
@@ -271,39 +301,39 @@ test -n "$resolved_hip"
 case "$(readlink -f "$resolved_hip")" in "$ROCM_PATH"/*) ;; *) echo "unexpected HIP runtime: $resolved_hip" >&2; exit 1 ;; esac
 test "$(sha256sum "$ACCL_RCCL_LIB" | awk '{print $1}')" = "$ACCL_EXPECT_RCCL_SHA256"
 test "$(sha256sum "$ACCL_PLUGIN" | awk '{print $1}')" = "$ACCL_EXPECT_PLUGIN_SHA256"
+sha256sum --check --strict <<< "$ACCL_EXPECT_BINARY_SHA256"
 readelf -Ws "$ACCL_PLUGIN" | grep -q ' ncclProfiler_v5$'
+has_kpack_ref() { readelf -SW "$1" | grep -q '[.]rocm_kpack_ref'; }
 if [ "$ACCL_KPACK_COUNT" -gt 0 ]; then
   for kpack in $ACCL_KPACK_FILES; do test -s "$kpack"; done
-  readelf -SW "$ACCL_RCCL_LIB" | grep -q '[.]rocm_kpack_ref'
+  has_kpack_ref "$ACCL_RCCL_LIB"
   for binary in $ACCL_TEST_BINARIES; do
-    readelf -SW "$binary" | grep -q '[.]rocm_kpack_ref'
+    has_kpack_ref "$binary"
   done
 else
-  if readelf -SW "$ACCL_RCCL_LIB" | grep -q '[.]rocm_kpack_ref'; then
+  if has_kpack_ref "$ACCL_RCCL_LIB"; then
     echo "librccl.so is kpack-stripped but no kpack archives were fetched" >&2
     exit 1
   fi
   for binary in $ACCL_TEST_BINARIES; do
-    if readelf -SW "$binary" | grep -q '[.]rocm_kpack_ref'; then
+    if has_kpack_ref "$binary"; then
       echo "$binary is kpack-stripped but no kpack archives were fetched" >&2
       exit 1
     fi
   done
 fi
-if [ -x "$ROCM_PATH/bin/rocminfo" ]; then
-  archs=$("$ROCM_PATH/bin/rocminfo" 2>/dev/null | sed -n 's/.*Name:[[:space:]]*\(gfx[0-9a-f]*\).*/\1/p' | sort -u | paste -sd, -)
-elif [ -x /usr/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then
-  archs=$(/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)
-elif [ -x /usr/local/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then
-  archs=$(/usr/local/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)
-elif command -v rocminfo >/dev/null 2>&1; then
-  archs=$(rocminfo 2>/dev/null | sed -n 's/.*Name:[[:space:]]*\(gfx[0-9a-f]*\).*/\1/p' | sort -u | paste -sd, -)
+rocminfo_bin="$ROCM_PATH/bin/rocminfo"
+python_bin=/usr/bin/python3
+if [ ! -x "$python_bin" ]; then python_bin=/usr/local/bin/python3; fi
+if [ ! -x "$rocminfo_bin" ] && [ -x "$python_bin" ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then
+  archs=$("$python_bin" "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)
 else
-  archs=
+  if [ ! -x "$rocminfo_bin" ]; then rocminfo_bin=$(command -v rocminfo); fi
+  archs=$("$rocminfo_bin" 2>/dev/null | sed -n 's/.*Name:[[:space:]]*\(gfx[0-9a-f]*\).*/\1/p' | sort -u | paste -sd, -)
 fi
 case ",$archs," in *,gfx950,*) ;; *) echo "unexpected GPU architecture(s): $archs" >&2; exit 1 ;; esac
 printf 'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\n' "$host" "$archs" "$ACCL_EXPECT_RCCL_SHA256" "$ACCL_EXPECT_PLUGIN_SHA256" "$(readlink -f "$resolved_hip")" "$ACCL_KPACK_COUNT"
-'''
+"""
 
 
 def render_slurm_script(
@@ -383,6 +413,12 @@ def render_slurm_script(
         _shell_export("ACCL_KPACK_COUNT", str(len(paths.kpack_files))),
         _shell_export("ACCL_EXPECT_RCCL_SHA256", sha256_file(paths.rccl_library)),
         _shell_export("ACCL_EXPECT_PLUGIN_SHA256", sha256_file(paths.profiler_plugin)),
+        _shell_export(
+            "ACCL_EXPECT_BINARY_SHA256",
+            "\n".join(
+                f"{sha256_file(path)}  {path}" for path in paths.binaries.values()
+            ),
+        ),
     ]
     lines.extend(_shell_export(name, value) for name, value in RUBY_RCCL_ENV.items())
     lines.extend(
@@ -412,14 +448,6 @@ def render_slurm_script(
             "    preflight_rc=1",
             "  fi",
             "fi",
-            *[
-                "test \"$(sha256sum "
-                + shlex.quote(str(paths.binaries[binary]))
-                + " | awk '{print $1}')\" = "
-                + shlex.quote(sha256_file(paths.binaries[binary]))
-                + " || preflight_rc=1"
-                for binary in COLLECTIVES
-            ],
             'export ACCL_MPI_HOSTS="$mpi_hosts"',
             (
                 "printf 'mpi_launcher=%s mpi_hosts=%s ranks=%s\\n' "
@@ -489,6 +517,8 @@ def render_slurm_script(
             str(config.step_factor),
             "-g",
             "1",
+            "-d",
+            "float",
             "-n",
             str(config.iterations),
             "-w",
@@ -663,6 +693,7 @@ def validate_collective_output(
     expected_collective: str,
     expected_ranks: int,
     warmup_iterations: int,
+    expected_sizes: set[int] | None = None,
 ) -> dict:
     files = sorted(output_dir.glob("*.jsonl")) if output_dir.is_dir() else []
     if not files:
@@ -758,6 +789,11 @@ def validate_collective_output(
         )
 
     reference_sizes = rank_sizes[0]
+    if expected_sizes is not None and reference_sizes != expected_sizes:
+        raise ValueError(
+            f"Requested message-size coverage mismatch: observed={sorted(reference_sizes)}, "
+            f"expected={sorted(expected_sizes)}"
+        )
     for rank, sizes in rank_sizes.items():
         if sizes != reference_sizes:
             raise ValueError(
@@ -893,6 +929,28 @@ def build_manifest(
     }
 
 
+def render_summary(manifest: dict) -> str:
+    lines = [
+        "ACCL profiler decomposition",
+        f"Overall: {'FAIL' if manifest['errors'] else 'PASS'}",
+        f"Slurm job: {manifest['slurm']['job_id'] or 'not submitted'} ({manifest['slurm']['state']})",
+        "",
+        "Collective | result | process exit | profiler validation",
+    ]
+    for binary, result in manifest["collectives"].items():
+        validated = result["validation"] is not None
+        report_failed = any(
+            error.startswith(f"{binary}:") for error in manifest["errors"]
+        )
+        passed = result["exit_code"] == 0 and validated and not report_failed
+        lines.append(
+            f"{binary} | {'PASS' if passed else 'FAIL'} | {result['exit_code']} | {'PASS' if validated else 'FAIL'}"
+        )
+    if manifest["errors"]:
+        lines.extend(["", "Errors:", *manifest["errors"]])
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact-dir", required=True, type=Path)
@@ -905,8 +963,8 @@ def main() -> int:
     parser.add_argument("--min-bytes", default="1K")
     parser.add_argument("--max-bytes", default="256M")
     parser.add_argument("--step-factor", type=int, default=2)
-    parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--warmup-iterations", type=int, default=5)
+    parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--warmup-iterations", type=int, default=2)
     parser.add_argument(
         "--mpi-root",
         type=Path,
@@ -940,6 +998,20 @@ def main() -> int:
         warmup_iterations=args.warmup_iterations,
         mpi_root=args.mpi_root,
     )
+    if (
+        config.iterations < 1
+        or config.warmup_iterations < 0
+        or config.timeout_minutes < 1
+    ):
+        parser.error(
+            "iterations/timeout must be positive; warmup_iterations cannot be negative"
+        )
+    try:
+        expected_sizes = {
+            name: message_sizes(config, name) for name in COLLECTIVES.values()
+        }
+    except ValueError as exc:
+        parser.error(str(exc))
 
     paths = discover_artifacts(args.artifact_dir)
     work_dir = args.work_dir.resolve()
@@ -993,12 +1065,13 @@ def main() -> int:
                 expected_name,
                 config.ranks,
                 config.warmup_iterations,
+                expected_sizes[expected_name],
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{binary}: {exc}")
 
     errors.extend(generate_reports(paths, work_dir, config.warmup_iterations))
-    if not slurm_state.startswith("COMPLETED"):
+    if slurm_state != "COMPLETED" or slurm_exit_code != "0:0":
         errors.append(
             f"Slurm allocation did not complete successfully: "
             f"state={slurm_state}, exit_code={slurm_exit_code}"
@@ -1017,18 +1090,7 @@ def main() -> int:
     (work_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    summary = [
-        "ACCL profiler decomposition",
-        f"Slurm job: {job_id or 'not submitted'} ({slurm_state})",
-        "",
-        "Collective | status",
-        "--- | ---",
-    ]
-    summary.extend(
-        f"{binary} | {'PASS' if statuses.get(binary) == 0 else 'FAIL'}"
-        for binary in COLLECTIVES
-    )
-    write_github_summary("\n".join(summary))
+    write_github_summary(render_summary(manifest))
     if errors:
         for error in errors:
             log.error("%s", error)

@@ -22,6 +22,10 @@ on:
         description: 'Test scope: smoke (22 curated tests) or all'
         type: string
         default: 'smoke'
+      test_suites:
+        description: 'auto, or comma-separated suite names (see plan_rccl_ci.py)'
+        type: string
+        default: 'auto'
       notify_email:
         type: string
         default: ''
@@ -44,6 +48,31 @@ permissions:
   contents: read
 
 jobs:
+  test-plan:
+    name: Plan RCCL test suites
+    needs: [therock-build-linux]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    outputs:
+      suites: ${{ steps.plan.outputs.suites }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: projects/rccl/ci/scripts
+      - name: Select runnable suites
+        id: plan
+        env:
+          EVENT_NAME: ${{ inputs.event_name }}
+          TEST_SUITES: ${{ inputs.test_suites }}
+          AMDGPU_FAMILY: ${{ inputs.amdgpu_families }}
+          BUILD_RESULT: ${{ needs.therock-build-linux.result }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+        run: |
+          python3 projects/rccl/ci/scripts/plan_rccl_ci.py \
+            --event-name "$EVENT_NAME" --test-suites "$TEST_SUITES" \
+            --amdgpu-family "$AMDGPU_FAMILY" --build-result "$BUILD_RESULT" \
+            --artifact-run-id "$ARTIFACT_RUN_ID"
+
   therock-build-linux:
     name: Build Linux Packages
     # Skipped when artifact_run_id is provided (reuse mode). Downstream jobs
@@ -155,8 +184,7 @@ jobs:
   therock-test-linux-multi-node:
     name: "Test multi-node"
     # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
-    # TODO: When re-enabling, gate this job the same way as the other therock-build-linux
-    # dependents: if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && ... }}
+    # TODO: When re-enabling, add this suite to plan_rccl_ci.py and consume test-plan.
     if: false
     permissions:
       contents: read
@@ -172,8 +200,8 @@ jobs:
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'single-node') }}
+    needs: [test-plan]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -183,8 +211,8 @@ jobs:
 
   therock-test-pytorch-distributed:
     name: "Test PyTorch distributed (scheduled)"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'pytorch') }}
+    needs: [test-plan]
     uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
@@ -199,8 +227,8 @@ jobs:
 
   therock-test-jax-collective:
     name: "Test JAX collective (scheduled)"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'jax') }}
+    needs: [test-plan]
     uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
@@ -214,8 +242,8 @@ jobs:
 
   therock-test-rocprof:
     name: "Test rocprofv3 smoke"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'rocprof') }}
+    needs: [test-plan]
     uses: ./.github/workflows/therock-rccl-test-rocprof.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
@@ -229,8 +257,8 @@ jobs:
 
   therock-test-madengine:
     name: "Test MADEngine workloads (scheduled)"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') }}
+    needs: [test-plan]
     permissions:
       contents: read
       id-token: write
@@ -248,8 +276,8 @@ jobs:
 
   therock-test-accl-profiler:
     name: "Test ACCL profiler decomposition (scheduled)"
-    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
-    needs: [therock-build-linux]
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'accl-profiler') }}
+    needs: [test-plan]
     permissions:
       contents: read
     uses: ./.github/workflows/therock-rccl-test-accl-profiler.yml

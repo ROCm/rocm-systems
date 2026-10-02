@@ -2,12 +2,15 @@
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+from accl_test_records import make_record as _record
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ci", "scripts"))
 import test_accl_profiler as accl_ci  # noqa: E402
@@ -56,34 +59,6 @@ def _artifact_paths(tmp_path: Path, kpack_names: tuple[str, ...] = ()) -> Artifa
     )
 
 
-def _record(rank: int, size: int, coll: str = "AllReduce") -> dict:
-    return {
-        "header": {"rank": rank, "n_ranks": 2},
-        "coll_perf": {
-            "coll": coll,
-            "coll_sn": size + rank,
-            "coll_msg_size_bytes": size,
-            "decomposition": {
-                "enqueue_to_kernel_us": 1,
-                "gpu_kernel_avg_us": 2,
-                "gpu_kernel_min_us": 2,
-                "gpu_kernel_max_us": 2,
-                "proxy_gpu_wait_us": 3,
-                "proxy_network_us": 4,
-                "proxy_peer_wait_us": 5,
-                "proxy_flush_us": 6,
-                "proxy_gpu_recv_wait_us": 7,
-                "n_proxy_ops": 8,
-                "n_send_ops": 4,
-                "n_recv_ops": 4,
-            },
-            "event_trace_ts": {
-                "kernel_events": [{"channel_id": 0, "duration_us": 2}]
-            },
-        },
-    }
-
-
 def _run_config(tmp_path: Path, **kwargs) -> RunConfig:
     mpi_root = tmp_path / "openmpi"
     (mpi_root / "bin").mkdir(parents=True, exist_ok=True)
@@ -130,9 +105,7 @@ def test_slurm_script_runs_only_five_supported_collectives(tmp_path):
     assert "alltoall_perf" not in script
     assert "srun --nodes=2 --ntasks=2 --ntasks-per-node=1" in script
     assert "--ntasks=16" not in script
-    expected_mpi = (
-        f"{tmp_path}/openmpi/bin/mpirun --prefix {tmp_path}/openmpi -np 16"
-    )
+    expected_mpi = f"{tmp_path}/openmpi/bin/mpirun --prefix {tmp_path}/openmpi -np 16"
     assert expected_mpi in script
     assert '--host "$ACCL_MPI_HOSTS"' in script
     assert "--mca pml ob1 --mca btl '^vader,openib'" in script
@@ -158,8 +131,7 @@ def test_slurm_script_validates_mpi_rank_placement(tmp_path):
     assert "NCCL_IGNORE_CPU_AFFINITY" in script
     assert 'set -e; test "${OMPI_COMM_WORLD_SIZE:-}"' in script
     assert (
-        f"export ACCL_PROFILER_OUTPUT_DIR={tmp_path}/work/raw/all_reduce_perf"
-        in script
+        f"export ACCL_PROFILER_OUTPUT_DIR={tmp_path}/work/raw/all_reduce_perf" in script
     )
 
 
@@ -217,8 +189,8 @@ def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch
         "ACTIONS_RESULTS_URL",
     ):
         assert variable in script
-    assert '"$ROCM_PATH/bin/rocminfo"' in script
-    assert '/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator"' in script
+    assert 'rocminfo_bin="$ROCM_PATH/bin/rocminfo"' in script
+    assert '"$python_bin" "$ROCM_PATH/bin/rocm_agent_enumerator"' in script
 
 
 def test_slurm_script_uses_embedded_kpack_references(tmp_path):
@@ -233,8 +205,8 @@ def test_slurm_script_uses_embedded_kpack_references(tmp_path):
     assert "export ROCM_KPACK_PATH_PREFIX=" not in script
     assert "rccl_lib_gfx950.kpack" in script
     assert "rccl_test_gfx950.kpack" in script
-    assert 'readelf -SW "$ACCL_RCCL_LIB"' in script
-    assert 'readelf -SW "$binary"' in script
+    assert 'has_kpack_ref "$ACCL_RCCL_LIB"' in script
+    assert 'has_kpack_ref "$binary"' in script
     assert 'resolved_hip=$(ldd "$ACCL_PREFLIGHT_BINARY"' in script
     assert '"$ROCM_PATH"/*' in script
 
@@ -255,6 +227,9 @@ def test_discover_artifacts_prefers_packaged_layout(tmp_path):
     plugin.write_text("plugin", encoding="utf-8")
     report = tmp_path / "share" / "rccl" / "accl" / "accl_report.py"
     report.write_text("report", encoding="utf-8")
+    # A preferred package location wins over a duplicate elsewhere in the tree.
+    (tmp_path / "duplicate").mkdir()
+    (tmp_path / "duplicate" / plugin.name).write_text("other plugin")
     for binary in COLLECTIVES:
         (tmp_path / "bin" / binary).write_text(binary, encoding="utf-8")
 
@@ -263,6 +238,208 @@ def test_discover_artifacts_prefers_packaged_layout(tmp_path):
     assert paths.profiler_plugin == plugin.resolve()
     assert paths.report_script == report.resolve()
     assert set(paths.binaries) == set(COLLECTIVES)
+
+
+def test_discover_artifacts_fallback_and_kpacks(tmp_path):
+    expected = _artifact_paths(
+        tmp_path, ("rccl_lib_gfx950.kpack", "rccl_test_gfx950.kpack")
+    )
+    assert discover_artifacts(tmp_path) == expected
+
+
+def test_discover_artifacts_rejects_ambiguous_fallback(tmp_path):
+    _artifact_paths(tmp_path)
+    (tmp_path / "duplicate").mkdir()
+    (tmp_path / "duplicate" / "librccl-profiler-accl.so").write_text("other plugin")
+    with pytest.raises(
+        RuntimeError, match="Ambiguous artifact librccl-profiler-accl.so"
+    ):
+        discover_artifacts(tmp_path)
+
+
+@pytest.mark.parametrize("collective", COLLECTIVES.values())
+def test_message_sizes_match_requested_sweep(collective):
+    sizes = accl_ci.message_sizes(RunConfig(), collective)
+    divisor = 16 if collective in {"AllGather", "ReduceScatter"} else 1
+    assert sizes == {1024 * 2**index // divisor for index in range(19)}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"min_bytes": "0"},
+        {"min_bytes": "invalid"},
+        {"max_bytes": "512"},
+        {"step_factor": 1},
+        {"min_bytes": "4"},
+    ],
+)
+def test_message_sizes_reject_invalid_sweeps(overrides):
+    with pytest.raises(ValueError):
+        accl_ci.message_sizes(RunConfig(**overrides), "AllGather")
+
+
+def test_validate_collective_output_rejects_uniformly_truncated_sweep(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank)
+    with pytest.raises(ValueError, match="Requested message-size coverage mismatch"):
+        validate_collective_output(tmp_path, "AllReduce", 2, 2, {1024, 2048, 4096})
+
+
+@pytest.mark.parametrize(
+    "world,local_size,local_rank,passes",
+    [
+        (16, 8, 0, True),
+        (16, 8, 7, True),
+        (8, 8, 0, False),
+        (16, 4, 0, False),
+        (16, 8, 8, False),
+    ],
+)
+def test_mpi_preflight_executes_fail_fast(
+    tmp_path, world, local_size, local_rank, passes
+):
+    script = render_slurm_script(
+        _artifact_paths(tmp_path), tmp_path / "work", _run_config(tmp_path)
+    )
+    line = next(line for line in script.splitlines() if "set -e; test" in line)
+    argv = shlex.split(line)
+    payload = argv[argv.index("-c") + 1]
+    result = subprocess.run(
+        ["bash", "-c", payload],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "ACCL_EXPECT_RANKS": "16",
+            "ACCL_GPUS_PER_NODE": "8",
+            "OMPI_COMM_WORLD_SIZE": str(world),
+            "OMPI_COMM_WORLD_LOCAL_SIZE": str(local_size),
+            "OMPI_COMM_WORLD_LOCAL_RANK": str(local_rank),
+            "OMPI_COMM_WORLD_RANK": "0",
+        },
+    )
+    assert (result.returncode == 0) == passes, result.stderr
+    assert ("mpi_host=" in result.stdout) == passes
+
+
+@pytest.mark.parametrize(
+    "corrupt", [None, "librccl.so", "librccl-profiler-accl.so", *COLLECTIVES]
+)
+def test_node_preflight_checks_all_artifact_digests(tmp_path, corrupt):
+    paths = _artifact_paths(tmp_path)
+    env = {
+        **os.environ,
+        "ROCM_PATH": str(tmp_path),
+        "ACCL_RCCL_LIB": str(paths.rccl_library),
+        "ACCL_PLUGIN": str(paths.profiler_plugin),
+        "ACCL_PREFLIGHT_BINARY": str(paths.binaries["all_reduce_perf"]),
+        "ACCL_EXPECT_RCCL_SHA256": accl_ci.sha256_file(paths.rccl_library),
+        "ACCL_EXPECT_PLUGIN_SHA256": accl_ci.sha256_file(paths.profiler_plugin),
+        "ACCL_EXPECT_BINARY_SHA256": "\n".join(
+            f"{accl_ci.sha256_file(p)}  {p}" for p in paths.binaries.values()
+        ),
+        "ACCL_TEST_BINARIES": " ".join(map(str, paths.binaries.values())),
+        "ACCL_KPACK_COUNT": "0",
+    }
+    if corrupt:
+        (tmp_path / corrupt).write_text("tampered")
+    # Emulate node discovery, but exercise the real Bash checks and sha256sum.
+    mocks = """
+ldd() { printf 'librccl.so => %s\nlibamdhip64.so => %s/libamdhip64.so\n' "$ACCL_RCCL_LIB" "$ROCM_PATH"; }
+readelf() { if [ "$1" = -Ws ]; then echo ' ncclProfiler_v5'; fi; }
+rocminfo() { echo 'Name: gfx950'; }
+"""
+    result = subprocess.run(
+        ["bash", "-c", mocks + render_node_preflight_script()],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (corrupt is None), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [None, "validation", "report", "process", "preflight", "slurm", "infrastructure"],
+)
+def test_main_manifest_summary_and_exit_agree(tmp_path, monkeypatch, failure):
+    paths = _artifact_paths(tmp_path)
+    report_source = (
+        Path(__file__).resolve().parents[1] / "plugins/profiler/accl/accl_report.py"
+    )
+    paths.report_script.write_text(report_source.read_text())
+    if failure == "report":
+        paths.report_script.write_text("import sys; sys.exit(1)\n")
+    config = _run_config(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    statuses = {"preflight": 0, **dict.fromkeys(COLLECTIVES, 0)}
+    if failure in {"process", "preflight"}:
+        statuses["all_reduce_perf" if failure == "process" else "preflight"] = 1
+    (work / "collective-status.tsv").write_text(
+        "".join(f"{key}\t{value}\n" for key, value in statuses.items())
+    )
+    for binary, collective in COLLECTIVES.items():
+        for rank in range(2):
+            output = work / "raw" / binary
+            _write_rank_file(output, rank, collective, complete=failure != "validation")
+            # Two-rank AG/RS descriptor bytes are half the requested size.
+            if collective in {"AllGather", "ReduceScatter"}:
+                path = output / f"rank{rank}.jsonl"
+                objects = [json.loads(line) for line in path.read_text().splitlines()]
+                for obj in objects:
+                    if "coll_perf" in obj:
+                        obj["coll_perf"]["coll_msg_size_bytes"] //= 2
+                path.write_text("\n".join(map(json.dumps, objects)) + "\n")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "test_accl_profiler.py",
+            "--artifact-dir",
+            str(paths.root),
+            "--work-dir",
+            str(work),
+            "--mpi-root",
+            str(config.mpi_root),
+            "--nodes",
+            "1",
+            "--gpus-per-node",
+            "2",
+            "--min-bytes",
+            "1K",
+            "--max-bytes",
+            "2K",
+        ],
+    )
+    monkeypatch.setattr(accl_ci.signal, "signal", lambda *_: None)
+
+    def submit(*_):
+        if failure == "infrastructure":
+            raise RuntimeError("scheduler unavailable")
+        return "12345"
+
+    monkeypatch.setattr(accl_ci, "submit_slurm_job", submit)
+    monkeypatch.setattr(accl_ci, "cancel_slurm_job", lambda *_: None)
+    monkeypatch.setattr(
+        accl_ci,
+        "wait_for_slurm_job",
+        lambda *_: ("FAILED" if failure == "slurm" else "COMPLETED", "0:0"),
+    )
+    summaries = []
+    monkeypatch.setattr(accl_ci, "write_github_summary", summaries.append)
+    assert accl_ci.main() == (0 if failure is None else 1)
+    manifest = json.loads((work / "manifest.json").read_text())
+    assert bool(manifest["errors"]) == (failure is not None)
+    assert f"Overall: {'PASS' if failure is None else 'FAIL'}" in summaries[0]
+    if failure in {"validation", "report", "process"}:
+        assert "all_reduce_perf | FAIL" in summaries[0]
+    if failure is None:
+        assert set(path.stem for path in (work / "reports").glob("*.txt")) == set(
+            COLLECTIVES
+        )
+        assert (work / "accl_report.txt").stat().st_size > 0
 
 
 def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
@@ -290,9 +467,7 @@ def test_validate_collective_output_requires_nested_kernel_events(tmp_path):
 
 
 @pytest.mark.parametrize("event_trace", [None, [], "invalid"])
-def test_validate_collective_output_rejects_invalid_event_trace(
-    tmp_path, event_trace
-):
+def test_validate_collective_output_rejects_invalid_event_trace(tmp_path, event_trace):
     for rank in range(2):
         _write_rank_file(tmp_path, rank)
     path = tmp_path / "rank0.jsonl"
@@ -479,9 +654,7 @@ def test_wait_for_slurm_job_starts_timeout_at_running(monkeypatch):
 
     monkeypatch.setattr(accl_ci.subprocess, "run", fake_run)
     monkeypatch.setattr(accl_ci.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        accl_ci.time, "monotonic", lambda: next(monotonic_values)
-    )
+    monkeypatch.setattr(accl_ci.time, "monotonic", lambda: next(monotonic_values))
 
     with pytest.raises(TimeoutError, match="exceeded 1 running minutes"):
         wait_for_slurm_job("12345", 1)
