@@ -3,9 +3,9 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Presubmit and on-demand ASAN builds. The ci:host-asan PR label selects
+# host-only instrumentation; ci:asan selects full ASAN. Dispatch defaults to
+# full ASAN, while run_rocjitsu selects host-ASAN HIP/ROCr tests on CPU.
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -20,6 +20,10 @@ on:
       - labeled
   workflow_dispatch:
     inputs:
+      run_rocjitsu:
+        type: boolean
+        description: "Build host-ASAN runtime stages only, then run HIP smoke and ROCr quick suites under rocJITsu on CPU"
+        default: false
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
@@ -59,19 +63,27 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
     with:
-      build_variant: "asan"
+      build_variant: ${{ inputs.run_rocjitsu && 'host-asan' || 'asan' }}
+      # The simulator only consumes HIP/ROCr runtime suites. Excluded stages
+      # are skipped outright; no math-library baseline artifacts are copied.
+      build_stages: ${{ inputs.run_rocjitsu && 'compiler-runtime,runtime-tests' || '' }}
+      build_native_linux: ${{ !inputs.run_rocjitsu }}
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
       build_pytorch: false
       build_jax: false
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
+      linux_amdgpu_families: ${{ inputs.run_rocjitsu && 'gfx94X' || inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
+      linux_test_labels: ${{ inputs.run_rocjitsu && 'test:hip-tests,test:rocrtst' || inputs.linux_test_labels || '' }}
+      prebuilt_stages: ${{ !inputs.run_rocjitsu && inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ !inputs.run_rocjitsu && inputs.baseline_run_id || '' }}
+      baseline_repository: ${{ !inputs.run_rocjitsu && (inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository)) || '' }}
       repository: ROCm/TheRock
       ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Dispatch normally enables sandbox GPU testing. Clear both runner keys
+      # in simulator mode so these artifacts are tested only on the CPU pool.
+      external_repo: >-
+        {"repository":"${{ github.repository }}","ref":"${{ github.sha }}",
+         "family_overrides":${{ inputs.run_rocjitsu && '{"gfx94x":{"linux":{"test-runs-on":"","test-runs-on-sandbox":""}}}' || '{}' }}}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -96,6 +108,14 @@ jobs:
       contents: read
       id-token: write
 
+  rocjitsu_tests:
+    needs: [setup, linux_build_and_test]
+    if: ${{ inputs.run_rocjitsu && needs.setup.outputs.enable_build_jobs == 'true' }}
+    uses: ./.github/workflows/host-asan-rocjitsu-tests.yml
+    with:
+      therock_ref: e0e238c0323f76aeabdd348cfd3798a653820fdc
+      artifacts_run_id: ${{ github.run_id }}
+
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary
     # always() is needed to show the job statuses regardless of failure
@@ -103,6 +123,7 @@ jobs:
     needs:
       - setup
       - linux_build_and_test
+      - rocjitsu_tests
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

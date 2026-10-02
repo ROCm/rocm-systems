@@ -1,0 +1,181 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: Host-ASAN runtime tests under rocJITsu
+
+# Runtime-only prototype: HIP smoke (excluding the three printf stress cases
+# from #12666) and the ROCr QUICK_TESTS selection. This is not full systems
+# coverage. Runtime, tests, compiler and ASAN runtime all come from one build.
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        required: true
+        type: string
+      artifacts_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  simulator:
+    name: Host-ASAN rocJITsu / ${{ matrix.suite }}
+    runs-on: aws-linux-scale-rocm-large
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [hip-tests, rocrtst]
+    container:
+      image: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TYPE: ci
+      ROCM_ROOT: ${{ github.workspace }}/asan-rocm
+      ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
+      SUITE: ${{ matrix.suite }}
+      ROCRTST_FILTER: rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test
+    steps:
+      - name: Install build and artifact tools
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential binutils ca-certificates cmake curl git ninja-build \
+            pkg-config python3 python3-venv xz-utils zstd
+
+      - name: Checkout systems branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            emulation/rocjitsu
+
+      - name: Checkout matching TheRock artifact tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ inputs.therock_ref }}
+          path: TheRock
+          persist-credentials: false
+          sparse-checkout: |
+            build_tools
+            cmake
+
+      - name: Fetch host-ASAN runtime and systems test artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p logs "$ROCM_ROOT"
+          python3 -m venv .venv
+          .venv/bin/pip install boto3 requests pyzstd
+          # --rocrtst includes the core runtime/compiler and hwloc dependencies.
+          # The pinned installer predates --hip-tests, so fetch that artifact
+          # explicitly. No math-library artifacts or nightly fallbacks are used.
+          .venv/bin/python TheRock/build_tools/install_rocm_from_artifacts.py \
+            --run-id "$ARTIFACTS_RUN_ID" --run-github-repo "$GITHUB_REPOSITORY" \
+            --artifact-group gfx94X --amdgpu-targets gfx942 \
+            --output-dir "$ROCM_ROOT" --rocrtst --tests 2>&1 | tee logs/fetch-runtime.log
+          .venv/bin/python TheRock/build_tools/fetch_artifacts.py \
+            --run-id "$ARTIFACTS_RUN_ID" --run-github-repo "$GITHUB_REPOSITORY" \
+            --artifact-group gfx94X --amdgpu-targets gfx942 \
+            --output-dir "$ROCM_ROOT" --flatten \
+            '^core-hiptests_test_' '^amd-llvm_dev_' 2>&1 | tee logs/fetch-tests.log
+          test -f "$ROCM_ROOT/share/hip/catch_tests/CTestTestfile.cmake"
+          test -x "$ROCM_ROOT/bin/rocrtst64"
+          test -x "$ROCM_ROOT/llvm/bin/clang"
+          test -x "$ROCM_ROOT/llvm/bin/clang++"
+          test -x "$ROCM_ROOT/llvm/bin/llvm-symbolizer"
+          # Refuse a release runtime accidentally supplied as host-ASAN input.
+          readelf -Ws "$ROCM_ROOT/lib/libamdhip64.so" > logs/hip-symbols.log
+          grep -q '__asan_' logs/hip-symbols.log
+          .venv/bin/python TheRock/build_tools/github_actions/configure_asan_env.py \
+            --artifacts-dir "$ROCM_ROOT" 2>&1 | tee logs/asan-environment.log
+          printf 'Source: %s/actions/runs/%s\n' \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$ARTIFACTS_RUN_ID" > logs/provenance.txt
+          git rev-parse HEAD >> logs/provenance.txt
+          git -C TheRock rev-parse HEAD >> logs/provenance.txt
+
+      - name: Build simulator with the artifact compiler and shared ASAN
+        run: |
+          set -euo pipefail
+          test -f "${ASAN_RUNTIME_PATH:?ASAN runtime was not resolved}"
+          test -x "${ASAN_SYMBOLIZER_PATH:?ASAN symbolizer was not resolved}"
+          export LD_LIBRARY_PATH="$(dirname "$ASAN_RUNTIME_PATH"):$LD_LIBRARY_PATH"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          cmake -S emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$ROCM_ROOT/llvm/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$ROCM_ROOT/llvm/bin/clang++" \
+            -DBUILD_TESTING=OFF -DRJ_LOG_GROUPS=OFF \
+            -DRJ_ENABLE_ASAN=ON -DRJ_SANITIZER_RUNTIME=SHARED \
+            2>&1 | tee logs/configure.log
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared \
+            -j"$(nproc)" 2>&1 | tee logs/build.log
+          test -x rj-build/tools/rocjitsu/rocjitsu
+          test -f emulation/rocjitsu/configs/gfx942_cdna3.json
+
+      - name: Run selected systems suite in local simulator mode
+        env:
+          DEBUG_HIP_GRAPH_MIN_OVERLAP: "0"
+          THEROCK_REQUIRE_HIP_YAML_ENTRIES: "1"
+        run: |
+          set -euo pipefail
+          unset GTEST_FILTER
+          # The ASAN-linked launcher preloads its matching runtime before its
+          # interposer in the child. Do not preload ASAN into the Python driver.
+          launcher="$PWD/rj-build/tools/rocjitsu/rocjitsu"
+          config="$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json"
+          if [[ "$SUITE" == hip-tests ]]; then
+            python3 .github/scripts/rocjitsu_suite_runner.py \
+              --rocjitsu "$launcher" --config "$config" --name hip-tests-smoke \
+              --cwd "$ROCM_ROOT/share/hip/catch_tests" --timeout-seconds 9000 \
+              --log logs/hip-tests.log -- \
+              ctest --test-dir "$ROCM_ROOT/share/hip/catch_tests" \
+                -L '^smoke$' \
+                --exclude-regex 'Unit_NonHost_Printf_(loop|multiple_Threads|BufferAvailability)' \
+                --no-tests=error --output-on-failure --parallel 1 --timeout 3600 -V
+          else
+            python3 .github/scripts/rocjitsu_suite_runner.py \
+              --rocjitsu "$launcher" --config "$config" --name rocrtst-quick \
+              --cwd "$ROCM_ROOT/bin" --timeout-seconds 7200 \
+              --gtest-filter "$ROCRTST_FILTER" --log logs/rocrtst.log -- \
+              "$ROCM_ROOT/bin/rocrtst64" "--gtest_filter=$ROCRTST_FILTER"
+            # GoogleTest exits zero when a stale filter selects no tests.
+            grep -Eq '\[ +PASSED +\] [1-9][0-9]* tests?\.' logs/rocrtst.log
+          fi
+          echo passed > "logs/$SUITE.result"
+
+      - name: Summarize actual suite result
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          result=failed
+          if [[ -f "logs/$SUITE.result" ]]; then result=$(cat "logs/$SUITE.result"); fi
+          {
+            echo "### Host-ASAN rocJITsu: $SUITE — $result"
+            echo "Source build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$ARTIFACTS_RUN_ID"
+            echo 'Runner: aws-linux-scale-rocm-large; local gfx942_cdna3 simulation.'
+            echo 'Subset: HIP smoke excluding three printf stress cases, or ROCr QUICK_TESTS.'
+            echo 'Math-library suites are excluded. Missing artifacts, empty selections and timeouts fail.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$result" = passed
+
+      - name: Retain simulator and ASAN logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-asan-rocjitsu-${{ matrix.suite }}-${{ github.run_attempt }}
+          path: |
+            logs/
+            rj-build/CMakeCache.txt
+          if-no-files-found: error
+          retention-days: 14
