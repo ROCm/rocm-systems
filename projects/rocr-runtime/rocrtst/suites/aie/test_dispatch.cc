@@ -15,6 +15,7 @@
 #include <limits>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <elf.h>
@@ -251,6 +252,8 @@ std::uint64_t enqueue_aie_packet(hsa_queue_t* q, const hsa_amd_aie_kernel_dispat
 // the two shapes it turns into is the loader's business, not the application's.
 // ---------------------------------------------------------------------------
 const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
+// vsmul in an aie2 section followed by vsadd in an aie2p section.
+const std::filesystem::path kMultiArchHsacoPath = STRINGIFY(MULTIARCH_HSACO_PATH);
 constexpr const char* kHsacoKernelName = DEFAULT_HSACO_KERNEL_NAME;
 const std::filesystem::path kMulHsacoPath = STRINGIFY(MUL_HSACO_PATH);
 constexpr const char* kMulHsacoKernelName = MUL_HSACO_KERNEL_NAME;
@@ -706,6 +709,20 @@ TEST_F(DispatchTest, SingleDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, LoadsTheAgentsSectionOfAMultiArchHsaco) {
+  // The loader has to pick the section named after the agent's arch, not the first AIE section in
+  // the file. aie2 is packed first, so on an aie2p agent only that selection finds vsadd.
+  if (!std::filesystem::exists(kMultiArchHsacoPath)) {
+    GTEST_SKIP() << "hsaco was not built: " << kMultiArchHsacoPath;
+  }
+  char arch[64] = {};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_NAME, arch), HSA_STATUS_SUCCESS);
+  const std::string_view agent_arch(arch);
+  ASSERT_TRUE(agent_arch == "aie2" || agent_arch == "aie2p") << "unexpected arch " << agent_arch;
+
+  EXPECT_NE(LoadKernel(kMultiArchHsacoPath, agent_arch == "aie2p" ? "vsadd" : "vsmul"), 0u);
 }
 
 TEST_F(DispatchTest, SingleDispatchVMem) {

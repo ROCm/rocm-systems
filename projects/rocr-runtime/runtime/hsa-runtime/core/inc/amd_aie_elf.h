@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "inc/hsa.h"
@@ -66,14 +67,16 @@ struct Kernel {
 ///
 /// @param [in] image Pointer to the ELF image bytes.
 /// @param [in] size Size of `image` in bytes.
+/// @param [in] arch Arch name of the hsaco section the ELF was found in, e.g. "aie2p". The ELF's
+/// OS/ABI must be the one for this arch.
 /// @param [out] out Kernels found in the image, keyed by name. Cleared before use.
 /// @param [out] error Human-readable message describing the failure; only touched on error.
-/// @retval HSA_STATUS_SUCCESS `image` is a well-formed aie2p full ELF and at least one
+/// @retval HSA_STATUS_SUCCESS `image` is a well-formed full ELF for `arch` and at least one
 /// dispatchable kernel was found.
-/// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT `image` is not a well-formed aie2p full ELF or
-/// uses a feature this reader does not implement.
-hsa_status_t Parse(const void* image, size_t size, std::map<std::string, Kernel>* out,
-                   std::string* error);
+/// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT `image` is not a well-formed full ELF for `arch`,
+/// `arch` has no full-ELF format, or `image` uses a feature this reader does not implement.
+hsa_status_t Parse(const void* image, size_t size, std::string_view arch,
+                   std::map<std::string, Kernel>* out, std::string* error);
 
 /// @brief Folds a buffer address into a shim DMA buffer descriptor, the scheme the NPU firmware
 /// defines. This *adds* to the descriptor already in place, so it must only ever be applied to a

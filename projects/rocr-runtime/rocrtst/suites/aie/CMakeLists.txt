@@ -369,6 +369,28 @@ add_custom_command(
 )
 add_custom_target(vsmul_hsaco_artifact DEPENDS "${vsmul_HSACO}")
 
+# One hsaco with a section per arch, for aie_code_test's arch selection. aie2 is packed first so the
+# aie2p section is not the first AIE section in the file. The payloads only have to parse, not run,
+# so the artifacts of the detected device stand in for both arches.
+set(multiarch_HSACO "${CMAKE_CURRENT_BINARY_DIR}/multiarch.hsaco")
+add_custom_command(
+  OUTPUT "${multiarch_HSACO}"
+  # aie-hsaco adds to an existing file, so start from none.
+  COMMAND "${CMAKE_COMMAND}" -E rm -f "${multiarch_HSACO}"
+  COMMAND "${AIE_HSACO}"
+          --hsaco "${multiarch_HSACO}"
+          --arch aie2
+          --kernel "${VSMUL_HSACO_KERNEL_NAME}:${vsmul_INSTS_BIN}:${vsmul_DESIGN_PDI}:16:1"
+  COMMAND "${AIE_HSACO}"
+          --hsaco "${multiarch_HSACO}"
+          --arch aie2p
+          --kernel "${VSADD_HSACO_KERNEL_NAME}:${vsadd_INSTS_BIN}:${vsadd_DESIGN_PDI}:32:1"
+  DEPENDS vsadd_kernel_artifacts vsmul_kernel_artifacts
+  COMMENT "Packaging vsmul (aie2) and vsadd (aie2p) into a multi-arch AIE hsaco"
+  VERBATIM
+)
+add_custom_target(multiarch_hsaco_artifact DEPENDS "${multiarch_HSACO}")
+
 # Packages the vsadd full-ELF artifact into a single AIE hsaco with kind=FullElf, so the
 # loader test in test_dispatch.cc can exercise hsa_executable_load_agent_code_object on a
 # FullElf hsaco. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so the test's
@@ -433,6 +455,7 @@ target_compile_definitions(test_dispatch
   PRIVATE
     MUL_SCALE=${VSMUL_SCALE}
     DEFAULT_HSACO_PATH=${vsadd_HSACO}
+    MULTIARCH_HSACO_PATH=${multiarch_HSACO}
     DEFAULT_HSACO_KERNEL_NAME="${VSADD_HSACO_KERNEL_NAME}"
     DEFAULT_ELF_HSACO_PATH=${vsadd_ELF_HSACO}
     # The kernel is addressed as "<device>:<sequence>", which aie-hsaco's elf: form derives from
@@ -449,7 +472,7 @@ target_link_libraries(test_dispatch
     GTest::gtest_main
 )
 add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
-                               vsmul_hsaco_artifact)
+                               vsmul_hsaco_artifact multiarch_hsaco_artifact)
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
@@ -518,6 +541,7 @@ target_include_directories(aie_code_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/inc
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/libamdhsacode)
+target_compile_definitions(aie_code_test PRIVATE AIE_HSACO_ARCH="${AIE_HSACO_ARCH}")
 target_link_libraries(aie_code_test PRIVATE GTest::gtest_main elf)
-add_dependencies(aie_code_test vsadd_hsaco_artifact)
+add_dependencies(aie_code_test vsadd_hsaco_artifact multiarch_hsaco_artifact)
 add_test(NAME aie_code_test COMMAND aie_code_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

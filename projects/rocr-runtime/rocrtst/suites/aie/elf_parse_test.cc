@@ -28,6 +28,8 @@ std::vector<std::uint8_t> ReadFile(const char* path) {
 }
 
 constexpr const char* kElf = "kernel_full_elf_vsadd/aie.elf";
+// The only arch with a full-ELF format the reader implements.
+constexpr const char* kArch = "aie2p";
 
 // ---------------------------------------------------------------------------
 // In-memory ELF surgery
@@ -108,7 +110,7 @@ bool SetRelocationOffset(std::vector<std::uint8_t>& image, std::uint32_t index,
 hsa_status_t ParseImage(const std::vector<std::uint8_t>& image,
                         std::map<std::string, rocr::AMD::aie_elf::Kernel>* kernels,
                         std::string* error) {
-  return rocr::AMD::aie_elf::Parse(image.data(), image.size(), kernels, error);
+  return rocr::AMD::aie_elf::Parse(image.data(), image.size(), kArch, kernels, error);
 }
 
 // The relocation type the reader reads as "write a 64-bit address here", used for PDI symbols.
@@ -120,8 +122,9 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
-  ASSERT_EQ(rocr::AMD::aie_elf::Parse(image.data(), image.size(), &kernels, &error),
-            HSA_STATUS_SUCCESS) << error;
+  ASSERT_EQ(rocr::AMD::aie_elf::Parse(image.data(), image.size(), kArch, &kernels, &error),
+            HSA_STATUS_SUCCESS)
+      << error;
   ASSERT_FALSE(kernels.empty());
 
   // Compared against the artifact's own sections rather than fixed sizes: their sizes change with
@@ -142,7 +145,7 @@ TEST(AieElfParse, RejectsGarbage) {
   const std::vector<std::uint8_t> garbage(512, 0xA5);
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
-  EXPECT_NE(rocr::AMD::aie_elf::Parse(garbage.data(), garbage.size(), &kernels, &error),
+  EXPECT_NE(rocr::AMD::aie_elf::Parse(garbage.data(), garbage.size(), kArch, &kernels, &error),
             HSA_STATUS_SUCCESS);
   EXPECT_FALSE(error.empty());
 }
@@ -154,7 +157,7 @@ TEST(AieElfParse, RejectsTruncated) {
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
-  EXPECT_NE(rocr::AMD::aie_elf::Parse(image.data(), image.size(), &kernels, &error),
+  EXPECT_NE(rocr::AMD::aie_elf::Parse(image.data(), image.size(), kArch, &kernels, &error),
             HSA_STATUS_SUCCESS);
 }
 
@@ -268,6 +271,84 @@ TEST(AieElfParse, RejectsArgumentPatchSiteOutOfRange) {
       << "a misaligned argument patch site was accepted";
   EXPECT_NE(error.find("argument patch site"), std::string::npos)
       << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, RejectsArchWithoutFullElf) {
+  // aie2 has no full-ELF format, so an aie2 hsaco section cannot carry one.
+  const auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  EXPECT_NE(rocr::AMD::aie_elf::Parse(image.data(), image.size(), "aie2", &kernels, &error),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(error.find("no full-ELF format"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, RejectsOsAbiOfAnotherArch) {
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  image[EI_OSABI] = 64;  // aie2ps
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS);
+  EXPECT_NE(error.find("not an aie2p AIE ELF"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, RejectsNonComdatGroup) {
+  // A plain group has no known meaning in a full ELF; mlir-aie's packer refuses it too.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  const std::uint32_t group = FindSection(image, ".group.0");
+  ASSERT_NE(group, 0u) << "artifact has no .group.0 section";
+  const std::uint32_t no_flags = 0;
+  std::memcpy(image.data() + SectionHeader(image, group).sh_offset, &no_flags, sizeof(no_flags));
+
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS);
+  EXPECT_NE(error.find("not a COMDAT group"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
+  // The string tables are the ones the symbol tables link to, whatever their names. Renamed in
+  // place (same length, so no other .shstrtab offset moves); the result must not change.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> expected;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &expected, &error), HSA_STATUS_SUCCESS) << error;
+
+  const Elf32_Shdr shstrtab = SectionHeader(image, Header(image).e_shstrndx);
+  for (const char* name : {".strtab", ".dynstr"}) {
+    const std::uint32_t index = FindSection(image, name);
+    ASSERT_NE(index, 0u) << "artifact has no " << name << " section";
+    // Overwrite the last character: ".strtaX", ".dynstX".
+    image[shstrtab.sh_offset + SectionHeader(image, index).sh_name + std::strlen(name) - 1] = 'X';
+    ASSERT_EQ(FindSection(image, name), 0u) << name << " is still found by name";
+  }
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  ASSERT_EQ(kernels.size(), expected.size());
+  for (const auto& [name, k] : expected) {
+    const auto it = kernels.find(name);
+    ASSERT_NE(it, kernels.end()) << "kernel " << name << " not found";
+    EXPECT_EQ(it->second.ctrl_code, k.ctrl_code);
+    EXPECT_EQ(it->second.pdi, k.pdi);
+    EXPECT_EQ(it->second.pdi_patch_offset, k.pdi_patch_offset);
+    EXPECT_EQ(it->second.num_args(), k.num_args());
+  }
 }
 
 TEST(AieElfPatch, ShimDma48IsAdditive) {

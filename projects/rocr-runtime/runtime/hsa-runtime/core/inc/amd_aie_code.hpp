@@ -11,13 +11,14 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include "core/inc/amd_aie_section.h"
 
 namespace rocr {
-namespace amd { namespace elf { class Image; } }
+namespace amd { namespace elf { class Image; class Section; } }
 namespace AMD {
 
 /// @brief Parsed metadata for one AIE kernel; blob pointers alias the ELF buffer.
@@ -50,10 +51,20 @@ struct AieKernelInfo {
 /// that buffer must outlive this object.
 class AieCode {
  public:
-  /// @brief Parses @p data; returns nullptr if it is not a valid AIE code object.
-  static std::unique_ptr<AieCode> Create(const void* data, size_t size);
+  /// @brief Parses the AIE section for @p arch in @p data.
+  ///
+  /// @param [in] data Pointer to the hsaco bytes; must outlive the returned object.
+  /// @param [in] size Size of @p data in bytes.
+  /// @param [in] arch Arch name of the agent, which is also the name of the section to parse.
+  /// @param [out] out The parsed object; only set on success.
+  /// @retval HSA_STATUS_SUCCESS The section for @p arch was found and is well formed.
+  /// @retval HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS @p data has no AIE section for @p arch.
+  /// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT @p data is not an ELF64, or the AIE section for
+  /// @p arch is malformed.
+  static hsa_status_t Create(const void* data, size_t size, std::string_view arch,
+                             std::unique_ptr<AieCode>* out);
 
-  /// @brief Returns true if @p data is an ELF containing an AIE section.
+  /// @brief Returns true if @p data is an ELF containing an AIE section for any arch.
   static bool IsAieCodeObject(const void* data, size_t size);
 
   /// @brief Returns the arch section name.
@@ -67,7 +78,8 @@ class AieCode {
 
  private:
   AieCode() = default;
-  bool Parse();
+  /// @brief Parses the AIE section @p sec, whose header has already been bounds-checked.
+  bool Parse(amd::elf::Section* sec);
 
   /// @brief Parsed ELF view over the caller's buffer; owns the base/size (data()/size()).
   std::unique_ptr<amd::elf::Image> elf_;

@@ -1601,12 +1601,6 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 #if defined(__linux__)
 hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
                                                hsa_loaded_code_object_t* loaded_code_object) {
-  auto aie_code = AMD::AieCode::Create(data, size);
-  if (!aie_code) {
-    logger_ << "LoaderError: failed to parse AIE code object\n";
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
   // The AIE path is selected from ELF content alone, so guard the downcast: an
   // AIE code object targeted at a non-AIE agent is a caller error, not UB.
   core::Agent* core_agent = core::Agent::Convert(agent);
@@ -1616,12 +1610,16 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   }
   auto* aie_agent = static_cast<AMD::AieAgent*>(core_agent);
 
-  // Arch-vs-agent validation: the AIE section name IS the arch name, and the agent is the sole
-  // authority on which arch it accepts (arch_name from node_props.AMDName). The parser identifies
-  // the section structurally (by header magic) and carries no arch allowlist of its own.
-  if (aie_code->GetArchSectionName() != aie_agent->arch_name()) {
-    logger_ << "LoaderError: code object arch does not match agent\n";
-    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  // Arch-vs-agent selection: the AIE section name IS the arch name, and the agent is the sole
+  // authority on which arch it accepts (arch_name from node_props.AMDName). One hsaco can carry a
+  // section per arch, so only the agent's section is parsed; the others are not looked at.
+  std::unique_ptr<AMD::AieCode> aie_code;
+  if (const hsa_status_t err = AMD::AieCode::Create(data, size, aie_agent->arch_name(), &aie_code);
+      err != HSA_STATUS_SUCCESS) {
+    logger_ << (err == HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS
+                    ? "LoaderError: code object has no AIE section for the agent's arch\n"
+                    : "LoaderError: failed to parse AIE code object\n");
+    return err;
   }
 
   auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(this, agent, data, size);
@@ -1761,8 +1759,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (it == parsed_elfs.end()) {
         std::map<std::string, AMD::aie_elf::Kernel> kernels;
         std::string error;
-        const hsa_status_t err =
-            AMD::aie_elf::Parse(ki->insts_data, ki->insts_size, &kernels, &error);
+        const hsa_status_t err = AMD::aie_elf::Parse(
+            ki->insts_data, ki->insts_size, aie_code->GetArchSectionName(), &kernels, &error);
         if (err != HSA_STATUS_SUCCESS) {
           log_warning_n(10, "AIE: cannot parse the nested full ELF: %s\n", error.c_str());
           return err;

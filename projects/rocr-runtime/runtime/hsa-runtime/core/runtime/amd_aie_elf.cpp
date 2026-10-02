@@ -20,6 +20,11 @@ namespace {
 /// @brief ELF OS/ABI identifying an aie2p AIE ELF.
 constexpr uint8_t kElfAmdAie2p = 69;
 
+/// @brief Returns the ELF OS/ABI a full ELF for @p arch carries, or 0 if @p arch has no full-ELF
+/// format this reader implements. aie2 (Phoenix) has none at all: XRT defines no platform value
+/// for it.
+uint8_t ElfOsAbiForArch(std::string_view arch) { return arch == "aie2p" ? kElfAmdAie2p : 0; }
+
 /// @brief Relocation types, matching the patch schemes the NPU firmware and XRT use.
 enum class PatchScheme : uint32_t {
   /// @brief Fold a buffer address into a shim DMA buffer descriptor. Used for kernel arguments.
@@ -105,8 +110,8 @@ bool ParseArgIndex(const char* name, uint32_t* index) {
 
 }  // namespace
 
-hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::string, Kernel>* out,
-                    std::string* error) {
+hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view arch,
+                   std::map<std::string, Kernel>* out, std::string* error) {
   if (out == nullptr || error == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   auto fail = [&](const std::string& msg) -> hsa_status_t {
@@ -121,8 +126,14 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
       ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_ident[EI_DATA] != ELFDATA2LSB) {
     return fail("not a little-endian ELF32");
   }
-  if (ehdr->e_ident[EI_OSABI] != kElfAmdAie2p) {
-    return fail("not an aie2p AIE ELF");
+  const uint8_t osabi = ElfOsAbiForArch(arch);
+  if (osabi == 0) {
+    return fail("no full-ELF format for arch " + std::string(arch));
+  }
+  // The hsaco section the ELF came from names the arch; an ELF built for a different one would load
+  // here and only fail on the device.
+  if (ehdr->e_ident[EI_OSABI] != osabi) {
+    return fail("not an " + std::string(arch) + " AIE ELF");
   }
   if (ehdr->e_shentsize != sizeof(Elf32_Shdr) || ehdr->e_shnum == 0) {
     return fail("malformed section headers");
@@ -141,24 +152,27 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
   };
 
   const Elf32_Shdr* symtab = nullptr;
-  const Elf32_Shdr* strtab = nullptr;
   const Elf32_Shdr* dynsym = nullptr;
-  const Elf32_Shdr* dynstr = nullptr;
   const Elf32_Shdr* rela = nullptr;
   for (uint32_t i = 0; i < ehdr->e_shnum; ++i) {
     const char* name = section_name(i);
     if (name == nullptr) continue;
     if (std::strcmp(name, ".symtab") == 0)
       symtab = &shdrs[i];
-    else if (std::strcmp(name, ".strtab") == 0)
-      strtab = &shdrs[i];
     else if (std::strcmp(name, ".dynsym") == 0)
       dynsym = &shdrs[i];
-    else if (std::strcmp(name, ".dynstr") == 0)
-      dynstr = &shdrs[i];
     else if (std::strcmp(name, ".rela.dyn") == 0)
       rela = &shdrs[i];
   }
+  // A symbol table names its string table through sh_link, as ELF defines it, rather than by the
+  // string table's section name. mlir-aie's hsaco packer reads it the same way, so the two cannot
+  // disagree about the kernel names in an ELF that names its string tables differently.
+  auto linked_strtab = [&](const Elf32_Shdr* table) -> const Elf32_Shdr* {
+    if (table == nullptr || table->sh_link == 0 || table->sh_link >= ehdr->e_shnum) return nullptr;
+    return &shdrs[table->sh_link];
+  };
+  const Elf32_Shdr* strtab = linked_strtab(symtab);
+  const Elf32_Shdr* dynstr = linked_strtab(dynsym);
   if (symtab == nullptr || strtab == nullptr || symtab->sh_entsize != sizeof(Elf32_Sym)) {
     return fail("missing or malformed .symtab");
   }
@@ -204,7 +218,10 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
     // Group data is a flags word followed by the member section indices.
     const uint32_t word_count = shdrs[i].sh_size / sizeof(Elf32_Word);
     const auto* words = image.As<Elf32_Word>(shdrs[i].sh_offset, word_count);
-    if (words == nullptr) return fail("malformed group section");
+    if (words == nullptr || word_count == 0) return fail("malformed group section");
+    // Producers emit only COMDAT groups, and a plain group has no known meaning in a full ELF.
+    // Refused rather than read as a kernel, the same as mlir-aie's hsaco packer does.
+    if ((words[0] & GRP_COMDAT) == 0) return fail("group is not a COMDAT group");
     for (uint32_t w = 1; w < word_count; ++w) {
       const uint32_t member = words[w];
       if (member >= ehdr->e_shnum) return fail("group member out of range");
