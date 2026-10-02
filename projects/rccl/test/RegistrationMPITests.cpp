@@ -1660,9 +1660,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
  */
 TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
 {
-    // The GIN IB backend registers the window as one DMA-BUF MR, and a HIP
-    // DMA-BUF export covers only the first physical segment (EINVAL).
-    GTEST_SKIP() << "Requires per-segment GIN DMA-BUF registration";
     const int nodeCount = MPITestConstants::detectNodeCount();
     if (!validateTestPrerequisites(/*min_processes=*/2)) {
         GTEST_SKIP() << "Requires 2+ ranks";
