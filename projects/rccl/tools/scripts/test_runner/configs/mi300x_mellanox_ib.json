@@ -4199,10 +4199,11 @@
         },
         {
           "name": "GIN_QpCount_StaysAtOne",
-          "description": "GIN proxy IB links stay at one QP per device when NCCL_IB_QPS_PER_CONNECTION is raised",
+          "description": "GIN proxy IB links stay at one QP per device while collective links follow NCCL_IB_QPS_PER_CONNECTION and P2P links follow RCCL_IB_QPS_PER_P2P",
           "test_filter": "GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
           "env_variables": {
-            "NCCL_IB_QPS_PER_CONNECTION": "4"
+            "NCCL_IB_QPS_PER_CONNECTION": "4",
+            "RCCL_IB_QPS_PER_P2P": "2"
           }
         }
       ]
