@@ -991,6 +991,7 @@ function(rj_add_consan_device_conformance_cases)
         "Reduction|reduction|ConSanDeviceReductionTest"
         "SharedHelperOwners|shared_helper_owners|ConSanDeviceSharedHelperOwnersTest"
         "IndependentWorkgroups|independent_workgroups|ConSanDeviceIndependentWorkgroupsTest"
+        "IndependentWorkgroupsWitness|independent_workgroups|ConSanDeviceIndependentWorkgroupsWitnessTest|default-only"
         "RepeatedDispatchIdentity|repeated_dispatch_identity|ConSanDeviceRepeatedDispatchIdentityTest"
         "CrossKernelDispatchIdentity|cross_kernel_dispatch_identity|ConSanDeviceCrossKernelDispatchIdentityTest|default-only"
         "GraphReplay|graph_replay|ConSanDeviceGraphReplayTest"
@@ -1322,6 +1323,12 @@ function(rj_add_consan_device_conformance_cases)
                     PASS_REGEX
                     "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
                 )
+            elseif(_workload_name STREQUAL "IndependentWorkgroupsWitness")
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX
+                    "${_rj_consan_independent_workgroups_witness_regex}"
+                )
             endif()
 
             # HIP does not expose its stream-to-HSA-queue mapping to this
@@ -1527,56 +1534,6 @@ function(rj_add_consan_device_conformance_cases)
                 LABELS ${_incorrect_labels}
             )
             list(APPEND _instrumented_tests "${_incorrect_test_name}")
-
-            if(
-                _mode_value STREQUAL "default"
-                AND _workload_name STREQUAL "IndependentWorkgroups"
-            )
-                # Bounded first-publication retention can select different
-                # workgroups at the two sites in the 2x2x2 identity case. Keep
-                # that coverage, but give the diagnostic contract a separate
-                # process containing only one designated workgroup.
-                set(_witness_correct_test_name
-                    "${_device_PREFIX}.${_mode_name}${_workload_name}Witness.Correct"
-                )
-                rj_add_consan_hip_case(
-                    NAME "${_witness_correct_test_name}"
-                    TARGET
-                        hip_consan_device_${_workload_target}_${_device_TARGET}_test
-                    FILTER "${_workload_suite}.WitnessCorrect"
-                    ${_config_args}
-                    ${_resource_lock_args}
-                    TIMEOUT ${_workload_timeout}
-                    ENVIRONMENT ${_correct_environment}
-                    LABELS ${_labels} "${_mode_value}" clean
-                )
-                list(APPEND _instrumented_tests "${_witness_correct_test_name}")
-
-                set(_witness_incorrect_environment
-                    ${_incorrect_environment}
-                    "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
-                )
-                set(_witness_incorrect_test_name
-                    "${_device_PREFIX}.${_mode_name}${_workload_name}Witness.Incorrect"
-                )
-                rj_add_consan_hip_case(
-                    NAME "${_witness_incorrect_test_name}"
-                    TARGET
-                        hip_consan_device_${_workload_target}_${_device_TARGET}_test
-                    FILTER "${_workload_suite}.WitnessIncorrect"
-                    ${_config_args}
-                    ${_resource_lock_args}
-                    TIMEOUT ${_workload_timeout}
-                    PASS_REGEX
-                        "${_rj_consan_independent_workgroups_witness_regex}"
-                    ENVIRONMENT ${_witness_incorrect_environment}
-                    LABELS ${_labels} "${_mode_value}" incorrect racy
-                )
-                list(
-                    APPEND _instrumented_tests
-                    "${_witness_incorrect_test_name}"
-                )
-            endif()
         endforeach()
     endforeach()
 

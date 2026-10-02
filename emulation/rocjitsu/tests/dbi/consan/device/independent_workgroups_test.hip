@@ -65,11 +65,13 @@ TEST(ConSanDeviceIndependentWorkgroupsTest, Incorrect) {
   run_independent_workgroups(/*grid_x=*/2u, /*grid_y=*/2u, /*grid_z=*/2u, /*synchronize=*/false);
 }
 
-TEST(ConSanDeviceIndependentWorkgroupsTest, WitnessCorrect) {
+// Keep this suite separate so a diagnostic from the multidimensional identity
+// cases cannot satisfy the single-workgroup witness's checked-output contract.
+TEST(ConSanDeviceIndependentWorkgroupsWitnessTest, Correct) {
   run_independent_workgroups(/*grid_x=*/1u, /*grid_y=*/1u, /*grid_z=*/1u, /*synchronize=*/true);
 }
 
-TEST(ConSanDeviceIndependentWorkgroupsTest, WitnessIncorrect) {
+TEST(ConSanDeviceIndependentWorkgroupsWitnessTest, Incorrect) {
   run_independent_workgroups(/*grid_x=*/1u, /*grid_y=*/1u, /*grid_z=*/1u, /*synchronize=*/false);
 }
 

@@ -126,7 +126,7 @@ class CheckedRunnerTest(unittest.TestCase):
                 self.assertEqual(
                     filters,
                     [
-                        "--gtest_filter=ConSanDeviceIndependentWorkgroupsTest.WitnessIncorrect"
+                        "--gtest_filter=ConSanDeviceIndependentWorkgroupsWitnessTest.Incorrect"
                     ],
                 )
                 pattern_files = [
