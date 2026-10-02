@@ -216,13 +216,15 @@ metadata_initialize_thread_info(size_t tid)
         return;
     }
 
-    trace_cache::get_metadata_registry().add_thread_info(
-        { .parent_process_id = getppid(),
-          .process_id        = getpid(),
-          .thread_id = static_cast<size_t>(_thread_info->index_data->system_value),
-          .start     = _thread_info->get_start(),
-          .end       = _thread_info->get_stop(),
-          .extdata   = "{}" });
+    auto const thread_id = static_cast<size_t>(_thread_info->index_data->system_value);
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = _thread_info->get_start(),
+                                          .end               = _thread_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 }
 
 void
@@ -245,10 +247,17 @@ metadata_initialize_track(std::int64_t tid)
     const auto& _overflow_track_name =
         get_track_name<category::overflow_sampling>(*_thread_info);
 
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _timer_track_name, .thread_id = thread_id, .extdata = "{}" });
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _overflow_track_name, .thread_id = thread_id, .extdata = "{}" });
+    auto& registry = trace_cache::get_metadata_registry();
+    registry.ensure_track(_timer_track_name, [&] {
+        return trace_cache::info::track{ .track_name = _timer_track_name,
+                                         .thread_id  = thread_id,
+                                         .extdata    = "{}" };
+    });
+    registry.ensure_track(_overflow_track_name, [&] {
+        return trace_cache::info::track{ .track_name = _overflow_track_name,
+                                         .thread_id  = thread_id,
+                                         .extdata    = "{}" };
+    });
 }
 
 // Added

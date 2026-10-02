@@ -154,8 +154,11 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record,
     }
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
+    metadata_registry.ensure_thread(tid, [&] {
+        return typename Externals::thread_info_t{
+            Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}"
+        };
+    });
 
     auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
@@ -171,7 +174,8 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record,
 
     auto const track_name = fmt::format("KFD Page Migrate [{}->{}]",
                                         agent_label(src_agent), agent_label(dst_agent));
-    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.ensure_track(
+        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
 
     auto const agent_node_id = [](const auto* agent_ptr) {
         return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };
