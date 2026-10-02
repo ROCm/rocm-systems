@@ -457,13 +457,17 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcQuiet() {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
+      // Drain only if work is pending, but the fence is unconditionally
+      // acq_rel whenever SDMA is enabled: the acquire is required to make an
+      // already-drained SDMA get visible to subsequent CU loads. The dirty
+      // bit may have been consumed by an earlier fence/quiet that issued only
+      // a release fence, so it cannot gate the acquire here.
       if (atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0) {
+                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
         sdmaImpl_.sdmaQuietAll();
-        atomic::threadfence<atomic::memory_scope::system,
-                            atomic::memory_order::acq_rel>();
-        return;
-      }
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acq_rel>();
+      return;
     }
     atomic::threadfence<atomic::memory_scope::system,
                         atomic::memory_order::release>();
@@ -475,12 +479,11 @@ class IpcSdmaImpl : public IpcOnImpl {
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
-                         &sdmaImpl_.sdmaDirty) & pe_mask) {
+                         &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
-        atomic::threadfence<atomic::memory_scope::system,
-                            atomic::memory_order::acq_rel>();
-        return;
-      }
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acq_rel>();
+      return;
     }
     atomic::threadfence<atomic::memory_scope::system,
                         atomic::memory_order::release>();
