@@ -4,6 +4,7 @@
 /// @file minmax_test.cpp
 /// @brief Min/max selection rules, gfx1201 regression cases, and scalar/SIMD agreement.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "util/simd.h"
 
@@ -18,6 +19,7 @@
 namespace {
 
 namespace cmp = rocjitsu::amdgpu::comparison;
+namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 using mm::Nan;
 
@@ -213,22 +215,22 @@ template <typename Fmt> void check_specials_and_random() {
 
 TEST(MinmaxTest, F16EveryEncodingAgainstSpecials) {
   for (uint32_t a = 0; a <= 0xffffu; ++a)
-    for (const uint32_t b : specials<cmp::F16>()) {
-      expect_binary<cmp::F16>(a, b);
-      expect_binary<cmp::F16>(b, a);
+    for (const uint32_t b : specials<fmt::F16>()) {
+      expect_binary<fmt::F16>(a, b);
+      expect_binary<fmt::F16>(b, a);
     }
 }
 
-TEST(MinmaxTest, F16SpecialsAndRandom) { check_specials_and_random<cmp::F16>(); }
-TEST(MinmaxTest, F32SpecialsAndRandom) { check_specials_and_random<cmp::F32>(); }
-TEST(MinmaxTest, F64SpecialsAndRandom) { check_specials_and_random<cmp::F64>(); }
+TEST(MinmaxTest, F16SpecialsAndRandom) { check_specials_and_random<fmt::F16>(); }
+TEST(MinmaxTest, F32SpecialsAndRandom) { check_specials_and_random<fmt::F32>(); }
+TEST(MinmaxTest, F64SpecialsAndRandom) { check_specials_and_random<fmt::F64>(); }
 
 // ---------------------------------------------------------------------------
 // Regression cases from gfx1201 hardware results.
 // ---------------------------------------------------------------------------
 
 TEST(MinmaxTest, MatchesGfx1201MinimumMaximum) {
-  using F32 = cmp::F32;
+  using F32 = fmt::F32;
   // The first NaN in source order wins, quieted, with sign and payload; a quiet
   // src0 beats a signaling src1.
   EXPECT_EQ((mm::evaluate<F32, mm::Maximum>(kKeep, 0x7f800001u, 0u)), 0x7fc00001u);
@@ -239,28 +241,28 @@ TEST(MinmaxTest, MatchesGfx1201MinimumMaximum) {
   EXPECT_EQ((mm::evaluate<F32, mm::Minimum>(kKeep, 0x807fffffu, 0u)), 0x807fffffu);
   EXPECT_EQ((mm::evaluate<F32, mm::Maximum>(kKeep, 1u, 0u)), 1u);
   EXPECT_EQ((mm::evaluate<F32, mm::Maximum>(kKeep, 0x80000000u, 0u)), 0u);
-  EXPECT_EQ((mm::evaluate<cmp::F64, mm::Maximum>(kKeep, uint64_t{0x7ff0000000000001}, uint64_t{0})),
+  EXPECT_EQ((mm::evaluate<fmt::F64, mm::Maximum>(kKeep, uint64_t{0x7ff0000000000001}, uint64_t{0})),
             uint64_t{0x7ff8000000000001});
-  EXPECT_EQ((mm::evaluate<cmp::F16, mm::Maximum>(kKeep, 0x7c01u, 0u)), 0x7e01u);
-  EXPECT_EQ((mm::evaluate<cmp::F16, mm::Minimum>(kFlush, 0x83ffu, 0u)), 0x8000u);
+  EXPECT_EQ((mm::evaluate<fmt::F16, mm::Maximum>(kKeep, 0x7c01u, 0u)), 0x7e01u);
+  EXPECT_EQ((mm::evaluate<fmt::F16, mm::Minimum>(kFlush, 0x83ffu, 0u)), 0x8000u);
   // Nested selections keep the inner NaN's payload when src2 is also NaN.
   EXPECT_EQ((mm::evaluate<F32, mm::MaximumMinimum>(kKeep, 0u, 0x7f800001u, 0x7fc00000u)),
             0x7fc00001u);
-  EXPECT_EQ((mm::evaluate<cmp::F16, mm::Maximum3>(kKeep, 0xfd2du, 0x21c8u, 0xb723u)), 0xff2du);
+  EXPECT_EQ((mm::evaluate<fmt::F16, mm::Maximum3>(kKeep, 0xfd2du, 0x21c8u, 0xb723u)), 0xff2du);
 }
 
 TEST(MinmaxTest, MatchesGfx1201NumForms) {
-  using F32 = cmp::F32;
+  using F32 = fmt::F32;
   EXPECT_EQ((mm::evaluate<F32, mm::MaxNum>(kKeep, 0x80000000u, 0u)), 0u);
   EXPECT_EQ((mm::evaluate<F32, mm::MinNum>(kKeep, 0x7f800001u, 0x7fc00000u)), 0x7fc00001u);
   EXPECT_EQ((mm::evaluate<F32, mm::MinNum>(kKeep, 0x7f800001u, 0x3f800000u)), 0x3f800000u);
-  EXPECT_EQ((mm::evaluate<cmp::F64, mm::MaxNum>(kFlush, uint64_t{1}, uint64_t{0})), uint64_t{0});
-  EXPECT_EQ((mm::evaluate<cmp::F16, mm::MinNum>(kKeep, 0xfe00u, 0x7e00u)), 0xfe00u);
+  EXPECT_EQ((mm::evaluate<fmt::F64, mm::MaxNum>(kFlush, uint64_t{1}, uint64_t{0})), uint64_t{0});
+  EXPECT_EQ((mm::evaluate<fmt::F16, mm::MinNum>(kKeep, 0xfe00u, 0x7e00u)), 0xfe00u);
   EXPECT_EQ((mm::evaluate<F32, mm::MinMaxNum>(kKeep, 0x7f800001u, 0x7fc00000u, 0x3f800000u)),
             0x3f800000u);
   EXPECT_EQ((mm::evaluate<F32, mm::Med3Num>(kKeep, 0x7fc00000u, 1u, 0u)), 0u);
   EXPECT_EQ((mm::evaluate<F32, mm::Med3Num>(kKeep, 0x80000000u, 0u, 0x80000000u)), 0x80000000u);
-  EXPECT_EQ((mm::evaluate<cmp::F16, mm::Med3Num>(kFlush, 1u, 0u, 1u)), 0u);
+  EXPECT_EQ((mm::evaluate<fmt::F16, mm::Med3Num>(kFlush, 1u, 0u, 1u)), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,12 +308,12 @@ TEST(MinmaxTest, SimdMatchesScalar) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
 #if __has_include(<experimental/simd>)
-    expect_simd_matches_scalar<cmp::F16, util::native<uint32_t>>();
-    expect_simd_matches_scalar<cmp::F32, util::native<uint32_t>>();
+    expect_simd_matches_scalar<fmt::F16, util::native<uint32_t>>();
+    expect_simd_matches_scalar<fmt::F32, util::native<uint32_t>>();
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-    expect_simd_matches_scalar<cmp::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
+    expect_simd_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
-    expect_simd_matches_scalar<cmp::F64, util::native<uint64_t>>();
+    expect_simd_matches_scalar<fmt::F64, util::native<uint64_t>>();
 #endif
 #endif
   }

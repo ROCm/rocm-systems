@@ -418,9 +418,8 @@ template <bool Extended, typename Slot>
         const rj_code_arch_t arch = wf.cu().arch();
         if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
           const auto policy = comparison::Policy::make(wf.fp_denorm_mode_f32());
-          result = slot.op == 10
-                       ? minmax::evaluate<comparison::F32, minmax::MaxNum>(policy, av, bv)
-                       : minmax::evaluate<comparison::F32, minmax::MinNum>(policy, av, bv);
+          result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
+                                 : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
           break;
         }
         F selected = bf;

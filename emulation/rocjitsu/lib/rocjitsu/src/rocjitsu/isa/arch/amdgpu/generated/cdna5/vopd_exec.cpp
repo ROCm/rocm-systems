@@ -193,11 +193,11 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>(
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
         amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdMinNumF32: {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinNum>(
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
         amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdAddNcU32:

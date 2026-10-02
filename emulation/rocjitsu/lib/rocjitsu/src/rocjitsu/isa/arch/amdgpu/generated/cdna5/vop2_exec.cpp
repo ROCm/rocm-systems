@@ -1318,7 +1318,7 @@ void VMinNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         return std::bit_cast<util::native<uint32_t>>(
             ([compare_policy =
                   amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MinNum>(
+              return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
@@ -1330,7 +1330,7 @@ void VMinNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MinNum>(
+        amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
             compare_policy, amdgpu::RegisterAccess(wf).read_lane(src0, lane),
             amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
   }
@@ -1361,7 +1361,7 @@ RJ_NOINLINE void VMinNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         return std::bit_cast<util::native<uint32_t>>(
             ([compare_policy =
                   amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MinNum>(
+              return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
@@ -1373,7 +1373,7 @@ RJ_NOINLINE void VMinNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MinNum>(
+        amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
             compare_policy, amdgpu::RegisterAccess(wf).read_lane(src0, lane),
             amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
   }
@@ -1390,7 +1390,7 @@ void VMaxNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         return std::bit_cast<util::native<uint32_t>>(
             ([compare_policy =
                   amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MaxNum>(
+              return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
@@ -1402,7 +1402,7 @@ void VMaxNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MaxNum>(
+        amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
             compare_policy, amdgpu::RegisterAccess(wf).read_lane(src0, lane),
             amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
   }
@@ -1433,7 +1433,7 @@ RJ_NOINLINE void VMaxNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         return std::bit_cast<util::native<uint32_t>>(
             ([compare_policy =
                   amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MaxNum>(
+              return amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
                   compare_policy, a, b);
             })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
@@ -1445,7 +1445,7 @@ RJ_NOINLINE void VMaxNumF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::minmax::evaluate<amdgpu::comparison::F16, amdgpu::minmax::MaxNum>(
+        amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
             compare_policy, amdgpu::RegisterAccess(wf).read_lane(src0, lane),
             amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
   }

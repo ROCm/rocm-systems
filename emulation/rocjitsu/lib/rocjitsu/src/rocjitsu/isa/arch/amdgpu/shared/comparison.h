@@ -31,32 +31,13 @@
 /// values above the format width are ignored. CLASS tests read the raw
 /// encoding and do not use these stages.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+
 #include <cstdint>
 #include <functional>
 #include <type_traits>
 
 namespace rocjitsu::amdgpu::comparison {
-
-/// @brief Binary interchange format carried in an unsigned lane type.
-template <typename LaneType, unsigned ExponentBits, unsigned MantissaBits> struct Format {
-  using Lane = LaneType;
-  static constexpr unsigned kExponentBits = ExponentBits;
-  static constexpr unsigned kMantissaBits = MantissaBits;
-  static constexpr unsigned kWidth = 1 + ExponentBits + MantissaBits;
-  static constexpr Lane kSign = Lane{1} << (kWidth - 1);
-  static constexpr Lane kMagnitude = kSign - 1;
-  static constexpr Lane kBits = kSign | kMagnitude;
-  static constexpr Lane kExponentMax = (Lane{1} << ExponentBits) - 1;
-  static constexpr Lane kInfinity = kExponentMax << MantissaBits;
-  static constexpr Lane kQuiet = Lane{1} << (MantissaBits - 1);
-  static constexpr Lane kMinNormal = Lane{1} << MantissaBits;
-
-  static_assert(std::is_unsigned_v<Lane> && kWidth <= 8 * sizeof(Lane));
-};
-
-using F16 = Format<uint32_t, 5, 10>;
-using F32 = Format<uint32_t, 8, 23>;
-using F64 = Format<uint64_t, 11, 52>;
 
 /// @brief Per-instruction compare policy, fixed before any lane is evaluated.
 struct Policy {

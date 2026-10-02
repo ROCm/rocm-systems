@@ -91,7 +91,7 @@ def output_policy_expr(dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS) -
     ``fields`` holds the (OMOD, CLAMP) expressions from the instruction.
     """
     omod, clamp = fields
-    fmt = f'amdgpu::comparison::{dtype.upper()}'
+    fmt = f'amdgpu::fp_format::{dtype.upper()}'
     return f'amdgpu::output_modifier_policy<{fmt}>(wf, {omod}, {clamp})'
 
 
@@ -104,5 +104,5 @@ def output_policy_decl(
 
 def apply_output(dtype: str, bits: str) -> str:
     """Apply OMOD then CLAMP to an already rounded destination encoding."""
-    fmt = f'amdgpu::comparison::{dtype.upper()}'
+    fmt = f'amdgpu::fp_format::{dtype.upper()}'
     return f'amdgpu::output_modifier::apply<{fmt}>({bits}, {OUTPUT_POLICY})'
