@@ -4731,7 +4731,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
           if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
-              !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
+              !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
+              !ncclCeImplemented(info->coll, info->op, info->datatype) || !ncclDevrIsOneLsaTeam(comm)) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;
