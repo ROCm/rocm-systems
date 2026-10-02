@@ -531,7 +531,14 @@ if [[ ${#CMD[@]} -gt 0 ]]; then
   done < <(strip_launchers "${CMD[@]}")
   # A command that is nothing but assignments has no workload in it.
   [[ "$WORKLOAD_NAME" == *=* ]] && { LAUNCHER_ENV+=("$WORKLOAD_NAME"); WORKLOAD_NAME=""; }
-  WORKLOAD_BIN="$(command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true)"
+  # Looked up on the PATH the workload is started with: `env PATH=/x app` runs
+  # /x/app, and the last assignment wins as it does for env.
+  WORKLOAD_BIN="$(
+    for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
+      [[ "$assignment" == PATH=* ]] && PATH="${assignment#PATH=}"
+    done
+    command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true
+  )"
 fi
 
 # check_runtime in the environment the workload will have. `local -x` exports

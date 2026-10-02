@@ -335,6 +335,11 @@ def _playback_env(playback: str) -> dict[str, str]:
     and dies on a missing symbol version, which reads like a broken archive.
     A build-tree reader needs the matching libhsa-runtime64 the same way, and
     `ROCR_LIB` names it, as it does for triage_archive.sh.
+
+    `$ROCM_PATH/lib` goes last, after the caller's own `LD_LIBRARY_PATH`, in
+    the order triage_archive.sh uses: a build-tree reader still needs the rest
+    of ROCm from it, and ahead of the caller it would bind the system release's
+    libraries in front of the reader's own.
     """
     env = dict(os.environ)
     root = Path(playback).resolve().parent.parent
@@ -342,9 +347,11 @@ def _playback_env(playback: str) -> dict[str, str]:
     rocr = env.get("ROCR_LIB")
     if rocr and (Path(rocr) / "libhsa-runtime64.so.1").is_file() and rocr not in dirs:
         dirs.append(rocr)
-    if dirs:
-        existing = env.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = ":".join(dirs + ([existing] if existing else []))
+    existing = [part for part in env.get("LD_LIBRARY_PATH", "").split(":") if part]
+    rocm_lib = str(Path(env.get("ROCM_PATH", "/opt/rocm")) / "lib")
+    tail = [rocm_lib] if Path(rocm_lib).is_dir() and rocm_lib not in dirs + existing else []
+    if dirs or tail:
+        env["LD_LIBRARY_PATH"] = ":".join(dirs + existing + tail)
     return env
 
 

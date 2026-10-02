@@ -454,6 +454,7 @@ def test_build_tree_playback_gets_rocr_lib_on_the_path(tmp_path, monkeypatch):
     (rocr / "libhsa-runtime64.so.1").write_text("")
     monkeypatch.setenv("ROCR_LIB", str(rocr))
     monkeypatch.setenv("LD_LIBRARY_PATH", "/mine")
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "no-rocm"))
 
     env = inspect_archive._playback_env(str(binary))
 
@@ -462,6 +463,25 @@ def test_build_tree_playback_gets_rocr_lib_on_the_path(tmp_path, monkeypatch):
     # A ROCR_LIB without the library in it is not put on the path.
     (rocr / "libhsa-runtime64.so.1").unlink()
     assert inspect_archive._playback_env(str(binary))["LD_LIBRARY_PATH"] == "/mine"
+
+
+def test_build_tree_playback_gets_rocm_lib_last(tmp_path, monkeypatch):
+    """As ensure_playback.sh and triage_archive.sh do: the rest of ROCm comes
+    from $ROCM_PATH/lib, after the caller's own path so the system release
+    does not bind ahead of it."""
+    binary = tmp_path / "build" / "playback" / "hrr-playback"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n")
+    rocm = tmp_path / "rocm"
+    (rocm / "lib").mkdir(parents=True)
+    monkeypatch.delenv("ROCR_LIB", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(rocm))
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/mine")
+
+    assert inspect_archive._playback_env(str(binary))["LD_LIBRARY_PATH"] == f"/mine:{rocm / 'lib'}"
+
+    monkeypatch.delenv("LD_LIBRARY_PATH")
+    assert inspect_archive._playback_env(str(binary))["LD_LIBRARY_PATH"] == str(rocm / "lib")
 
 
 def test_missing_playback_is_reported_not_fatal(tmp_path, monkeypatch):
