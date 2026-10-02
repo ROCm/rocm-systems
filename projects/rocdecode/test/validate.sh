@@ -204,12 +204,27 @@ if [[ $SKIP_CONFORMANCE -eq 0 ]]; then
     fi
     echo "=== Running Conformance: $CODEC ==="
     OUT="$RESULTS_DIR/conformance_${CODEC}_output.txt"
+    # Give each codec its own results directory under this run. Without it every codec, and
+    # every other sweep on the machine, shares the script's default directory and appends to one
+    # rocDecode_output.log, so the pass counts are taken over another run's output.
     python3 run_rocDecode_Conformance.py \
       --rocDecode_directory "$SCRIPT_DIR/.." \
       --files_directory "$DIR" \
+      --results_directory "$RESULTS_DIR/$CODEC" \
       2>&1 | tee "$OUT"
-    if grep -q "The number of failing streams is 0" "$OUT" && \
-       grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
+    # A pass count above the stream count cannot come from decoding; it means the tally was taken
+    # over output that is not all from this run. Call that out rather than letting it land as an
+    # ordinary pass or failure, which is how it reads otherwise.
+    TOTAL_STREAMS=$(grep -oE "completed on the [0-9]+ streams" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    PASSING_STREAMS=$(grep -oE "number of passing streams is [0-9]+" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    if [[ -n "$TOTAL_STREAMS" && -n "$PASSING_STREAMS" && "$PASSING_STREAMS" -gt "$TOTAL_STREAMS" ]]; then
+      echo "ERROR: $CODEC reported $PASSING_STREAMS passing streams out of $TOTAL_STREAMS."
+      echo "       The tally is inconsistent, so these results are not usable. This happens when"
+      echo "       another conformance run shares the results directory; re-run with nothing else"
+      echo "       decoding on this machine."
+      RESULTS["Conformance $CODEC"]="FAILED"
+    elif grep -q "The number of failing streams is 0" "$OUT" && \
+         grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
       RESULTS["Conformance $CODEC"]="PASSED"
     else
       RESULTS["Conformance $CODEC"]="FAILED"
