@@ -65,6 +65,8 @@ test_categories:
       - "RmaProxyReadyTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/cost_model.cc
+      - "CostModelMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
       # group.cc

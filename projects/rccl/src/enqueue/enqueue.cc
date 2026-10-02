@@ -2912,6 +2912,23 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     }
   }
 
+  // Apply the per-call algSelection filter. A registry mask bit IS its cost-model tuning id, so a
+  // general row sits at (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
+  // Env (NCCL_ALGO/NCCL_PROTO) is a global override that wins over per-call algSelection for any
+  // function it forced, matching ncclMakeSymmetricTaskList (src/scheduler/symmetric_sched.cc).
+  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
+  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // generalMask == 0 means the selection named no general row (symmetric-only, e.g. "SYMK_LL").
+  // Leave the table alone: the symmetric scheduler may still decline, and this table is the
+  // fallback it declines to.
+  if (generalMask != 0) {
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+      }
+    }
+  }
+
   return ncclSuccess;
 }
 

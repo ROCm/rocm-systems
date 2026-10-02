@@ -1706,6 +1706,107 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForwardsFuncAndBytesToTheTimeQuery)
   EXPECT_EQ(size_t(4096), seenBytes);
 }
 
+// --- per-call algSelection narrowing (AICOMRCCL-2728) -----------------------
+// A registry mask bit IS its cost-model tuning id, so a general row sits at
+// (a * NCCL_NUM_PROTOCOLS + p). The mask reaches here as task->algMask, already
+// parsed and validated by ncclCollConfigGetAlgMask.
+
+namespace {
+constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
+}  // namespace
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGeneralRows) {
+  // The bug this pins: before the filter existed the mask was parsed, validated
+  // and discarded, so naming RING_LL left every eligible cell a candidate and
+  // the argmin was free to pick something else entirely.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL);
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/1,
+                                             /*nvls=*/1, 1, 0, tbl.ptr()));
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL));
+  EXPECT_EQ(1, tbl.countWritten()) << "only the named row may survive the filter";
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
+  // Prefix matching upstream of here yields several bits, e.g. "RING" -> all
+  // three RING protocols. Every named row must survive, not just the first.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL) | GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL128) |
+                 GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
+  EXPECT_EQ(NCCL_NUM_PROTOCOLS, tbl.countWritten());
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {
+  // algMask == 0 is "automatic" and must not filter anything. Guards the whole
+  // existing suite against the filter silently narrowing the default path.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = 0;
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  EXPECT_LT(1, tbl.countWritten()) << "automatic selection must leave the table wide";
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGeneralTableIntact) {
+  // A selection naming only SYMK_* rows has no general bits. The general table
+  // is what the symmetric scheduler falls back TO when it declines, so blanking
+  // it here would strand the collective with nothing to run.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  EXPECT_LT(1, tbl.countWritten()) << "symmetric-only selection must not narrow the general table";
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_EnvForcedFunction_OverridesPerCallSelection) {
+  // NCCL_ALGO/NCCL_PROTO are global overrides and win over a per-call
+  // selection, matching ncclMakeSymmetricTaskList's effAlgMask rule.
+  CostComm cc;
+  cc.get()->tuningContext.forced[ncclFuncAllReduce] = 1;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL);
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  EXPECT_LT(1, tbl.countWritten()) << "env-forced function must ignore algMask";
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionCannotResurrectAnIneligibleRow) {
+  // The filter only removes. Naming a row the eligibility guards already
+  // skipped must leave it IGNOREd, so an unavailable algorithm is never
+  // selected just because the user asked for it.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE);
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, 1, 0, tbl.ptr()));
+  EXPECT_FALSE(tbl.written(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(0, tbl.countWritten()) << "topoGetAlgoInfo then falls back to RING/SIMPLE";
+}
+
 // ===========================================================================
 // ncclRedOpCreatePreMulSum_impl (enqueue.cc:4103) / ncclRedOpDestroy_impl (:4148)
 //
