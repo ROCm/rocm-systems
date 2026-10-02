@@ -99,8 +99,8 @@ struct buffered_domain_definition
     buffer_properties               buffer       = k_default_buffer_properties;
     configure_cb_t                  on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
-        correlation_dependency = std::nullopt;
-    finalize_cb_t                   on_finalize = nullptr;
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 template <typename SdkBackend>
@@ -110,8 +110,8 @@ struct callback_domain_definition
     callback_tracing_cb_t<SdkBackend> on_record;
     configure_cb_t                    on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
-        correlation_dependency = std::nullopt;
-    finalize_cb_t                   on_finalize = nullptr;
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 struct domain_configuration
