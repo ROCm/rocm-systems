@@ -1,5 +1,5 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * See LICENSE.txt for more license information
@@ -7,6 +7,7 @@
 
 #include "multiplane.h"
 #include "net_ib_cast_inspect.h"
+#include "common_cast.h"
 #include "core.h"
 
 #include <arpa/inet.h>
@@ -15,7 +16,9 @@
 #include <vector>
 #include <mutex>
 
-// Forward declarations for XML parser internals (defined in xml.cc, external linkage)
+// Forward declarations for XML parser internals (defined in xml.cc, external linkage).
+// These are not exposed in graph/xml.h because they are considered private API of the
+// XML parser.  If xml.cc ever moves them into a header, remove the duplicates here.
 typedef ncclResult_t (*xmlHandlerFunc_t)(FILE*, struct ncclXml*, struct ncclXmlNode*);
 struct xmlHandler {
   const char* name;
@@ -144,12 +147,25 @@ static ncclResult_t ibCastMultiplanePopulateMap(struct ncclXml* xml) {
           strncpy(info.interface, pipIface, MAX_STR_LEN - 1);
           info.interface[MAX_STR_LEN - 1] = '\0';
         }
+        // Parse PIP IP at load time to catch malformed addresses early
+        // and avoid repeated inet_pton on every QP RTR.
+        NCCLCHECK(ibCastIpToGid(pipIp, &info.gid));
         pips.push_back(info);
       }
 
-      std::string key(gidStr);
+      // Normalize the GID key: parse to binary and re-format to canonical
+      // lowercase colon-separated hex.  This ensures that compressed IPv6 forms,
+      // uppercase hex, or plain IPv4 in the XML all map correctly.
+      union ibv_gid parsedGid;
+      NCCLCHECK(ibCastIpToGid(gidStr, &parsedGid));
+      char canonicalGid[64];
+      ibCastGidToString(&parsedGid, canonicalGid, sizeof(canonicalGid));
+      std::string key(canonicalGid);
+      if (gidToPipMap.count(key)) {
+        WARN("Multiplane: duplicate GID %s in map file — overwriting previous entry", canonicalGid);
+      }
       gidToPipMap[key] = pips;
-      INFO(NCCL_NET, "Multiplane: GID %s -> %zu PIPs", gidStr, pips.size());
+      INFO(NCCL_NET, "Multiplane: GID %s (canonical: %s) -> %zu PIPs", gidStr, canonicalGid, pips.size());
       for (size_t p = 0; p < pips.size(); p++) {
         INFO(NCCL_NET, "  PIP[%zu]: ip=%s interface=%s", p, pips[p].ip, pips[p].interface);
       }
@@ -158,8 +174,8 @@ static ncclResult_t ibCastMultiplanePopulateMap(struct ncclXml* xml) {
   return ncclSuccess;
 }
 
-static void ibCastMultiplaneLoadOnce() {
-  const char* mapFile = getenv("RCCL_MULTIPLANE_MAP_FILE");
+static void IbCastMultiplaneLoadOnce() {
+  const char* mapFile = ncclGetEnv("RCCL_MULTIPLANE_MAP_FILE");
   if (mapFile == NULL || mapFile[0] == '\0') {
     loadResult = ncclSuccess;
     return;
@@ -202,18 +218,19 @@ static void ibCastMultiplaneLoadOnce() {
   }
 }
 
-ncclResult_t ibCastMultiplaneLoad(void) {
-  std::call_once(loadOnceFlag, ibCastMultiplaneLoadOnce);
+ncclResult_t IbCastMultiplaneLoad(void) {
+  std::call_once(loadOnceFlag, IbCastMultiplaneLoadOnce);
   return loadResult;
 }
 
-ncclResult_t ibCastMultiplaneEnabled(bool* enabled) {
-  const char* mapFile = getenv("RCCL_MULTIPLANE_MAP_FILE");
-  *enabled = (mapFile != NULL && mapFile[0] != '\0');
+ncclResult_t IbCastMultiplaneEnabled(bool* enabled) {
+  // IbCastMultiplaneEnable is set once during RCCL init (init.cc) based on
+  // IbCastAinicRoce && RCCL_MULTIPLANE_MAP_FILE — no per-QP overhead.
+  *enabled = IbCastMultiplaneEnable;
   return ncclSuccess;
 }
 
-ncclResult_t ibCastMultiplaneGetPipGids(const union ibv_gid* vipGid, union ibv_gid* pipGids, int* nPips) {
+ncclResult_t IbCastMultiplaneGetPipGids(const union ibv_gid* vipGid, union ibv_gid* pipGids, int* nPips) {
   *nPips = 0;
   if (!multiplaneLoaded) return ncclSuccess;
 
@@ -231,7 +248,7 @@ ncclResult_t ibCastMultiplaneGetPipGids(const union ibv_gid* vipGid, union ibv_g
   if (count > MULTIPLANE_MAX_PIPS) count = MULTIPLANE_MAX_PIPS;
 
   for (int i = 0; i < count; i++) {
-    NCCLCHECK(ibCastIpToGid(pips[i].ip, &pipGids[i]));
+    pipGids[i] = pips[i].gid;
   }
   *nPips = count;
   INFO(NCCL_NET, "Multiplane: GID %s resolved to %d PIPs", gidStr, count);
@@ -259,4 +276,6 @@ void ncclIbCastTestMultiplaneReset(void) {
   loadOnceFlag.~once_flag();
   new (&loadOnceFlag) std::once_flag();
   loadResult = ncclSuccess;
+  // Reset the init-time global so tests can toggle between enabled/disabled.
+  IbCastMultiplaneEnable = false;
 }
