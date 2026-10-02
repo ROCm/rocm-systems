@@ -327,7 +327,7 @@ Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 6
+HRR_VERSION = 7
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -352,12 +352,15 @@ Version history, so an archive written by an older runtime can be placed:
   or a reader that translates the tail. Both cases assume the dispatch tables
   only ever grow at the end; an insertion anywhere else moves the IDs after it.
   A retired dispatch-table slot (nulled `void*`) still occupies an ID.
+- **v7** `hipLibraryGetModule` inserted into `HipDispatchTable`, shifting the nine
+  compiler API IDs (545..553 → 546..554). Archives written at v6 decode those
+  compiler events as the wrong API under v7.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 6)
+                      events.bin HRR_VERSION = 7)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -1331,7 +1334,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 6, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 7, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch

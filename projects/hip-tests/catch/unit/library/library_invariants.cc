@@ -189,3 +189,51 @@ HIP_TEST_CASE(Unit_hipLibrary_LoadUnloadCycle) {
     HIP_CHECK(hipLibraryUnload(lib));
   }
 }
+
+// hipLibraryGetModule returns a non-null stable handle.
+HIP_TEST_CASE(Unit_hipLibraryGetModule_Positive_Basic) {
+  HIP_TEST_DRIVER_INIT();
+  hipLibrary_t lib = nullptr;
+  HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
+                                   0));
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod, lib));
+  REQUIRE(mod != nullptr);
+
+  // Second call returns the same handle.
+  hipModule_t mod2 = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod2, lib));
+  REQUIRE(mod2 == mod);
+
+  HIP_CHECK(hipLibraryUnload(lib));
+}
+
+// GetModule as the first call on a fresh library triggers lazy build itself.
+HIP_TEST_CASE(Unit_hipLibraryGetModule_Positive_BuildsOnFirstUse) {
+  HIP_TEST_DRIVER_INIT();
+  hipLibrary_t lib = nullptr;
+  HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
+                                   0));
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod, lib));
+  REQUIRE(mod != nullptr);
+
+  hipFunction_t func = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&func, mod, "add_kernel"));
+  REQUIRE(func != nullptr);
+
+  HIP_CHECK(hipLibraryUnload(lib));
+}
+
+// Module returned by hipLibraryGetModule must not be unloadable via hipModuleUnload.
+HIP_TEST_CASE(Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused) {
+  HIP_TEST_DRIVER_INIT();
+  hipLibrary_t lib = nullptr;
+  HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
+                                   0));
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod, lib));
+  HIP_CHECK_ERROR(hipModuleUnload(mod), hipErrorIllegalState);
+  HIP_CHECK(hipLibraryUnload(lib));
+}
+

@@ -73,8 +73,10 @@
  * v6: pointer arguments whose pointee used to be dropped now carry it inline
  * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
  * before v6 cannot be read by a v6 reader: re-capture rather than replay an
- * old recording. */
-#define HRR_VERSION ((uint16_t)6u)
+ * old recording.
+ * v7: hipLibraryGetModule inserted into HipDispatchTable, shifting compiler
+ * API IDs (hipPopCallConfiguration … hipUnregisterFatBinary) up by one. */
+#define HRR_VERSION ((uint16_t)7u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -5820,6 +5822,14 @@ typedef struct {
     uint64_t module;
 } hrr_args_hipModuleEnumerateFunctions;
 
+/* hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pMod;
+    uint64_t library;
+} hrr_args_hipLibraryGetModule;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6367,16 +6377,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEGETLUID = 542,
     HRR_API_HIPINITDEVICE = 543,
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
-    HRR_API_HIPPOPCALLCONFIGURATION = 545,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 546,
-    HRR_API_HIPREGISTERFATBINARY = 547,
-    HRR_API_HIPREGISTERFUNCTION = 548,
-    HRR_API_HIPREGISTERMANAGEDVAR = 549,
-    HRR_API_HIPREGISTERSURFACE = 550,
-    HRR_API_HIPREGISTERTEXTURE = 551,
-    HRR_API_HIPREGISTERVAR = 552,
-    HRR_API_HIPUNREGISTERFATBINARY = 553,
-    HRR_API_COUNT = 554
+    HRR_API_HIPLIBRARYGETMODULE = 545,
+    HRR_API_HIPPOPCALLCONFIGURATION = 546,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 547,
+    HRR_API_HIPREGISTERFATBINARY = 548,
+    HRR_API_HIPREGISTERFUNCTION = 549,
+    HRR_API_HIPREGISTERMANAGEDVAR = 550,
+    HRR_API_HIPREGISTERSURFACE = 551,
+    HRR_API_HIPREGISTERTEXTURE = 552,
+    HRR_API_HIPREGISTERVAR = 553,
+    HRR_API_HIPUNREGISTERFATBINARY = 554,
+    HRR_API_COUNT = 555
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6927,6 +6938,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceGetLuid",
     "hipInitDevice",
     "hipModuleEnumerateFunctions",
+    "hipLibraryGetModule",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",
