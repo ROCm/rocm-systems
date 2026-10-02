@@ -86,6 +86,7 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/dda_targets.h"
 #endif
 #if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
@@ -2818,6 +2819,7 @@ static bool ncclDdaCommSetupRequested(const struct ncclCommInitRankAsyncJob* job
   return false;
 #else
   if (job == nullptr || comm == nullptr || job->parent != nullptr || job->isGrow) return false;
+  if (!ncclDdaCompiledForArch(comm->archName)) return false;
   if (ncclDdaUseFabricPath(comm)) return true;
   return comm->nNodes == 1 && comm->nRanks == 8;
 #endif

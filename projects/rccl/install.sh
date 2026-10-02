@@ -42,6 +42,7 @@ force_reduce_pipeline=false
 enable_tdm_simple=false
 generate_sym_kernels=true
 enable_dda=true
+dda_target_overrides=""
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
@@ -82,7 +83,8 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
-    echo "       --disable-dda           Compile out DDA collective kernels"
+    echo "       --disable-dda           Compile out DDA collective kernels (default for every GPU target)"
+    echo "       --dda-target            Override DDA compilation for one GPU target, gfx<arch>=ON or gfx<arch>=OFF. Repeatable."
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -124,7 +126,8 @@ function display_help()
     echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
-    echo "    -DENABLE_DDA=OFF                      Compile out DDA collective kernels (default: ON)"
+    echo "    -DENABLE_DDA=OFF                      Compile out DDA collective kernels for every GPU target (default: ON)"
+    echo "    -DDDA_TARGET_OVERRIDES=gfx950=OFF    Per-target overrides of ENABLE_DDA. Separate entries with ',' or ';'"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DENABLE_RCCL_EP_IN_LIBRCCL=ON        Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
@@ -151,7 +154,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-dda,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-dda,dda-target:,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -175,6 +178,7 @@ while true; do
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
          --disable-dda)              enable_dda=false;                                                                                 shift ;;
+         --dda-target)               if [[ -z "${dda_target_overrides}" ]]; then dda_target_overrides="${2}"; else dda_target_overrides="${dda_target_overrides},${2}"; fi; shift 2 ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
@@ -495,6 +499,13 @@ fi
 # the paths ineligible, so selection falls through to other algorithms.
 if [[ "${enable_dda}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DDA=OFF"
+fi
+
+# Per-target overrides of the ENABLE_DDA default. gfx950=OFF leaves every
+# other target on the default; combined with --disable-dda, gfx950=ON turns
+# that one target back on.
+if [[ -n "${dda_target_overrides}" ]]; then
+    cmake_common_options="${cmake_common_options} -DDDA_TARGET_OVERRIDES=${dda_target_overrides}"
 fi
 
 # Device linker (assembly-extract pipeline, no -fgpu-rdc)

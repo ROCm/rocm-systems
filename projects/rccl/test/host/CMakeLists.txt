@@ -789,10 +789,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroInit and variants
 # ---------------------------------------------------------------------------
-# init.cc calls DDA setup under ENABLE_DDA. That define is private to librccl,
-# so pass the shipping default here. --disable-dda leaves it unset and the
-# setup calls are compiled out, matching the library.
-if(NOT DEFINED ENABLE_DDA OR ENABLE_DDA)
+# init.cc calls DDA setup under ENABLE_DDA. That define is private to librccl
+# and is applied after this directory is configured, so pass the resolved
+# result here. A per-target override that still leaves some architecture
+# enabled keeps ENABLE_DDA set. The target list itself stays off this binary:
+# these tests call the setup predicate with a null arch name, and the list
+# would make that predicate return false.
+if(DEFINED RCCL_DDA_ENABLED)
+  if(RCCL_DDA_ENABLED)
+    set(_MICRO_DDA_DEF ENABLE_DDA)
+  else()
+    set(_MICRO_DDA_DEF "")
+  endif()
+elseif(NOT DEFINED ENABLE_DDA OR ENABLE_DDA)
   set(_MICRO_DDA_DEF ENABLE_DDA)
 else()
   set(_MICRO_DDA_DEF "")

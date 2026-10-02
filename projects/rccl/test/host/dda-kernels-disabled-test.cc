@@ -17,7 +17,24 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/dda_targets.h"
 #include "../common/LogCapture.hpp"
+
+TEST(DdaKernelsDisabled, ArchListFollowsOverrides) {
+  EXPECT_TRUE(ncclDdaArchInList("gfx950", nullptr));
+  EXPECT_FALSE(ncclDdaArchInList("gfx950", ""));
+  EXPECT_TRUE(ncclDdaArchInList("gfx950", "gfx950"));
+  EXPECT_TRUE(ncclDdaArchInList("gfx950:xnack+", "gfx950,gfx942"));
+  EXPECT_TRUE(ncclDdaArchInList("gfx942", "gfx950,gfx942"));
+  EXPECT_FALSE(ncclDdaArchInList("gfx1250", "gfx950,gfx942"));
+  EXPECT_FALSE(ncclDdaArchInList("gfx125", "gfx1250"));
+  EXPECT_FALSE(ncclDdaArchInList(nullptr, "gfx950"));
+#if defined(ENABLE_DDA)
+  EXPECT_TRUE(ncclDdaCompiledForArch("gfx906"));
+#else
+  EXPECT_FALSE(ncclDdaCompiledForArch("gfx950"));
+#endif
+}
 
 TEST(DdaKernelsDisabled, EligibilityIsFalseAndBlocksAreZero) {
   using RedElig = bool (*)(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t);

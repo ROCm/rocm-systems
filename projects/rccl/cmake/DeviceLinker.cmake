@@ -618,7 +618,8 @@ add_custom_command(
   VERBATIM
 )
 
-# Empty when ENABLE_DDA=OFF so the top-level device_linker_build DEPENDS list
+# Empty when DDA is compiled out for every target (ENABLE_DDA=OFF, or every
+# target overridden off) so the top-level device_linker_build DEPENDS list
 # can keep naming these objects. The sets below overwrite the paths when the
 # kernels are actually compiled.
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "")
@@ -637,7 +638,15 @@ set(DDA_ALLTOALL_FABRIC_LL_FAT_OBJ "")
 set(DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ "")
 set(DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ "")
 set(DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ "")
-if(ENABLE_DDA)
+if(RCCL_DDA_ENABLED)
+# Compile DDA kernels only for the resolved targets. The surrounding device
+# objects keep the full GPU_TARGETS list; this swap is restored before the
+# GIN commands below.
+set(_DL_SAVED_OFFLOAD_ARCH_FLAGS "${DL_OFFLOAD_ARCH_FLAGS}")
+set(DL_OFFLOAD_ARCH_FLAGS "")
+foreach(_dda_arch ${RCCL_DDA_TARGETS})
+  list(APPEND DL_OFFLOAD_ARCH_FLAGS "--offload-arch=${_dda_arch}")
+endforeach()
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
 set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
 set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
@@ -718,6 +727,7 @@ add_custom_command(
   COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
+set(DL_OFFLOAD_ARCH_FLAGS "${_DL_SAVED_OFFLOAD_ARCH_FLAGS}")
 endif()
 
 # ===========================================================================
@@ -817,7 +827,12 @@ endif()
 # ===========================================================================
 # dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
 # ===========================================================================
-if(ENABLE_DDA)
+if(RCCL_DDA_ENABLED)
+set(_DL_SAVED_OFFLOAD_ARCH_FLAGS "${DL_OFFLOAD_ARCH_FLAGS}")
+set(DL_OFFLOAD_ARCH_FLAGS "")
+foreach(_dda_arch ${RCCL_DDA_TARGETS})
+  list(APPEND DL_OFFLOAD_ARCH_FLAGS "--offload-arch=${_dda_arch}")
+endforeach()
 set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric.o")
 
 add_custom_command(
@@ -1072,6 +1087,7 @@ add_custom_command(
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
+set(DL_OFFLOAD_ARCH_FLAGS "${_DL_SAVED_OFFLOAD_ARCH_FLAGS}")
 endif()
 
 # ===========================================================================

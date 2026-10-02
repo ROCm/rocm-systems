@@ -112,7 +112,7 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
-option(ENABLE_DDA                              "Compile DDA collective kernels"                ON)
+option(ENABLE_DDA                              "Compile DDA collective kernels (default for every GPU target)" ON)
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -260,6 +260,9 @@ if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
 endif()
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
+
+include(cmake/DdaTargets.cmake)
+rccl_resolve_dda_targets()
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
@@ -959,10 +962,6 @@ rccl_add_nccl_compat_package_targets()
 
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
-endif()
-
-if(ENABLE_DDA)
-  target_compile_definitions(rccl PRIVATE ENABLE_DDA)
 endif()
 
 # Off by default: the NET_IB/NET_SOCK profiler events instrument the network

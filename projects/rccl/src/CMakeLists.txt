@@ -91,6 +91,7 @@ set(SRC_FILES
   device/tdm/tdmCopy.h
   algorithms/dda/device/device_buffer.cc
   algorithms/dda/dda_kernels_disabled.cc
+  algorithms/dda/dda_targets.h
   diagnostics.cc
   diagnostics.h
   diagnostics/device/p2p.cu
@@ -584,10 +585,13 @@ set(SRC_FILES
   tuning/tuning_int.h
 )
 
-# --disable-dda / -DENABLE_DDA=OFF: drop the DDA device kernels and the
-# communicator setup that allocates their scratch, peer tables, and barriers.
-# Host selection still links, via dda_kernels_disabled.cc, and never picks DDA.
-if(NOT ENABLE_DDA)
+# ENABLE_DDA is the default. DDA_TARGET_OVERRIDES can turn individual GPU
+# targets off (or back on). When the resolved set is empty, drop the DDA
+# device kernels and the communicator setup that allocates their scratch,
+# peer tables, and barriers. Host selection still links, via
+# dda_kernels_disabled.cc, and never picks DDA. dda_targets.h stays: host
+# code uses it to tell a compiled-out architecture from one that was built.
+if(NOT RCCL_DDA_ENABLED)
   set(_DDA_KERNEL_SOURCES
     algorithms/dda/all_gather/dda_all_gather_fabric.cu
     algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu
@@ -616,7 +620,7 @@ if(NOT ENABLE_DDA)
   foreach(_dda_src IN LISTS _DDA_KERNEL_SOURCES)
     list(REMOVE_ITEM SRC_FILES ${_dda_src})
   endforeach()
-  message(STATUS "ENABLE_DDA=OFF: DDA kernels and communicator setup are not compiled")
+  message(STATUS "DDA kernels and communicator setup are not compiled")
 endif()
 
 # Prepend src/ to all source files for proper paths from root
@@ -1004,7 +1008,7 @@ list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
 # dda_kernels_disabled.cc is always hipified so host tests can compile the
 # stubs. The library links it only when the real kernels are not built.
-if(ENABLE_DDA)
+if(RCCL_DDA_ENABLED)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_kernels_disabled\\.cc$")
 endif()
 
@@ -1513,6 +1517,19 @@ endif()
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
 #==================================================================================================
+# ENABLE_DDA plus the resolved target list. Device-linker DDA compiles copy
+# these from the rccl target, so they have to be set before that include.
+if(RCCL_DDA_ENABLED)
+  list(JOIN RCCL_DDA_TARGETS "," _dda_targets_csv)
+  set(_dda_targets_hdr "${PROJECT_BINARY_DIR}/include/dda_enabled_targets.h")
+  set(_dda_targets_hdr_tmp "${CMAKE_CURRENT_BINARY_DIR}/dda_enabled_targets.h.tmp")
+  file(WRITE "${_dda_targets_hdr_tmp}" "#define DDA_ENABLED_TARGETS \"${_dda_targets_csv}\"\n")
+  execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${_dda_targets_hdr_tmp}" "${_dda_targets_hdr}")
+  target_compile_definitions(rccl PRIVATE ENABLE_DDA DDA_TARGETS_CONFIGURED)
+else()
+  file(REMOVE "${PROJECT_BINARY_DIR}/include/dda_enabled_targets.h")
+endif()
 if(ENABLE_DEVICE_LINKER)
   include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
   add_dependencies(rccl device_linker_build)
