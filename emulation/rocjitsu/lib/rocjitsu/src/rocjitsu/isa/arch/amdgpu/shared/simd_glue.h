@@ -964,6 +964,52 @@ inline constexpr uint32_t mxfp_format_bits_v = [] {
   return 8u;
 }();
 
+template <MxfpFormat Format> inline float decode_mxfp_scalar(uint32_t code) {
+  if constexpr (Format == MxfpFormat::Fp4E2m1)
+    return util::fp4_e2m1_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Fp6E2m3)
+    return util::fp6_e2m3_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Bf6E3m2)
+    return util::bf6_e3m2_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Fp8E4m3)
+    return util::fp8_e4m3_to_f32(static_cast<uint8_t>(code));
+  else
+    return util::bf8_e5m2_to_f32(static_cast<uint8_t>(code));
+}
+
+template <MxfpFormat Format>
+inline constexpr bool is_mxfp_unpack_exceptional(uint32_t code, uint8_t scale_code) {
+  if (scale_code == 0xffu)
+    return true;
+  if constexpr (Format == MxfpFormat::Fp8E4m3)
+    return (code & 0x7fu) == 0x7fu;
+  else if constexpr (Format == MxfpFormat::Bf8E5m2)
+    return (code & 0x7fu) > 0x7cu;
+  else
+    return false;
+}
+
+/// Both generated scalar unpack and exceptional SIMD chunks use this compiled
+/// consumer. Its compiler-local NaN selection can differ from the historical
+/// direct expressions; finite scalar unpack keeps those expressions instead.
+/// Disable GCC caller-specific specialization as well as inlining so the two
+/// execution paths cannot acquire different NaN operand-selection contexts.
+template <MxfpFormat Format, MxfpWideFormat WideFormat>
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((noipa))
+#endif
+RJ_NOINLINE inline uint32_t
+convert_mxfp_unpack_scalar(uint32_t code, uint8_t scale_code, bool fp16_ovfl) {
+  const float scale = util::e8m0_to_f32(scale_code);
+  const float value = decode_mxfp_scalar<Format>(code) * scale;
+  if constexpr (WideFormat == MxfpWideFormat::F32)
+    return std::bit_cast<uint32_t>(value);
+  else if constexpr (WideFormat == MxfpWideFormat::F16)
+    return util::f32_to_f16_mode(value, fp16_ovfl);
+  else
+    return util::f32_to_bf16_rne_mode(value, fp16_ovfl);
+}
+
 #if __has_include(<experimental/simd>)
 template <MxfpFormat Format>
   requires(util::has_stdx_simd)
@@ -978,19 +1024,6 @@ inline util::native<float> decode_mxfp_simd(util::native<uint32_t> code) {
     return util::fp8_e4m3_to_f32_simd(code);
   else
     return util::bf8_e5m2_to_f32_simd(code);
-}
-
-template <MxfpFormat Format> inline float decode_mxfp_scalar(uint32_t code) {
-  if constexpr (Format == MxfpFormat::Fp4E2m1)
-    return util::fp4_e2m1_to_f32(static_cast<uint8_t>(code));
-  else if constexpr (Format == MxfpFormat::Fp6E2m3)
-    return util::fp6_e2m3_to_f32(static_cast<uint8_t>(code));
-  else if constexpr (Format == MxfpFormat::Bf6E3m2)
-    return util::bf6_e3m2_to_f32(static_cast<uint8_t>(code));
-  else if constexpr (Format == MxfpFormat::Fp8E4m3)
-    return util::fp8_e4m3_to_f32(static_cast<uint8_t>(code));
-  else
-    return util::bf8_e5m2_to_f32(static_cast<uint8_t>(code));
 }
 
 template <MxfpFormat Format, bool Stochastic>
@@ -1022,30 +1055,6 @@ inline uint32_t encode_mxfp_scalar(float value, uint32_t seed, bool fp16_ovfl) {
       return util::f32_to_bf8_e5m2_rne_mode(value, fp16_ovfl);
   }
 }
-
-#if defined(__GNUC__) && !defined(__clang__)
-/// GCC's generated narrow body matches this isolated call frame, while the
-/// same expression in the outlined SIMD helper preserves the other quiet-NaN
-/// operand. Keep the rare exceptional unpack pipeline here so its result stays
-/// bit-exact with GCC's compiler-local scalar oracle.
-template <MxfpFormat Format, MxfpWideFormat WideFormat>
-RJ_NOINLINE inline uint32_t convert_mxfp_unpack_scalar(uint32_t code, uint8_t scale_code,
-                                                       bool fp16_ovfl) {
-  static_assert(WideFormat != MxfpWideFormat::F32);
-  const float scale = util::e8m0_to_f32(scale_code);
-  if constexpr (WideFormat == MxfpWideFormat::F16)
-    return util::f32_to_f16_mode(decode_mxfp_scalar<Format>(code) * scale, fp16_ovfl);
-  else
-    return util::f32_to_bf16_rne_mode(decode_mxfp_scalar<Format>(code) * scale, fp16_ovfl);
-}
-
-/// Passing the decoded operand first as an FP argument keeps GCC's multiply
-/// operand order consistent with the generated F32 scalar consumer. Decoding
-/// inside this frame instead lets GCC select the other quiet-NaN operand.
-RJ_NOINLINE inline uint32_t multiply_mxfp_unpack_f32_scalar(float input, float scale) {
-  return std::bit_cast<uint32_t>(input * scale);
-}
-#endif
 
 /// Keep each rare exceptional pack pipeline in one scalar call frame. Besides
 /// preventing auto-vectorization, this keeps host NaN operand selection and
@@ -1128,6 +1137,11 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
   const uint64_t exec = wf.exec();
   if (exec == 0)
     return true;
+  // Optimized scalar execution can omit arithmetic whose destination writes
+  // are suppressed. Retain that compiler-local exception behavior, falling
+  // back before acquiring views so register observations are not duplicated.
+  if ((wf.vgpr_write_mask() & exec) != exec)
+    return false;
   if (wf.wf_size() % W != 0)
     return false;
 
@@ -1202,12 +1216,9 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
         else if constexpr (Format == MxfpFormat::Bf8E5m2)
           exceptional = exceptional || ((codes[index] & U(0x7fu)) > U(0x7cu));
       }
-      // Host scalar NaN selection depends on both the compiler and the final
-      // consumer of the arithmetic result. If any active lane is exceptional,
-      // preserve the generated scalar body's complete decode/multiply/convert
-      // pipeline for this native chunk. The views above have already performed
-      // their plugin observations, so falling through to the generated body
-      // here would observe the same accesses twice.
+      // Use the same compiled decode/multiply/convert consumer as generated
+      // exceptional scalar unpack. The views have already observed accesses,
+      // so falling through to the generated body here would observe them twice.
       if (util::stdx::any_of(exceptional)) {
         for (uint32_t local_lane = 0; local_lane < W; ++local_lane) {
           if ((chunk & (uint64_t{1} << local_lane)) == 0)
@@ -1215,48 +1226,17 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
           const uint32_t lane = lane_base + local_lane;
           const uint8_t scalar_scale_byte =
               static_cast<uint8_t>(scale_bits[local_lane] >> (scale_byte * 8u));
-          auto read_scaled_code = [&](uint32_t index) -> uint32_t {
-            const uint32_t bit = index * LowBits;
-            const uint32_t word = bit / 32u;
-            const uint32_t shift = bit & 31u;
-            uint32_t code = src_words[word][local_lane] >> shift;
-            if (shift + LowBits > 32u)
-              code |= src_words[word + 1u][local_lane] << (32u - shift);
-            return code & CodeMask;
-          };
-
           if constexpr (WideFormat == MxfpWideFormat::F32) {
-            const float scalar_scale = util::e8m0_to_f32(scalar_scale_byte);
             for (uint32_t index = 0; index < Count; ++index) {
-#if defined(__GNUC__) && !defined(__clang__)
-              const uint32_t bits = multiply_mxfp_unpack_f32_scalar(
-                  decode_mxfp_scalar<Format>(read_scaled_code(index)), scalar_scale);
+              const uint32_t bits = convert_mxfp_unpack_scalar<Format, WideFormat>(
+                  codes[index][local_lane], scalar_scale_byte, wf.fp16_ovfl());
               destination.set_lane(index, lane, bits);
-#else
-              float value = decode_mxfp_scalar<Format>(read_scaled_code(index)) * scalar_scale;
-              destination.set_lane(index, lane, std::bit_cast<uint32_t>(value));
-#endif
             }
           } else {
-#if !defined(__GNUC__) || defined(__clang__)
-            const float scalar_scale = util::e8m0_to_f32(scalar_scale_byte);
-#endif
             std::array<uint32_t, WideWords> scalar_dst_words{};
             for (uint32_t index = 0; index < Count; ++index) {
-              uint32_t bits;
-#if defined(__GNUC__) && !defined(__clang__)
-              bits = convert_mxfp_unpack_scalar<Format, WideFormat>(
-                  read_scaled_code(index), scalar_scale_byte, wf.fp16_ovfl());
-#else
-              if constexpr (WideFormat == MxfpWideFormat::F16)
-                bits = util::f32_to_f16_mode(decode_mxfp_scalar<Format>(read_scaled_code(index)) *
-                                                 scalar_scale,
-                                             wf.fp16_ovfl());
-              else
-                bits = util::f32_to_bf16_rne_mode(
-                    decode_mxfp_scalar<Format>(read_scaled_code(index)) * scalar_scale,
-                    wf.fp16_ovfl());
-#endif
+              const uint32_t bits = convert_mxfp_unpack_scalar<Format, WideFormat>(
+                  codes[index][local_lane], scalar_scale_byte, wf.fp16_ovfl());
               scalar_dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
             }
             for (uint32_t word = 0; word < WideWords; ++word)

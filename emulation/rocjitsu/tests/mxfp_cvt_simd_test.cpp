@@ -42,6 +42,14 @@
 #include <xmmintrin.h>
 #endif
 
+#if GTEST_HAS_DEATH_TEST && defined(__linux__) && defined(__SSE__) &&                              \
+    (defined(__x86_64__) || defined(__i386__))
+#include <cerrno>
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 using namespace rocjitsu;
@@ -461,6 +469,20 @@ void seed_inactive_lane_fp_hazard(ConversionFixture &fixture, const ConversionCa
   fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, 1, 0u);
 }
 
+void seed_restricted_write_underflow_hazard(ConversionFixture &fixture,
+                                            const ConversionCase &test_case, uint64_t write_mask) {
+  fixture.seed(test_case, kFullExec);
+  // Every lane executes, but only lane 0 would underflow. Its destination is
+  // suppressed by the test's write mask; all other lanes evaluate exact 1 / 1.
+  fixture.fill_wide_source(test_case, kSourceBase, [](uint32_t lane, uint32_t) {
+    return lane == 0u ? std::bit_cast<float>(0x0080'0000u) : 1.0f;
+  });
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, lane,
+                           lane == 0u ? 0x7F7F'FFFFu : 0x3F80'0000u);
+  fixture.wf->set_vgpr_write_mask(write_mask);
+}
+
 #if GTEST_HAS_DEATH_TEST && defined(__linux__) && defined(__SSE__) &&                              \
     (defined(__x86_64__) || defined(__i386__))
 int run_inactive_lane_unmasked_exception_test() {
@@ -561,6 +583,68 @@ int run_exact_inputs_unmasked_invalid_test() {
     }
     return 0;
   }
+}
+
+int run_restricted_write_unmasked_underflow_case(bool force_scalar, uint64_t write_mask) {
+  HeldFloatingEnvironment environment;
+  if (!environment.valid())
+    return 1;
+  ConversionFixture fixture("gfx1250_mxfp_cvt_restricted_write_unmasked");
+  if (!fixture.cu || !fixture.decoder || !fixture.wf)
+    return 2;
+  const ConversionCase *test_case = find_conversion("v_cvt_scalef32_pk8_fp4_f32");
+  if (!test_case)
+    return 3;
+  const auto words = build_conversion(*test_case);
+  std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+  if (!instruction)
+    return 4;
+
+  seed_restricted_write_underflow_hazard(fixture, *test_case, write_mask);
+  ForceScalarGuard guard(force_scalar);
+  if (std::feclearexcept(FE_ALL_EXCEPT) != 0)
+    return 5;
+  uint32_t mxcsr = _mm_getcsr();
+  mxcsr |= static_cast<uint32_t>(_MM_MASK_MASK);
+  mxcsr &= ~static_cast<uint32_t>(_MM_EXCEPT_MASK | _MM_MASK_UNDERFLOW);
+  _mm_setcsr(mxcsr);
+  const bool succeeded =
+      fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+  _mm_setcsr(_mm_getcsr() | _MM_MASK_MASK);
+  return succeeded ? 0 : 6;
+}
+
+int compare_restricted_write_unmasked_underflow() {
+  const auto child_status = [](bool force_scalar, uint64_t write_mask, int &status) {
+    const pid_t child = fork();
+    if (child == -1)
+      return false;
+    if (child == 0)
+      std::_Exit(run_restricted_write_unmasked_underflow_case(force_scalar, write_mask));
+    pid_t waited;
+    do {
+      waited = waitpid(child, &status, 0);
+    } while (waited == -1 && errno == EINTR);
+    return waited == child;
+  };
+  for (uint64_t write_mask : {kFullExec & ~uint64_t{1}, uint64_t{0}}) {
+    int scalar_status = 0;
+    int simd_status = 0;
+    if (!child_status(true, write_mask, scalar_status) ||
+        !child_status(false, write_mask, simd_status))
+      return 1;
+    // Whether dead scalar arithmetic is removed depends on the compiler.
+    // Compare actual trap behavior instead of requiring either result globally.
+    if (WIFSIGNALED(scalar_status)) {
+      if (WTERMSIG(scalar_status) != SIGFPE || !WIFSIGNALED(simd_status) ||
+          WTERMSIG(simd_status) != SIGFPE)
+        return 2;
+    } else if (!WIFEXITED(scalar_status) || WEXITSTATUS(scalar_status) != 0 ||
+               !WIFEXITED(simd_status) || WEXITSTATUS(simd_status) != 0) {
+      return 3;
+    }
+  }
+  return 0;
 }
 #endif
 
@@ -907,9 +991,9 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackSpecialScalesMasksAndOverflowAreBitExa
         const auto scalar_result = run(true);
         EXPECT_EQ(simd_result, scalar_result);
 
-        // NaN operand selection for multiplication is compiler- and
-        // consumer-sensitive. The untouched generated scalar expression is
-        // deliberately the oracle for those bit patterns.
+        // Exceptional unpack uses one scalar/SIMD consumer to define
+        // compiler-local NaN operand selection. Finite unpack and pack retain
+        // their original generated arithmetic.
       }
 
       // One exceptional active lane scalarizes its native chunk. Keep the
@@ -962,7 +1046,8 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackNaNOperandsMatchScalar) {
       ASSERT_NE(instruction, nullptr);
 
       // Both NaN signs and every BF8 NaN payload, with a NaN or unity scale.
-      // The generated scalar consumer determines which NaN multiplication keeps.
+      // The shared exceptional-unpack consumer determines which NaN is kept;
+      // this intentionally replaces the historical compiler-specific boundary.
       for (uint32_t code : {0x7cu, 0x7du, 0x7eu, 0x7fu, 0xfcu, 0xfdu, 0xfeu, 0xffu}) {
         SCOPED_TRACE(code);
         for (uint32_t scale_code : {0xffu, 0x7fu}) {
@@ -1027,37 +1112,41 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, AllOpcodesMatchScalarFloatingPointExceptions
         SCOPED_TRACE(profile == InputProfile::Finite ? "finite" : "zero_inf_nan");
         for (uint64_t exec : {kFullExec, kSparseExec, uint64_t{0}}) {
           SCOPED_TRACE(exec);
-          const auto run = [&](bool force_scalar) {
-            fixture.seed(test_case, exec, profile);
-            ForceScalarGuard guard(force_scalar);
-            // Seeding may perform conversions: clear only after all setup,
-            // and capture status before assertions or register inspection.
-            const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
-            const int baseline_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
-            const bool succeeded =
-                fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
-            const int result_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
-            return RunResult{clear_result,
-                             baseline_exceptions,
-                             result_exceptions,
-                             succeeded,
-                             fixture.snapshot_vgpr_window(),
-                             fixture.snapshot_seed()};
-          };
+          for (uint64_t write_mask : {kFullExec, kRestrictedWriteMask, uint64_t{0}}) {
+            SCOPED_TRACE(write_mask);
+            const auto run = [&](bool force_scalar) {
+              fixture.seed(test_case, exec, profile);
+              fixture.wf->set_vgpr_write_mask(write_mask);
+              ForceScalarGuard guard(force_scalar);
+              // Seeding may perform conversions: clear only after all setup,
+              // and capture status before assertions or register inspection.
+              const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
+              const int baseline_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+              const bool succeeded =
+                  fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+              const int result_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+              return RunResult{clear_result,
+                               baseline_exceptions,
+                               result_exceptions,
+                               succeeded,
+                               fixture.snapshot_vgpr_window(),
+                               fixture.snapshot_seed()};
+            };
 
-          const RunResult scalar = run(true);
-          const RunResult simd = run(false);
-          ASSERT_EQ(scalar.clear_result, 0);
-          ASSERT_EQ(simd.clear_result, 0);
-          ASSERT_EQ(scalar.baseline_exceptions, 0);
-          ASSERT_EQ(simd.baseline_exceptions, 0);
-          ASSERT_TRUE(scalar.succeeded);
-          ASSERT_TRUE(simd.succeeded);
-          // Active arithmetic is allowed to raise exceptions; SIMD must
-          // reproduce the scalar pipeline, not suppress those flags.
-          EXPECT_EQ(simd.result_exceptions, scalar.result_exceptions);
-          EXPECT_EQ(simd.destination, scalar.destination);
-          EXPECT_EQ(simd.seed, scalar.seed);
+            const RunResult scalar = run(true);
+            const RunResult simd = run(false);
+            ASSERT_EQ(scalar.clear_result, 0);
+            ASSERT_EQ(simd.clear_result, 0);
+            ASSERT_EQ(scalar.baseline_exceptions, 0);
+            ASSERT_EQ(simd.baseline_exceptions, 0);
+            ASSERT_TRUE(scalar.succeeded);
+            ASSERT_TRUE(simd.succeeded);
+            // Preserve the configured scalar consumer's flags, including when
+            // a write mask lets the compiler remove otherwise active arithmetic.
+            EXPECT_EQ(simd.result_exceptions, scalar.result_exceptions);
+            EXPECT_EQ(simd.destination, scalar.destination);
+            EXPECT_EQ(simd.seed, scalar.seed);
+          }
         }
       }
     }
@@ -1127,6 +1216,82 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, ActiveArithmeticPreservesHostFloatingPointEx
                   arithmetic.required_exceptions);
         EXPECT_EQ(simd.exceptions, scalar.exceptions);
         EXPECT_EQ(simd.destination, scalar.destination);
+      }
+    }
+  }
+}
+
+TEST(Gfx1250MxfpCvtSimdCorrectness, RestrictedWriteMasksPreserveScalarFloatingPointExceptions) {
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
+  } else {
+    HeldFloatingEnvironment environment;
+    ASSERT_TRUE(environment.valid());
+    ConversionFixture fixture("gfx1250_mxfp_cvt_restricted_write_fenv");
+    ASSERT_NE(fixture.cu, nullptr);
+    ASSERT_NE(fixture.decoder, nullptr);
+    ASSERT_NE(fixture.wf, nullptr);
+    const ConversionCase *test_case = find_conversion("v_cvt_scalef32_pk8_fp4_f32");
+    ASSERT_NE(test_case, nullptr);
+    const auto words = build_conversion(*test_case);
+    std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+
+    struct RunResult {
+      int clear_result;
+      int raise_result;
+      int baseline_exceptions;
+      int exceptions;
+      bool succeeded;
+      std::array<uint32_t, kMaxDestinationRegs * kWaveSize> destination;
+      std::array<uint32_t, kWaveSize> seed_before;
+      std::array<uint32_t, kWaveSize> seed_after;
+    };
+    for (uint64_t write_mask : {kFullExec & ~uint64_t{1}, uint64_t{0}}) {
+      SCOPED_TRACE(write_mask);
+      for (int sticky : {0, FE_INVALID}) {
+        SCOPED_TRACE(sticky);
+        const auto run = [&](bool force_scalar) {
+          seed_restricted_write_underflow_hazard(fixture, *test_case, write_mask);
+          const auto seed_before = fixture.snapshot_seed();
+          ForceScalarGuard guard(force_scalar);
+          const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
+          const int raise_result = std::feraiseexcept(sticky);
+          const int baseline_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+          const bool succeeded =
+              fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+          const int exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+          return RunResult{clear_result,        raise_result,
+                           baseline_exceptions, exceptions,
+                           succeeded,           fixture.snapshot_vgpr_window(),
+                           seed_before,         fixture.snapshot_seed()};
+        };
+        const RunResult scalar = run(true);
+        const RunResult simd = run(false);
+        ASSERT_EQ(scalar.clear_result, 0);
+        ASSERT_EQ(simd.clear_result, 0);
+        ASSERT_EQ(scalar.raise_result, 0);
+        ASSERT_EQ(simd.raise_result, 0);
+        EXPECT_EQ(scalar.baseline_exceptions, sticky);
+        EXPECT_EQ(simd.baseline_exceptions, sticky);
+        ASSERT_TRUE(scalar.succeeded);
+        ASSERT_TRUE(simd.succeeded);
+        // The scalar compiler may retain or remove lane 0's unused division.
+        // Match that choice without clearing its legitimate or sticky flags.
+        EXPECT_EQ(simd.exceptions, scalar.exceptions);
+        EXPECT_EQ(scalar.exceptions & sticky, sticky);
+        EXPECT_EQ(simd.destination, scalar.destination);
+        EXPECT_EQ(scalar.seed_after, scalar.seed_before);
+        EXPECT_EQ(simd.seed_after, simd.seed_before);
+        EXPECT_EQ(simd.seed_before, scalar.seed_before);
+        for (uint32_t word = 0; word < packed_word_count(*test_case); ++word) {
+          for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+            if (write_mask & (uint64_t{1} << lane))
+              continue;
+            const uint32_t sentinel = 0xA5A5'0000u ^ (word * 0x101u) ^ lane;
+            EXPECT_EQ(simd.destination[word * kWaveSize + lane], sentinel);
+          }
+        }
       }
     }
   }
@@ -1217,12 +1382,23 @@ TEST(Gfx1250MxfpCvtSimdDeathTest, ExactFiniteInputsDoNotTrapWithUnmaskedInvalid)
                 "");
   }
 }
+
+TEST(Gfx1250MxfpCvtSimdDeathTest, RestrictedWriteMasksMatchScalarWithUnmaskedUnderflow) {
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
+  } else {
+    ASSERT_EXIT(std::_Exit(compare_restricted_write_unmasked_underflow()),
+                ::testing::ExitedWithCode(0), "");
+  }
+}
 #endif
 
 TEST(Gfx1250MxfpCvtSimdCorrectness, NativeSimdHelperHandlesSupportedOperands) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
+    HeldFloatingEnvironment environment;
+    ASSERT_TRUE(environment.valid());
     const ConversionCase *test_case = find_conversion("v_cvt_scalef32_sr_pk8_fp4_f32");
     ASSERT_NE(test_case, nullptr);
     ConversionFixture fixture("gfx1250_mxfp_cvt_simd_gate");
@@ -1235,6 +1411,13 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, NativeSimdHelperHandlesSupportedOperands) {
     ASSERT_NE(instruction, nullptr);
     auto *typed = dynamic_cast<cdna5::VCvtScalef32SrPk8Fp4F32Vop3 *>(instruction.get());
     ASSERT_NE(typed, nullptr);
+    const auto try_simd = [&] {
+      return amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                     amdgpu::MxfpWideFormat::F32, 8u,
+                                                     amdgpu::MxfpDirection::Pack, true>(
+          *fixture.wf, fixture.vgpr_base + kDestinationBase, fixture.vgpr_base + kSourceBase,
+          typed->src2, typed->src1, 0u);
+    };
 
     fixture.seed(*test_case, kSparseExec);
     {
@@ -1243,16 +1426,31 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, NativeSimdHelperHandlesSupportedOperands) {
     }
     const auto scalar_result = fixture.snapshot_vgpr_window();
 
-    fixture.seed(*test_case, kSparseExec);
-    {
+    // Suppressing only inactive lanes does not require scalar fallback.
+    for (uint64_t write_mask : {kFullExec, kSparseExec}) {
+      SCOPED_TRACE(write_mask);
+      fixture.seed(*test_case, kSparseExec);
+      fixture.wf->set_vgpr_write_mask(write_mask);
       ForceScalarGuard enable_simd(false);
-      ASSERT_TRUE((amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
-                                                           amdgpu::MxfpWideFormat::F32, 8u,
-                                                           amdgpu::MxfpDirection::Pack, true>(
-          *fixture.wf, fixture.vgpr_base + kDestinationBase, fixture.vgpr_base + kSourceBase,
-          typed->src2, typed->src1, 0u)));
+      ASSERT_TRUE(try_simd());
+      EXPECT_EQ(fixture.snapshot_vgpr_window(), scalar_result);
     }
-    EXPECT_EQ(fixture.snapshot_vgpr_window(), scalar_result);
+    for (uint64_t write_mask : {kSparseExec & ~uint64_t{1}, uint64_t{0}}) {
+      SCOPED_TRACE(write_mask);
+      fixture.seed(*test_case, kSparseExec);
+      fixture.wf->set_vgpr_write_mask(write_mask);
+      const auto destination_before = fixture.snapshot_vgpr_window();
+      const auto seed_before = fixture.snapshot_seed();
+      ForceScalarGuard enable_simd(false);
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      ASSERT_EQ(std::feraiseexcept(FE_INVALID), 0);
+      const bool handled = try_simd();
+      const int exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+      EXPECT_FALSE(handled);
+      EXPECT_EQ(exceptions, FE_INVALID);
+      EXPECT_EQ(fixture.snapshot_vgpr_window(), destination_before);
+      EXPECT_EQ(fixture.snapshot_seed(), seed_before);
+    }
   }
 }
 
