@@ -82,6 +82,52 @@ wait_for_phase_complete() {
     return 1
 }
 
+terminate_and_wait() {
+    local pid=$1
+    local process_name=$2
+    local interrupt_grace_seconds=5
+    local terminate_grace_seconds=2
+    local watchdog_pid=""
+    local wait_status=0
+
+    if [ -z "${pid}" ]; then
+        return 0
+    fi
+
+    if kill -0 "${pid}" 2>/dev/null; then
+        kill -2 "${pid}" 2>/dev/null || true
+        (
+            sleep "${interrupt_grace_seconds}"
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "${process_name} did not exit after SIGINT; sending SIGTERM"
+                kill -15 "${pid}" 2>/dev/null || true
+            fi
+
+            sleep "${terminate_grace_seconds}"
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "${process_name} did not exit after SIGTERM; sending SIGKILL"
+                kill -9 "${pid}" 2>/dev/null || true
+            fi
+        ) &
+        watchdog_pid=$!
+    fi
+
+    wait "${pid}" 2>/dev/null || wait_status=$?
+
+    if [ -n "${watchdog_pid}" ]; then
+        kill "${watchdog_pid}" 2>/dev/null || true
+        wait "${watchdog_pid}" 2>/dev/null || true
+    fi
+
+    return "${wait_status}"
+}
+
+show_profiler_log() {
+    local log_file=$1
+    echo "rocprofv3 output:"
+    cat "${log_file}" 2>/dev/null || true
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
@@ -103,8 +149,8 @@ DETACH_PIPE=""
 
 cleanup() {
     if [ -n "${ROCPROF_PID}" ]; then
-        kill -2 "${ROCPROF_PID}" 2>/dev/null || true
-        wait "${ROCPROF_PID}" 2>/dev/null || true
+        terminate_and_wait "${ROCPROF_PID}" "rocprofv3" || true
+        ROCPROF_PID=""
     fi
 
     { exec 3>&-; } 2>/dev/null || true
@@ -113,8 +159,8 @@ cleanup() {
     fi
 
     if [ -n "${APP_PID}" ]; then
-        kill -2 "${APP_PID}" 2>/dev/null || true
-        wait "${APP_PID}" 2>/dev/null || true
+        terminate_and_wait "${APP_PID}" "test application" || true
+        APP_PID=""
     fi
 }
 
@@ -175,10 +221,8 @@ PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${AP
 ROCPROF_PID=$!
 
 if ! wait_for_profiler_attached "${APP_PID}" "${ROCPROF_LOG}"; then
-    echo "rocprofv3 output:"
-    cat "${ROCPROF_LOG}" 2>/dev/null || true
-    kill -2 "${ROCPROF_PID}" 2>/dev/null || true
-    wait "${ROCPROF_PID}" 2>/dev/null || true
+    show_profiler_log "${ROCPROF_LOG}"
+    terminate_and_wait "${ROCPROF_PID}" "rocprofv3" || true
     ROCPROF_PID=""
     exec 3>&-
     rm -f "${DETACH_PIPE}"
@@ -196,6 +240,13 @@ else
     ROCPROF_EXIT_CODE=$?
     ROCPROF_PID=""
     echo "rocprofv3 attach test failed with exit code $ROCPROF_EXIT_CODE"
+    show_profiler_log "${ROCPROF_LOG}"
+    exit 1
+fi
+
+if ! grep -q "Detaching from PID ${APP_PID} .* :: success" "${ROCPROF_LOG}"; then
+    echo "rocprofv3 exited without reporting successful detachment from PID ${APP_PID}"
+    show_profiler_log "${ROCPROF_LOG}"
     exit 1
 fi
 
@@ -203,30 +254,20 @@ exec 3>&-
 rm -f "${DETACH_PIPE}"
 DETACH_PIPE=""
 
-echo "Profiler detached successfully"
-
-kill -2 "${APP_PID}" 2>/dev/null
-if wait "${APP_PID}"; then
-    APP_PID=""
-else
-    APP_EXIT_CODE=$?
-    APP_PID=""
-    echo "Test application failed with exit code $APP_EXIT_CODE"
-    exit 1
-fi
-
 echo "Checking for generated output files..."
 ls -laR "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
 
 JSON_COUNT=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" -name "*.json" | wc -l)
 if [ "${JSON_COUNT}" -eq 0 ]; then
     echo "Error: No JSON files were generated"
+    show_profiler_log "${ROCPROF_LOG}"
     exit 1
 fi
 
 APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" -name "${APP_OUTPUT_PID}_results.json" | head -1)
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_OUTPUT_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
+    show_profiler_log "${ROCPROF_LOG}"
     exit 1
 fi
 echo "Found app JSON output: $APP_JSON"
@@ -242,6 +283,18 @@ done
 
 if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json" ]; then
     echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json not found"
+    show_profiler_log "${ROCPROF_LOG}"
+    exit 1
+fi
+
+echo "Profiler detached successfully"
+
+if terminate_and_wait "${APP_PID}" "test application"; then
+    APP_PID=""
+else
+    APP_EXIT_CODE=$?
+    APP_PID=""
+    echo "Test application failed with exit code $APP_EXIT_CODE"
     exit 1
 fi
 
