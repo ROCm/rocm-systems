@@ -5,13 +5,11 @@
 /// @brief Min/max selection rules, gfx1201 regression cases, and scalar/SIMD agreement.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
-#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -265,52 +263,6 @@ TEST(MinmaxTest, MatchesGfx1201NumForms) {
   EXPECT_EQ((mm::evaluate<cmp::F16, mm::Med3Num>(kFlush, 1u, 0u, 1u)), 0u);
 }
 
-TEST(MinmaxTest, AppliesModifiersBeforeTheFlush) {
-  using F32 = cmp::F32;
-  // NEG makes the subnormal negative; input flushing then produces -0.
-  EXPECT_EQ((mm::evaluate<F32, mm::MinNum>(mm::Modifiers{0u, 1u}, kFlush, 1u, 0u)), 0x80000000u);
-  // ABS on src1 and NEG on src2 come from bits 1 and 2.
-  EXPECT_EQ(
-      (mm::evaluate<F32, mm::Max3Num>(mm::Modifiers{2u, 4u}, kKeep, 0u, 0xbf800000u, 0x40000000u)),
-      0x3f800000u);
-  EXPECT_EQ((mm::evaluate<F32, mm::Med3Num>(mm::Modifiers{0u, 1u}, kKeep, 0x3f800000u, 0x40000000u,
-                                            0x40400000u)),
-            0x40000000u);
-}
-
-// ---------------------------------------------------------------------------
-// Floating-point inputs preserve selection results, including widened F16 inputs.
-// ---------------------------------------------------------------------------
-
-TEST(MinmaxTest, FloatingLanesMatchRawBits) {
-  using F32 = cmp::F32;
-  for (const uint32_t a : specials<F32>())
-    for (const uint32_t b : specials<F32>()) {
-      const float fa = std::bit_cast<float>(a);
-      const float fb = std::bit_cast<float>(b);
-      ASSERT_EQ(std::bit_cast<uint32_t>(mm::evaluate<F32, mm::Maximum>(kFlush, fa, fb)),
-                (mm::evaluate<F32, mm::Maximum>(kFlush, a, b)));
-      ASSERT_EQ(std::bit_cast<uint32_t>(mm::evaluate<F32, mm::Med3Num>(kFlush, fa, fb, fa)),
-                (mm::evaluate<F32, mm::Med3Num>(kFlush, a, b, a)));
-    }
-}
-
-TEST(MinmaxTest, WidenedF16MatchesF16) {
-  const auto widen = [](uint32_t h) { return util::f16_to_f32(static_cast<uint16_t>(h)); };
-  for (uint32_t a = 0; a <= 0xffffu; ++a)
-    for (const uint32_t b : specials<cmp::F16>())
-      for (const cmp::Policy p : {kKeep, kFlush}) {
-        ASSERT_EQ(std::bit_cast<uint32_t>(
-                      mm::evaluate<cmp::WidenedF16, mm::MinNum>(p, widen(a), widen(b))),
-                  std::bit_cast<uint32_t>(widen(mm::evaluate<cmp::F16, mm::MinNum>(p, a, b))))
-            << std::hex << "a 0x" << a << " b 0x" << b;
-        ASSERT_EQ(
-            std::bit_cast<uint32_t>(
-                mm::evaluate<cmp::WidenedF16, mm::MaximumMinimum>(p, widen(b), widen(a), widen(b))),
-            std::bit_cast<uint32_t>(widen(mm::evaluate<cmp::F16, mm::MaximumMinimum>(p, b, a, b))));
-      }
-}
-
 // ---------------------------------------------------------------------------
 // SIMD lanes select the same source as the scalar path.
 // ---------------------------------------------------------------------------
@@ -361,21 +313,6 @@ TEST(MinmaxTest, SimdMatchesScalar) {
 #else
     expect_simd_matches_scalar<cmp::F64, util::native<uint64_t>>();
 #endif
-    // Also check floating-point vectors, as used by the F32 VOP3 SIMD helpers.
-    using VF = util::native<float>;
-    alignas(64) std::array<float, VF::size()> fa{}, fb{};
-    const auto vals = specials<cmp::F32>();
-    for (std::size_t i = 0; i < VF::size(); ++i) {
-      fa[i] = std::bit_cast<float>(vals[i % vals.size()]);
-      fb[i] = std::bit_cast<float>(vals[(i * 5 + 3) % vals.size()]);
-    }
-    const VF r =
-        mm::evaluate<cmp::F32, mm::Minimum>(kFlush, VF(fa.data(), util::stdx::element_aligned),
-                                            VF(fb.data(), util::stdx::element_aligned));
-    for (std::size_t i = 0; i < VF::size(); ++i)
-      ASSERT_EQ(std::bit_cast<uint32_t>(static_cast<float>(r[i])),
-                (mm::evaluate<cmp::F32, mm::Minimum>(kFlush, std::bit_cast<uint32_t>(fa[i]),
-                                                     std::bit_cast<uint32_t>(fb[i]))));
 #endif
   }
 }

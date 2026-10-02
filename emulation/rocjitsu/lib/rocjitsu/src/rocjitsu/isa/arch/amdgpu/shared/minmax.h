@@ -7,8 +7,9 @@
 /// @brief AMD minimum/maximum and *_NUM instructions from the IEEE 754-2019 family.
 ///
 /// These instructions select a source after applying ABS/NEG and MODE input
-/// flushing, using the shared stages in comparison.h. Selection orders -0
-/// below +0 and does not flush the result. Callers apply output modifiers.
+/// flushing. Selection orders -0 below +0 and does not flush the result.
+/// The floating_operation.h wrapper applies ABS/NEG before the operation and
+/// OMOD/CLAMP afterward, for both scalar and SIMD callers.
 ///
 /// The operation template chooses the result ordering (minimum or maximum)
 /// and NaN rule. Three-source forms compose two binary selections; V_MED3_NUM
@@ -18,16 +19,14 @@
 /// gfx1201 only; applying its ISA discrepancies to CDNA5 remains an assumption
 /// requiring hardware verification.
 ///
-/// Scalar and SIMD callers use the same implementation. Floating-point inputs
-/// are bit-cast to unsigned lanes so selection preserves signs and NaN payloads.
+/// Scalar and SIMD callers use the same implementation on raw encodings in
+/// unsigned lanes, so selection preserves signs and NaN payloads.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 
-#include <bit>
 #include <cstdint>
 #include <functional>
 #include <type_traits>
-#include <utility>
 
 namespace rocjitsu::amdgpu::minmax {
 
@@ -80,33 +79,7 @@ using MaxMinNum = Nested<MaxNum, MinNum>;
 
 namespace detail {
 
-/// @brief Unsigned scalar or SIMD type used to inspect floating-point bits.
-template <typename V> struct Encoding;
-template <> struct Encoding<float> {
-  using type = uint32_t;
-};
-template <> struct Encoding<double> {
-  using type = uint64_t;
-};
-template <template <typename, typename> class Simd, typename T, typename Abi>
-  requires std::is_floating_point_v<T>
-struct Encoding<Simd<T, Abi>> {
-  using type = Simd<typename Encoding<T>::type, Abi>;
-};
-
-template <typename V>
-inline constexpr bool is_floating_lane_v = requires { typename Encoding<V>::type; };
-
-/// @brief `when_true` where `take` holds, else `when_false`.
-template <typename V, typename Mask>
-constexpr V choose(const Mask &take, V when_true, V when_false) {
-  if constexpr (std::is_same_v<Mask, bool>) {
-    return take ? when_true : when_false;
-  } else {
-    where(take, when_false) = when_true;
-    return when_false;
-  }
-}
+using comparison::detail::choose;
 
 /// @brief Recover the source encoding from comparison::total_order_key.
 template <typename Fmt, typename V> constexpr V from_total_order_key(V key) {
@@ -188,37 +161,23 @@ template <typename Fmt, typename Op, typename V> constexpr V apply(V a, V b, V c
 
 } // namespace detail
 
-/// @brief VOP3 source modifiers; bit i of each field applies to source i.
-struct Modifiers {
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-};
-
 /// @brief Apply input flushing and selection to sources with ABS/NEG already applied.
-/// @details Accepts unsigned encodings or floating-point values, scalar or SIMD.
-template <typename Fmt, typename Op, typename V, typename... Vs>
-  requires(1 + sizeof...(Vs) == Op::kSources && (std::is_same_v<V, Vs> && ...))
-constexpr V evaluate(const Policy &policy, V a, Vs... rest) {
-  if constexpr (detail::is_floating_lane_v<V>) {
-    using E = typename detail::Encoding<V>::type;
-    return std::bit_cast<V>(
-        evaluate<Fmt, Op>(policy, std::bit_cast<E>(a), std::bit_cast<E>(rest)...));
-  } else {
-    static_assert(comparison::detail::is_lane_v<Fmt, V>);
-    return detail::apply<Fmt, Op>(comparison::prepare<Fmt>(a, policy),
-                                  comparison::prepare<Fmt>(rest, policy)...);
-  }
-}
-
-/// @brief Evaluate an operation after applying per-source VOP3 modifiers.
+/// @details Accepts unsigned encodings, scalar or SIMD.
 template <typename Fmt, typename Op, typename V, typename... Vs>
   requires(1 + sizeof...(Vs) == Op::kSources && (std::is_same_v<V, Vs> && ...) &&
            comparison::detail::is_lane_v<Fmt, V>)
-constexpr V evaluate(const Modifiers &modifiers, const Policy &policy, V a, Vs... rest) {
-  return [&]<std::size_t... I>(std::index_sequence<I...>, auto... sources) {
-    return evaluate<Fmt, Op>(policy,
-                             comparison::modify<Fmt>(sources, I, modifiers.abs, modifiers.neg)...);
-  }(std::index_sequence_for<V, Vs...>{}, a, rest...);
+constexpr V evaluate(const Policy &policy, V a, Vs... rest) {
+  return detail::apply<Fmt, Op>(comparison::prepare<Fmt>(a, policy),
+                                comparison::prepare<Fmt>(rest, policy)...);
 }
+
+/// @brief Input flushing and selection, independent of instruction modifiers.
+template <typename Fmt, typename Op> struct Operation {
+  Policy policy;
+
+  template <typename V, typename... Vs> constexpr V operator()(V a, Vs... rest) const {
+    return evaluate<Fmt, Op>(policy, a, rest...);
+  }
+};
 
 } // namespace rocjitsu::amdgpu::minmax

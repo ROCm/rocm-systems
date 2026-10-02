@@ -58,12 +58,6 @@ using F16 = Format<uint32_t, 5, 10>;
 using F32 = Format<uint32_t, 8, 23>;
 using F64 = Format<uint64_t, 11, 52>;
 
-/// @brief F16 inputs widened to F32 by the VOP3 SIMD helpers.
-/// @details Widening does not change selection; input flushing still uses the F16 threshold.
-struct WidenedF16 : F32 {
-  static constexpr Lane kMinNormal = 0x38800000u; // 2^-14, encoded as F32.
-};
-
 /// @brief Per-instruction compare policy, fixed before any lane is evaluated.
 struct Policy {
   bool flush_inputs = false;
@@ -88,6 +82,18 @@ template <typename Fmt, typename V>
 inline constexpr bool is_lane_v = std::is_same_v<V, typename Fmt::Lane> || requires {
   requires std::is_same_v<typename V::value_type, typename Fmt::Lane>;
 };
+
+/// @brief `when_true` where `take` holds, else `when_false`, for a scalar or SIMD lane.
+/// @details Both candidates are evaluated; a SIMD mask selects independently per lane.
+template <typename V, typename Mask>
+constexpr V choose(const Mask &take, V when_true, V when_false) {
+  if constexpr (std::is_same_v<Mask, bool>) {
+    return take ? when_true : when_false;
+  } else {
+    where(take, when_false) = when_true;
+    return when_false;
+  }
+}
 
 /// @brief All ones where the magnitude is below the smallest normal, zero elsewhere.
 /// @details The subtraction borrows into the lane's top bit exactly when the

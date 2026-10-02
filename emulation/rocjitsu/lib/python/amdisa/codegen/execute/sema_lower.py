@@ -1112,12 +1112,17 @@ def _lower_dst_write(
 ) -> list[str]:
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
-    # A bare min/max call already returns destination bits. OMOD/CLAMP wrappers
-    # use the floating-point path below. This also skips SDWA's F16 output
-    # modifiers, but these min/max forms only exist on targets without SDWA.
-    writes_minmax_bits = _is_float_minmax(rhs_node)
+    # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
+    # conversion to host float and back. These forms only exist on targets
+    # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
+    selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
+    writes_minmax_bits = _is_float_minmax(selection_node)
     if writes_minmax_bits:
-        _, rhs = _float_minmax_selection(rhs_node, ctx)
+        _, rhs = _float_minmax_selection(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+        )
         needs_bitcast = 0
     else:
         rhs = _lower_expr(rhs_node, ctx)
@@ -2088,17 +2093,49 @@ def _is_float_minmax(node: SemaNode) -> bool:
     )
 
 
-def _float_minmax_selection(node: SemaNode, ctx: LoweringContext) -> tuple[str, str]:
-    """Return the source dtype and a minmax.h expression selecting raw bits."""
+def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:
+    """Read through output-modifier wrappers without changing the AST.
+
+    For clamp(omod(value)), return value and ('inst_.omod', 'inst_.clamp').
+    A missing wrapper contributes '0u', disabling that output stage.
+    """
+    omod = clamp = '0u'
+    while (
+        node.kind == SemaNodeKind.CALL
+        and node.call_name in ('apply_omod', 'apply_clamp')
+        and len(node.children) > 1
+    ):
+        if node.call_name == 'apply_omod':
+            omod = 'inst_.omod'
+        else:
+            clamp = 'inst_.clamp'
+        node = node.children[1]
+    return node, (omod, clamp)
+
+
+def _float_minmax_selection(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    """Return raw-bit selection with shared source/output modifier handling."""
     form = (node.call_name or '').removeprefix(FLOAT_MINMAX_CALL)
     dtype, reads, modifiers = _raw_float_sources(node, ctx)
-    return dtype, float_minmax.minmax_expr(dtype, form, reads, modifiers=modifiers)
+    output_policy = None
+    if output_fields is not None:
+        declaration = float_minmax.output_policy_decl(dtype, output_fields)
+        if declaration not in ctx.vector_preamble:
+            ctx.vector_preamble.append(declaration)
+        output_policy = float_minmax.OUTPUT_POLICY
+    return dtype, float_minmax.minmax_expr(
+        dtype, form, reads, modifiers=modifiers, output_policy=output_policy
+    )
 
 
 def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
-    """Convert selected bits to the floating-point value OMOD/CLAMP expect.
+    """Convert selected bits to a floating-point value inside a larger expression.
 
-    Direct destination writes keep the bits instead; see _lower_dst_write.
+    Destination writes, including OMOD/CLAMP, keep the bits; see _lower_dst_write.
     """
     dtype, selected = _float_minmax_selection(node, ctx)
     if dtype == 'f16':

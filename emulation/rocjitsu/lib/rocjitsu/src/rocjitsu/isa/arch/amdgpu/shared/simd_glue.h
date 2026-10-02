@@ -18,10 +18,12 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -686,6 +688,41 @@ inline uint32_t effective_vop3_omod_f16(const Wavefront &wf, uint32_t omod) {
 
 inline uint32_t effective_vop3_omod_f64(const Wavefront &wf, uint32_t omod) {
   return fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), omod);
+}
+
+/// @brief Resolve instruction fields and wave MODE into an output policy for `Fmt`.
+/// @details Architecture rules decide whether OMOD is active and CLAMP clears NaNs.
+/// @param omod VOP3 OMOD field.
+/// @param clamp VOP3 CLAMP field.
+template <typename Fmt>
+inline output_modifier::Policy output_modifier_policy(const Wavefront &wf, uint32_t omod,
+                                                      uint32_t clamp) {
+  output_modifier::Policy policy;
+  if constexpr (std::is_same_v<Fmt, comparison::F32>) {
+    policy.omod = effective_vop3_omod_f32(wf, omod);
+    policy.round_mode = wf.fp_round_mode_f32();
+  } else {
+    if constexpr (std::is_same_v<Fmt, comparison::F16>)
+      policy.omod = effective_vop3_omod_f16(wf, omod);
+    else
+      policy.omod = effective_vop3_omod_f64(wf, omod);
+    policy.round_mode = wf.fp_round_mode_f16_f64();
+  }
+  policy.clamp = clamp != 0;
+  policy.clamp_nan_to_zero = floating_clamp_nan_to_zero(wf);
+  policy.fp16_ovfl = wf.fp16_ovfl();
+  return policy;
+}
+
+/// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
+/// @details Resolve MODE once, before the SIMD lane loop. The operation itself
+/// only needs to implement input flushing and produce destination-format bits.
+template <typename Fmt, typename Inst, typename Op>
+inline auto vop3_float_operation(const Inst &inst, const Wavefront &wf, Op operation) {
+  return floating_operation::WithModifiers<Fmt, Op>{
+      {inst.inst_.abs, inst.inst_.neg},
+      output_modifier_policy<Fmt>(wf, inst.inst_.omod, inst.inst_.clamp),
+      operation};
 }
 
 inline util::native<uint32_t> finalize_omod_f16_bits_simd(util::native<uint32_t> value,
@@ -1412,17 +1449,17 @@ template <typename T, typename Inst>
 /// 64-bit-lane VOP2 binary SIMD fast path (v_add_f64 / v_mul_f64 /
 /// v_max_num_f64 / v_min_num_f64). VOP2 has no abs/neg/omod/clamp fields and
 /// reads its second source as `vsrc1` (not `src1`); otherwise identical to the
-/// f64 FMA vop2 path minus the dst-accumulate operand. Min/max callers use
-/// minmax::evaluate, sharing the scalar path's input flushing, NaN handling,
-/// and signed-zero ordering.
-template <typename Inst, typename BinOp>
+/// f64 FMA vop2 path minus the dst-accumulate operand. `T` is `double` for
+/// host arithmetic, or `uint64_t` for raw encodings: min/max callers pass
+/// those to minmax::evaluate, the same evaluation as the scalar path.
+template <typename T = double, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &inst, Wavefront &wf,
                                                            BinOp bin_op) {
+  static_assert(std::is_same_v<T, double> || std::is_same_v<T, uint64_t>);
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  using T = double;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -1442,7 +1479,7 @@ template <typename Inst, typename BinOp>
 }
 
 /// Unconstrained fallback for the f64 vop2 binary path.
-template <typename Inst, typename BinOp>
+template <typename T = double, typename Inst, typename BinOp>
 [[nodiscard]] bool try_execute_binary_vop2_f64_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
@@ -2065,11 +2102,15 @@ template <typename Inst, typename CmpOp, typename WriteResult>
 /// no source/result modifiers other than integer CLAMP. Saturating integer
 /// arithmetic falls back to the scalar body; the plain op is bit-identical to
 /// that body when CLAMP is clear. T is a 32-bit integer lane type.
+///
+/// Raw floating-point operations use WithModifiers to supply ABS/NEG, OMOD
+/// and CLAMP around the operation. CLAMP then stays on the SIMD path.
 template <typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
-  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
-      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if ((!floating_operation::applies_modifiers_v<BinOp> && inst.inst_.clamp != 0u) ||
+      simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2136,15 +2177,17 @@ template <typename T, typename Inst, typename BinOp>
 /// body's low-half read plus full-dword zero-extending write. The true16 form
 /// selects source halves with op_sel[0:1] and writes the destination half per
 /// the ISA's op_sel[3] policy. The packed-f16 binary functors do not apply
-/// abs/neg/omod/clamp, so both forms bail to scalar whenever a modifier is
-/// present.
+/// ABS/NEG/OMOD/CLAMP, so both forms fall back to scalar when a modifier is
+/// present. Raw F16 operations use WithModifiers to supply those stages and
+/// stay on the SIMD path. This helper still selects source and destination halves.
 template <bool True16, typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
                                                            BinOp bin_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
-      inst.inst_.clamp != 0u)
+  if (!floating_operation::applies_modifiers_v<BinOp> &&
+      (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
+       inst.inst_.clamp != 0u))
     return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
@@ -2364,6 +2407,41 @@ template <typename Inst, typename BinOp>
   return false;
 }
 
+/// VOP3 binary SIMD fast path on raw 64-bit encodings. Reads src0/src1 as
+/// `native<uint64_t>` and leaves every VOP3 modifier to `bin_op`, which applies
+/// them to the bits in the same order as the scalar body.
+template <typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_raw64_simd(Inst &inst, Wavefront &wf,
+                                                             BinOp bin_op) {
+  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = uint64_t;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  RegisterAccess regs(wf);
+  auto src0 = regs.read_operand64(inst.src0, exec);
+  auto src1 = regs.read_operand64(inst.src1, exec);
+  auto dst = regs.write_operand64(inst.vdst, exec);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = src0.template load_native<T>(base);
+    const auto b = src1.template load_native<T>(base);
+    dst.template store_native<T>(base, bin_op(a, b), chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the raw 64-bit VOP3 binary path.
+template <typename Inst, typename BinOp>
+[[nodiscard]] bool try_execute_binary_vop3_raw64_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
 /// VOP3 f64 unary SIMD fast path. 64-bit-lane counterpart of
 /// try_execute_unary_vop3_fp_simd: reads `src0` as `native<double>`, applies
 /// the src0 abs/neg modifiers (apply_vop3_src_mod_f64), runs `un_op`, applies
@@ -2490,13 +2568,14 @@ template <bool True16, typename Inst, typename UnOp>
 /// integer CLAMP. Saturating arithmetic falls back to the scalar body; the plain
 /// functor is bit-identical to that body when CLAMP is clear. T is a 32-bit
 /// integer lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop
-/// as the binary VOP3 path.
+/// as the binary VOP3 path. For raw floating-point operations, WithModifiers
+/// supplies ABS/NEG, OMOD and CLAMP, so CLAMP stays on the SIMD path.
 template <typename T, typename Inst, typename TernOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &inst, Wavefront &wf, TernOp tern_op) {
-  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
-      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if ((!floating_operation::applies_modifiers_v<TernOp> && inst.inst_.clamp != 0u) ||
+      simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2564,7 +2643,8 @@ template <typename T, typename Inst, typename TernOp>
 }
 
 /// VOP3 ternary operations whose three sources and destination are true16,
-/// such as min3/max3/med3 i16/u16 on RDNA true16 encodings.
+/// such as min3/max3/med3 i16/u16 on RDNA true16 encodings. The glue applies
+/// no modifier; F16 min/max functors apply every VOP3 modifier to the raw bits.
 template <typename T, typename Inst, typename TernOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_true16_simd(Inst &inst, Wavefront &wf,
@@ -4764,6 +4844,16 @@ template <bool Vop3, typename Inst>
   return
 #endif
 
+/// 64-bit VOP2 binary counterpart on raw floating-point encodings (min/max).
+/// The functor reads `native<uint64_t>` lanes. Variadic in the functor.
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64(...)                                                \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_f64_simd<uint64_t>(inst, wf, __VA_ARGS__))       \
+  return
+#endif
+
 /// 64-bit-lane VOP1 unary counterpart. `T` is the 64-bit lane type (`double`
 /// for the f64 math ops, `uint64_t` for v_mov_b64). Variadic in the functor so
 /// its commas pass through as one token sequence.
@@ -4920,6 +5010,29 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp_simd<T>(inst, wf, __VA_ARGS__))               \
   return
 
+/// Raw floating-point paths apply source and output modifiers around the operation.
+/// The operation handles input flushing and returns raw destination-format bits.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(Fmt, ...)                                             \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<uint32_t>(                                  \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP16(Fmt, ...)                                           \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<false, uint32_t>(                       \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_RAW_FP16(Fmt, ...)                                    \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<true, uint32_t>(                        \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...)                                           \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_raw64_simd(                                      \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#endif
+
 /// VOP3 f32 unary counterpart (reads src0, applies abs/neg/omod/clamp). `Tin`
 /// and `Tout` are both float32_t; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(Tin, Tout, ...)                                            \
@@ -4988,6 +5101,17 @@ template <bool Vop3, typename Inst>
 /// VOP3 ternary counterpart for true16 SRC0/SRC1/SRC2 plus selected-half dst.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(T, ...)                                              \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<T>(inst, wf, __VA_ARGS__))          \
+  return
+
+/// VOP3 ternary counterparts on raw floating-point encodings (min/max), with
+/// the same functor contract as ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(Fmt, ...)                                            \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<uint32_t>(                                 \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(Fmt, ...)                                   \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<uint32_t>(                          \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
   return
 
 /// VOP3 f32 ternary counterpart (per-source abs/neg, result omod/clamp).
