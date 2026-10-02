@@ -632,24 +632,15 @@ bool HostBlitManager::fillBuffer(device::Memory& memory, const void* pattern, si
     // Replicate the pattern into a host staging block and copy that out, so the destination
     // is only ever written (it may be write-combined). The block is no larger than the fill
     // and is built by doubling, to keep small fills cheap.
-    constexpr size_t kStagingSize = 4096;
-    uint8_t staging[kStagingSize];
-    const size_t blockBytes =
-        std::min(std::max(kStagingSize / patternSize, size_t{1}) * patternSize, fillBytes);
-    const_address src = reinterpret_cast<const_address>(pattern);
-    if (blockBytes <= kStagingSize && blockBytes > patternSize) {
-      memcpy(staging, pattern, patternSize);
-      for (size_t filled = patternSize; filled < blockBytes;) {
-        const size_t n = std::min(filled, blockBytes - filled);
-        memcpy(staging + filled, staging, n);
-        filled += n;
-      }
-      src = staging;
+    uint8_t staging[4096];
+    static_assert(amd::FillMemoryCommand::MaxFillPatterSize <= sizeof(staging));
+    const size_t blockBytes = std::min(sizeof(staging) / patternSize * patternSize, fillBytes);
+    memcpy(staging, pattern, patternSize);
+    for (size_t n = patternSize; n < blockBytes; n *= 2) {
+      memcpy(staging + n, staging, std::min(n, blockBytes - n));
     }
-    for (size_t done = 0; done < fillBytes;) {
-      const size_t chunk = std::min(blockBytes, fillBytes - done);
-      memcpy(dst + done, src, chunk);
-      done += chunk;
+    for (size_t done = 0; done < fillBytes; done += blockBytes) {
+      memcpy(dst + done, staging, std::min(blockBytes, fillBytes - done));
     }
   }
 
