@@ -103,6 +103,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   uint32_t num_iods = soc.num_iods();
   uint32_t num_ses = 0;
   uint32_t num_cus = 0;
+  uint32_t cus_per_shader_array = 0;
   flatbuffers::Offset<fb::ComputeUnitConfig> fb_cu;
 
   if (num_xcds > 0) {
@@ -112,6 +113,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       auto *se = xcd->shader_engine(0);
       num_cus = se->num_compute_units();
       if (num_cus > 0) {
+        cus_per_shader_array = se->compute_unit(0)->cus_per_shader_array();
         const auto &cu_cfg = se->compute_unit(0)->config();
         // Store an explicit zero even though it is the stable wire default. It
         // means unbounded for a new checkpoint, while field absence remains the
@@ -126,7 +128,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
     }
   }
 
-  auto fb_se = fb::CreateShaderEngineConfig(builder, num_cus, fb_cu);
+  auto fb_se = fb::CreateShaderEngineConfig(builder, num_cus, fb_cu, cus_per_shader_array);
   auto fb_xcd = fb::CreateXcdConfig(builder, num_ses, fb_se);
   auto fb_gpu = fb::CreateAmdgpuConfig(builder, num_xcds, num_iods, fb_xcd);
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
@@ -171,6 +173,9 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
       vm_config.soc.xcd.num_shader_engines = xcd->num_shader_engines();
       if (auto *se = xcd->shader_engine()) {
         vm_config.soc.xcd.shader_engine.num_compute_units = se->num_compute_units();
+        // Legacy checkpoints lack this geometry. Keep it unknown so WGP-ID
+        // reads remain unsupported instead of reporting an SE-local index.
+        vm_config.soc.xcd.shader_engine.cus_per_shader_array = se->cus_per_shader_array();
         if (auto *cu = se->compute_unit()) {
           auto &cu_cfg = vm_config.soc.xcd.shader_engine.compute_unit;
           cu_cfg.num_wf_slots = cu->num_wf_slots();
