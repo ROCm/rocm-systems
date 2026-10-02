@@ -292,10 +292,12 @@ TEST(cuidtstUnprivileged, NicLookupBySiblingInterfaceFindsTheFunction) {
   EXPECT_EQ(known, 1u);
 }
 
-// A property query answers from the handle's device alone: it does not
-// re-derive every other device. Compared against a cold
-// enumeration, and bounded outright, since a warm one can read almost nothing.
+// A property query answers from the handle's device alone and does not
+// re-derive every other device. Compared against a cold enumeration, and
+// bounded outright, since a warm one can read almost nothing. Root is left out:
+// its query also reads cuid_seed, once per amdgpu device while no key is set.
 TEST(cuidtstUnprivileged, PropertyQueryDoesNotReenumerate) {
+  if (geteuid() == 0) GTEST_SKIP() << "root reads cuid_seed on every query";
   if (ThreadReadCalls() < 0) GTEST_SKIP() << "no /proc/thread-self/io";
   const long long before = ThreadReadCalls();
   if (amdcuid_refresh() != AMDCUID_STATUS_SUCCESS)

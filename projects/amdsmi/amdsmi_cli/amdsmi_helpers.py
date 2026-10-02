@@ -389,6 +389,24 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
+    @staticmethod
+    def get_cuid_seed_state():
+        """Whether a node key is set, and its fingerprint."""
+        seed_dict = {"seed_provisioned": "N/A", "seed_fingerprint": "N/A"}
+        try:
+            seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
+            seed_dict["seed_provisioned"] = seed_info["provisioned"]
+            seed_dict["seed_fingerprint"] = seed_info["fingerprint"]
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+            if isinstance(e, amdsmi_exception.AmdSmiLibraryException) and (
+                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
+            ):
+                seed_dict["seed_provisioned"] = "N/A (requires root)"
+                seed_dict["seed_fingerprint"] = "N/A (requires root)"
+            logging.debug("Failed to get cuid seed info | %s", e)
+
+        return seed_dict
+
     def get_gpu_cuid_info(self, device_handle, include_primary=False):
         """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
         result = {
@@ -398,6 +416,7 @@ class AMDSMIHelpers:
             "auxiliary": "unknown",
             "source": "UNKNOWN",
             "identifier_kind": "unknown",
+            "effective_seed": "unknown",
             "cuid_metadata_status": "unknown",
         }
         try:
@@ -413,6 +432,7 @@ class AMDSMIHelpers:
                     component_type="N/A",
                     auxiliary="N/A",
                     source="N/A",
+                    effective_seed="N/A",
                     cuid_metadata_status="not_supported",
                 )
             else:
@@ -446,6 +466,12 @@ class AMDSMIHelpers:
             result["primary_cuid"] = info.get("primary") or (
                 "N/A (requires root)" if os.geteuid() != 0 else "N/A"
             )
+        # A derived CUID that is not temporary is keyed with the node key,
+        # and amdgpu holds one only when an administrator set it.
+        if auxiliary is True:
+            result["effective_seed"] = "temporary"
+        elif auxiliary is False and result["source"] in ("DRIVER", "LIBRARY"):
+            result["effective_seed"] = "provisioned"
         return result
 
     def get_gpu_choices(self):

@@ -112,22 +112,44 @@ amdcuid_status_t CuidDevice::driver_primary_cuid(amdcuid_primary_id& id) const {
   return drv;
 }
 
+amdcuid_status_t CuidDevice::driver_derived_cuid(amdcuid_derived_id& id) const {
+  // cuid_derived is 0444, so this stage answers for an unprivileged caller
+  // even where cuid_primary does not: an ordinary user must get the kernel's
+  // value rather than falling through and deriving a competing one.
+  amdcuid_derived_id published = {};
+  const amdcuid_status_t drv = read_driver_published(
+      CuidUtilities::kDriverDerivedAttribute, published.UUIDv8_representation, published.raw_bits);
+  if (drv == AMDCUID_STATUS_SUCCESS) {
+    cuid::get_hash_from_raw(published.raw_bits, published.hash);
+    id = published;
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  return drv;
+}
+
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
+  amdcuid_status_t status = driver_derived_cuid(id);
+  if (status != AMDCUID_STATUS_UNSUPPORTED) {
+    last_source_ =
+        status == AMDCUID_STATUS_SUCCESS ? AMDCUID_SOURCE_DRIVER : AMDCUID_SOURCE_UNKNOWN;
+    return status;
+  }
+
   // A key-gated component takes its auxiliary identity outright when no key
   // is available.
   const bool key_available = hmac && hmac->is_valid();
   const bool force_auxiliary = key_gated_identity() && !key_available;
 
-  // Derive. That needs a primary, and without one there is no derived CUID to
-  // be had. Do not substitute a zeroed payload with the auxiliary bit set: it
-  // holds no per-device input, so every component on this host whose primary
-  // lookup failed would collide on one identifier. The kernel takes the same
-  // position (amdgpu_cuid.c): with no serial it publishes nothing. A device
-  // class that can build an auxiliary identifier does so inside its own
-  // get_primary_cuid()/get_auxiliary_primary_cuid().
+  // Nothing published, nothing forced: derive. That needs a primary, and
+  // without one there is no derived CUID to be had. Do not substitute a zeroed
+  // payload with the auxiliary bit set: it holds no per-device input, so every
+  // component on this host whose primary lookup failed would collide on one
+  // identifier. The kernel takes the same position (amdgpu_cuid.c): with no
+  // serial it publishes nothing. A device class that can build an auxiliary
+  // identifier does so inside its own get_primary_cuid()/
+  // get_auxiliary_primary_cuid().
   amdcuid_primary_id primary = {};
-  amdcuid_status_t status =
-      force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
+  status = force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
   if (status == AMDCUID_STATUS_SUCCESS) {
     // An auxiliary primary is derived with the machine-id application key
     // rather than the node key; id_is_auxiliary() reads the marker only where
@@ -152,10 +174,17 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp, cuid_hmac* hmac) c
   if (!is_temp) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
+  amdcuid_derived_id derived = {};
+  amdcuid_status_t status = driver_derived_cuid(derived);
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    *is_temp = id_is_auxiliary(derived);
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  if (status != AMDCUID_STATUS_UNSUPPORTED) return status;
+
   const bool force_auxiliary = key_gated_identity() && !(hmac && hmac->is_valid());
   amdcuid_primary_id primary = {};
-  const amdcuid_status_t status =
-      force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
+  status = force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
   if (status != AMDCUID_STATUS_SUCCESS) return status;
   *is_temp = id_is_auxiliary(primary);
   return AMDCUID_STATUS_SUCCESS;

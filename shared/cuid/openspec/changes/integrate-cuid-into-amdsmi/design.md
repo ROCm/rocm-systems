@@ -92,7 +92,8 @@ consume `amd-smi` alone.
 flag, the source and the node seed's state. The primary appears only under
 `--cuid-primary`, and only where the caller could read it; otherwise the field
 reads `N/A (requires root)`, because the primary embeds a raw serial number and
-`amd-smi static` output ends up in public bug reports.
+`amd-smi static` output ends up in public bug reports. Root reads `N/A` where a
+temporary CUID has no primary, or where it lacks `CAP_SYS_ADMIN`.
 
 The seed's state rides in the same block rather than a command of its own: it is
 the context the derived CUID beside it only means anything in.

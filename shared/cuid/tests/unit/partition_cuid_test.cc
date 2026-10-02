@@ -19,9 +19,10 @@
 
 namespace {
 
-// P-1 from the cross-layer conformance vectors, so the value here is the one
-// both layers agree on rather than an arbitrary string.
+// P-1 and D-1 from the cross-layer conformance vectors, so the values here are
+// the ones both layers agree on rather than arbitrary strings.
 constexpr char kPrimary[] = "d4abaad3-9b34-8c50-9800-028dcc084200";
+constexpr char kDerived[] = "10133e37-3995-80bc-a402-7074c5c1c44c";
 
 class FakeSysfs {
  public:
@@ -29,10 +30,11 @@ class FakeSysfs {
 
   const std::string& device_path() const { return root_; }
 
-  void PublishPartition(const char* primary) {
+  void PublishPartition(const char* primary, const char* derived) {
     mkdir((root_ + "/xcp").c_str(), 0755);
     Write(root_ + "/xcp/cuid_unit_id", "0");
     if (primary) Write(root_ + "/xcp/cuid_primary", primary);
+    if (derived) Write(root_ + "/xcp/cuid_derived", derived);
   }
 
  private:
@@ -61,7 +63,7 @@ TEST(cuidtst, PartitionIsSkippedWhenTheDriverPublishesNothing) {
 TEST(cuidtst, PartitionIsNamedByItsOwnNode) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   const std::string attr_dir = CuidGpu::partition_attr_dir_for_device(fake.device_path());
   ASSERT_EQ(attr_dir, fake.device_path() + "/xcp");
@@ -83,7 +85,7 @@ TEST(cuidtst, PartitionIsNamedByItsOwnNode) {
 TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   amdcuid_gpu_info info = {};
   ASSERT_EQ(CuidGpu::discover_partition(&info, fake.device_path()), AMDCUID_STATUS_SUCCESS);
@@ -95,7 +97,10 @@ TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
   EXPECT_EQ(path, info.partition_attr_dir + "/cuid_primary");
 
   amdcuid_id_t want_primary = {};
+  amdcuid_id_t want_derived = {};
   ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(kPrimary, want_primary.bytes),
+            AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(kDerived, want_derived.bytes),
             AMDCUID_STATUS_SUCCESS);
 
   amdcuid_primary_id primary = {};
@@ -110,16 +115,15 @@ TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
     EXPECT_EQ(partition.get_hardware_fingerprint(fingerprint), AMDCUID_STATUS_PERMISSION_DENIED);
   }
 
-  // Without a node key there is no derived CUID, and a partition has no
-  // temporary one: every partition of a GPU shares the parent's routing id.
   amdcuid_derived_id derived = {};
-  EXPECT_EQ(partition.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_UNSUPPORTED);
+  ASSERT_EQ(partition.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(std::memcmp(derived.UUIDv8_representation.bytes, want_derived.bytes, 16), 0);
 }
 
 TEST(cuidtst, UnnamedVfCannotAdoptPartitionAttributes) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   amdcuid_gpu_info info = {};
   info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
@@ -147,7 +151,7 @@ TEST(cuidtst, PartitionWithoutAPublishedPrimaryDoesNotInventOne) {
   ASSERT_FALSE(fake.device_path().empty());
   // cuid_primary is 0400. An unprivileged caller must not fall through to the
   // auxiliary path, which would give every partition the parent's routing id.
-  fake.PublishPartition(nullptr);
+  fake.PublishPartition(nullptr, kDerived);
 
   amdcuid_gpu_info info = {};
   ASSERT_EQ(CuidGpu::discover_partition(&info, fake.device_path()), AMDCUID_STATUS_SUCCESS);

@@ -42,6 +42,10 @@ class CuidDeviceManager {
     std::lock_guard<std::mutex> lock(manager_mutex_);
     return devices_;
   }
+  // Share an externally owned cuid_hmac so build_cuid_index() derives CUIDs
+  // with the node key the public API reloads. Not owned; the caller must
+  // outlive this manager.
+  void set_hmac(cuid_hmac* hmac) { hmac_ = hmac; }
 
   /**
    * @brief Discover all devices currently present on the system.
@@ -82,6 +86,9 @@ class CuidDeviceManager {
   /// Index lookup by derived CUID
   std::map<amdcuid_id_t, DevicePtr, CuidComparator> cuid_index_;
   std::map<cuid::DeviceRoute, CuidDeviceEntry> observations_;
+
+  // Externally owned hmac shared via set_hmac(); see that method's comment.
+  cuid_hmac* hmac_ = nullptr;
 };
 
 #endif  // CUID_DEVICE_MANAGER_H

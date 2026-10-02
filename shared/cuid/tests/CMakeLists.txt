@@ -57,6 +57,7 @@ set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/node_key_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/lookup_policy_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/partition_cuid_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.cc
@@ -186,6 +187,11 @@ if(AMDCUID_BUILD_LIFECYCLE_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 -Wl,--wrap=stat
                 -Wl,--wrap=fstat
+                -Wl,--wrap=read
+                -Wl,--wrap=__read_chk
+                -Wl,--wrap=write
+                -Wl,--wrap=madvise
+                -Wl,--wrap=_ZN4rocm4sha26sha2566updateEPKhm
                 -Wl,--wrap=_ZN7CuidCpu8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
                 -Wl,--wrap=_ZN7CuidNic8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
                 -Wl,--wrap=_ZN7CuidNpu8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE

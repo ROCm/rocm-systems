@@ -1,11 +1,9 @@
-> **Superseded in part by `split-identity-from-key-store`.** The daemon and
-> record-store sources, the public placeholder key, and seed drift and repair
-> described in this change and in its `amdsmi-identity-api` and
-> `amdsmi-seed-provisioning` specs do not exist, and amd-smi reports the
-> sources `UNKNOWN`, `DRIVER` and `LIBRARY`. Seed provisioning and seed state
-> (`amdsmi-seed-provisioning`, the `set --cuid-seed` requirement of
-> `amdsmi-cli`, and tasks 1.4, 1.5, 2.5, 2.6, 4.4, 4.5 and 5.5 to 5.7) are
-> withdrawn until `add-volatile-node-key` restores them.
+> **Superseded in part by `split-identity-from-key-store` and
+> `add-volatile-node-key`.** The daemon and record-store sources, the public
+> placeholder key, and seed drift and repair described in this change and in
+> its `amdsmi-identity-api` and `amdsmi-seed-provisioning` specs do not exist:
+> amdgpu holds the node key in memory, set through `cuid_seed`, and amd-smi
+> reports the sources `UNKNOWN`, `DRIVER` and `LIBRARY`.
 
 ## Why
 

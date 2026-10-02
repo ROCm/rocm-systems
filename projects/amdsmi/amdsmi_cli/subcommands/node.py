@@ -196,6 +196,7 @@ class NodeCommands:
 
         cuid_dict = {}
         if args.cuid:
+            cuid_dict = self.helpers.get_cuid_seed_state()
             cuid_dict["components"] = self._node_cuid_components(args.cuid_primary)
 
         # Print output
@@ -231,6 +232,8 @@ class NodeCommands:
                 node_output.append(f"        TRAY_TYPE: {tray_dict.get('tray_type', 'N/A')}")
             if args.cuid:
                 node_output.append("    CUID:")
+                node_output.append(f"        SEED_PROVISIONED: {cuid_dict['seed_provisioned']}")
+                node_output.append(f"        SEED_FINGERPRINT: {cuid_dict['seed_fingerprint']}")
                 components = cuid_dict["components"]
                 if not isinstance(components, dict):
                     node_output.append(f"        COMPONENTS: {components}")
@@ -264,10 +267,19 @@ class NodeCommands:
                 if isinstance(components, dict) and components:
                     # One row per component, each carrying the node's fields.
                     for name, fields in components.items():
-                        self.logger.output = {**csv_dict, "component": name, **fields}
+                        self.logger.output = {
+                            **csv_dict,
+                            "seed_provisioned": cuid_dict["seed_provisioned"],
+                            "seed_fingerprint": cuid_dict["seed_fingerprint"],
+                            "component": name,
+                            **fields,
+                        }
                         self.logger.store_multiple_device_output()
                     self.logger.print_output(multiple_device_enabled=True)
                     return
+                if args.cuid:
+                    csv_dict["seed_provisioned"] = cuid_dict["seed_provisioned"]
+                    csv_dict["seed_fingerprint"] = cuid_dict["seed_fingerprint"]
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output

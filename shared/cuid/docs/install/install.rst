@@ -51,5 +51,21 @@ To build and install the CUID library from source, follow these steps:
 
 Installation ships the static library ``libamdcuid_static.a``, its header
 ``amd_cuid.h`` (under ``include/amdcuid``) and a CMake package
-(``find_package(amdcuid)``, target ``amdcuid::amdcuid``). Nothing needs
-configuring. See :ref:`read-cuids` for reading CUIDs.
+(``find_package(amdcuid)``, target ``amdcuid::amdcuid``).
+
+Setting the node key
+====================
+
+amdgpu starts without a node key and keeps one only in memory, so set it after
+every boot or amdgpu reload:
+
+.. code-block:: shell
+
+   head -c 32 /dev/urandom | sudo amd-smi set --cuid-seed -
+   # or, to share one key across a fleet:
+   sudo amd-smi set --cuid-seed /path/to/fleet-key.bin
+
+Without a key, amdgpu publishes no derived CUID: a whole GPU gets a temporary
+CUID and a partition none. CPU, NIC, NPU and platform CUIDs are temporary
+without a key and for every non-root caller. See
+:ref:`manage-node-key` for the refusal rules and failure modes.

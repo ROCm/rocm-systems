@@ -103,6 +103,8 @@ from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
 from .amdsmi_interface import amdsmi_get_gpu_device_cuid
 from .amdsmi_interface import amdsmi_get_gpu_cuid_info
+from .amdsmi_interface import amdsmi_set_cuid_seed
+from .amdsmi_interface import amdsmi_get_cuid_seed_info
 from .amdsmi_interface import amdsmi_get_cuid_components
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 

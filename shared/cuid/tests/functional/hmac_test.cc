@@ -6,12 +6,14 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 TestHMAC::TestHMAC() {
   SetTitle("HMAC Key Operations");
   SetDescription(
-      "Verify amdcuid_generate_hash_key produces a non-zero key, and that "
-      "amdcuid_set_hash_key is unsupported.");
+      "Verify amdcuid_generate_hash_key produces a non-zero key. "
+      "amdcuid_set_hash_key requires root.");
 }
 
 // No device enumeration needed for HMAC key operations.
@@ -36,7 +38,15 @@ void TestHMAC::Run() {
            generated_key[1], generated_key[2], generated_key[3]);
   }
 
-  EXPECT_EQ(amdcuid_set_hash_key(generated_key), AMDCUID_STATUS_UNSUPPORTED);
-  amdcuid_key_info_t info{};
-  EXPECT_EQ(amdcuid_get_key_info(&info), AMDCUID_STATUS_UNSUPPORTED);
+  const char* allow = std::getenv("AMDCUID_TEST_ALLOW_SET_KEY");
+  if (!allow || std::strcmp(allow, "1") != 0) {
+    GTEST_SKIP() << "amdcuid_set_hash_key() would replace this host's node key; "
+                    "set AMDCUID_TEST_ALLOW_SET_KEY=1 to run it.";
+  }
+
+  status = amdcuid_set_hash_key(generated_key);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "no amdgpu device exposes cuid_seed";
+  CHK_ERR_ASRT(status);
+
+  IF_VERB(1) { printf("  amdcuid_set_hash_key: %s\n", amdcuid_status_to_string(status)); }
 }

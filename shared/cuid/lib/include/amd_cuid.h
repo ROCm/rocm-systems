@@ -36,7 +36,14 @@ extern "C" {
 //! amdcuid_get_key_info() return AMDCUID_STATUS_UNSUPPORTED.
 //! AMDCUID_QUERY_SOURCE and amdcuid_source_t added. A CPU's UnitID is 0, and a
 //! NIC's is its PCI function number.
-#define AMDCUID_LIB_VERSION_MINOR 2
+//!
+//! 2.3.0: the node key is read from amdgpu's cuid_seed, by root only, and
+//! keys derived CUIDs; every other caller, and every host without a key, gets
+//! temporary CPU, NIC, NPU and platform CUIDs. amdcuid_set_hash_key() writes
+//! cuid_seed and returns AMDCUID_STATUS_UNSUPPORTED without amdgpu, and
+//! amdcuid_get_key_info() returns AMDCUID_STATUS_PERMISSION_DENIED to a
+//! non-root caller.
+#define AMDCUID_LIB_VERSION_MINOR 3
 
 //! Patch version should be updated for each bug fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 0
@@ -275,11 +282,15 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
  *
  * This function forces the CUID library to rediscover devices on the system
  * and rebuild its in-memory index. This is useful if devices have been added
- * or removed.
+ * or removed, or the node key has changed (a fresh amdcuid_get_key_info()
+ * picks up a cuid_seed change on its own; this additionally re-derives every
+ * device's CUID under the reloaded key).
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found during
- * discovery
+ * discovery, AMDCUID_STATUS_PERMISSION_DENIED or AMDCUID_STATUS_FILE_ERROR if
+ * root could not read the node key. The index is rebuilt either way, without
+ * a key.
  */
 amdcuid_status_t amdcuid_refresh(void);
 
@@ -334,13 +345,14 @@ typedef enum {
                            ///< "0000:03:00.0"). Supported by GPU and NIC device types.
   AMDCUID_QUERY_TEMPORARY_CUID =
       16,                     ///< Query to determine if a CUID is temporary, that is auxiliary
-                              ///< (bool). True when the identifier was built from
-                              ///< non-privileged device information without the node key, which
-                              ///< this library does not hold, so every derived CUID it returns
-                              ///< is temporary. amdcuid_id_to_string() does not mark it; the
-                              ///< marker is payload bit 117, the Auxiliary Value Identifier. A
-                              ///< temporary CUID is not unique across nodes and changes if the
-                              ///< OS installation or the device topology changes.
+                              ///< (bool). True when the driver did not publish the identifier
+                              ///< and either the caller has no node key (non-root, or no key is
+                              ///< set) or no hardware serial was available (for a GPU,
+                              ///< the driver publishes no cuid_primary). amdcuid_id_to_string()
+                              ///< does not mark it; the marker is payload bit 117, the
+                              ///< Auxiliary Value Identifier. A temporary CUID is not unique
+                              ///< across nodes and changes if the OS installation or the device
+                              ///< topology changes.
   AMDCUID_QUERY_SOURCE = 17,  ///< Query which stage answered the last derivation
                               ///< (::amdcuid_source_t). Supported by all device types.
   AMDCUID_QUERY_LAST
@@ -351,6 +363,11 @@ typedef enum {
  *
  * This function allows querying various properties of a device using its CUID
  * handle. Accessing certain properties may require elevated permissions.
+ *
+ * For root, the handle is checked against the node key read from cuid_seed
+ * by this call, as a lookup reads it; a handle derived under a key changed
+ * since returns AMDCUID_STATUS_DEVICE_NOT_FOUND until amdcuid_refresh() or a
+ * new lookup. The library keeps no copy of the key between calls.
  *
  * @param[in] handle The CUID handle of the device to query.
  * @param[in] query The property to query (see amdcuid_query_t).
@@ -372,18 +389,36 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
 /**
  * @brief Set the node-wide key.
  *
- * This library holds no node key and cannot set one.
+ * The key is written to one amdgpu device's cuid_seed. amdgpu holds one key in
+ * memory for all its devices and re-keys every GPU and partition; it keeps the
+ * key until the module is unloaded or the host reboots, and stores it nowhere
+ * else. Every CUID derived with the node key changes; temporary CUIDs, keyed
+ * by the machine ID, do not.
  *
- * @param[in] key Ignored.
- * @return AMDCUID_STATUS_UNSUPPORTED
+ * @param[in] key Pointer to the key. This must be 32 bytes in length.
+ * @return AMDCUID_STATUS_SUCCESS on success,
+ *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p key is NULL, all 32 bytes
+ *         are equal, or it is a public constant zero-padded to 32 bytes,
+ *         AMDCUID_STATUS_UNSUPPORTED if no amdgpu device exposes cuid_seed,
+ *         AMDCUID_STATUS_PERMISSION_DENIED or AMDCUID_STATUS_FILE_ERROR if
+ *         the PCI devices could not be listed, no cuid_seed was found and a
+ *         device could not be checked for one, or the driver refused the
+ *         write. These change nothing. Once amdgpu has accepted the key, the
+ *         status is that of the amdcuid_refresh() that follows: the key has
+ *         already changed, and the library's handles may still hold the old
+ *         derived CUIDs until a later amdcuid_refresh() succeeds. That
+ *         refresh can also fail with PERMISSION_DENIED or FILE_ERROR;
+ *         amdcuid_get_key_info() tells whether the key changed.
  */
 amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]);
 
 /**
  * @brief Create a new HMAC key for HMAC computations on CUIDs.
  *
- * This function generates a new random HMAC key. Requires elevated
- * permissions to generate the key.
+ * This function generates a new random HMAC key. Use amdcuid_set_hash_key() to
+ * set the key for use in the library to the key generated by this function.
+ * Requires elevated permissions to generate the key.
  *
  * @param[out] key Pointer to the buffer where the generated HMAC key will be
  * stored. This must be 32 bytes in length.
@@ -404,7 +439,8 @@ amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]);
  * the same secret, which a truncated digest answers without disclosing it.
  */
 typedef struct {
-  /** Non-zero when an administrator set the key. */
+  /** Non-zero when amdgpu holds a node key; it holds one only when an
+   *  administrator set it. */
   uint8_t provisioned;
   uint8_t reserved[7];
   /** First 8 octets of the unkeyed SHA-256 of the key in use. */
@@ -412,15 +448,23 @@ typedef struct {
 } amdcuid_key_info_t;
 
 /**
- * @brief Report whether a key is provisioned, and a fingerprint of the key in
+ * @brief Report whether a node key is set, and a fingerprint of the key in
  *        use.
  *
- * This library holds no node key.
+ * The key is read from the first amdgpu cuid_seed that returns one. Without
+ * amdgpu, or while amdgpu holds no key, the call succeeds with
+ * ::amdcuid_key_info_t::provisioned and the fingerprint zero. Never returns
+ * key material.
  *
- * @param[out] info Pointer to a caller-allocated ::amdcuid_key_info_t, cleared
- *                  on return.
- * @return AMDCUID_STATUS_INVALID_ARGUMENT if @p info is NULL,
- *         AMDCUID_STATUS_UNSUPPORTED otherwise.
+ * @param[out] info Pointer to a caller-allocated ::amdcuid_key_info_t,
+ *                  cleared on any failure.
+ * @return AMDCUID_STATUS_SUCCESS on success,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p info is NULL,
+ *         AMDCUID_STATUS_PERMISSION_DENIED if the caller is not root, or
+ *         amdgpu refused its cuid_seed read (root without CAP_SYS_ADMIN),
+ *         AMDCUID_STATUS_FILE_ERROR if no key was read and listing the PCI
+ *         devices or reading a cuid_seed failed for another reason, or a
+ *         cuid_seed returned other than 32 octets
  */
 amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info);
 

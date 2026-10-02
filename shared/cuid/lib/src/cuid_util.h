@@ -69,10 +69,12 @@ inline amdcuid_status_t validate_fingerprint(uint64_t fingerprint) {
 
 // The CUID attributes amdgpu publishes under /sys/bus/pci/devices/<bdf>/ and
 // under each partition's xcp directory. cuid_primary is 0400 and gated on
-// CAP_SYS_ADMIN because its payload embeds the raw serial; cuid_unit_id is
-// 0444, so its presence is what tells any caller that the driver publishes
-// a CUID there.
+// CAP_SYS_ADMIN because its payload embeds the raw serial; cuid_derived is
+// 0444 and is what unprivileged tools consume; cuid_unit_id is 0444, so its
+// presence is what tells any caller that the driver publishes a CUID there.
+// cuid_seed is deliberately absent here: it is the secret.
 constexpr const char kDriverPrimaryAttribute[] = "cuid_primary";
+constexpr const char kDriverDerivedAttribute[] = "cuid_derived";
 constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 
 // Read a driver-published CUID attribute and parse its RFC 9562 UUID string
@@ -81,8 +83,10 @@ constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 //
 // The three failure modes are distinct because the caller acts on each
 // differently:
-//   FILE_NOT_FOUND    no attribute (pre-CUID driver, or no serial found), so
-//                     there is no kernel CUID to have. Logged at DEBUG.
+//   FILE_NOT_FOUND    no attribute (pre-CUID driver, or no serial found), or
+//                     a read that fails with ENODATA (cuid_derived without a
+//                     node key), so there is no kernel CUID to have. Logged
+//                     at DEBUG.
 //   PERMISSION_DENIED present but not readable by us. The kernel still holds
 //                     the authoritative value, so do not compute a rival one.
 //   INVALID_FORMAT    readable, but not a UUID.
@@ -91,8 +95,8 @@ constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 // errno is meaningful and nothing escapes into hosts built without exceptions.
 amdcuid_status_t read_driver_cuid_from_path(const std::string& path, amdcuid_id_t* id);
 
-// Read `attribute` (kDriverPrimaryAttribute) for the device at `bdf`, in the standard
-// "dddd:bb:dd.f" form.
+// Read `attribute` (kDriverPrimaryAttribute or kDriverDerivedAttribute) for
+// the device at `bdf`, in the standard "dddd:bb:dd.f" form.
 amdcuid_status_t read_driver_cuid(const std::string& bdf, const std::string& attribute,
                                   amdcuid_id_t* id);
 
@@ -112,11 +116,6 @@ inline void pack_component_type_bits(uint8_t value, uint8_t raw_bits[16]) {
   raw_bits[14] = static_cast<uint8_t>((raw_bits[14] & 0x3F) | ((value & 0x3) << 6));
   raw_bits[15] = static_cast<uint8_t>((raw_bits[15] & 0xFC) | ((value & 0xC) >> 2));
 }
-
-// Whether this process holds CAP_SYS_ADMIN in its effective set. amdgpu gates
-// reading cuid_primary on it, so root without it (a default
-// container) is unprivileged as far as the driver is concerned.
-bool has_cap_sys_admin();
 
 std::string read_sysfs_file(const std::string& path);
 std::string readlink_bdf(const std::string& device_path);
