@@ -4,15 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for the GIN proxy-thread NUMA affinity pin. Two halves:
+// Host-only microtests for src/gin/gin_host.cc, pulled in via GIN_HOST_CC_PATH.
+//
+// Currently covers the GIN proxy-thread NUMA affinity pin. Two halves:
 //   - the CONSUME half, ncclGinProgress (src/gin/gin_host.cc:60-63), which pins
 //     the proxy thread to ginState->cpuAffinity when that set is non-empty; and
 //   - the PRODUCE half, ginDevCommSetupWithBackend (src/gin/gin_host.cc:392-393),
 //     which stashes comm->cpuAffinity into ginState just before the progress
 //     threads are spawned. Covering only the consumer would leave that one
 //     assignment free to be deleted with both consumer cases still green.
-// The unit under test is pulled in via GIN_HOST_CC_PATH, the standard
-// rccl-UnitTestsMicroInit pattern.
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -29,24 +29,16 @@
 
 #include "fakes/param_redirect.h"
 
-// init.cc needs the doubles for these two: fakes/nccl_stubs.cc:85 serves init.cc:586 and
-// fakes/gin_fakes.cc:18 serves init.cc:4877. Rename gin_host.cc's own definitions at
-// inclusion time so both survive in rccl-UnitTestsMicroInit. Nothing else gin_host.cc
-// defines is faked in this binary.
-#define ncclGinHostFinalize     ncclGinHostFinalizeUut
-#define ncclGinQueryLastError   ncclGinQueryLastErrorUut
-
 #include GIN_HOST_CC_PATH
 
-#undef ncclGinHostFinalize
-#undef ncclGinQueryLastError
-
 // gin_host.cc references these two symbols only from the setup/spawn path, which
-// was dead-code-stripped until the producer test below made it live. ncclTeamRail
-// lives in another TU (nccl_device/core.cc) and ncclSetThreadName in debug.cc,
-// neither compiled into rccl-UnitTestsMicroInit; stub them here so the one
-// setup path this test drives links without dragging in those TUs. A rail team
-// of stride 1 keeps ginDevCommSetupWithBackend's stride checks satisfied.
+// was dead-code-stripped until the producer test below made it live. Neither has
+// a fakes file to live in: ncclTeamRail is defined in nccl_device/core.cc, whose
+// only double today is target-shaped (fakes/dev_runtime_micro_fakes.cc, for
+// rccl-UnitTestsMicro), and ncclSetThreadName's owner (misc/debug.cc) has no fakes
+// file at all. Stub them here so the one setup path this test drives links without
+// dragging in those TUs. A rail team of stride 1 keeps ginDevCommSetupWithBackend's
+// stride checks satisfied.
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) {
   ncclTeam_t team{};
   team.nRanks = 1;
@@ -61,7 +53,7 @@ namespace {
 // Build a minimal ncclGinState the affinity path reads: cpuAffinity plus the
 // stop signal that makes ncclGinProgress return after pinning. Everything else
 // is default-constructed and never touched on this path.
-class GinProxyAffinityTest : public ::testing::Test {
+class GinHostProxyAffinityMicrotest : public ::testing::Test {
 protected:
   ncclGinState ginState_;
 
@@ -83,7 +75,7 @@ protected:
   }
 };
 
-TEST_F(GinProxyAffinityTest, NonEmptyAffinity_PinsProxyThreadToThatCpuSet) {
+TEST_F(GinHostProxyAffinityMicrotest, NonEmptyAffinity_PinsProxyThreadToThatCpuSet) {
   CPU_SET(3, &ginState_.cpuAffinity);
   g_ncclOsCpuCountValue = 1;
 
@@ -97,7 +89,7 @@ TEST_F(GinProxyAffinityTest, NonEmptyAffinity_PinsProxyThreadToThatCpuSet) {
 // The guard: an empty affinity set (ncclOsCpuCount == 0) means the comm was
 // never NUMA-pinned, so the proxy thread must be left with its inherited
 // affinity rather than pinned to an empty set (which would be a hard error).
-TEST_F(GinProxyAffinityTest, EmptyAffinity_LeavesProxyThreadAffinityUnchanged) {
+TEST_F(GinHostProxyAffinityMicrotest, EmptyAffinity_LeavesProxyThreadAffinityUnchanged) {
   g_ncclOsCpuCountValue = 0;  // ncclOsCpuCount(cpuAffinity) reports "empty"
 
   RunProgressOnce();
@@ -133,7 +125,7 @@ ncclResult_t FakeDestroyContext(void* /*ginCtx*/) { return ncclSuccess; }
 // ginState->cpuAffinity (gin_host.cc:393) on the branch that first spawns the
 // progress threads, so the consumer above has a populated set to read on a real
 // comm. Drive that setup path with a scripted backend and assert the copy.
-class GinProxyAffinitySetupTest : public ::testing::Test {
+class GinHostProxyAffinitySetupMicrotest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
   std::unique_ptr<ncclSharedResources> sr_ = std::make_unique<ncclSharedResources>();
@@ -183,7 +175,7 @@ protected:
   }
 };
 
-TEST_F(GinProxyAffinitySetupTest, StashesCommAffinityBeforeSpawningProxyThreads) {
+TEST_F(GinHostProxyAffinitySetupMicrotest, StashesCommAffinityBeforeSpawningProxyThreads) {
   CPU_ZERO(&comm_->cpuAffinity);
   CPU_SET(5, &comm_->cpuAffinity);  // a distinctive mask to spot the copy
   g_ncclOsCpuCountValue = 1;        // so the spawned worker takes the pin branch

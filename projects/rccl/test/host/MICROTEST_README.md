@@ -42,8 +42,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
-  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
-    `GroupEndInternalTest.*`.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
+    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
+    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -105,6 +106,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
+    `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
+    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
+    `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -138,14 +144,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
-  `INIT_CC_PATH`) and `gin/gin_host.cc` (via `GIN_HOST_CC_PATH`);
-  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `GinProxyAffinityTest.*`,
-  `GinProxyAffinitySetupTest.*`. `fakes/gin_fakes.cc` stays in the target (init.cc
-  needs its doubles) and defines `ncclGinQueryLastError`, which `gin_host.cc` also
-  defines; likewise `fakes/nccl_stubs.cc`'s `ncclGinHostFinalize`. The GIN test
-  (`gin-proxy-affinity-test.cc`) renames `gin_host.cc`'s two definitions to
-  `*Uut` at include time so both survive without a duplicate symbol. The
-  `-uncached` variant adds
+  `INIT_CC_PATH`);
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
   arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
   arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
@@ -190,8 +190,60 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 
+- **`rccl-UnitTestsMicroGinHost`** — `src/gin/gin_host.cc` (via `GIN_HOST_CC_PATH`,
+  from `gin-host-test.cc`); suites `GinHost*`. Its own binary, not sharing
+  `rccl-UnitTestsMicroInit`: that target links `fakes/gin_fakes.cc` (which `init.cc`
+  needs for `ncclGinInit`) and `fakes/nccl_stubs.cc`, which between them fake
+  `ncclGinQueryLastError` and `ncclGinHostFinalize` — two symbols this unit defines,
+  so the real file and those fakes cannot share a link line. Its source list is the
+  shortest of any target here (the test TU, `fakes/nccl_fakes.cc` for `ncclDebugLog`,
+  `fakes/os_fakes.cc` for the affinity seams, and the shared `main`): the usual
+  bootstrap/topo/transport/nccl/hip floor is not linked because
+  `--gc-sections` drops every path the covered code never reaches, so nothing in it
+  is referenced. Add a fakes file when the linker asks for one. See
+  `test_categories_micro_ginhost.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
+
+
+## Naming a new microtest
+
+One unit under test fixes every other name, mechanically, so nothing has to be
+invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
+
+| Thing | Rule | `src/gin/gin_host.cc` |
+|---|---|---|
+| Path macro | `<STEM>_CC_PATH`, `<STEM>` upper-snake | `GIN_HOST_CC_PATH` |
+| Test TU | `test/host/<stem>-test.cc`, `_` → `-` | `test/host/gin-host-test.cc` |
+| Binary | `rccl-UnitTestsMicro<Stem>`, `<Stem>` UpperCamel | `rccl-UnitTestsMicroGinHost` |
+| gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
+| CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase, `_` dropped | `test/test_categories_micro_ginhost.yaml` |
+| JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_ginhost.xml` |
+| Test-runner config | `unit_tests_micro_<stem>` (in `configs/ci-precheckin.json`) | `unit_tests_micro_ginhost` |
+
+Because every suite starts with the binary's `<Stem>`, the categories yaml needs
+exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
+without editing it — gtest's `*` does not cross the `.`, so a per-suite list
+silently drops any suite someone forgets to add.
+
+Two deliberate exceptions to "one unit, one binary, one TU":
+
+- A unit may need **more than one test TU** (`rccl-UnitTestsMicroTaskPrep`'s
+  `task_prep/` files each come under test in their own TU). Name the extra TUs
+  `<stem>-<aspect>-test.cc` and keep them in the same binary.
+- A unit may be small enough to **ride in `rccl-UnitTestsMicro`** rather than
+  getting a binary of its own (`p2p.cc`, `group.cc`, `gdr_probe.cc`, …). The file
+  and suite names are unchanged; only the binary and yaml differ. Give a unit its
+  own binary when it needs a binary-wide `-D`, or when its definitions collide
+  with fakes the shared target needs.
+
+When a unit does get its own binary, the full checklist is: source list +
+`rccl_add_micro_binary()` call in `test/host/CMakeLists.txt`, the categories yaml,
+the `binaries` array in `test/host/run_host_tests.sh`, the config + `test_suites`
+entry in `tools/scripts/test_runner/configs/ci-precheckin.json`, the coverage
+object list in `tools/scripts/test_runner/lib/test_executor.py`, and an entry in
+[Units under test](#units-under-test) above.
 
 
 ## Why a separate test binary
@@ -255,11 +307,15 @@ test:
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
+   The unit's path fixes the test file, binary, suite and yaml names — see
+   [Naming a new microtest](#naming-a-new-microtest).
 2. **Register the source.** Add the test `.cc` to the target's source list in
    `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
    (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
    share. If you add a new gtest suite, add its pattern to the target's
-   `test/test_categories_micro*.yaml` so CTest runs it.
+   `test/test_categories_micro*.yaml` so CTest runs it (a suite named for its
+   binary's stem is already matched). A new *binary* has a longer checklist: see
+   the end of [Naming a new microtest](#naming-a-new-microtest).
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
@@ -366,6 +422,10 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
   It therefore cannot link into the enqueue target and stays target-shaped.
+  One symbol in it, `ncclArgsGlobalCheck`, is a controllable hook
+  (`g_ncclArgsGlobalCheck` in `fakes/collective_stubs.h`) rather than a hard
+  `::abort()`, for `group-test.cc`'s `ArgsGlobalCheckTest`; everything else in
+  the file is still the same fail-loud floor described above.
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
@@ -688,7 +748,8 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
+`rccl-UnitTestsMicroGinHost` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -726,6 +787,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc tests
 ./build/rccl-HostUnitTests
 ```
 

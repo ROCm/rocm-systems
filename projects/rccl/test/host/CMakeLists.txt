@@ -132,10 +132,9 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc and src/gin/gin_host.cc.
+  # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc.
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
-    gin-proxy-affinity-test.cc
     fakes/init_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -147,7 +146,7 @@ function(rccl_define_micro_source_lists)
     fakes/amdsmi_fakes.cc
     fakes/api_trace_fakes.cc
     fakes/dev_runtime_fakes.cc
-    fakes/enqueue_fakes.cc
+    fakes/enqueue_fakes.cc               # src/enqueue/enqueue.cc (rcclEffectiveP2pBatchEnable)
     fakes/env_fakes.cc
     fakes/env_plugin_fakes.cc
     fakes/gin_fakes.cc
@@ -169,6 +168,24 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc.
+  # Its own binary, not rccl-UnitTestsMicroInit: that target links fakes/gin_fakes.cc
+  # (init.cc needs its ncclGinInit doubles), which fakes ncclGinQueryLastError -- a
+  # symbol this unit defines, so the two cannot share a link line; fakes/nccl_stubs.cc's
+  # ncclGinHostFinalize collides the same way.
+  # Deliberately short: the usual bootstrap/topo/transport/nccl_stubs/hip floor is absent
+  # because -ffunction-sections/--gc-sections drops everything the covered paths never
+  # reach, so nothing in it is referenced. Add a fakes file when the linker asks for it --
+  # an undefined symbol is a louder signal than a fail-loud stub, and it keeps this
+  # binary's dependency surface an honest statement of what gin_host.cc's tested paths use.
+  set(TEST_MICRO_GIN_HOST_SOURCE_FILES
+    gin-host-test.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/nccl_fakes.cc                  # ncclDebugLog + the debug-level data symbols
+    fakes/os_fakes.cc                    # src/os/linux.cc ncclOsCpuCount/ncclOsSetAffinity
+    ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
@@ -788,9 +805,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
-    EXTRA_INCLUDES ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
     EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
-    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
@@ -798,6 +813,16 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
+  SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_ginhost.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
