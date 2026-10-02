@@ -13,6 +13,7 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
+#include "utils/flags.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -3324,9 +3325,31 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
-  // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
-                                      *hip::getStream(stream), true, failIdx);
+  // Call internal batch implementation. When chunking is enabled (and there are
+  // no attrs to remap onto sub-ranges), split the input into progressively
+  // doubling chunks and parse+submit each so the first chunk rings the doorbell
+  // before the rest of the input is parsed.
+  hip::Stream& hipStream = *hip::getStream(stream);
+  const size_t chunkBase = GPU_BATCH_CHUNK;
+  hipError_t status = hipSuccess;
+  if (chunkBase == 0 || numAttrs > 0 || count <= chunkBase) {
+    status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, hipStream, true,
+                             failIdx);
+  } else {
+    size_t off = 0;
+    size_t csz = chunkBase;
+    while (off < count && status == hipSuccess) {
+      const size_t n = (csz < count - off) ? csz : (count - off);
+      size_t chunkFailIdx = SIZE_MAX;
+      status = ihipMemcpyBatch(dsts + off, srcs + off, sizes + off, n, nullptr, nullptr, 0,
+                               hipStream, true, &chunkFailIdx);
+      if (status != hipSuccess && failIdx != nullptr && chunkFailIdx != SIZE_MAX) {
+        *failIdx = off + chunkFailIdx;
+      }
+      off += n;
+      csz = (csz * 2 < 1024) ? csz * 2 : 1024;
+    }
+  }
 
   HIP_RETURN(status);
 }
