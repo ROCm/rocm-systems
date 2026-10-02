@@ -4,6 +4,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/simulation.h"
@@ -752,7 +753,7 @@ TEST(Pm4QueueBindingTest, RejectsUnsupportedVmPollingThroughTheComputeQueueBindi
   command_processor.set_gpu_vm(&gpu_vm);
   GpuQueueRegistry registry(gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      command_processor.make_pm4_queue_binding_factory({});
+      make_compute_queue_binding_factory(command_processor, {});
 
   for (const QueueDoorbellMode mode :
        {QueueDoorbellMode::HostPolled, QueueDoorbellMode::VmPolled}) {
@@ -793,12 +794,11 @@ TEST(Pm4QueueBindingTest, GracefulRegistryRemovalKeepsHandleUntilPublicationComp
   command_processor.set_gpu_vm(&gpu_vm);
   GpuQueueRegistry registry(gpu_vm);
   uint32_t writes = 0;
-  const std::shared_ptr<QueueBindingFactory> binding_factory =
-      command_processor.make_pm4_queue_binding_factory(
-          {.write_uconfig_register = [&](uint64_t, uint32_t) {
-            ++writes;
-            return Pm4RegisterWriteStatus::Complete;
-          }});
+  const std::shared_ptr<QueueBindingFactory> binding_factory = make_compute_queue_binding_factory(
+      command_processor, {.write_uconfig_register = [&](uint64_t, uint32_t) {
+        ++writes;
+        return Pm4RegisterWriteStatus::Complete;
+      }});
   const QueueHandle queue = registry.register_queue({
       .identity = {.address_space = address_space, .process_id = 1, .queue_id = 7},
       .ring = {.base_address = kRing, .size_bytes = 64, .consumer_pointer_address = kReadPointer},

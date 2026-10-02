@@ -94,16 +94,24 @@ Models the GPU hardware pipeline:
   continuation, retirement publication, and terminal state. Legacy KFD and PCI/MES
   create queues through `GpuQueueRegistry` and the same SDMA binding factory; the command
   processor is not part of the SDMA path.
-- **Packet processors** — `AqlPacketProcessor`, `Pm4PacketProcessor`, and
-  `SdmaPacketProcessor` implement the same compile-time, one-head-packet
+- **Packet processors** — `AqlPacketProcessor` and `SdmaPacketProcessor` implement
+  the same compile-time, one-head-packet
   processing contract while retaining protocol-specific request and diagnostic
   state. An SDMA request carries caller-owned opaque continuation state because
-  an SDMA packet may block after a partial effect; AQL and PM4 retries are
+  an SDMA packet may block after a partial effect; AQL retries are
   restartable and require no continuation. Packet processors
   do not own queue registration, scheduling, ring lifetime, or completion
   tracking. Expected guest-packet and descriptor failures are returned as typed
   per-queue results; they do not escape as simulator exceptions or stop unrelated
   queues.
+- **PM4 packet processing** — `pm4/pm4_packet_processor` processes production
+  compute rings and DRM indirect-buffer streams. It owns packet fetching, opcode
+  effects, register updates, nested IB traversal, and cursor publication over
+  CP-owned queue state. CP supplies architecture, cache flushing, dispatch
+  admission, retry scheduling, and synchronous fault cancellation callbacks.
+  Temporary unavailability retains command and cursor-publication state for retry;
+  cancellation stops resident waves before submission resources are released.
+  CP retains queue scheduling and dispatch completion.
 - **PCI/VFIO adapters** — PCI configuration, BAR/MMIO, DMA, interrupts, and
   transport-session lifetime. These adapt accesses into `GpuVm` and the shared
   block models; they do not contain alternate CP, MES, SDMA, or shader models.
@@ -182,14 +190,14 @@ engine. AQL, PM4, and SDMA use `GpuQueueRegistry`, reusable `QueueBindingFactory
 and unique per-registration `QueueBinding` objects. PM4 and SDMA share
 `ConsumerCursorJournal` for retry-safe consumer publication; SDMA and the
 restricted PM4 compute-queue path share `CircularRingReader` for wrap-safe
-fetches. AQL, PM4, and SDMA expose the same `PacketProcessResult` envelope
+fetches. AQL and SDMA expose the same `PacketProcessResult` envelope
 and core processor operation. The common layer validates only
 protocol-independent status,
 retirement, and input-growth invariants. `required_bytes` is the fetch extent
 needed to process the head packet, while `retirement_bytes` is the cursor advance
 requested after processing and may include protocol-defined skipped commands. The
 ring owner validates that retirement extent against its capacity and the
-producer-visible cursor. All three remain concrete protocol
+producer-visible cursor. The protocols remain concrete protocol
 implementations because their request, scheduling, retry, and completion
 semantics differ; SDMA continuation lifetime remains with its ring consumer.
 
