@@ -610,11 +610,11 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
   qpAttr.ah_attr.port_num = rtrAttr->localIbPort;
 
   // Multiplane: program per-plane PUEC routes if configured.
-  // Skip loopback QPs (GDR/RMA flush) where remote == local — PUEC routes are meaningless.
-  bool multiplaneEnabled = false;
-  NCCLCHECK(IbCastMultiplaneEnabled(&multiplaneEnabled));
-  bool isLoopback = (memcmp(&rtrAttr->remoteGid, &rtrAttr->localGid, sizeof(union ibv_gid)) == 0);
-  if (multiplaneEnabled && !isLoopback) {
+  // IbCastMultiplaneEnable is set once at init — when false the entire block is skipped
+  // with zero per-QP overhead.  The loopback check (GDR/RMA flush QPs where remote ==
+  // local) is deferred behind the global so non-multiplane paths never pay for the memcmp.
+  if (IbCastMultiplaneEnable &&
+      memcmp(&rtrAttr->remoteGid, &rtrAttr->localGid, sizeof(union ibv_gid)) != 0) {
     NCCLCHECK(IbCastMultiplaneLoad());
     union ibv_gid pipGids[MULTIPLANE_MAX_PIPS];
     int nPips = 0;
