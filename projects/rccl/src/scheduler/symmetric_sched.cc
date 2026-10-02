@@ -15,7 +15,6 @@
 #include "enqueue.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
-#include "ce_coll.h"
 #include <cuda_fp16.h>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
@@ -83,23 +82,6 @@ static bool symBatchAligned16B(struct ncclTaskColl* headTask) {
   return true;
 }
 
-// Symmetric windows require equal offsets on every rank, and the containment
-// bound is the minimum window size across ranks, so every rank reaches the
-// same answer without a bootstrap exchange.
-static void setCeAllReduceFastPath(struct ncclComm* comm) {
-  struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue);
-  while (task != nullptr) {
-    task->ceAllReduceFastPath = false;
-    if (task->func == ncclFuncAllReduce) {
-      const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
-      task->ceAllReduceFastPath = task->recvWin != nullptr &&
-                                  (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-                                  ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
-    }
-    task = task->next;
-  }
-}
-
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead) {
@@ -113,7 +95,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
 
   memset(tasksSymByFnOpTy, 0, sizeof(tasksSymByFnOpTy));
   *remainTasksHead = nullptr;
-  setCeAllReduceFastPath(comm);
   if (task) {
     NCCLCHECK(ncclDevrInitOnce(comm));
   }
@@ -128,7 +109,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
     bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
 
-    bool wantSym = !comm->p2pCrossClique && symAvailable && cfgAllowsSymk;
+    bool wantSym = symAvailable && cfgAllowsSymk;
     if (wantSym) {
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));

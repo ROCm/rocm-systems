@@ -3240,6 +3240,68 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_SplitLsaTeamReturnsFalse) {
       });
 }
 
+// Runs from ncclPrepareTasks for every comm, so cross-clique comms that skip
+// ncclMakeSymmetricTaskList still get the bit.
+TEST(WrapMicrotest, SetCeAllReduceFastPath_RangeInSymmetricWindowSetsBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = storage;
+  recvWin.size = sizeof(storage);
+  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclTaskColl a{}, b{};
+  for (ncclTaskColl* t : {&a, &b}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->recvWin = &recvWin;
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  a.count = 16;
+  a.recvbuff = storage + 32;
+  b.count = sizeof(storage);  // exactly the whole window
+  b.recvbuff = storage;
+  comm->p2pCrossClique = true;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_TRUE(a.ceAllReduceFastPath);
+  EXPECT_TRUE(b.ceAllReduceFastPath);
+  delete comm;
+}
+
+TEST(WrapMicrotest, SetCeAllReduceFastPath_IneligibleTasksClearBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow symWin{};
+  symWin.userPtr = storage;
+  symWin.size = sizeof(storage);
+  symWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclDevrWindow plainWin = symWin;
+  plainWin.winFlags = 0;
+
+  ncclTaskColl pastEnd{}, notSym{}, noWin{}, notAr{};
+  for (ncclTaskColl* t : {&pastEnd, &notSym, &noWin, &notAr}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->count = 16;
+    t->recvbuff = storage;
+    t->recvWin = &symWin;
+    t->ceAllReduceFastPath = true;  // stale value from an earlier launch
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  pastEnd.count = 64;
+  pastEnd.recvbuff = storage + 96;
+  notSym.recvWin = &plainWin;
+  noWin.recvWin = nullptr;
+  notAr.func = ncclFuncAllGather;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_FALSE(pastEnd.ceAllReduceFastPath);
+  EXPECT_FALSE(notSym.ceAllReduceFastPath);
+  EXPECT_FALSE(noWin.ceAllReduceFastPath);
+  EXPECT_FALSE(notAr.ceAllReduceFastPath);
+  delete comm;
+}
+
 // Documents/pins a real production gap (does not change production code):
 // of this function's twelve early-return guards, seven emit a WARN with NO
 // log-once protection. The disabled-by-default guard latches behind
