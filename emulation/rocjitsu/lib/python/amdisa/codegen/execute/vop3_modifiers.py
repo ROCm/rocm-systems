@@ -78,3 +78,31 @@ def vop3_dst_mod_f64(varname: str, indent: str = '    ') -> list[str]:
         f'{indent}if (inst_.clamp) {varname} = amdgpu::clamp_floating_result({varname}, wf);',
         f'{indent}{varname} = amdgpu::fp_mode::finalize_omod_f64({varname}, effective_omod);',
     ]
+
+
+# Scalar expressions use inst_; shared-body generation qualifies it later.
+OUTPUT_POLICY = 'output_policy'
+OUTPUT_MODIFIERS = ('inst_.omod', 'inst_.clamp')
+
+
+def output_policy_expr(dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS) -> str:
+    """Emit the effective OMOD/CLAMP policy using dtype's MODE fields.
+
+    ``fields`` holds the (OMOD, CLAMP) expressions from the instruction.
+    """
+    omod, clamp = fields
+    fmt = f'amdgpu::comparison::{dtype.upper()}'
+    return f'amdgpu::output_modifier_policy<{fmt}>(wf, {omod}, {clamp})'
+
+
+def output_policy_decl(
+    dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS, indent: str = '  '
+) -> str:
+    """Declare the scalar output policy once, before the lane loop."""
+    return f'{indent}const auto {OUTPUT_POLICY} = {output_policy_expr(dtype, fields)};'
+
+
+def apply_output(dtype: str, bits: str) -> str:
+    """Apply OMOD then CLAMP to an already rounded destination encoding."""
+    fmt = f'amdgpu::comparison::{dtype.upper()}'
+    return f'amdgpu::output_modifier::apply<{fmt}>({bits}, {OUTPUT_POLICY})'

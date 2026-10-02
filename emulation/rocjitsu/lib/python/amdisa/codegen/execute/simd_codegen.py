@@ -2965,6 +2965,8 @@ def _simd_probe_line(
     # VOP3 f64 unary (ceil/floor/trunc/rndne/sqrt). Same modifier policy.
     spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
     if spec3unaf64 is not None:
+        if template_name.split('_')[1] in ('ceil', 'floor', 'trunc', 'rndne'):
+            return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64({spec3unaf64});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});'
     # VOP3 f16 unary (widen-then-modify-then-narrow). FTZ-free ops only:
     # ceil/floor/trunc/rndne/sqrt. Transcendentals deferred.
@@ -3066,6 +3068,8 @@ def _simd_probe_line(
             if base in _VOP3_UNARY_SKIP:
                 return None
             if base in _VOP3_UNARY_FP_F32:
+                if base.split('_')[1] in ('ceil', 'floor', 'trunc', 'rndne'):
+                    return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP32({cpp_op});'
                 modifier_args = (
                     ', true /* force_output_flush */'
                     if base.upper() in FLUSH_NEAREST_F32_OPS
