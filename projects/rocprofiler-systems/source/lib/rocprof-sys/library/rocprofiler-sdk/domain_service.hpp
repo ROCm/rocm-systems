@@ -5,6 +5,7 @@
 
 #include "common/string_utility.hpp"
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
+#include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
@@ -73,6 +74,7 @@ public:
         }
 
         configure_pending_external_correlation_id();
+        configure_code_object_domain();
     }
 
     void flush() const
@@ -129,6 +131,22 @@ private:
     std::vector<typename SdkBackend::external_correlation_request_kind_t>
                              m_correlation_domains;
     SdkBackend::context_id_t m_context{};
+    SdkBackend::context_id_t m_code_object_context{};
+
+    // code_object is not in the registry, so it is never user-selectable: it always
+    // runs, on its own context, so kernel names resolve even while m_context is paused.
+    void configure_code_object_domain()
+    {
+        SdkBackend::create_context(&m_code_object_context);
+
+        m_callback_domains.emplace_back(
+            domains::callback::k_code_object<SdkBackend, Externals>,
+            m_code_object_context,
+            std::vector<typename SdkBackend::tracing_operation_t>{});
+        m_callback_domains.back().configure();
+
+        SdkBackend::start_context(m_code_object_context);
+    }
 
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const

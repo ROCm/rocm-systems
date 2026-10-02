@@ -19,7 +19,6 @@
 #include "library/rocprofiler-sdk/buffered/memory_copy.hpp"
 #include "library/rocprofiler-sdk/buffered/scratch_memory.hpp"
 
-#include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/compiler_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip_stream.hpp"
@@ -175,7 +174,6 @@ private:
                              k_callback_domains_size>
             result;
 
-        result.add(callback::k_code_object<SdkBackend, Externals>);
         result.add(callback::hip::k_compiler_api<SdkBackend, Externals>);
         result.add(callback::hip::k_runtime_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_core_api<SdkBackend, Externals>);

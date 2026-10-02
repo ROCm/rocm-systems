@@ -216,15 +216,18 @@ struct stream_id
 {
     std::uint64_t handle{};
 };
+struct code_object_load_data
+{};
+struct kernel_symbol_data
+{};
 // Real SDK defines rocprofiler_hip_stream_operation_t as an enum; a plain int
 // satisfies every comparison/assignment backend<mock_sdk> performs on it.
 using hip_stream_operation_t = int;
 struct hip_stream_data
 {
-    std::uint64_t size{};
-    struct stream_id stream_id
-    {};
-    std::uint64_t stream_value{};
+    std::uint64_t    size{};
+    struct stream_id stream_id{};
+    std::uint64_t    stream_value{};
 };
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
@@ -391,7 +394,7 @@ public:
                 (counter_id id, available_dimensions_cb_t cb, void* user_data));
 
     MOCK_METHOD(status_t, get_version,
-                (std::uint32_t * major, std::uint32_t* minor, std::uint32_t* patch));
+                (std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch));
     MOCK_METHOD(status_t, get_timestamp, (timestamp * ts));
     MOCK_METHOD(const char*, get_status_string, (status_t s));
 
@@ -471,6 +474,8 @@ struct mock_sdk
     using hip_stream_data                      = testing::hip_stream_data;
     using hip_stream_operation_t               = testing::hip_stream_operation_t;
     using stream_id                            = testing::stream_id;
+    using code_object_load_data                = testing::code_object_load_data;
+    using kernel_symbol_data                   = testing::kernel_symbol_data;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
@@ -578,6 +583,9 @@ struct mock_sdk
     static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
     static constexpr ompt_operation_t OMPT_ID_error              = 21;
     static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+
+    static constexpr tracing_operation CODE_OBJECT_LOAD                          = 1;
+    static constexpr tracing_operation CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER = 2;
 
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;

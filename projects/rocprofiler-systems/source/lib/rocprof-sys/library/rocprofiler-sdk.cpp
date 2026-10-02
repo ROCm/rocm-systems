@@ -499,7 +499,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     state::thread::pop();
 }
 
-#if(ROCPROFILER_VERSION < 700)
+#if (ROCPROFILER_VERSION < 700)
 /**
  * @brief Stream ID.
  */
@@ -645,23 +645,11 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     return counters_v;
 }
 
-const kernel_symbol_data_t*
-get_kernel_symbol_info(std::uint64_t _kernel_id)
-{
-    return g_tool_data->get_kernel_symbol_info(_kernel_id);
-}
-
-const rocprofiler_callback_tracing_code_object_load_data_t*
-get_code_object_info(std::uint64_t _code_object_id)
-{
-    return g_tool_data->get_code_object_info(_code_object_id);
-}
-
 template <typename CorrelationIdType>
 std::uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -714,45 +702,6 @@ register_operation_name_strings()
         {
             metadata.add_string(*item.second);
         }
-    }
-}
-
-void
-tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
-                          rocprofiler_user_data_t* /*user_data*/, void* /*callback_data*/)
-{
-    auto ts = rocprofiler_timestamp_t{};
-    ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
-
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
-    {
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-        {
-            if(record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
-            {
-                auto data_v =
-                    *static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
-                        record.payload);
-                g_tool_data->code_object_records.wlock(
-                    [ts, &record, &data_v](auto& data) {
-                        data.emplace_back(code_object_callback_record_t{
-                            .timestamp = ts, .record = record, .payload = data_v });
-                    });
-                trace_cache::get_metadata_registry().add_code_object(data_v);
-            }
-            else if(record.operation ==
-                    ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
-            {
-                auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
-                g_tool_data->kernel_symbol_records.wlock(
-                    [ts, &record, &data_v](auto& _data) {
-                        _data.emplace_back(kernel_symbol_callback_record_t{
-                            .timestamp = ts, .record = record, .payload = data_v });
-                    });
-                trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
-            }
-        }
-        return;
     }
 }
 
@@ -1111,13 +1060,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
-    // Code object callback on its own always-on context so kernel names are captured
-    // even when primary_ctx is stopped (region filter mode)
-    ROCPROFILER_CALL(rocprofiler_create_context(&_data->code_object_ctx));
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-        _data->code_object_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
-        tool_code_object_callback, _data));
-
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
 
@@ -1150,7 +1092,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
@@ -1160,7 +1102,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         domain_selection selection;
@@ -1176,7 +1118,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 10202)
+#if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -1366,7 +1308,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_OMPT))
     {
         _data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
@@ -1380,7 +1322,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1396,7 +1338,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
     {
         _data->backtrace_operations.emplace(
@@ -1412,7 +1354,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10304)
+#if (ROCPROFILER_VERSION >= 10304)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
     {
         _data->backtrace_operations.emplace(
@@ -1428,7 +1370,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10305)
+#if (ROCPROFILER_VERSION >= 10305)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1526,7 +1468,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(should_defer_main_contexts())
     {
-        start_context(_data->get_code_obj_context());
         start_context(_data->get_control_context());
     }
     else

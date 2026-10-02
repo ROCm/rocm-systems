@@ -86,12 +86,22 @@ struct callback_tracing_record_t
     void* payload = nullptr;
 };
 
+struct code_object_load_data_t
+{
+    std::uint64_t code_object_id = 0;
+};
+
+struct code_object_kernel_symbol_register_data_t
+{
+    std::uint64_t kernel_id = 0;
+};
+
 using tracing_operation_t     = std::size_t;
 using buffer_tracing_kind_t   = std::size_t;
 using callback_tracing_kind_t = std::size_t;
 using buffer_policy_t         = int;
 using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
-                                 std::size_t, void*, std::uint64_t);
+                                         std::size_t, void*, std::uint64_t);
 using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
 using external_correlation_request_kind_t  = std::size_t;
 using external_correlation_id_request_cb_t = int (*)(std::uint64_t, context_id_t,
@@ -420,38 +430,40 @@ struct mock_sdk
                                                          std::int32_t, void*);
 
     // NOLINTBEGIN(readability-identifier-naming)
-    static constexpr std::size_t      compile_time_version                    = 90909;
-    static constexpr buffer_policy_t  BUFFER_POLICY_LOSSLESS                  = 1;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_QUEUE                = 27;
-    static constexpr std::size_t      CALLBACK_TRACING_CODE_OBJECT            = 1;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_CORE_API           = 2;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_AMD_EXT_API        = 3;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_IMAGE_EXT_API      = 4;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API       = 7;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCJPEG_API            = 8;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API          = 9;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API           = 10;
-    static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API            = 11;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM             = 12;
-    static constexpr std::size_t      HIP_STREAM_SET                          = 0;
-    static constexpr std::size_t      CALLBACK_TRACING_RCCL_API               = 13;
-    static constexpr std::size_t      CALLBACK_TRACING_OMPT                   = 14;
-    static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
-    static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
-    static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
-    static constexpr std::size_t      BUFFER_TRACING_KERNEL_DISPATCH          = 28;
-    static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY              = 29;
-    static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION        = 30;
-    static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY           = 31;
+    static constexpr std::size_t      compile_time_version                      = 90909;
+    static constexpr buffer_policy_t  BUFFER_POLICY_LOSSLESS                    = 1;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS   = 20;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_FAULT       = 21;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE     = 22;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_QUEUE            = 23;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU   = 24;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_FAULT             = 25;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_MIGRATE           = 26;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_QUEUE                  = 27;
+    static constexpr std::size_t      CALLBACK_TRACING_CODE_OBJECT              = 1;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_CORE_API             = 2;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_AMD_EXT_API          = 3;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_IMAGE_EXT_API        = 4;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API     = 5;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API          = 6;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API         = 7;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCJPEG_API              = 8;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API            = 9;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API             = 10;
+    static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API              = 11;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM               = 12;
+    static constexpr std::size_t      HIP_STREAM_SET                            = 0;
+    static constexpr std::size_t      CALLBACK_TRACING_RCCL_API                 = 13;
+    static constexpr std::size_t      CALLBACK_TRACING_OMPT                     = 14;
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER                      = 0;
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT                       = 1;
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE                       = 2;
+    static constexpr std::size_t      BUFFER_TRACING_KERNEL_DISPATCH            = 28;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY                = 29;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION          = 30;
+    static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY             = 31;
+    static constexpr std::size_t      CODE_OBJECT_LOAD                          = 1;
+    static constexpr std::size_t      CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER = 2;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH   = 32;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY       = 33;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION = 34;
@@ -469,6 +481,9 @@ struct mock_sdk
     using memory_copy_record_t          = test_support::memory_copy_record_t;
     using memory_allocation_record_t    = test_support::memory_allocation_record_t;
     using scratch_memory_record_t       = test_support::scratch_memory_record_t;
+    using code_object_load_data_t       = test_support::code_object_load_data_t;
+    using code_object_kernel_symbol_register_data_t =
+        test_support::code_object_kernel_symbol_register_data_t;
 
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
     using nccl_data_type_t = int;
@@ -1009,6 +1024,9 @@ struct gmock_metadata_registry
     MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
     MOCK_METHOD(void, add_queue, (std::uint64_t queue_handle));
     MOCK_METHOD(void, add_stream, (std::uint64_t stream_handle));
+    MOCK_METHOD(void, add_code_object, (const code_object_load_data_t& code_object));
+    MOCK_METHOD(void, add_kernel_symbol,
+                (const code_object_kernel_symbol_register_data_t& kernel_symbol));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_metadata_registry>>
@@ -1419,8 +1437,8 @@ struct externals
         [[nodiscard]] std::vector<std::uint64_t>    get_stream_list() const { return {}; }
         [[nodiscard]] std::vector<std::string_view> get_string_list() const { return {}; }
         [[nodiscard]] bool                          save_to_file(
-                                     const std::string& /*filepath*/,
-                                     const std::vector<std::shared_ptr<agent_t>>& /*agents*/) const
+            const std::string& /*filepath*/,
+            const std::vector<std::shared_ptr<agent_t>>& /*agents*/) const
         {
             return true;
         }
@@ -1465,6 +1483,20 @@ struct externals
             if(g_metadata_registry_mock)
             {
                 g_metadata_registry_mock->add_stream(stream_handle);
+            }
+        }
+        void add_code_object(const code_object_load_data_t& code_object)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_code_object(code_object);
+            }
+        }
+        void add_kernel_symbol(const code_object_kernel_symbol_register_data_t& symbol)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_kernel_symbol(symbol);
             }
         }
     };
