@@ -1672,6 +1672,8 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   // DEBUG_HIP_GRAPH_CLASSIC_PATH=1 forces this path on Linux for testing without
   // enabling the full PAL backend.
   if (GPU_ENABLE_PAL != 0 || DEBUG_HIP_GRAPH_CLASSIC_PATH) {
+    // hipGraphInstantiateFlagUseNodePriority is a scheduling hint; CUDA never
+    // fails instantiation for it, so accept and ignore it here too.
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
     hipError_t initStatus = validateClonedKernelNodes(static_cast<const hip::Graph*>(classicExec));
@@ -1726,6 +1728,13 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
   HIP_RETURN(status, ReturnPtrValue(pGraphExec));
 }
 
+// Accepted flag bitmasks per entry point; intentionally narrower than all declared flags.
+static constexpr unsigned long long kValidInstantiateFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUseNodePriority;
+static constexpr unsigned long long kValidInstantiateParamsFlags =
+    hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUpload |
+    hipGraphInstantiateFlagDeviceLaunch | hipGraphInstantiateFlagUseNodePriority;
+
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags = 0) {
   HIP_INIT_API(hipGraphInstantiateWithFlags, pGraphExec, graph, flags);
@@ -1733,9 +1742,7 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // invalid flag check
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  if ((flags & ~kValidInstantiateFlags) != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1754,9 +1761,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
 
   unsigned long long flags = instantiateParams->flags;
 
-  if (flags != 0 && flags != hipGraphInstantiateFlagAutoFreeOnLaunch &&
-      flags != hipGraphInstantiateFlagUpload && flags != hipGraphInstantiateFlagDeviceLaunch &&
-      flags != hipGraphInstantiateFlagUseNodePriority) {
+  if ((flags & ~kValidInstantiateParamsFlags) != 0) {
     instantiateParams->result_out = hipGraphInstantiateError;
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -1772,7 +1777,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
   instantiateParams->result_out = hipGraphInstantiateSuccess;
   instantiateParams->errNode_out = nullptr;
 
-  if (flags == hipGraphInstantiateFlagUpload) {
+  if ((flags & hipGraphInstantiateFlagUpload) != 0) {
     hipError_t status = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
     HIP_RETURN(status);
   }

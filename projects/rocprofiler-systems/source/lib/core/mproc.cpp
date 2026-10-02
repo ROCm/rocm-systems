@@ -51,7 +51,7 @@ get_concurrent_processes(int _ppid)
 int
 get_process_index(int _pid, int _ppid)
 {
-    auto _children = get_concurrent_processes(_ppid);
+    auto const _children = get_concurrent_processes(_ppid);
     for(auto itr = _children.begin(); itr != _children.end(); ++itr)
     {
         if(*itr == _pid)

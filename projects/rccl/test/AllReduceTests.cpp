@@ -221,6 +221,23 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Regression test for FP8 avg scaling by 1/(2*nRanks) wherever the device fp8 type is
+  // FNUZ (AICOMRCCL-1945). It discriminates on gfx942 and the software fallback; where host
+  // and device are both OCP it only guards the float scalar, whose host half is pinned in
+  // test/host/enqueue-test.cc. One rank runs the separate oneRankReduce kernel.
+  //
+  // E5M2 is left out: ExpectedReduceFp8 (test/common/DeviceDataOps.hpp) sums in fp8 and
+  // divides last, which disagrees with RCCL's pre-scale for a 2-bit mantissa on unpatched
+  // builds too (AICOMRCCL-2321).
+  TEST(AllReduce, Fp8Avg)
+  {
+    TestBed testBed;
+    testBed.RunSimpleSweep({ncclCollAllReduce}, {ncclFloat8e4m3}, {ncclAvg},
+                           /*roots=*/{0}, /*numElements=*/{384, 1024}, /*inPlaceList=*/{false},
+                           /*managedMemList=*/{false}, /*useHipGraphList=*/{false});
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, UserBufferRegistration)
   {
     const int nranks = 8;
@@ -756,7 +773,11 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Requires at least 1 GPU";
 
     ncclFunc_t                  const funcType      = ncclCollAllReduce;
-    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16};
+    // At one rank the avg scalar is exactly 1.0, so the harness reference and RCCL agree
+    // for both fp8 types. On gfx942 these also launch oneRankReduce on an fp8 type, whose
+    // name differs between the host and device passes unless onerank.cu keeps it stable.
+    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16,
+                                                       ncclFloat8e4m3, ncclFloat8e5m2};
     bool                        const inPlace       = false; // out-of-place: tail of separate output buffer must be written
     bool                        const useManagedMem = false;
 
