@@ -8,7 +8,9 @@ import math
 import sys
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
+from amdsmi_cli_exceptions import AmdSmiInvalidParameterValueException
 from amdsmi_cli_exceptions import AmdSmiExitCode
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -2030,6 +2032,52 @@ class SetValueCommands:
             self.logger.clear_multiple_devices_output()
             return
 
+    def _set_cuid_seed(self, source):
+        """Provision the node-wide CUID derivation seed.
+
+        `source` is a path, or "-" for standard input. The seed is never taken
+        from a command-line argument: an argument is visible in
+        /proc/<pid>/cmdline to every user on the machine, and lands in the
+        invoking user's shell history.
+        """
+        seed_size = amdsmi_interface.AMDSMI_CUID_SEED_SIZE
+
+        if source == "-":
+            seed = sys.stdin.buffer.read()
+        else:
+            try:
+                with open(source, "rb") as handle:
+                    seed = handle.read()
+            except OSError as e:
+                raise AmdSmiInvalidFilePathException(
+                    "set", self.logger.format, f"Cannot read CUID seed from {source}: {e.strerror}"
+                ) from e
+
+        if len(seed) != seed_size:
+            # Checked here as well as in the library so that the error names the
+            # file.
+            raise AmdSmiInvalidParameterValueException(
+                "set",
+                source,
+                self.logger.format,
+                f"CUID seed must be exactly {seed_size} bytes, got {len(seed)} from {source}",
+            )
+
+        try:
+            amdsmi_interface.amdsmi_set_cuid_seed(seed)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            # Provisioning is root-only. Mirrors --gtt: the privilege error is
+            # named rather than left as a raw library status.
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            raise
+
+        seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
+        # The fingerprint, never the seed: this output gets pasted into tickets.
+        self.logger.output["seed_provisioned"] = seed_info["provisioned"]
+        self.logger.output["seed_fingerprint"] = seed_info["fingerprint"]
+        self.logger.print_output()
+
     def set_value(
         self,
         args,
@@ -2075,6 +2123,7 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        cuid_seed=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -2120,7 +2169,8 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined, or --gtt or
+                --cuid-seed is combined with --gpu
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2170,6 +2220,22 @@ class SetValueCommands:
                 return
 
         # Check if a GPU argument has been set
+        # The CUID derivation seed is node-scoped, so it is handled ahead of the
+        # GPU/CPU/CORE dispatch, which exists to pick a device.
+        if getattr(args, "cuid_seed", None):
+            if getattr(args, "gpu", None) is not None:
+                # Without this the command re-keys every derived CUID on the
+                # node while appearing to target one device.
+                msg = (
+                    "amd-smi set: error: argument --cuid-seed: not allowed with argument "
+                    "--gpu/-g (the CUID seed is node-wide, not per-GPU)"
+                )
+                raise AmdSmiInvalidParameterException(
+                    "set", "--cuid-seed", self.helpers.get_output_format(), msg
+                )
+            self._set_cuid_seed(args.cuid_seed)
+            return
+
         gpu_args_enabled = False
         gpu_attributes = [
             "fan",

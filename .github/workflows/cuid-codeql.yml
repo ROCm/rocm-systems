@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop]
     paths:
-      - 'projects/cuid/**'
+      - 'shared/cuid/**'
       - 'shared/sha256/**'
       - '.github/workflows/cuid-codeql.yml'
   schedule:
@@ -69,12 +69,12 @@ jobs:
       - name: Set Project Directory
         run: |
           # Find the directory containing the main CMakeLists.txt for CUID
-          # Prioritize finding it in projects/cuid
-          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          # Prioritize finding it in shared/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/shared/cuid/CMakeLists.txt" -exec dirname {} \; | head -n 1)
 
           if [ -z "$TARGET_DIR" ]; then
-            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
-            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+            echo "Could not find CMakeLists.txt in shared/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "shared/cuid" | head -n 1 | xargs dirname)
           fi
 
           if [ -z "$TARGET_DIR" ]; then
