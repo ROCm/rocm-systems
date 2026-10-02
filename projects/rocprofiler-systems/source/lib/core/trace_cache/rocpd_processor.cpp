@@ -162,8 +162,6 @@ rocpd_processor_t::handle(const memory_copy_sample& mcs)
     auto const& n_info  = node_info::get_instance();
     auto const  process = m_metadata->get_process_info();
 
-    auto name = std::string{ mcs.name };
-
     const auto& dst_agent = m_agent_manager->get_agent_by_handle(mcs.dst_agent_id_handle);
     const auto& src_agent = m_agent_manager->get_agent_by_handle(mcs.src_agent_id_handle);
 
@@ -180,8 +178,8 @@ rocpd_processor_t::handle(const memory_copy_sample& mcs)
     memory_copy.src_agent_id    = make_agent_uid(src_agent);
     memory_copy.src_address     = mcs.src_address_value;
     memory_copy.size            = mcs.bytes;
-    memory_copy.name            = name;
-    memory_copy.region_name     = name;
+    memory_copy.name            = mcs.name;
+    memory_copy.region_name     = mcs.name;
 
     auto env      = make_trace_env(n_info.id, process.pid, mcs.thread_id);
     env.stream_id = mcs.stream_handle;
