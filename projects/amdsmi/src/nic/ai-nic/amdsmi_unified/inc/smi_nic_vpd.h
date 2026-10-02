@@ -26,7 +26,7 @@ struct VpdFields {
  * Parses a raw PCI VPD image (the bytes exposed at
  * /sys/bus/pci/devices/<bdf>/vpd) per the PCI Local Bus spec resource-tag
  * layout. Walks the large/small resource tags rather than substring-searching,
- * so keyword lengths are honoured. Robust to truncation: parsing stops at the
+ * so keyword lengths are honoured. Tolerates truncation: parsing stops at the
  * end tag or the first out-of-bounds length, returning whatever was decoded.
  */
 VpdFields parse_pci_vpd(const std::vector<uint8_t>& image);

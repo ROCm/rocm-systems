@@ -119,7 +119,7 @@ class NicTransport {
   virtual Result<VendorStatistics> get_statistics(const std::string& iface) = 0;
 
   // ethtool -I --show-fec (netlink FEC stats); ENOTSUP on backends that do
-  // not support it. Failure here is not an error for the caller — it means
+  // not support it. Failure here is not an error for the caller; it means
   // this port's FEC counters stay absent, same as any table entry the driver
   // does not expose.
   virtual Result<FecStatistics_t> get_fec_statistics(const std::string& iface) = 0;
@@ -142,6 +142,13 @@ enum class NicBackend_t { Auto, Ioctl, Netlink };
  * Thread-safe; each instance is independent.
  */
 std::shared_ptr<NicTransport> create_transport(NicBackend_t backend = NicBackend_t::Auto);
+
+/**
+ * Wraps `inner` so every call is reported through amd::smi::nic::log (interface,
+ * SUCCESS/FAIL, parsed content). Results and backend_name() pass through
+ * unchanged; with no sink installed the wrapper only forwards.
+ */
+std::shared_ptr<NicTransport> with_debug_logging(std::shared_ptr<NicTransport> inner);
 
 // Internal factory functions for backend implementations
 namespace ioctl_internal {

@@ -20,9 +20,26 @@
 #include <string>
 #include <vector>
 
+#include "smi_nic_log.h"
+
 namespace amd::nic::netlink {
 
 namespace {
+
+// Debug-log line for one devlink request against pci/<dev>; `err` is a negative libnl code.
+void log_devlink(const char* func, const char* op, const std::string& dev, int err,
+                 const std::string& content) {
+  if (!amd::smi::nic::log::is_enabled()) {
+    return;
+  }
+  amd::smi::nic::log::debug(
+      func, std::string("devlink ") + op + " pci/" + dev + " -> " +
+                ((err < 0) ? (std::string("FAIL ") + nl_geterror(-err)) : ("SUCCESS " + content)));
+}
+
+std::string count_or_unknown(uint64_t value, uint64_t unknown) {
+  return (value == unknown) ? "unknown" : std::to_string(value);
+}
 
 // State threaded through the health-reporter dump callback.
 struct HealthDumpContext {
@@ -110,12 +127,41 @@ int DevlinkNetlinkClient::init() {
   return 0;
 }
 
+std::string devlink_describe(const std::vector<DevlinkReporter>& reporters) {
+  std::string text = "reporters=" + std::to_string(reporters.size());
+  for (const auto& r : reporters) {
+    text += std::string(" [") + r.name + " healthy=" + std::to_string(r.healthy) +
+            " errors=" + std::to_string(r.error_count) + "]";
+  }
+  return text;
+}
+
+std::string devlink_describe(const DevlinkPortSplit& split) {
+  return "splittable=" + count_or_unknown(split.splittable, UINT8_MAX) +
+         " split_count=" + count_or_unknown(split.split_count, UINT32_MAX);
+}
+
+std::string devlink_describe(const DevlinkDeviceInfo& info) {
+  std::string text = std::string("driver=") + info.driver_name +
+                     " serial=" + amd::smi::nic::log::mask_tail(info.serial_number) +
+                     " board_serial=" + amd::smi::nic::log::mask_tail(info.board_serial_number) +
+                     " versions=" + std::to_string(info.version_count);
+  for (int i = 0; i < info.version_count; ++i) {
+    const DevlinkVersion& v = info.versions[i];
+    const bool is_serial = (std::string(v.name).find("serial") != std::string::npos);
+    text += std::string(" [") + v.name + "=" +
+            (is_serial ? amd::smi::nic::log::mask_tail(v.value) : std::string(v.value)) + "]";
+  }
+  return text;
+}
+
 transport::Result<std::vector<DevlinkReporter>> DevlinkNetlinkClient::get_health_reporters(
     const std::string& dev) {
   transport::Result<std::vector<DevlinkReporter>> result{false, {}, ENOTSUP};
 
   int ret = init();
   if (ret < 0) {
+    log_devlink(__PRETTY_FUNCTION__, "HEALTH_REPORTER_GET", dev, ret, "");
     result.error_code = -ret;
     return result;
   }
@@ -134,6 +180,9 @@ transport::Result<std::vector<DevlinkReporter>> DevlinkNetlinkClient::get_health
 
   ret = client_.query(family_id_, DEVLINK_CMD_HEALTH_REPORTER_GET, DEVLINK_GENL_VERSION, build_fn,
                       health_dump_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
+  if (amd::smi::nic::log::is_enabled()) {
+    log_devlink(__PRETTY_FUNCTION__, "HEALTH_REPORTER_GET", dev, ret, devlink_describe(reporters));
+  }
   if (ret < 0) {
     result.error_code = -ret;
     return result;
@@ -189,6 +238,8 @@ int port_dump_handler(struct nl_msg* msg, void* arg) {
   DevlinkPortSplit split{};
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_PORT_SPLITTABLE])) {
     split.splittable = NLAttributes::get_u8(tb[DEVLINK_ATTR_PORT_SPLITTABLE]);
+    // PORT_GET never carries SPLIT_COUNT; a port that reported its attributes is unsplit.
+    split.split_count = 0;
   }
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_PORT_SPLIT_COUNT])) {
     split.split_count = NLAttributes::get_u32(tb[DEVLINK_ATTR_PORT_SPLIT_COUNT]);
@@ -209,6 +260,7 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
 
   int ret = init();
   if (ret < 0) {
+    log_devlink(__PRETTY_FUNCTION__, "PORT_GET", dev, ret, "");
     result.error_code = -ret;
     return result;
   }
@@ -227,6 +279,10 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
 
   ret = client_.query(family_id_, DEVLINK_CMD_PORT_GET, DEVLINK_GENL_VERSION, build_fn,
                       port_dump_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
+  if (amd::smi::nic::log::is_enabled()) {
+    log_devlink(__PRETTY_FUNCTION__, "PORT_GET", dev, ret,
+                ctx.found_any ? devlink_describe(ctx.split) : "no port object");
+  }
   if (ret < 0) {
     result.error_code = -ret;
     return result;
@@ -334,6 +390,7 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
 
   int ret = init();
   if (ret < 0) {
+    log_devlink(__PRETTY_FUNCTION__, "INFO_GET", dev, ret, "");
     result.error_code = -ret;
     return result;
   }
@@ -352,6 +409,10 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
 
   ret = client_.query(family_id_, DEVLINK_CMD_INFO_GET, DEVLINK_GENL_VERSION, build_fn,
                       device_info_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
+  if (amd::smi::nic::log::is_enabled()) {
+    log_devlink(__PRETTY_FUNCTION__, "INFO_GET", dev, ret,
+                ctx.found ? devlink_describe(info) : "no devlink instance");
+  }
   if (ret < 0) {
     result.error_code = -ret;
     return result;
