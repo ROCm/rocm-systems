@@ -599,6 +599,9 @@ struct mock_sdk
         ompt_thread_unknown = 4
     };
 
+    static constexpr ompt_thread_type_t OMPT_THREAD_INITIAL =
+        ompt_thread_type_t::ompt_thread_initial;
+
     // Mirrors rocprofiler_ompt_args_t's shape (one struct member per OMPT operation
     // whose fields ompt.hpp reads); a plain struct suffices since tests only ever
     // populate the single branch matching the record's operation.

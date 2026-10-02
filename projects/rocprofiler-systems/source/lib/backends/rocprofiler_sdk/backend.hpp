@@ -177,6 +177,9 @@ struct backend
     // ─── OMPT types and constants ─────────────────────────────────────────────────
     using ompt_operation_t             = Wrapper::ompt_operation_t;
     using callback_tracing_ompt_data_t = Wrapper::ompt_data_t;
+    using ompt_thread_t                = Wrapper::ompt_thread_t;
+
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = Wrapper::OMPT_THREAD_INITIAL;
 
     static constexpr ompt_operation_t OMPT_ID_thread_begin =
         Wrapper::OMPT_ID_thread_begin;
