@@ -16,8 +16,5 @@ class TestReset(TestCliBase):
         cmds = self.CreateCmds(
             "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        # TODO: remove before committing - skips --gpureset (slow, actually resets
-        # the GPU) so local sweeps don't take forever.
-        cmds = [c for c in cmds if "gpureset" not in c[0]]
         self.RunCmds(cmds)
         return

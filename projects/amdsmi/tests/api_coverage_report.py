@@ -421,7 +421,11 @@ def read_suite_status(log_dir):
 
                 ran = count(r"\[[=-]+\]\s+(\d+)\s+tests?\s+(?:from .*?)?ran")
                 passed = count(r"\[\s*PASSED\s*\]\s+(\d+)\s+tests?")
-                failed = count(r"\[\s*FAILED\s*\]\s+(\d+)\s+tests?")
+                # Real GTest says "N tests, listed below:"; the Python suites'
+                # GTest-style wrapper (common.py's _print_gtest_summary) says
+                # "N failure(s), listed below:" instead -- accept both so a
+                # Python suite's real failures aren't silently read as zero.
+                failed = count(r"\[\s*FAILED\s*\]\s+(\d+)\s+(?:tests?|failures?)")
                 skipped = count(r"\[\s*SKIPPED\s*\]\s+(\d+)\s+tests?")
                 if code == "skipped":
                     state = "not run"
