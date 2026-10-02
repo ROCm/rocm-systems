@@ -82,6 +82,14 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
+// Per-QP chunk size, as in ncclIbMultiSend: below splitDataThreshold only the
+// active QP (i==0, see ncclIbCommBaseGetQpForRequest) carries data; above it
+// each device's weighted share is split across that device's QPs.
+static inline uint32_t ncclIbQpChunkSize(int size, int64_t splitDataThreshold, int i, uint8_t weight, int qpsPerDev) {
+  if (size < splitDataThreshold) return (i == 0) ? size : 0;
+  return DIVUP(DIVUP((uint64_t)size * weight, 100 * qpsPerDev), IB_WRITE_CHUNK_ALIGNMENT) * IB_WRITE_CHUNK_ALIGNMENT;
+}
+
 // Multi-segment (AIRUNTIME-2351 classic-path follow-up) variant of
 // ncclIbMultiSend. It splits each request's per-QP chunk into one RDMA-write WR
 // per local+remote physical segment slice, so a transfer that straddles a
@@ -147,14 +155,8 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
     // resiliency skip so skipped QPs still advance the offsets consistently).
     uint32_t chunkLen[NCCL_NET_IB_MAX_RECVS];
     for (int r = 0; r < nreqs; r++) {
-      uint32_t chunkSize;
-      if (reqs[r]->send.size < splitDataThreshold) {
-        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
-      } else {
-        chunkSize = DIVUP(DIVUP((uint64_t)reqs[r]->send.size * weights[origDevIndex], 100 * qpsPerDev[origDevIndex]),
-                          IB_WRITE_CHUNK_ALIGNMENT) *
-                    IB_WRITE_CHUNK_ALIGNMENT;
-      }
+      uint32_t chunkSize =
+        ncclIbQpChunkSize(reqs[r]->send.size, splitDataThreshold, i, weights[origDevIndex], qpsPerDev[origDevIndex]);
       chunkLen[r] = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
     }
 
