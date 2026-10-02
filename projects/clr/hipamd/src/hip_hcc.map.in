@@ -698,6 +698,7 @@ local:
 hip_7.17 {
 global:
     hipModuleEnumerateFunctions;
+    hipExtMemcpyBatchAsync;
 local:
     *;
 } hip_7.16;

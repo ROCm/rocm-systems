@@ -182,6 +182,11 @@ class BlitSdmaBase : public core::Blit {
   /// @param body_signal  When non-null (!platform_atomic_support_ classic path),
   ///   the body fences this signal to 0 on completion instead of atomic-
   ///   decrementing out_signal.  Caller allocates one per engine group.
+  /// @param dst_size_list  Optional per-entry B-side sizes for asymmetric
+  ///   LINEAR_SWAP (size_list is the A side). When null, or when
+  ///   dst_size_list[d] == size_list[d], the swap is symmetric. Asymmetric
+  ///   entries require NativeAsymmetricSwapSupported(); the caller must reject
+  ///   them otherwise.
   virtual hsa_status_t SubmitBodies(
       hsa_amd_memory_copy_op_type_t op,
       void* const* dst_list,
@@ -191,9 +196,12 @@ class BlitSdmaBase : public core::Blit {
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
-      core::Signal* body_signal = nullptr) = 0;
+      core::Signal* body_signal = nullptr,
+      const size_t* dst_size_list = nullptr) = 0;
 
   virtual bool SwapSupported() const = 0;
+  /// @brief Whether LINEAR_SWAP supports src_size != dst_size natively.
+  virtual bool NativeAsymmetricSwapSupported() const = 0;
   virtual bool IndirectCopySupported() const = 0;
   virtual bool UsesGCR() const = 0;
 };
@@ -332,9 +340,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
-      core::Signal* body_signal = nullptr) override;
+      core::Signal* body_signal = nullptr,
+      const size_t* dst_size_list = nullptr) override;
 
   bool SwapSupported() const override { return swap_supported_; }
+  bool NativeAsymmetricSwapSupported() const override { return false; }
   bool IndirectCopySupported() const override { return indirect_copy_supported_; }
   bool UsesGCR() const override { return useGCR; }
 
