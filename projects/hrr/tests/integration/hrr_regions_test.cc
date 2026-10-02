@@ -539,6 +539,16 @@ void install_sidecar(const fs::path& archive_path,
   write_region_batch(regions / "synthetic.hrrr", recs);
 }
 
+// The workload's layout as its allocator would declare it: the segment and the
+// two blocks carved out of it.
+void install_block_sidecar(const fs::path& archive_path, uint64_t seg) {
+  install_sidecar(archive_path, {
+      region_rec(HRR_REGION_ADD, HRR_REGION_SEGMENT, seg, kSegBytes),
+      region_rec(HRR_REGION_ADD, HRR_REGION_BLOCK, seg, kBlockBytes),
+      region_rec(HRR_REGION_ADD, HRR_REGION_BLOCK, seg + kBlock1Off, kBlockBytes),
+  });
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -563,11 +573,7 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
     CHECK(out.find("Regions ") == std::string::npos);
   }
 
-  install_sidecar(archive, {
-      region_rec(HRR_REGION_ADD, HRR_REGION_SEGMENT, seg, kSegBytes),
-      region_rec(HRR_REGION_ADD, HRR_REGION_BLOCK, seg, kBlockBytes),
-      region_rec(HRR_REGION_ADD, HRR_REGION_BLOCK, seg + kBlock1Off, kBlockBytes),
-  });
+  install_block_sidecar(archive, seg);
 
   SECTION("the stale pointer is reported, and nothing moves") {
     auto [rc, out] = hrr_playback_merged(archive);
@@ -594,22 +600,35 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
     CHECK(rc == 0);
     CHECK(out.find("region OOB") == std::string::npos);
   }
+}
 
-  SECTION("--guard-blocks makes the overrun fault") {
-    // A fault the GPU never reports leaves the replay in hipDeviceSynchronize
-    // until CI kills the whole suite. Killed by the watchdog it would also
-    // pass the rc != 0 test below, so it is ruled out first.
-    auto [rc, out] = hrr_playback_watchdog(archive, kGuardReplayTimeoutSeconds,
-                                           "--guard-blocks");
-    INFO("Guarded replay:\n" << out);
-    REQUIRE(rc != kHrrWatchdogKilled);
-    if (rc == 0) {
-      // The only acceptable clean run is one where nothing was guarded — no VMM
-      // support, or every reservation failed. If blocks were relocated and the
-      // overrun still did not fault, the guard is not doing its job.
-      INFO("Guard reported a clean run; it must not have relocated anything");
-      CHECK(out.find(": 0 block relocation(s)") != std::string::npos);
-    }
+// The one case that faults the GPU on purpose. Some drivers escalate that fault
+// to a GPU hang, and ROCr then aborts every process holding the device, this
+// suite included; [guard-fault] lets CI run it in a Catch2 process of its own so
+// that costs this case and not the rest of the suite.
+TEST_CASE("Unit_HRR_Regions_GuardBlocks", "[hrr][guard-fault]") {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_regions_guard.hrr");
+  hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  const uint64_t seg = find_alloc_base(archive, kSegBytes);
+  INFO("Recorded segment base: 0x" << std::hex << seg);
+  REQUIRE(seg != 0);
+  install_block_sidecar(archive, seg);
+
+  // A fault the GPU never reports leaves the replay in hipDeviceSynchronize
+  // until CI kills the whole suite. Killed by the watchdog it would also pass
+  // the rc != 0 test below, so it is ruled out first.
+  auto [rc, out] = hrr_playback_watchdog(archive, kGuardReplayTimeoutSeconds,
+                                         "--guard-blocks");
+  INFO("Guarded replay:\n" << out);
+  REQUIRE(rc != kHrrWatchdogKilled);
+  if (rc == 0) {
+    // The only acceptable clean run is one where nothing was guarded — no VMM
+    // support, or every reservation failed. If blocks were relocated and the
+    // overrun still did not fault, the guard is not doing its job.
+    INFO("Guard reported a clean run; it must not have relocated anything");
+    CHECK(out.find(": 0 block relocation(s)") != std::string::npos);
   }
 }
 

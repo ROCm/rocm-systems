@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Build a platform/family table from Catch2 JUnit files.
 
-CI names the files unit-<os>.xml and integration-<family>.xml. Catch2 also
+CI names the files unit-<os>.xml and integration-<family>.xml, plus
+integration-<family>-<run>.xml for a case run in a process of its own. Catch2 also
 emits one <testcase> per SECTION, so counts here use only top-level cases
 (names without '/'), matching run_catch2.py.
 """
@@ -67,6 +68,30 @@ def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
         return {"error": str(error)}
 
 
+def summarize_job(paths: list[Path], errors: list[str]) -> dict[str, object]:
+    # A job can split its suite over several Catch2 runs, each with its own
+    # file (integration-gfx110x-guard-fault.xml); they are one column.
+    merged: dict[str, object] = {
+        "counts": {"PASS": 0, "FAIL": 0, "SKIP": 0},
+        "failed": [],
+        "total": 0,
+    }
+    for path in paths:
+        data = try_summarize(path, errors)
+        if "error" in data:
+            if len(paths) == 1:
+                return data
+            # One run aborted mid-write; the others still count.
+            merged["counts"]["FAIL"] += 1
+            merged["failed"].append(f"{path.name} (unreadable)")
+            continue
+        for key, value in data["counts"].items():
+            merged["counts"][key] += value
+        merged["failed"] += data["failed"]
+        merged["total"] += data["total"]
+    return merged
+
+
 def cell(value: object) -> str:
     return "—" if value is None else str(value)
 
@@ -84,17 +109,18 @@ def failed_cell(names: list[str]) -> str:
 
 def render(directory: Path, errors: list[str]) -> str:
     rows: list[tuple[str, str, dict[str, object] | None]] = []
+    claimed: set[str] = set()
     for filename, suite, platform in COLUMNS:
-        path = directory / filename
-        if path.is_file():
-            rows.append((suite, platform, try_summarize(path, errors)))
+        paths = [directory / filename] if (directory / filename).is_file() else []
+        paths += sorted(directory.glob(f"{Path(filename).stem}-*.xml"))
+        claimed.update(path.name for path in paths)
+        if paths:
+            rows.append((suite, platform, summarize_job(paths, errors)))
         else:
             rows.append((suite, platform, None))
 
     extra = sorted(
-        path.name
-        for path in directory.glob("*.xml")
-        if path.name not in {filename for filename, _, _ in COLUMNS}
+        path.name for path in directory.glob("*.xml") if path.name not in claimed
     )
     for filename in extra:
         rows.append(("Other", filename, try_summarize(directory / filename, errors)))
