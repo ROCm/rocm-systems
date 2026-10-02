@@ -1281,7 +1281,7 @@ class AMDSMILogger:
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
         if amdgpu_version != "N/A":
-            print("| AMDGPU Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
+            print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
         elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
 

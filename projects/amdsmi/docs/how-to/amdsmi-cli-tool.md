@@ -1089,7 +1089,7 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.0.0                                                    |
-| AMDGPU Version:    6.19.14.31400000-2370381                                  |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
 | ROCm Version:      7.14.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1118,8 +1118,8 @@ information, GPU status, and running processes.
 
 The default output includes the following sections:
 
-- **Version header**: AMD-SMI version, AMDGPU Version, ROCm version, and
-  platform information.
+- **Version header**: AMD-SMI version, amdgpu driver version, ROCm version,
+  and platform information.
 - **GPU table** (first row per GPU): BDF address, GPU market name, OAM ID,
   memory utilization, hotspot temperature, uncorrectable ECC error count, and
   current/maximum power usage.
@@ -1264,7 +1264,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        AMDGPU_VERSION: 6.19.14.31400000-2370381
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A

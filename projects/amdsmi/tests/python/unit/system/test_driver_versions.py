@@ -85,7 +85,3 @@ class TestDriverVersions(unittest.TestCase):
         self.assertEqual(info["driver_version"], "N/A")
         self.assertEqual(info["driver_build_version"], "N/A")
         self.assertEqual(info["driver_full_version"], "N/A")
-
-
-if __name__ == "__main__":
-    unittest.main()

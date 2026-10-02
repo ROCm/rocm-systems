@@ -6,12 +6,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
+
 ### Changed
 
-- **Changed amdgpu driver version reporting** (breaking).  
-  - ``amdsmi_get_gpu_driver_info()`` adds ``driver_kernel_version`` and ``amdgpu_driver_version`` (the parts of ``/sys/module/amdgpu/version``, such as ``6.19.14`` and ``31400000``), ``driver_build_version`` (the active DKMS build number), and ``driver_full_version`` (``driver_version`` plus ``-build`` when the build is present). ``driver_version`` is unchanged. On the WSL backend, ``driver_full_version`` is a copy of the WDDM ``driver_version`` because sysfs and DKMS are unavailable.
-  - ``amd-smi`` and ``amd-smi version`` print ``AMDGPU Version``. The ``amd-smi version --json``/``--csv`` key changed from ``amdgpu_version`` to ``driver_full_version``.
-  - ``amd-smi static --driver`` now reports the composed version as ``AMDGPU_VERSION`` (JSON/CSV key ``amdgpu_version``), replacing ``VERSION`` (JSON/CSV key ``version``).
+- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
+  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
 
 ### Resolved Issues
 

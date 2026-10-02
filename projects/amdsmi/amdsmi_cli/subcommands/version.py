@@ -52,7 +52,7 @@ class VersionCommands:
         self.logger.output["amdsmi_library_version"] = f"{amdsmi_lib_version_str}"
         self.logger.output["rocm_version"] = f"{rocm_version_str}"
         # Initialize conditional version keys to N/A so CSV/JSON export can rely on them
-        self.logger.output["driver_full_version"] = "N/A"
+        self.logger.output["amdgpu_version"] = "N/A"
         self.logger.output["amd_hsmp_driver_version"] = "N/A"
         self.logger.output["nic_driver_version"] = "N/A"
 
@@ -61,7 +61,7 @@ class VersionCommands:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
                     driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
-                    self.logger.output["driver_full_version"] = driver_info["driver_full_version"]
+                    self.logger.output["amdgpu_version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get amdgpu driver versions | %s", e.get_error_info())
         if args.cpu_version:
@@ -106,7 +106,7 @@ class VersionCommands:
             if args.gpu_version:
                 human_readable_output = (
                     human_readable_output
-                    + f" | AMDGPU Version: {self.logger.output['driver_full_version']}"
+                    + f" | amdgpu version: {self.logger.output['amdgpu_version']}"
                 )
             if args.cpu_version:
                 human_readable_output = (

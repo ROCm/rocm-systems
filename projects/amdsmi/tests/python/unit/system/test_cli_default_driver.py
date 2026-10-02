@@ -6,11 +6,12 @@
 
 import importlib.util
 import io
-import sys
 import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+
+from common.common import stub_modules_at_import
 
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
@@ -72,18 +73,13 @@ def _load_default_module() -> types.ModuleType:
     helpers_module = types.ModuleType("amdsmi_helpers")
     helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
 
-    old_modules = {name: sys.modules.get(name) for name in ("amdsmi", "_version", "amdsmi_helpers")}
-    sys.modules["amdsmi"] = amdsmi
-    sys.modules["_version"] = version_metadata
-    sys.modules["amdsmi_helpers"] = helpers_module
+    restore = stub_modules_at_import(
+        {"amdsmi": amdsmi, "_version": version_metadata, "amdsmi_helpers": helpers_module}
+    )
     try:
         return _load_module("amdsmi_cli/subcommands/default.py", "default_driver_under_test")
     finally:
-        for name, old in old_modules.items():
-            if old is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = old
+        restore()
 
 
 def _run_default() -> dict:
@@ -118,15 +114,11 @@ def _run_default() -> dict:
 def _load_logger_module() -> types.ModuleType:
     helpers_module = types.ModuleType("amdsmi_helpers")
     helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    old_helpers = sys.modules.get("amdsmi_helpers")
-    sys.modules["amdsmi_helpers"] = helpers_module
+    restore = stub_modules_at_import({"amdsmi_helpers": helpers_module})
     try:
         return _load_module("amdsmi_cli/amdsmi_logger.py", "logger_driver_under_test")
     finally:
-        if old_helpers is None:
-            sys.modules.pop("amdsmi_helpers", None)
-        else:
-            sys.modules["amdsmi_helpers"] = old_helpers
+        restore()
 
 
 def _banner_payload() -> dict:
@@ -168,7 +160,7 @@ class TestDefaultDriverHeader(unittest.TestCase):
 
         lines = stdout.getvalue().splitlines()
         amdgpu_index = next(
-            i for i, line in enumerate(lines) if line.startswith("| AMDGPU Version:")
+            i for i, line in enumerate(lines) if line.startswith("| amdgpu Version:")
         )
         self.assertIn("6.19.14.31400000-2370381", lines[amdgpu_index])
         self.assertTrue(lines[amdgpu_index + 1].startswith("| ROCm Version:"))
@@ -191,8 +183,4 @@ class TestDefaultDriverHeader(unittest.TestCase):
         lines = stdout.getvalue().splitlines()
         os_kernel_line = next(line for line in lines if line.startswith("| OS kernel Version:"))
         self.assertIn("6.8.0-124-generic", os_kernel_line)
-        self.assertFalse(any(line.startswith("| AMDGPU Version:") for line in lines))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertFalse(any(line.startswith("| amdgpu Version:") for line in lines))
