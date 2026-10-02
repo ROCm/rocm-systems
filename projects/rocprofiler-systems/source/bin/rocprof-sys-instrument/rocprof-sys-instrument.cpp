@@ -115,7 +115,7 @@ create_dependency_listing_envp()
 {
     auto envp = std::vector<char*>{};
 
-    // Copy existing environment until nullptr terminator is reached
+    // Copy ptrs to existing environment until nullptr terminator is reached
     for(char* const* var = ::environ; var != nullptr && *var != nullptr; ++var)
     {
         envp.emplace_back(*var);
@@ -129,8 +129,8 @@ create_dependency_listing_envp()
 
 /// Redirect stdout to the pipe's write end, then become exe_path with the given
 /// environment. Never returns: on success the process image is replaced, on failure exits
-/// with 127. This function is used after fork, and between fork and exec the child may
-/// not allocate or modify the environment, so everything here must be async-signal-safe.
+/// with 127. Runs in the child between fork and exec, where only async-signal-safe
+/// calls are allowed (no allocation, no environment changes).
 [[noreturn]] void
 exec_with_stdout_to_pipe(const std::string& exe_path, pipe_fds fds,
                          const std::vector<char*>& envp)
@@ -157,7 +157,7 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
 {
     constexpr size_t k_read_buffer_size = 4096;
 
-    // Pipe's write end should be closed to get EOF signal from read end
+    // Close our copy of the write end, otherwise read() never sees EOF
     ::close(fds.write_fd);
     fds.write_fd = k_invalid_fd;
 
@@ -188,19 +188,19 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
             break;  // timed out or poll error
         }
 
-        // poll said readable, so read() returns at once: >0 data, 0 EOF, <0 error
+        // poll said readable, so read() should return at once: >0 data, 0 EOF, <0 error
         const auto bytes_read = ::read(fds.read_fd, buf.data(), buf.size());
-        if(bytes_read < 0)
+        if(bytes_read > 0)
         {
-            break;
+            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
         }
-        if(bytes_read == 0)
+        else if(bytes_read == 0)
         {
             eof = true;
         }
-        else
+        else if(errno != EINTR)  // EINTR: retry with time left
         {
-            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
+            break;  // read error
         }
     }
 
@@ -211,10 +211,11 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
     return eof ? std::optional{ std::move(out) } : std::nullopt;
 }
 
-/// Get the shared libraries exe_path actually loads, as absolute paths. exe_path must be
-/// dynamically linked: the listing works by running it with LD_TRACE_LOADED_OBJECTS=1,
-/// which makes the dynamic loader print every resolved dependency and exit before main().
-/// A static executable has no loader to intercept it, so it would run for real instead.
+/// Get the shared libraries exe_path actually loads at startup, as absolute paths.
+/// exe_path must be dynamically linked: the listing works by running it with
+/// LD_TRACE_LOADED_OBJECTS=1, which makes the dynamic loader print every resolved
+/// dependency and exit before main(). A static executable has no loader to intercept it,
+/// so it would run for real instead.
 [[nodiscard]] std::optional<std::vector<std::string>>
 read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds timeout)
 {
@@ -248,7 +249,8 @@ read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds
     const auto loader_output = read_pipe_until_eof(*fds, timeout);
     if(!loader_output)
     {
-        // Timed out: the child is still running. Kill it so the waitpid below returns.
+        // Timeout or read error: the child may still be running. Kill it so the waitpid
+        // below returns.
         ::kill(pid, SIGKILL);
     }
 
