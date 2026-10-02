@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
+#include <utility>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -499,6 +500,65 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
         }
     }
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// One multi-recv may mix a single-segment handle (nSegments 0 in the side
+// table) with a multi-segment one whose entry crosses a boundary. Both orders
+// run, so the flush also sees a single-segment final entry behind a
+// multi-segment one.
+TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mhMulti = nullptr; void* comm = nullptr;
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mhMulti, comm);
+    NetMHandleGuard mhGuardMulti(mhMulti, NetMHandleDeleter(net_, comm));
+    MultiSegmentVmmBuffer* multi = lastBuf_;
+
+    MultiSegmentVmmBuffer* single = AllocSym(1);
+    if (SyncSkip(single == nullptr)) GTEST_SKIP() << "single-segment VMM allocation unavailable";
+    void* mhSingle = nullptr;
+    ASSERT_EQ(RegisterMultiSegmentMr(comm, *single, &mhSingle), ncclSuccess);
+    ASSERT_NE(mhSingle, nullptr);
+    NetMHandleGuard mhGuardSingle(mhSingle, NetMHandleDeleter(net_, comm));
+
+    const size_t chunk = 64 * 1024;
+    void* singleBuf = static_cast<uint8_t*>(single->ptr) + chunk;
+    void* multiBuf  = static_cast<uint8_t*>(multi->ptr) + multi->segSize - chunk / 2; // crosses seg0/seg1
+    const int rank = MPIEnvironment::world_rank;
+
+    for (int order = 0; order < 2; order++) {
+        void* bufs[2]    = {singleBuf, multiBuf};
+        void* handles[2] = {mhSingle, mhMulti};
+        if (order == 1) { std::swap(bufs[0], bufs[1]); std::swap(handles[0], handles[1]); }
+        size_t sizes[2]  = {chunk, chunk};
+        int tags[2]      = {700 + 2 * order, 701 + 2 * order};
+        const uint8_t seeds[2] = {static_cast<uint8_t>(0x70 + 2 * order), static_cast<uint8_t>(0x71 + 2 * order)};
+
+        if (rank == 0) {
+            void* req = nullptr;
+            ASSERT_EQ(PostRecv(pair.recvComm, 2, bufs, sizes, tags, handles, &req), ncclSuccess);
+            int completedSizes[2] = {};
+            EXPECT_EQ(WaitForCompletion(req, completedSizes, kLargeTransferTimeoutMs), ncclSuccess);
+
+            int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
+            void* flushReq = nullptr;
+            EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
+            if (flushReq != nullptr) {
+                int flushSize = 0;
+                EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
+            }
+            for (int i = 0; i < 2; i++)
+                EXPECT_TRUE(VerifyDevice(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
+        } else {
+            void* reqs[2] = {};
+            for (int i = 0; i < 2; i++) FillDevice(bufs[i], chunk, seeds[i]);
+            for (int i = 0; i < 2; i++)
+                PostSendWithRetry(pair.sendComm, bufs[i], chunk, tags[i], handles[i], &reqs[i]);
+            for (int i = 0; i < 2; i++) {
+                int sentSize = 0;
+                EXPECT_EQ(WaitForCompletion(reqs[i], &sentSize, kLargeTransferTimeoutMs), ncclSuccess);
+            }
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
 }
 
 // nSegments==1 host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers still
