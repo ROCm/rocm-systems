@@ -66,6 +66,7 @@ def _load_decode_nic_capabilities():
 def _summary(capability):
     return {
         "bdf": "0000:a1:00.0",
+        "Type": "AINIC",
         "UUID": "0a:1b:2c:3d:4e:5f",
         "Permanent Address": "0a:1b:2c:3d:4e:5f",
         "Product Name": "DSC3-200",

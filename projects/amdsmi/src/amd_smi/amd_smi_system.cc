@@ -453,6 +453,9 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
   static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
   static_assert(offsetof(smi_nic_asic_info_t, vendor_name) ==
                 offsetof(amdsmi_nic_asic_info_t, vendor_name));
+  static_assert(offsetof(smi_nic_asic_info_t, type) == offsetof(amdsmi_nic_asic_info_t, type));
+  static_assert(offsetof(smi_nic_asic_info_t, capability) ==
+                offsetof(amdsmi_nic_asic_info_t, capability));
   status = g_nic_info_getters->asic(ctx, bdf_int,
                                     reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
   CHK_AMDNIC_RET(status);

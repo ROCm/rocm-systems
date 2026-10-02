@@ -3036,10 +3036,26 @@ typedef enum {
 } amdsmi_nic_capability_bits_t;
 
 /**
+ * @brief NIC type
+ *
+ * Which kind of NIC a handle refers to. Use the vendor name to tell apart devices reported as
+ * ::AMDSMI_NIC_TYPE_OTHER.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_TYPE_UNKNOWN = 0,  //!< the type could not be determined
+  AMDSMI_NIC_TYPE_AINIC = 1,    //!< AMD Pensando AINIC
+  AMDSMI_NIC_TYPE_UALOE = 2,    //!< UALoE accelerator-fabric endpoint
+  AMDSMI_NIC_TYPE_OTHER = 3,    //!< any other vendor
+} amdsmi_nic_type_t;
+
+/**
  * @brief NIC asic information
  *
  * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
- * when the corresponding attribute is unavailable.
+ * when the corresponding attribute is unavailable, except ``type``, which reads
+ * ::AMDSMI_NIC_TYPE_UNKNOWN.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3054,6 +3070,11 @@ typedef struct {
   char part_number[AMDSMI_MAX_STRING_LENGTH];
   char serial_number[AMDSMI_MAX_STRING_LENGTH];
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+  /**
+   * An amdsmi_nic_type_t value. A uint8_t rather than the enum so it fits the alignment padding
+   * before capability and the struct keeps its size and every other offset.
+   */
+  uint8_t type;
   uint32_t capability;  //!< bitmask of amdsmi_nic_capability_bits_t
 } amdsmi_nic_asic_info_t;
 
@@ -9688,6 +9709,24 @@ amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_nic_asic_info_t* info);
+
+/**
+ *  @brief Retrieves the type of the NIC
+ *
+ *  Reports the same value as the type field of ::amdsmi_nic_asic_info_t.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] type reference to the NIC type. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
+                                    amdsmi_nic_type_t* type);
 
 /**
  *  @brief Restrict which NICs @ref amdsmi_init discovers.

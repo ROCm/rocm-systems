@@ -3252,6 +3252,15 @@ class MetricCommands:
         nic_id = self.helpers.get_ainic_id_from_device_handle(args.nic)
         values = {}
 
+        # First, so an all-N/A block (a UALoE endpoint has no telemetry source) reads as
+        # expected and not as a failure.
+        nic_type = "N/A"
+        try:
+            nic_type = amdsmi_interface.amdsmi_get_nic_type_label(args.nic)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get type for nic %s | %s", nic_id, e.get_error_info())
+        values["type"] = nic_type
+
         telemetry = {}
         try:
             telemetry = amdsmi_interface.amdsmi_get_nic_telemetry(args.nic)

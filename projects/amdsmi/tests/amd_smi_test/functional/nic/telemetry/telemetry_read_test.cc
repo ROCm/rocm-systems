@@ -11,34 +11,8 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "functional/nic/nic_handles.h"
 #include "test_common.h"
-
-// Finds the first AMD NIC handle across all sockets; empty if none present.
-static std::vector<amdsmi_processor_handle> nic_handles() {
-  std::vector<amdsmi_processor_handle> nics;
-  uint32_t socket_count = 0;
-  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
-    return nics;
-  }
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
-  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
-    return nics;
-  }
-  for (auto socket : sockets) {
-    uint32_t count = 0;
-    if (amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr,
-                                             &count) != AMDSMI_STATUS_SUCCESS ||
-        count == 0) {
-      continue;
-    }
-    std::vector<amdsmi_processor_handle> handles(count);
-    if (amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, handles.data(),
-                                             &count) == AMDSMI_STATUS_SUCCESS) {
-      nics.insert(nics.end(), handles.begin(), handles.end());
-    }
-  }
-  return nics;
-}
 
 TestNicTelemetryRead::TestNicTelemetryRead() : TestBase() {
   set_title("AMDSMI NIC Telemetry Read Test");

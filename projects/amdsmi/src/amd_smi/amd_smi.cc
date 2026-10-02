@@ -56,6 +56,7 @@
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "smi_nic.h"
 #include "smi_nic_telemetry.h"
 
 // a global instance of std::mutex to protect data passed during threads
@@ -767,6 +768,28 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
     return status;
   }
   *info = ainic_info.asic;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+// The internal kind is copied into the public type byte, so the values must match.
+static_assert(static_cast<int>(SMI_NIC_KIND_UNKNOWN) == static_cast<int>(AMDSMI_NIC_TYPE_UNKNOWN));
+static_assert(static_cast<int>(SMI_NIC_KIND_AINIC) == static_cast<int>(AMDSMI_NIC_TYPE_AINIC));
+static_assert(static_cast<int>(SMI_NIC_KIND_UALOE) == static_cast<int>(AMDSMI_NIC_TYPE_UALOE));
+static_assert(static_cast<int>(SMI_NIC_KIND_OTHER) == static_cast<int>(AMDSMI_NIC_TYPE_OTHER));
+
+amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
+                                    amdsmi_nic_type_t* type) {
+  AMDSMI_CHECK_INIT();
+
+  if (type == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
+  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  *type = static_cast<amdsmi_nic_type_t>(ainic_info.asic.type);
   return AMDSMI_STATUS_SUCCESS;
 }
 
