@@ -19,6 +19,7 @@ RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 
 bool IbCastAinicRoce = 0;
+bool IbCastMultiplaneEnable = false;
 bool IbCastOffloadEnabled = 0;
 bool IbCastUseInline = 0;
 bool IbCastAinicCtsInlineData = 0;
@@ -389,6 +390,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   int nIbDevs = 0;
   struct ibv_device** devices = NULL;
   IbCastAinicRoce = rcclUseAinic();
+  {
+    const char* mapFile = ncclGetEnv("RCCL_MULTIPLANE_MAP_FILE");
+    IbCastMultiplaneEnable = IbCastAinicRoce && (mapFile != NULL && mapFile[0] != '\0');
+  }
 
   if (IbCastNDevs == -1) {
     std::lock_guard<std::mutex> lock(IbCastMutex);

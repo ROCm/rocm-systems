@@ -6,6 +6,7 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "multiplane.h"
 #include <initializer_list>
 
 #ifdef MPI_TESTS_ENABLED
@@ -1462,6 +1463,185 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// =============================================================================
+// Test: CastMultiplaneConnectionSmoke
+//
+// Smoke test for AINIC multiplane PUEC route programming.
+// When RCCL_MULTIPLANE_MAP_FILE is set, the QP RTR path in connect.cc
+// resolves each VIP to its PIP GIDs and programs per-plane PUEC routes
+// via ionic_dv_qp_set_puec_plane_route().
+//
+// This test establishes a CAST connection, performs a data-integrity
+// transfer, and verifies no crash or error occurs with multiplane
+// enabled.  The PUEC route programming is validated implicitly: if the
+// routes were wrong (e.g. source==destination for same-host peers),
+// the transfer would fail or time out.
+//
+// Requires: AINIC NIC + RCCL_MULTIPLANE_MAP_FILE pointing to a valid
+// VIP-to-PIP XML.  Skips cleanly when multiplane is not enabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Two-step gate: multiplane must be configured AND the NIC must advertise
+    // PUEC support via sysfs puec_nports.  Use MPI_Allreduce so all ranks
+    // agree on skip/run — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support "
+                        "(puec_nports > 0)";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    // Data integrity: fill with a known pattern, verify after transfer.
+    constexpr size_t kMsgSize = 4096;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 950, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "multiplane data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneMultiSizeTransfer
+//
+// Exercises the multiplane PUEC path with multiple message sizes (64B to 4MB)
+// to cover both small-message and large-message code paths.  Each size
+// performs a full send/recv cycle with data-integrity verification.
+//
+// Requires: multiplane enabled (AINIC + RCCL_MULTIPLANE_MAP_FILE).  Skips otherwise.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMaxSize = 4 * 1024 * 1024;  // 4 MB
+    std::vector<char> sendBuf(kMaxSize);
+    std::vector<char> recvBuf(kMaxSize);
+    for (size_t i = 0; i < kMaxSize; i++)
+        sendBuf[i] = static_cast<char>((i * 17 + 3) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? recvBuf.data() : sendBuf.data();
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMaxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Test several sizes: 64B, 1KB, 64KB, 1MB, 4MB
+    const size_t sizes[] = {64, 1024, 64 * 1024, 1024 * 1024, kMaxSize};
+    int tag = 960;
+    for (size_t sz : sizes) {
+        memset(recvBuf.data(), 0, sz);
+        CastDoSendRecv(rank, sendComm, recvComm, buf, sz, tag++, mhandle);
+        if (rank == 0) {
+            EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0)
+                << "multiplane data mismatch at size " << sz;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneDisabledNoRegression
+//
+// Verifies that when multiplane is not enabled, the connection setup and
+// data transfer work identically to the non-multiplane path.  This is a
+// backward-compatibility guard: the multiplane code in connect.cc must be
+// completely inert when multiplane is disabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // This test validates the disabled (no-multiplane) path.  Use MPI_Allreduce
+    // so all ranks agree — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = multiplaneOn ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane is enabled; this test validates "
+                        "the disabled (no-multiplane) path";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 2048;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 23) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 970, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0)
+            << "data mismatch with multiplane disabled";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 #endif // MPI_TESTS_ENABLED

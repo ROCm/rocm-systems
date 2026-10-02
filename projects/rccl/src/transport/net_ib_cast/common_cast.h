@@ -155,6 +155,7 @@ extern bool IbCastUseInline;
 #define WR_IMM_SIZE_MASK 0x007fffff
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
+extern bool IbCastMultiplaneEnable;
 extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
