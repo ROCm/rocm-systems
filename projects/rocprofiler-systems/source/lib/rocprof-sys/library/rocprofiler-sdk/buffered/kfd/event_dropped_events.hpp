@@ -82,11 +82,15 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
+    metadata_registry.ensure_thread(tid, [&] {
+        return typename Externals::thread_info_t{
+            Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}"
+        };
+    });
 
     auto const track_name = std::string{ "KFD Dropped Events" };
-    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.ensure_track(
+        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
 
     constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";

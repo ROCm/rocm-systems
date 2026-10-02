@@ -192,7 +192,9 @@ concept externals =
                                                std::uint64_t{}, std::uint32_t{},
                                                std::uint32_t{}, std::string{} }
         };
-        { typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} } };
+        {
+            typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} }
+        };
         {
             typename Externals::kfd_sample_t{ std::uint64_t{},
                                               std::string{},
@@ -225,8 +227,15 @@ concept externals =
              Externals::kfd_sample_t sample) {
         { Externals::get_metadata_registry() };
         { Externals::get_metadata_registry().add_string(text) };
-        { Externals::get_metadata_registry().add_thread_info(thread_info) };
-        { Externals::get_metadata_registry().add_track(track) };
+        {
+            Externals::get_metadata_registry().ensure_thread(
+                std::uint64_t{},
+                trace_cache::value_builder<typename Externals::thread_info_t>{})
+        };
+        {
+            Externals::get_metadata_registry().ensure_track(
+                text, trace_cache::value_builder<typename Externals::track_t>{})
+        };
         { Externals::get_metadata_registry().add_pmc_info(pmc_info) };
         { Externals::get_buffer_storage() };
         { Externals::get_buffer_storage().store(std::move(sample)) };
@@ -265,6 +274,19 @@ concept externals =
            { Externals::dlsym(symbol_name) } -> std::convertible_to<void*>;
            { Externals::dlerror() } -> std::convertible_to<const char*>;
            { Externals::state_thread::scoped(Externals::state_thread::Internal) };
-       };
-
-}  // namespace rocprofsys::policies::domain_service
+           &&
+               requires(std::string_view text, Externals::thread_info_t thread_info,
+                        Externals::region_sample         sample,
+                        Externals::rocm_hip_api_category hip_category)
+           {
+               { Externals::is_active() }->std::convertible_to<bool>;
+               { Externals::get_use_timemory() }->std::convertible_to<bool>;
+               { Externals::tracing_push_timemory(hip_category, text) };
+               { Externals::tracing_pop_timemory(hip_category, text) };
+               { Externals::get_metadata_registry().add_string(text) };
+               { Externals::get_metadata_registry().ensure_thread(
+                   std::uint64_t{},
+                   trace_cache::value_builder<typename Externals::thread_info_t>{}) };
+               { Externals::get_buffer_storage().store(std::move(sample)) };
+           };
+       }  // namespace rocprofsys::policies::domain_service

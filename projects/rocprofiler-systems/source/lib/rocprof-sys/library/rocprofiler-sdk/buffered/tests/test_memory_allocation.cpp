@@ -113,7 +113,7 @@ TEST(memory_allocation_test, on_memory_allocation_forwards_record_fields_to_depe
              .stream_handle           = k_mock_stream_id
     };
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(Eq(expected_thread_info)))
         .Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream(Eq(k_mock_stream_id))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_allocation(Eq(expected_sample)))

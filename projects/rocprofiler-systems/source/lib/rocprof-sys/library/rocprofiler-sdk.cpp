@@ -673,12 +673,14 @@ cache_category()
 void
 cache_add_thread_info(std::uint64_t tid)
 {
-    trace_cache::get_metadata_registry().add_thread_info({ .parent_process_id = getppid(),
-                                                           .process_id        = getpid(),
-                                                           .thread_id         = tid,
-                                                           .start             = 0,
-                                                           .end               = 0,
-                                                           .extdata           = "{}" });
+    trace_cache::get_metadata_registry().ensure_thread(tid, [tid] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = tid,
+                                          .start             = 0,
+                                          .end               = 0,
+                                          .extdata           = "{}" };
+    });
 }
 
 // The cached samples carry the SDK operation name, so every name the SDK can
