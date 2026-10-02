@@ -182,7 +182,7 @@ class TestCpuPower(unittest.TestCase):
         boost_limit = 0
         for i, cpu in enumerate(cpu_processors):
             msg = f"cpu({i}):"
-            msg1 = f"{msg} boost_limit({boost_limit}):"
+            msg1 = f"\t### amdsmi_set_cpu_socket_boostlimit(cpu={i}, boost_limit={boost_limit}):"
             try:
                 amdsmi.amdsmi_set_cpu_socket_boostlimit(cpu, boost_limit)
                 self.common.print(msg1, "")
