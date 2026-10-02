@@ -2026,6 +2026,47 @@ std::vector<ArithmeticCase> min_max_num_cases() {
   };
 }
 
+struct MinmaxForm {
+  const char *name;
+  uint16_t op;
+  unsigned width;
+  unsigned sources;
+};
+
+// Every floating min/max operation routed through the common VOP3 stages.
+constexpr std::array<MinmaxForm, 30> kMinmaxForms = {{
+    {"MinNumF16", rdna4::kVMinNumF16Vop3, 16, 2},
+    {"MaxNumF16", rdna4::kVMaxNumF16Vop3, 16, 2},
+    {"MinimumF16", rdna4::kVMinimumF16Vop3, 16, 2},
+    {"MaximumF16", rdna4::kVMaximumF16Vop3, 16, 2},
+    {"MinNumF32", rdna4::kVMinNumF32Vop3, 32, 2},
+    {"MaxNumF32", rdna4::kVMaxNumF32Vop3, 32, 2},
+    {"MinimumF32", rdna4::kVMinimumF32Vop3, 32, 2},
+    {"MaximumF32", rdna4::kVMaximumF32Vop3, 32, 2},
+    {"MinNumF64", rdna4::kVMinNumF64Vop3, 64, 2},
+    {"MaxNumF64", rdna4::kVMaxNumF64Vop3, 64, 2},
+    {"MinimumF64", rdna4::kVMinimumF64Vop3, 64, 2},
+    {"MaximumF64", rdna4::kVMaximumF64Vop3, 64, 2},
+    {"Min3NumF16", rdna4::kVMin3NumF16Vop3, 16, 3},
+    {"Max3NumF16", rdna4::kVMax3NumF16Vop3, 16, 3},
+    {"Minimum3F16", rdna4::kVMinimum3F16Vop3, 16, 3},
+    {"Maximum3F16", rdna4::kVMaximum3F16Vop3, 16, 3},
+    {"MinmaxNumF16", rdna4::kVMinmaxNumF16Vop3, 16, 3},
+    {"MaxminNumF16", rdna4::kVMaxminNumF16Vop3, 16, 3},
+    {"MinimummaximumF16", rdna4::kVMinimummaximumF16Vop3, 16, 3},
+    {"MaximumminimumF16", rdna4::kVMaximumminimumF16Vop3, 16, 3},
+    {"Med3NumF16", rdna4::kVMed3NumF16Vop3, 16, 3},
+    {"Min3NumF32", rdna4::kVMin3NumF32Vop3, 32, 3},
+    {"Max3NumF32", rdna4::kVMax3NumF32Vop3, 32, 3},
+    {"Minimum3F32", rdna4::kVMinimum3F32Vop3, 32, 3},
+    {"Maximum3F32", rdna4::kVMaximum3F32Vop3, 32, 3},
+    {"MinmaxNumF32", rdna4::kVMinmaxNumF32Vop3, 32, 3},
+    {"MaxminNumF32", rdna4::kVMaxminNumF32Vop3, 32, 3},
+    {"MinimummaximumF32", rdna4::kVMinimummaximumF32Vop3, 32, 3},
+    {"MaximumminimumF32", rdna4::kVMaximumminimumF32Vop3, 32, 3},
+    {"Med3NumF32", rdna4::kVMed3NumF32Vop3, 32, 3},
+}};
+
 std::vector<ArithmeticCase> minmax_input_flush_cases() {
   // Explicit expectations keep this independent of the helper's MODE decoding.
   // Set F32 and F16/F64 differently, then vary each output-flush bit alone.
@@ -2110,13 +2151,42 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
                        form.words, std::move(sources), std::move(expected), mode.mode,
                        FE_TONEAREST});
     }
+  // Equal inputs make every binary, nested and median form return that input.
+  // Test both signs with OMOD disabled so its zeroing cannot mask a missed flush.
+  for (const MinmaxForm &form : kMinmaxForms)
+    for (const ModeCase &mode : modes)
+      for (const bool negative : {false, true}) {
+        const bool keep = form.width == 32 ? mode.keep_f32 : mode.keep_f16_f64;
+        const uint64_t sign = negative ? uint64_t{1} << (form.width - 1) : 0;
+        const uint64_t input = sign | 1u;
+        const uint64_t result = sign | (keep ? 1u : 0u);
+        std::vector<std::pair<uint32_t, uint32_t>> sources;
+        std::vector<std::pair<uint32_t, uint32_t>> expected;
+        if (form.width == 64) {
+          sources = {{0, uint32_t(input)},
+                     {1, uint32_t(input >> 32)},
+                     {2, uint32_t(input)},
+                     {3, uint32_t(input >> 32)}};
+          expected = {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}};
+        } else {
+          const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
+          for (unsigned source = 0; source < form.sources; ++source)
+            sources.emplace_back(source, high | uint32_t(input));
+          expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(result)}};
+        }
+        cases.push_back({std::string(form.name) + "AllSources" +
+                             (negative ? "Negative" : "Positive") + "Mode" +
+                             std::to_string(mode.mode),
+                         ROCJITSU_CODE_ARCH_RDNA4, vop3(form.op, form.width), std::move(sources),
+                         std::move(expected), mode.mode, FE_TONEAREST});
+      }
   return cases;
 }
 
 std::vector<ArithmeticCase> minmax_output_modifier_cases() {
   // Expected bits come from gfx1201 v_max_num captures with OMOD/CLAMP.
-  // Other maximum forms reuse those expectations to check their wiring:
-  // their operands select the same value before the output modifiers.
+  // Equal inputs let every min/max form reuse those output-stage expectations.
+  // The final samples explicitly check the order of combined modifiers.
   struct Sample {
     const char *name;
     uint8_t omod;
@@ -2124,8 +2194,10 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
     uint32_t mode;
     uint64_t value;
     uint64_t expected;
+    bool abs = false;
+    bool neg = false;
   };
-  constexpr std::array<Sample, 12> f16 = {{
+  constexpr std::array<Sample, 14> f16 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x0001u, 0x0000u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000u, 0x0000u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8400u, 0x8000u},
@@ -2138,8 +2210,11 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"ClampNan", 0, true, 0xf0u, 0x7e00u, 0x0000u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7bffu, 0x3c00u},
       {"ClampNegative", 0, true, 0xf0u, 0x83ffu, 0x0000u},
+      // abs(-0.75) * 2 clamps to 1; -abs(-0.75) * 2 is -1.5.
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xba00u, 0x3c00u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xba00u, 0xbe00u, true, true},
   }};
-  constexpr std::array<Sample, 12> f32 = {{
+  constexpr std::array<Sample, 14> f32 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x00000001u, 0x00000000u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x80000000u, 0x00000000u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x80800000u, 0x80000000u},
@@ -2152,8 +2227,10 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"ClampNan", 0, true, 0xf0u, 0x7fc00000u, 0x00000000u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7f7fffffu, 0x3f800000u},
       {"ClampNegative", 0, true, 0xf0u, 0x807fffffu, 0x00000000u},
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xbf400000u, 0x3f800000u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xbf400000u, 0xbfc00000u, true, true},
   }};
-  constexpr std::array<Sample, 12> f64 = {{
+  constexpr std::array<Sample, 14> f64 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x1u, 0x0u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000000000000000u, 0x0u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8010000000000000u, 0x8000000000000000u},
@@ -2166,56 +2243,36 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"ClampNan", 0, true, 0xf0u, 0x7ff8000000000000u, 0x0u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7fefffffffffffffu, 0x3ff0000000000000u},
       {"ClampNegative", 0, true, 0xf0u, 0x800fffffffffffffu, 0x0u},
-  }};
-  struct Form {
-    const char *name;
-    uint16_t op;
-    unsigned width;
-  };
-  constexpr std::array<Form, 10> forms = {{
-      {"MaxNumF16", rdna4::kVMaxNumF16Vop3, 16},
-      {"MaximumF16", rdna4::kVMaximumF16Vop3, 16},
-      {"Max3NumF16", rdna4::kVMax3NumF16Vop3, 16},
-      {"Maximum3F16", rdna4::kVMaximum3F16Vop3, 16},
-      {"MaxNumF32", rdna4::kVMaxNumF32Vop3, 32},
-      {"MaximumF32", rdna4::kVMaximumF32Vop3, 32},
-      {"Max3NumF32", rdna4::kVMax3NumF32Vop3, 32},
-      {"Maximum3F32", rdna4::kVMaximum3F32Vop3, 32},
-      {"MaxNumF64", rdna4::kVMaxNumF64Vop3, 64},
-      {"MaximumF64", rdna4::kVMaximumF64Vop3, 64},
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xbfe8000000000000u, 0x3ff0000000000000u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xbfe8000000000000u, 0xbff8000000000000u, true, true},
   }};
   std::vector<ArithmeticCase> cases;
-  for (const Form &form : forms) {
+  for (const MinmaxForm &form : kMinmaxForms) {
     const auto &samples = form.width == 16 ? f16 : form.width == 32 ? f32 : f64;
     for (const Sample &sample : samples) {
-      const auto words = rdna4::build_vop3(form.op, {.vdst = 6,
-                                                     .clamp = uint8_t(sample.clamp),
-                                                     .src0 = 256,
-                                                     .src1 = uint16_t(form.width == 64 ? 258 : 257),
-                                                     .src2 = 258,
-                                                     .omod = sample.omod});
-      const uint64_t sign_bit = uint64_t{1} << (form.width - 1);
-      const uint64_t infinity = form.width == 16   ? 0x7c00u
-                                : form.width == 32 ? 0x7f800000u
-                                                   : 0x7ff0000000000000u;
-      const bool is_nan = (sample.value & (sign_bit - 1)) > infinity;
-      // For numbers, -inf makes each maximum form select src0. For NaNs,
-      // make all sources NaN so *_NUM also returns a NaN before OMOD/CLAMP.
-      const uint64_t other = is_nan ? sample.value : sign_bit | infinity;
+      const auto words =
+          rdna4::build_vop3(form.op, {.vdst = 6,
+                                      .abs = uint8_t(sample.abs ? (1u << form.sources) - 1 : 0u),
+                                      .clamp = uint8_t(sample.clamp),
+                                      .src0 = 256,
+                                      .src1 = uint16_t(form.width == 64 ? 258 : 257),
+                                      .src2 = 258,
+                                      .omod = sample.omod,
+                                      .neg = uint8_t(sample.neg ? (1u << form.sources) - 1 : 0u)});
       std::vector<std::pair<uint32_t, uint32_t>> sources;
       std::vector<std::pair<uint32_t, uint32_t>> expected;
       if (form.width == 64) {
         sources = {{0, uint32_t(sample.value)},
                    {1, uint32_t(sample.value >> 32)},
-                   {2, uint32_t(other)},
-                   {3, uint32_t(other >> 32)}};
+                   {2, uint32_t(sample.value)},
+                   {3, uint32_t(sample.value >> 32)}};
         expected = {{6, uint32_t(sample.expected)}, {7, uint32_t(sample.expected >> 32)}};
       } else {
         // The F16 destination keeps its high half.
         const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
         sources = {{0, high | uint32_t(sample.value)},
-                   {1, high | uint32_t(other)},
-                   {2, high | uint32_t(other)}};
+                   {1, high | uint32_t(sample.value)},
+                   {2, high | uint32_t(sample.value)}};
         expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(sample.expected)}};
       }
       cases.push_back({std::string(form.name) + sample.name,
