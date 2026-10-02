@@ -72,8 +72,9 @@ class ScratchDirTest(unittest.TestCase):
 
         out_dir = Path(self._build.name)
         args = argparse.Namespace(
-            clang="clang", arch="gfx942", source="kernel.cpp",
-            keep_temps=False, output=str(out_dir / "kernel.o"))
+            clang="clang", arch="gfx942", target_id="gfx942",
+            source="kernel.cpp", keep_temps=False,
+            output=str(out_dir / "kernel.o"))
 
         saved = (driver.discover_tools, driver.run,
                  driver.extract_device_function)
