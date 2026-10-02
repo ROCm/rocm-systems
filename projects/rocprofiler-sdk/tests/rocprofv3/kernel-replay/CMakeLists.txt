@@ -32,8 +32,10 @@ rocprofiler_configure_pytest_files(
 # integration-test arguments (--json-input, --passes).
 add_test(
     NAME rocprofv3-test-kernel-replay-cli-unit
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
-            --script $<TARGET_FILE:rocprofiler-sdk::rocprofv3>)
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
+        --script $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --schema
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/docs/rocprofv3_input_schema.json)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
