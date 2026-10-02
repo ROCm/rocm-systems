@@ -249,6 +249,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    const GpuVmAccessBatchGuard vm_access_batch;
     // Reuse instruction-fetch snapshots only within this execution quantum.
     // Restore the outer scope on exceptions and nested quantum execution too.
     InstructionVmSnapshot snapshot;
