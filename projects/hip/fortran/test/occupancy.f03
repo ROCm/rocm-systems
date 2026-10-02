@@ -28,8 +28,9 @@
 ! see: https:!rocm.docs.amd.com/projects/HIP/en/latest/
 !
 ! Exercises hipOccupancyMaxPotentialBlockSize and
-! hipOccupancyMaxActiveBlocksPerMultiprocessor on the kernel of the existing
-! vecadd test, and cross-checks the results against the device properties.
+! hipOccupancyMaxActiveBlocksPerMultiprocessor on the kernel of
+! vecadd_kernel.hip.cpp, which is compiled into this test, and cross-checks the
+! results against the device properties.
 !!!!!!!!!!!!!!
 !
 program occupancy

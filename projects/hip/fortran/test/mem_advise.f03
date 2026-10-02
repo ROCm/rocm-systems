@@ -29,7 +29,8 @@
 !
 ! Applies unified-memory hints to a managed allocation, reads them back with
 ! hipMemRangeGetAttribute, then prefetches the range to the device and back to
-! the host and checks the data survives the migration.
+! the host and checks the host sees the zeros the device wrote while the range
+! was migrated.
 !!!!!!!!!!!!!!
 !
 program mem_advise

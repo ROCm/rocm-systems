@@ -27,9 +27,10 @@
 ! HIP runtime hipPointerGetAttributes (Fortran 2003 interfaces)
 ! see: https:!rocm.docs.amd.com/projects/HIP/en/latest/
 !
-! Queries the attributes of the three allocation kinds hipfort can produce -
-! plain device memory, managed memory and pinned host memory - and checks the
-! runtime reports the expected memory type, owning device and pointers.
+! Queries the attributes of the three allocation kinds the HIP runtime can
+! produce - plain device memory, managed memory and pinned host memory - and
+! checks the runtime reports the expected memory type, owning device and
+! pointers.
 !!!!!!!!!!!!!!
 !
 program pointer_attributes

@@ -39,11 +39,10 @@
 ! the sentinel was overwritten with a value inside the enum is what actually
 ! distinguishes a working by-reference binding from a broken one.
 !
-! The hipCtx* twins of these four routines (hipCtxGetCacheConfig,
-! hipCtxGetSharedMemConfig) are deliberately not called here: they are ROCm-only
-! (#ifndef USE_CUDA_NAMES in hipfort.F90) and these hand-written tests are not
-! preprocessed, so referencing them would break the NVIDIA backend build. They
-! stay covered by the exhaustive symbol test test_hip.F03.
+! hipCtxGetCacheConfig and hipCtxGetSharedMemConfig are the deprecated
+! context-level twins of the two getters above and take the same enum output by
+! reference. They are not covered here; add them to this test if the driver API
+! surface is ever exercised.
 !!!!!!!!!!!!!!
 !
 program cache_config

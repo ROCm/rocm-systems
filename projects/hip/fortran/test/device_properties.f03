@@ -26,7 +26,7 @@
 !!!!!!!!!!!!!!
 ! HIP runtime device-properties test
 !
-! Exercises hipSetDeviceFlags, hipGetDeviceProperties (via hipfort_auxiliary),
+! Exercises hipSetDeviceFlags, hipGetDeviceProperties,
 ! cross-checks warpSize and multiProcessorCount against hipDeviceGetAttribute,
 ! then verifies the runtime is still functional after hipDeviceReset.
 !!!!!!!!!!!!!!

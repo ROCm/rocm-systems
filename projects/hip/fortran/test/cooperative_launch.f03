@@ -27,9 +27,9 @@
 ! HIP runtime cooperative kernel launch (Fortran 2003 interfaces)
 ! see: https:!rocm.docs.amd.com/projects/HIP/en/latest/
 !
-! Launches the kernel of the existing vecadd test with
-! hipLaunchCooperativeKernel on an occupancy-sized grid, checks the result, and
-! confirms an oversized grid is rejected.
+! Launches the kernel of vecadd_kernel.hip.cpp, which is compiled into this
+! test, with hipLaunchCooperativeKernel on an occupancy-sized grid, checks the
+! result, and confirms an oversized grid is rejected.
 !!!!!!!!!!!!!!
 !
 program cooperative_launch

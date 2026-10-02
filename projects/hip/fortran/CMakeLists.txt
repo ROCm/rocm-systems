@@ -41,9 +41,9 @@ endif()
 # only in the non-WIN32 branch of compiler/pre_hook_amd-llvm.cmake, so the
 # amdflang preference below finds nothing, the probe falls through to whatever
 # gfortran happens to be on PATH, and enable_language(Fortran) then fails to
-# identify it. This directory is not yet reached by the HIP build -- nothing
-# add_subdirectory()s it -- so the guard is in place before it is, rather than
-# after. A default and not a veto: -DBUILD_FORTRAN_BINDINGS=ON still works
+# identify it. clr add_subdirectory()s this directory under CLR_BUILD_HIP, so
+# the guard matters from the first build that picks it up. A default and not a
+# veto: -DBUILD_FORTRAN_BINDINGS=ON still works
 # wherever a usable compiler exists.
 option(BUILD_FORTRAN_BINDINGS "Build the HIP Fortran bindings" "${UNIX}")
 
@@ -389,7 +389,7 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 # The binding tests below are GPU runtime executables, so in-tree they belong to
-# the client/test track and must not come along with a plain library build: 26
+# the client/test track and must not come along with a plain library build: 29
 # test binaries linking a GPU runtime is not what -DCLR_BUILD_HIP=ON asked for,
 # and test/CMakeLists.txt additionally shells out to rocm_agent_enumerator AT
 # CONFIGURE TIME to pick an offload arch, which a library build has no business
