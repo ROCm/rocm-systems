@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 import json
 import pytest
+import re
 
 
 def pytest_addoption(parser):
@@ -33,6 +34,12 @@ def pytest_addoption(parser):
         default="kernel-tracing-test.json",
         help="Input JSON",
     )
+    parser.addoption(
+        "--signal-less-log",
+        action="store",
+        default=None,
+        help="stderr of a run that requested KFD dispatch-log signal-less completion",
+    )
 
 
 @pytest.fixture
@@ -40,3 +47,19 @@ def input_data(request):
     filename = request.config.getoption("--input")
     with open(filename, "r") as inp:
         return json.load(inp)
+
+
+@pytest.fixture
+def signal_less_summary(request):
+    """Counters from the signal-less summary line, or None when signal-less completion
+    was not requested"""
+    filename = request.config.getoption("--signal-less-log")
+    if filename is None:
+        return None
+    with open(filename, "r") as inp:
+        log = inp.read()
+    found = re.search(r"KFD dispatch-log signal-less summary: ([^;]*);", log)
+    assert found is not None, f"no signal-less summary in {filename}:\n{log}"
+    return {
+        key: int(val) for key, val in (itr.split("=") for itr in found.group(1).split())
+    }

@@ -574,13 +574,16 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
                HSA_STATUS_SUCCESS;
     };
 
-    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+    // the ring region the EOP record arrived on is the hardware pipe the kernel ran on
+    auto _emit = [&_payload, _pipe_id = static_cast<int32_t>(proven.region)](uint64_t start_ns,
+                                                                             uint64_t end_ns) {
         kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
                                                      _payload.callback_record,
                                                      _payload.correlation_id,
                                                      _payload.tid,
                                                      start_ns,
-                                                     end_ns);
+                                                     end_ns,
+                                                     _pipe_id);
     };
 
     // Retires exactly once whatever the outcome, and even if a client callback
@@ -1258,7 +1261,8 @@ write_interceptor(Queue*                                queue,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
+                                      .reserved_padding     = {0}},
+                                  ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE};
 
             {
                 auto tracer_data = _packet_data.callback_record;

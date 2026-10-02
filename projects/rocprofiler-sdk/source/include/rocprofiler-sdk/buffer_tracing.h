@@ -419,7 +419,14 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
     rocprofiler_timestamp_t                 start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t                 end_timestamp;    ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t      dispatch_info;    ///< Dispatch info
+    int32_t                                 pipe_id;
 
+    /// @var pipe_id
+    /// @brief Hardware pipe the kernel ran on (the pipe its completion was reported on), counted
+    /// from 0. Equal to ::ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE unless the dispatch completed
+    /// through KFD dispatch-log signal-less completion (environment variable
+    /// ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS).
+    ///
     /// @var operation
     /// @brief Kernel dispatch buffer records only report the ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE
     /// operation because there are no "real" wrapper around the enqueuing of an individual kernel
