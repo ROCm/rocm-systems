@@ -140,15 +140,15 @@ struct PutArgs {
   uint32_t optFlags;
 };
 
-template <typename Segment, typename RemoteAction>
+template <typename Segment, typename RemoteAction, typename LocalAction>
 __global__ void kernelBackendMaskPut(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin, PutArgs args,
-                                     RemoteAction remoteAction) {
+                                     RemoteAction remoteAction, LocalAction localAction) {
   if (threadIdx.x != 0 || blockIdx.x != 0) {
     return;
   }
   ncclGin net(comm, 0);
   net.put(ncclTeamWorld(comm), args.peer, dstWin, args.dstOff, srcWin, args.srcOff, args.bytes,
-          remoteAction, ncclGin_CounterInc{args.counterId}, ncclCoopThread{}, ncclGin_None{},
+          remoteAction, localAction, ncclCoopThread{}, ncclGin_None{},
           args.given, args.required, args.optFlags, Segment{});
 }
 
@@ -228,10 +228,10 @@ protected:
     return args;
   }
 
-  template <typename Segment, typename RemoteAction>
-  std::vector<PutRecord> runPut(const ncclDevComm& comm, const PutArgs& args, RemoteAction remoteAction) {
+  template <typename Segment, typename RemoteAction, typename LocalAction>
+  std::vector<PutRecord> runPut(const ncclDevComm& comm, const PutArgs& args, RemoteAction remote, LocalAction local) {
     d_records_.zero();
-    kernelBackendMaskPut<Segment><<<1, 1>>>(comm, d_dstWin_.ptr, d_srcWin_.ptr, args, remoteAction);
+    kernelBackendMaskPut<Segment><<<1, 1>>>(comm, d_dstWin_.ptr, d_srcWin_.ptr, args, remote, local);
     syncAndCheck();
     if (HasFatalFailure()) {
       return std::vector<PutRecord>(kNumSlots);
@@ -288,8 +288,10 @@ TEST_F(GinBackendMaskDispatchTest, MultiBitMaskDispatchesOnCtxBackend) {
     SCOPED_TRACE(::testing::Message() << "backend=" << static_cast<int>(c.backend));
     const PutArgs args = defaultArgs();
     const std::vector<PutRecord> records =
-        runPut<ncclGin_SegmentDevice>(makeComm(c.backend), args, ncclGin_SignalInc{args.signalId});
+        runPut<ncclGin_SegmentDevice>(makeComm(c.backend), args, ncclGin_None{}, ncclGin_None{});
     expectOnlyCalled(records, c.slot);
+    EXPECT_EQ(records[c.slot].signalType, NCCL_GIN_SIGNAL_TYPE_NONE) << "ncclGin_None must send no signal";
+    EXPECT_FALSE(records[c.slot].hasCounter) << "ncclGin_None must not request a counter";
   }
 }
 
@@ -308,7 +310,8 @@ TEST_F(GinBackendMaskDispatchTest, DevicePutForwardsArguments) {
     SCOPED_TRACE(::testing::Message() << "strongSignals=" << strongSignals);
     const std::vector<PutRecord> records =
         runPut<ncclGin_SegmentDevice>(makeComm(NCCL_NET_DEVICE_GIN_GPI, strongSignals), args,
-                                      ncclGin_SignalAdd{args.signalId, kSignalAddValue});
+                                      ncclGin_SignalAdd{args.signalId, kSignalAddValue},
+                                      ncclGin_CounterInc{args.counterId});
     expectOnlyCalled(records, kGpiSlot);
     expectForwarded(records[kGpiSlot], args, ncclGinSignalAdd, kSignalAddValue, args.required, strongSignals);
   }
@@ -320,7 +323,8 @@ TEST_F(GinBackendMaskDispatchTest, MixedSingleSegmentPutEscalatesRequiredToSyste
   auto check = [&](auto remoteAction, ncclGinSignalOp_t signalOp, uint64_t signalOpArg) {
     SCOPED_TRACE(::testing::Message() << "signalOp=" << static_cast<int>(signalOp));
     const std::vector<PutRecord> records =
-        runPut<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), args, remoteAction);
+        runPut<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), args, remoteAction,
+                                     ncclGin_CounterInc{args.counterId});
     expectOnlyCalled(records, kEfaSlot);
     expectForwarded(records[kEfaSlot], args, signalOp, signalOpArg, cuda::thread_scope_system, /*strongSignals=*/true);
   };

@@ -1025,6 +1025,7 @@ static bool sdmaIsOss7() {
   DeviceBuffer<int> d_oss7(1);
   d_oss7.zero();
   kernelSdmaIsOss7<<<1, 1>>>(d_oss7.ptr);
+  HIP_EXPECT(hipGetLastError());
   HIP_EXPECT(hipDeviceSynchronize());
   return d_oss7.download() != 0;
 }
