@@ -22,7 +22,6 @@ constexpr auto kVersionB = "6.19.20-2450390.24.04";
 constexpr auto kKernelRelease = "6.8.0-124-generic";
 constexpr auto kKernelMachine = "x86_64";
 constexpr auto kKernelSymlinkPrefix = "kernel-";
-constexpr auto kMissingDkmsRoot = "/tmp/amdsmi_missing_dkms_root";
 
 class DkmsTreeFixture {
  public:
@@ -232,21 +231,6 @@ TEST(SystemUnit, DriverVersionsRejectNullOutput) {
             AMDSMI_STATUS_INVAL);
 }
 
-TEST(SystemUnit, DkmsVersionsCollectsValidPackages) {
-  auto fixture = DkmsTreeFixture{};
-  fixture.add_package(kVersionA);
-  fixture.add_package(kVersionB);
-
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(packages.size(), 2u);
-  EXPECT_EQ(packages.at(kVersionA), kPackageName);
-  EXPECT_EQ(packages.at(kVersionB), kPackageName);
-}
-
 TEST(SystemUnit, ActiveDkmsVersionSelectsKernelSymlinkPackage) {
   auto fixture = DkmsTreeFixture{};
   fixture.add_package(kVersionA);
@@ -348,79 +332,37 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsMalformedKernelSymlinkTarget) {
   EXPECT_TRUE(active_version.empty());
 }
 
-TEST(SystemUnit, DkmsVersionsSkipsKernelSymlinks) {
-  auto fixture = DkmsTreeFixture{};
-  fixture.add_package(kVersionA);
-  fixture.add_kernel_symlink(kVersionA);
-
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(packages.size(), 1u);
-  EXPECT_EQ(packages.begin()->first, kVersionA);
-}
-
-TEST(SystemUnit, DkmsVersionsReturnsPackagesInLexicographicOrder) {
-  auto fixture = DkmsTreeFixture{};
-  fixture.add_package(kVersionB);
-  fixture.add_package(kVersionA);
-
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  ASSERT_EQ(packages.size(), 2u);
-  auto package = packages.begin();
-  EXPECT_EQ(package->first, kVersionA);
-  ++package;
-  EXPECT_EQ(package->first, kVersionB);
-}
-
-TEST(SystemUnit, DkmsVersionsReturnsSuccessForEmptyRoot) {
-  auto fixture = DkmsTreeFixture{};
-
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  packages.emplace(kVersionA, kPackageName);
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_TRUE(packages.empty());
-}
-
-TEST(SystemUnit, DkmsVersionsAcceptsRelativeSourceSymlink) {
+TEST(SystemUnit, ActiveDkmsVersionAcceptsRelativeSourceSymlink) {
   auto fixture = DkmsTreeFixture{};
   fixture.add_package_with_relative_source_symlink(kVersionA);
+  fixture.add_kernel_symlink(kVersionA);
 
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(packages.size(), 1u);
-  EXPECT_EQ(packages.begin()->first, kVersionA);
+  auto active_version = std::string{};
+  EXPECT_EQ(
+      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
+                                         kKernelRelease, kKernelMachine, &active_version),
+      AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(active_version, kVersionA);
 }
 
-TEST(SystemUnit, DkmsVersionsRejectsMissingDkmsConf) {
+TEST(SystemUnit, ActiveDkmsVersionRejectsMissingDkmsConf) {
   auto fixture = DkmsTreeFixture{};
   const auto version_dir = fixture.dkms_root() / kVersionA;
   const auto source_tree = fs::path{std::string{fixture.source_tree_prefix()} + kVersionA};
   fs::create_directories(version_dir);
   fs::create_directories(source_tree);
   fs::create_directory_symlink(source_tree, version_dir / "source");
+  fixture.add_kernel_symlink(kVersionA);
 
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_TRUE(packages.empty());
+  auto active_version = std::string{"unchanged"};
+  EXPECT_EQ(
+      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
+                                         kKernelRelease, kKernelMachine, &active_version),
+      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(active_version.empty());
 }
 
-TEST(SystemUnit, DkmsVersionsRejectsWrongSourceSymlinkTarget) {
+TEST(SystemUnit, ActiveDkmsVersionRejectsWrongSourceSymlinkTarget) {
   auto fixture = DkmsTreeFixture{};
   fixture.add_package(kVersionA);
   const auto version_dir = fixture.dkms_root() / kVersionA;
@@ -428,16 +370,17 @@ TEST(SystemUnit, DkmsVersionsRejectsWrongSourceSymlinkTarget) {
   fs::create_directories(decoy_tree);
   fs::remove(version_dir / "source");
   fs::create_directory_symlink(decoy_tree, version_dir / "source");
+  fixture.add_kernel_symlink(kVersionA);
 
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_TRUE(packages.empty());
+  auto active_version = std::string{"unchanged"};
+  EXPECT_EQ(
+      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
+                                         kKernelRelease, kKernelMachine, &active_version),
+      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(active_version.empty());
 }
 
-TEST(SystemUnit, DkmsVersionsRejectsPackageNameMismatch) {
+TEST(SystemUnit, ActiveDkmsVersionRejectsPackageNameMismatch) {
   auto fixture = DkmsTreeFixture{};
   const auto version_dir = fixture.dkms_root() / kVersionA;
   const auto source_tree = fs::path{std::string{fixture.source_tree_prefix()} + kVersionA};
@@ -448,18 +391,20 @@ TEST(SystemUnit, DkmsVersionsRejectsPackageNameMismatch) {
   auto conf_stream = std::ofstream{dkms_conf_dir / "dkms.conf"};
   conf_stream << "PACKAGE_NAME=\"" << kOtherPackageName << "\"\n";
   conf_stream << "PACKAGE_VERSION=\"" << kVersionA << "\"\n";
+  conf_stream.close();
   fs::create_symlink("amd/dkms/dkms.conf", source_tree / "dkms.conf");
   fs::create_directory_symlink(source_tree, version_dir / "source");
+  fixture.add_kernel_symlink(kVersionA);
 
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_TRUE(packages.empty());
+  auto active_version = std::string{"unchanged"};
+  EXPECT_EQ(
+      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
+                                         kKernelRelease, kKernelMachine, &active_version),
+      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(active_version.empty());
 }
 
-TEST(SystemUnit, DkmsVersionsRejectsPackageVersionMismatch) {
+TEST(SystemUnit, ActiveDkmsVersionRejectsPackageVersionMismatch) {
   auto fixture = DkmsTreeFixture{};
   const auto version_dir = fixture.dkms_root() / kVersionA;
   const auto source_tree = fs::path{std::string{fixture.source_tree_prefix()} + kVersionA};
@@ -470,28 +415,15 @@ TEST(SystemUnit, DkmsVersionsRejectsPackageVersionMismatch) {
   auto conf_stream = std::ofstream{dkms_conf_dir / "dkms.conf"};
   conf_stream << "PACKAGE_NAME=\"" << kPackageName << "\"\n";
   conf_stream << "PACKAGE_VERSION=\"" << kVersionB << "\"\n";
+  conf_stream.close();
   fs::create_symlink("amd/dkms/dkms.conf", source_tree / "dkms.conf");
   fs::create_directory_symlink(source_tree, version_dir / "source");
+  fixture.add_kernel_symlink(kVersionA);
 
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status = smi_amdgpu_get_dkms_versions_from(fixture.dkms_root().string(),
-                                                        fixture.source_tree_prefix(), &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_TRUE(packages.empty());
-}
-
-TEST(SystemUnit, DkmsVersionsRejectsNullOutput) {
-  const auto status =
-      smi_amdgpu_get_dkms_versions_from(kMissingDkmsRoot, kAmdgpuDkmsSourcePrefix, nullptr);
-  EXPECT_EQ(status, AMDSMI_STATUS_INVAL);
-}
-
-TEST(SystemUnit, DkmsVersionsReturnsNotSupportedForMissingRoot) {
-  auto packages = smi_amdgpu_dkms_packages_t{};
-  const auto status =
-      smi_amdgpu_get_dkms_versions_from(kMissingDkmsRoot, kAmdgpuDkmsSourcePrefix, &packages);
-
-  EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_TRUE(packages.empty());
+  auto active_version = std::string{"unchanged"};
+  EXPECT_EQ(
+      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
+                                         kKernelRelease, kKernelMachine, &active_version),
+      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(active_version.empty());
 }

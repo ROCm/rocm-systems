@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <iosfwd>
 #include <limits>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -310,11 +309,6 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
-/**
- * PACKAGE_VERSION (key) mapped to PACKAGE_NAME (value) for each amdgpu DKMS package.
- */
-using smi_amdgpu_dkms_packages_t = std::map<std::string, std::string>;
-
 inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
 inline constexpr auto kAmdgpuDkmsSourcePrefix = std::string_view{"/usr/src/amdgpu-"};
 
@@ -341,25 +335,5 @@ auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root,
                                         std::string_view source_tree_prefix,
                                         std::string_view release, std::string_view machine,
                                         std::string* active_version) -> amdsmi_status_t;
-
-/**
- *  @brief List amdgpu DKMS packages under a caller-supplied root and source tree.
- *
- *  @details Walks version-shaped subdirectories, checks that each source
- *  symlink points to @p source_tree_prefix concatenated with the version
- *  directory name (for example ``/usr/src/amdgpu-`` +
- *  ``6.19.14-2370381.24.04``), reads dkms.conf, and records
- *  PACKAGE_VERSION -> PACKAGE_NAME pairs. Ignores kernel-* symlinks and
- *  any directory that fails validation. Results are sorted by version
- *  string. Unit tests pass a temporary prefix.
- *
- *  @param[in] dkms_root Base directory containing version subdirectories.
- *  @param[in] source_tree_prefix Prefix for the ``source`` symlink target path.
- *  @param[out] packages Cleared on entry, then filled with one entry per
- *  valid package.
- */
-auto smi_amdgpu_get_dkms_versions_from(std::string_view dkms_root,
-                                       std::string_view source_tree_prefix,
-                                       smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
