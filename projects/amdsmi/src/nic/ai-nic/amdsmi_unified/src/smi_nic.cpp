@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "smi_nic_log.h"
 #include "smi_nic_transport.h"
 #include "smi_nic_vpd.h"
 #include "smi_sysfs.h"
@@ -28,7 +29,7 @@ uint64_t parse_bdf(const std::string& bdf) {
     return 0;
   }
 
-  if (bdf[4] != ':' || bdf[7] != ':' || bdf[10] != '.') {
+  if ((bdf[4] != ':') || (bdf[7] != ':') || (bdf[10] != '.')) {
     return 0;
   }
 
@@ -99,14 +100,26 @@ static std::optional<T> get_sysfs_data(const std::string& path) {
 // portless fwctl-only NIC) and decodes its identity fields. Absent/unreadable
 // VPD yields all-nullopt fields.
 static amd::smi::nic::vpd::VpdFields read_device_vpd(const std::string& sysfs_bus_path) {
-  std::ifstream file(sysfs_bus_path + "/vpd", std::ios::binary);
+  const std::string vpd_path = sysfs_bus_path + "/vpd";
+  std::ifstream file(vpd_path, std::ios::binary);
   if (!file) {
+    if (amd::smi::nic::log::is_enabled()) {
+      NIC_LOG_DEBUG("vpd read " + vpd_path + " -> FAIL cannot open");
+    }
     return {};
   }
   std::vector<uint8_t> image((std::istreambuf_iterator<char>(file)),
                              std::istreambuf_iterator<char>());
   auto fields = amd::smi::nic::vpd::parse_pci_vpd(image);
   fields.is_vpd_readable = true;
+  if (amd::smi::nic::log::is_enabled()) {
+    NIC_LOG_DEBUG("vpd read " + vpd_path + " -> SUCCESS bytes=" + std::to_string(image.size()) +
+                  " product=" + fields.product_name.value_or("absent") +
+                  " part=" + fields.part_number.value_or("absent") + " serial=" +
+                  (fields.serial_number.has_value()
+                       ? amd::smi::nic::log::mask_tail(fields.serial_number.value())
+                       : "absent"));
+  }
   return fields;
 }
 
@@ -266,7 +279,7 @@ void SmiNicPort::collect_vendor_statistics() const {
   }
 
   // FEC stats are netlink-only; a backend without them (ioctl, no libnl-3)
-  // reports failure here, which is not an error for the port — the FEC
+  // reports failure here, which is not an error for the port; the FEC
   // counters simply stay absent, same as any other name the table allows but
   // the driver does not expose.
   auto fec_result = transport_->get_fec_statistics(iface_);
@@ -633,6 +646,9 @@ std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
   const std::string hwmon_root = telemetry_sysfs_bus_path() + "/hwmon";
   std::error_code ec;
   if (!std::filesystem::is_directory(hwmon_root, ec)) {
+    if (amd::smi::nic::log::is_enabled()) {
+      NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL not a directory");
+    }
     return std::nullopt;
   }
 
@@ -642,8 +658,14 @@ std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
        (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
     std::filesystem::path input = it->path() / "temp1_input";
     if (std::filesystem::exists(input, ec)) {
+      if (amd::smi::nic::log::is_enabled()) {
+        NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + input.string());
+      }
       return input.string();
     }
+  }
+  if (amd::smi::nic::log::is_enabled()) {
+    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no temp1_input");
   }
   return std::nullopt;
 }

@@ -35,7 +35,7 @@ static void check(const std::string& name, bool passed, const std::string& detai
   std::cout << "\n";
 }
 
-static bool eq(const std::optional<std::string>& got, const std::string& want) {
+static bool is_equal(const std::optional<std::string>& got, const std::string& want) {
   return got.has_value() && got.value() == want;
 }
 
@@ -79,9 +79,9 @@ int main() {
 
     auto f = vpd::parse_pci_vpd(img);
     check("product_name parsed",
-          eq(f.product_name, "Broadcom BCM57608 1x400G QSFP-DD PCIe Ethernet NIC"));
-    check("part_number parsed", eq(f.part_number, "BCM957608-P1400GDF00"));
-    check("serial_number parsed", eq(f.serial_number, "P1400244200072FG"));
+          is_equal(f.product_name, "Broadcom BCM57608 1x400G QSFP-DD PCIe Ethernet NIC"));
+    check("part_number parsed", is_equal(f.part_number, "BCM957608-P1400GDF00"));
+    check("serial_number parsed", is_equal(f.serial_number, "P1400244200072FG"));
   }
 
   // Trailing space/NUL padding is trimmed.
@@ -96,9 +96,9 @@ int main() {
     img.push_back(kEndTag);
 
     auto f = vpd::parse_pci_vpd(img);
-    check("product_name trimmed", eq(f.product_name, "Supermicro Network Adapter"));
-    check("part_number trimmed", eq(f.part_number, "AOC-S100G-b2C"));
-    check("serial_number trimmed", eq(f.serial_number, "OA24CS041598"));
+    check("product_name trimmed", is_equal(f.product_name, "Supermicro Network Adapter"));
+    check("part_number trimmed", is_equal(f.part_number, "AOC-S100G-b2C"));
+    check("serial_number trimmed", is_equal(f.serial_number, "OA24CS041598"));
   }
 
   // Identifier only: PN/SN stay absent.
@@ -108,7 +108,7 @@ int main() {
     img.push_back(kEndTag);
 
     auto f = vpd::parse_pci_vpd(img);
-    check("identifier-only product_name", eq(f.product_name, "Some NIC"));
+    check("identifier-only product_name", is_equal(f.product_name, "Some NIC"));
     check("identifier-only no part_number", !f.part_number.has_value());
     check("identifier-only no serial_number", !f.serial_number.has_value());
   }
@@ -124,7 +124,7 @@ int main() {
     auto f = vpd::parse_pci_vpd(img);
     check("vpd-r-only no product_name", !f.product_name.has_value());
     check("vpd-r-only no part_number", !f.part_number.has_value());
-    check("vpd-r-only serial_number", eq(f.serial_number, "SERIAL123"));
+    check("vpd-r-only serial_number", is_equal(f.serial_number, "SERIAL123"));
   }
 
   // Empty keyword value is treated as absent, not empty string.
@@ -156,7 +156,7 @@ int main() {
     img.push_back(kEndTag);
 
     auto f = vpd::parse_pci_vpd(img);
-    check("truncated keyword: earlier PN kept", eq(f.part_number, "GOODPN"));
+    check("truncated keyword: earlier PN kept", is_equal(f.part_number, "GOODPN"));
     check("truncated keyword: bad SN dropped", !f.serial_number.has_value());
   }
 

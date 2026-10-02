@@ -69,7 +69,7 @@ bool IsToleratedForRdma(smi_nic_status_t status) {
 // host netdev to query for driver info or link state. Mirrors the carve-outs in
 // populate_amd_ainic_device() (amd_smi_system.cc).
 bool IsToleratedForDriverOrPort(size_t getter, smi_nic_status_t status) {
-  return ((getter == kDriver || getter == kPort) && (status == SMI_NIC_STATUS_NO_DATA));
+  return (((getter == kDriver) || (getter == kPort)) && (status == SMI_NIC_STATUS_NO_DATA));
 }
 
 template <size_t N>

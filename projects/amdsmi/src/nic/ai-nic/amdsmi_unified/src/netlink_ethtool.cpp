@@ -139,7 +139,7 @@ transport::Result<transport::LinkSettings> EthtoolNetlinkClient::get_link_settin
   int ret = client_.query(family_id_, ETHTOOL_MSG_LINKMODES_GET, 1, build_fn, link_settings_handler,
                           &ctx);
 
-  if (ret < 0 && !result.success) {
+  if ((ret < 0) && !result.success) {
     result.error_code = -ret;
   }
 
@@ -205,7 +205,7 @@ transport::Result<transport::PauseParams> EthtoolNetlinkClient::get_pause_params
 
   int ret = client_.query(family_id_, ETHTOOL_MSG_PAUSE_GET, 1, build_fn, pause_handler, &ctx);
 
-  if (ret < 0 && !result.success) {
+  if ((ret < 0) && !result.success) {
     result.error_code = -ret;
   }
 
@@ -235,7 +235,7 @@ transport::Result<transport::VendorStatistics> EthtoolNetlinkClient::get_statist
  * per-lane symbol-error histogram (fec_symbols_err_0..15, kernel 6.18+) has no
  * netlink attribute in headers available to build against here
  * (verified: absent from /usr/include/linux/ethtool_netlink.h on this host,
- * kernel 6.8) — the ionic StatTable_t lists those 16 names so they will
+ * kernel 6.8); the ionic StatTable_t lists those 16 names so they will
  * surface automatically once a future change adds the histogram attribute and
  * this kernel floor moves; until then they are silently absent, same as any
  * other table entry the driver does not expose.
@@ -310,7 +310,7 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
 
   int ret = client_.query(family_id_, ETHTOOL_MSG_FEC_GET, 1, build_fn, fec_stats_handler, &ctx);
 
-  if (ret < 0 && !result.success) {
+  if ((ret < 0) && !result.success) {
     result.error_code = -ret;
   }
 

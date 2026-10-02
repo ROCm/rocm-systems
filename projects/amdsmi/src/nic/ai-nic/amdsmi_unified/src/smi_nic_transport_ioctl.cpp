@@ -245,15 +245,15 @@ std::shared_ptr<NicTransport> create_auto_backend();
 std::shared_ptr<NicTransport> create_transport(NicBackend_t backend) {
 #ifdef HAVE_LIBNL3
   if (backend == NicBackend_t::Netlink) {
-    return internal::create_netlink_backend();
+    return with_debug_logging(internal::create_netlink_backend());
   }
   if (backend == NicBackend_t::Auto) {
-    return internal::create_auto_backend();
+    return with_debug_logging(internal::create_auto_backend());
   }
 #endif
 
   // Ioctl, or Netlink/Auto without libnl-3: the always-available fallback.
-  return std::make_shared<IoctlBackend>();
+  return with_debug_logging(std::make_shared<IoctlBackend>());
 }
 
 }  // namespace amd::smi::nic::transport

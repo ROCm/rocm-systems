@@ -324,8 +324,8 @@ typedef struct {
 - `subvendor_id`: `/sys/bus/pci/devices/<BDF>/subsystem_vendor`
 - `subsystem_id`: `/sys/bus/pci/devices/<BDF>/subsystem_device`
 - `revision`: `/sys/bus/pci/devices/<BDF>/revision`
-- `product_name`, `part_number`, `serial_number`: VPD data, parsed from `/sys/bus/pci/devices/<BDF>/vpd` when present. When the device exposes no sysfs VPD entry, `product_name` and `part_number` are reported as unavailable; `serial_number` falls back to the devlink board serial (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) and is reported as unavailable only when that is also absent. The devlink `DEVLINK_ATTR_INFO_SERIAL_NUMBER` attribute is deliberately *not* used — it is a MAC-derived EUI, not the physical board serial.
-- `capability`: bitmask of `amdsmi_nic_capability_bits_t` — `AMDSMI_NIC_CAP_FWCTL` (firmware-control management function, e.g. Pensando/POLLARA) and `AMDSMI_NIC_CAP_NETDEV` (host network port(s) present). Derived from the discovered device, not sysfs.
+- `product_name`, `part_number`, `serial_number`: VPD data, parsed from `/sys/bus/pci/devices/<BDF>/vpd` when present. When the device exposes no sysfs VPD entry, `product_name` and `part_number` are reported as unavailable; `serial_number` falls back to the devlink board serial (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) and is reported as unavailable only when that is also absent. The devlink `DEVLINK_ATTR_INFO_SERIAL_NUMBER` attribute is deliberately *not* used; it is a MAC-derived EUI, not the physical board serial.
+- `capability`: bitmask of `amdsmi_nic_capability_bits_t`: `AMDSMI_NIC_CAP_FWCTL` (firmware-control management function, e.g. Pensando/POLLARA) and `AMDSMI_NIC_CAP_NETDEV` (host network port(s) present). Derived from the discovered device, not sysfs.
 
 ### NIC bus information
 
@@ -461,7 +461,7 @@ typedef struct {
 
 Live temperature, health, and port-split state. Temperature is read via
 sysfs/hwmon; health and port-split come over devlink (libnl3). A metric the NIC
-does not expose is reported through a width-max sentinel in its sub-struct
+does not expose is reported through a width-max reserved value in its sub-struct
 (`UINT16_MAX`, `UINT32_MAX`, or `UINT8_MAX`), not a failed call.
 
 ```c
@@ -855,7 +855,7 @@ sudo amd-smi metric --nic 0 --port --json
 | Network port | `/sys/class/net/<iface>/` (`address`, `mtu`, `carrier`, `operstate`, `speed`, `dev_port`, `ifindex`, `type`) |
 | RDMA | `/sys/class/infiniband/<dev>/` (`node_guid`, `node_type`, `sys_image_guid`, `fw_ver`, `ports/<N>/state`, `ports/<N>/counters/*`) |
 | VPD Data | `/sys/bus/pci/devices/<BDF>/vpd` when present (product name, part number, serial number) |
-| Board serial (fallback) | devlink `DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER` — serial-number source when VPD is absent |
+| Board serial (fallback) | devlink `DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`, the serial-number source when VPD is absent |
 
 ---
 
@@ -1211,7 +1211,7 @@ generic across vendors.
    device does not expose the sysfs VPD entry, product name and part number are
    reported as unavailable. Backends must not shell out to external tools for VPD.
    For the serial number only, fall back to the devlink board serial
-   (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) before giving up — this is a distinct
+   (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) before giving up; this is a distinct
    physical source, not synthesized data (rule 5), so the fallback is compliant.
    Do not use `DEVLINK_ATTR_INFO_SERIAL_NUMBER`; it is a MAC-derived EUI.
 
@@ -1222,7 +1222,7 @@ generic across vendors.
    header or the `smi_nic_interface.h` C interface.
 
 5. **No synthesized data.** If a source doesn't exist for a given device, return
-   the documented "unsupported" sentinel (see
+   the documented "unsupported" reserved value (see
    [Unsupported or unavailable fields](#unsupported-or-unavailable-fields)) or
    omit the entry from the variable-length list; never substitute zero.
 

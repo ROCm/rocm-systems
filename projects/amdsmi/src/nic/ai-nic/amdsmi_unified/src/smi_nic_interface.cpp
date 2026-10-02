@@ -220,7 +220,7 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   if (serial.empty() && nic->is_vpd_readable()) {
     auto devlink = amd::nic::netlink::create_devlink_client();
     auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
-    if (dev_info.success && dev_info.value.board_serial_number[0] != '\0') {
+    if (dev_info.success && (dev_info.value.board_serial_number[0] != '\0')) {
       serial = dev_info.value.board_serial_number;
     }
   }
@@ -834,7 +834,7 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  // get_snapshot is total: an unexposed metric comes back as its sentinel, never
+  // get_snapshot is total: an unexposed metric comes back as its reserved value, never
   // as a failure, so there is no unsuccessful result to branch on here.
   amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
   *snapshot = telemetry.get_snapshot(*nic).value;

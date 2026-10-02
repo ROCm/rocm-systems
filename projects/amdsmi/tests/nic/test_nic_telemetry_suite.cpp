@@ -148,8 +148,8 @@ static void test_temperature_partial() {
 
   check("call succeeds", r.success, "errno=" + std::to_string(r.error_code));
   check("asic = 45C", r.value.asic_temp_c == 45, "got " + std::to_string(r.value.asic_temp_c));
-  check("transceiver = sentinel", r.value.transceiver_temp_c == tel::kTempUnsupported);
-  check("board = sentinel", r.value.board_temp_c == tel::kTempUnsupported);
+  check("transceiver = reserved value", r.value.transceiver_temp_c == tel::kTempUnsupported);
+  check("board = reserved value", r.value.board_temp_c == tel::kTempUnsupported);
 }
 
 static void test_temperature_unsupported() {
@@ -172,7 +172,7 @@ static void test_temperature_present_but_unreadable() {
   auto r = telemetry.get_temperature(nic);
 
   check("call still succeeds (sensor is supported)", r.success);
-  check("asic = sentinel (unreadable)", r.value.asic_temp_c == tel::kTempUnsupported);
+  check("asic = reserved value (unreadable)", r.value.asic_temp_c == tel::kTempUnsupported);
 }
 
 static void test_health_supported() {
@@ -247,7 +247,7 @@ static void test_health_multi_reporter_aggregate() {
 }
 
 static void test_health_error_count_saturates_below_sentinel() {
-  std::cout << "\nHealth: overflowing error_count saturates below the unsupported sentinel\n";
+  std::cout << "\nHealth: overflowing error_count saturates below the unsupported reserved value\n";
   FakeNic nic;
 
   // Two reporters each at UINT32_MAX: the u64 sum overflows uint32, so it must
@@ -262,10 +262,10 @@ static void test_health_error_count_saturates_below_sentinel() {
   auto r = telemetry.get_health(nic);
 
   check("call succeeds", r.success);
-  check("error_count is not the unsupported sentinel",
+  check("error_count is not the unsupported reserved value",
         r.value.error_count != tel::kErrorCountUnsupported,
         "got " + std::to_string(r.value.error_count));
-  check("error_count saturated to sentinel-1",
+  check("error_count saturated to reserved value minus 1",
         r.value.error_count == tel::kErrorCountUnsupported - 1,
         "got " + std::to_string(r.value.error_count));
 }
@@ -328,6 +328,25 @@ static void test_port_split_not_splittable() {
   check("split_count = 0", r.value.split_count == 0);
 }
 
+static void test_port_split_attrs_absent() {
+  std::cout << "\nPort-split: port listed but kernel sent no split attributes (ionic, ifoe)\n";
+  FakeNic nic;
+
+  // Value-initialised, exactly what the port dump handler yields when neither
+  // SPLITTABLE nor SPLIT_COUNT is present.
+  auto fake = std::make_shared<FakeDevlinkClient>();
+  fake->port_split = {true, {}, 0};
+
+  tel::NicTelemetry telemetry(fake);
+  auto r = telemetry.get_port_split(nic);
+
+  check("call succeeds", r.success);
+  check("splittable = N/A marker", r.value.splittable == tel::kCountUnsupported,
+        "got " + std::to_string(r.value.splittable));
+  check("split_count = N/A marker", r.value.split_count == tel::kCountUnsupported,
+        "got " + std::to_string(r.value.split_count));
+}
+
 static void test_port_split_unsupported() {
   std::cout << "\nPort-split: device exposes no port object (pds_core)\n";
   FakeNic nic;
@@ -372,12 +391,14 @@ static void test_snapshot_mixed() {
   auto r = telemetry.get_snapshot(nic);
 
   check("snapshot still succeeds", r.success);
-  check("temp asic = sentinel", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
-  check("temp board = sentinel", r.value.temperature.board_temp_c == tel::kTempUnsupported);
+  check("temp asic = reserved value", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
+  check("temp board = reserved value", r.value.temperature.board_temp_c == tel::kTempUnsupported);
   check("health present = Healthy",
         r.value.health.state == static_cast<uint8_t>(tel::HealthState::Healthy));
-  check("port splittable = sentinel", r.value.port_split.splittable == tel::kCountUnsupported);
-  check("port split_count = sentinel", r.value.port_split.split_count == tel::kCountUnsupported);
+  check("port splittable = reserved value",
+        r.value.port_split.splittable == tel::kCountUnsupported);
+  check("port split_count = reserved value",
+        r.value.port_split.split_count == tel::kCountUnsupported);
 }
 
 static void test_snapshot_all_unsupported() {
@@ -391,13 +412,15 @@ static void test_snapshot_all_unsupported() {
   tel::NicTelemetry telemetry(fake);
   auto r = telemetry.get_snapshot(nic);
 
-  check("snapshot still succeeds (per-field sentinels, not whole failure)", r.success);
-  check("temp asic = sentinel", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
+  check("snapshot still succeeds (per-field reserved values, not whole failure)", r.success);
+  check("temp asic = reserved value", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
   check("health state = Unsupported (distinct from Unknown)",
         r.value.health.state == static_cast<uint8_t>(tel::HealthState::Unsupported));
-  check("health error_count = sentinel", r.value.health.error_count == tel::kErrorCountUnsupported);
+  check("health error_count = reserved value",
+        r.value.health.error_count == tel::kErrorCountUnsupported);
   check("health reporter = empty", r.value.health.reporter[0] == '\0');
-  check("port splittable = sentinel", r.value.port_split.splittable == tel::kCountUnsupported);
+  check("port splittable = reserved value",
+        r.value.port_split.splittable == tel::kCountUnsupported);
 }
 
 static void test_device_info_supported() {
@@ -580,6 +603,7 @@ int main() {
   test_health_devlink_failure();
   test_port_split_active();
   test_port_split_not_splittable();
+  test_port_split_attrs_absent();
   test_port_split_unsupported();
   test_device_info_supported();
   test_device_info_unsupported();

@@ -50,7 +50,7 @@ void SmiNicSubsystemBroadcom::discover(
     const std::string sysfs_bus_path = pci_path + "/" + bdf;
     auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
     (void)device_id;  // bnxt spans many device ids; vendor + driver bind identify it.
-    if (vendor_id != VENDOR_ID || !is_bound_to_bnxt_en(sysfs_bus_path)) {
+    if ((vendor_id != VENDOR_ID) || !is_bound_to_bnxt_en(sysfs_bus_path)) {
       continue;
     }
 

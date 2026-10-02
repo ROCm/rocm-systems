@@ -51,7 +51,7 @@ const StatTable_t kBroadcomStatTable = {
 
     // Extended: per-priority TX PFC enabled frames (8). The RX counterpart
     // (rx_pfc_ena_frames_pri0..7, also present on this driver) is deliberately
-    // not in this table — the accepted acceptance criteria (55 total) only
+    // not in this table; the accepted acceptance criteria (55 total) only
     // ever counted the TX side.
     {"tx_pfc_ena_frames_pri0", StatTier_t::Extended},
     {"tx_pfc_ena_frames_pri1", StatTier_t::Extended},

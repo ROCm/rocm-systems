@@ -54,6 +54,10 @@ class GenericNetlinkClient {
   bool is_connected() const { return connected_; }
 
  private:
+  int query_impl(int family_id, uint8_t cmd, uint8_t version,
+                 std::function<int(NLMessage&)> build_fn, MessageHandler handler, void* arg,
+                 uint16_t flags);
+
   NLSocket socket_;
   bool connected_;
 };
