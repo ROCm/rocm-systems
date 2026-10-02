@@ -6,6 +6,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.11.0 for ROCm 10.3 (unreleased)
 
+### Added
+
+- `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
+  so a process can be profiled to rocpd in one session and to Perfetto in the next.
+
 ### Resolved issues
 
 - Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
