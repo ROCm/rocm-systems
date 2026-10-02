@@ -241,8 +241,8 @@ TEST_F(perfetto_engine_backend_policy_test,
 {
     EXPECT_CALL(*g_mock_perfetto_backend, start_cached_session(::testing::_)).Times(0);
 
-    for(auto backend : { rocprofsys::core::engine_config::backend_t::system,
-                         rocprofsys::core::engine_config::backend_t::all })
+    for(auto const backend : { rocprofsys::core::engine_config::backend_t::system,
+                               rocprofsys::core::engine_config::backend_t::all })
     {
         auto cfg    = make_test_config();
         cfg.backend = backend;
@@ -565,8 +565,7 @@ public:
     void on_source_drained(int source_id, std::span<const char> bytes) override
     {
         m_drained_count++;
-        if(std::find(m_throw_pids.begin(), m_throw_pids.end(), source_id) !=
-           m_throw_pids.end())
+        if(std::ranges::find(m_throw_pids, source_id) != m_throw_pids.end())
         {
             if(m_throw_count == 0)
             {

@@ -443,14 +443,8 @@ TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
   ::dlclose(module);
 }
 
-// Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
-// v_log_f32 (stdx::log2). Those VOP1 kernels take the SIMD path whenever
-// `util::has_stdx_simd`, with no runtime value check — so the vector libm
-// MUST be bit-identical to the scalar std::* used by the generated body, or
-// the fast path silently returns wrong results. These tests sweep full-range
-// random bit patterns (covering NaN/Inf/denormal/negative) and fail loudly if
-// any lane diverges, blocking a divergent toolchain at CI time. If one fails,
-// drop the corresponding row from SIMD_VOP1_UNARY rather than ship wrong math.
+// Compare scalar and SIMD paths over full-range random encodings, including
+// NaN payloads. LOG and EXP use the shared hardware mappings in both paths.
 template <class ScalarFn, class VectorFn>
 void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
@@ -474,14 +468,18 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 
 TEST(UtilSimd, Exp2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::exp2(x); },
-                        [](util::native<float> v) { return util::stdx::exp2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_exp_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::exp_f32_simd(v, quiet_snan); });
 }
 
 TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::log2(x); },
-                        [](util::native<float> v) { return util::stdx::log2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_log_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::log_f32_simd(v, quiet_snan); });
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
@@ -628,6 +626,30 @@ TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
   expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
                              [](util::native<double> x) { return x - util::floor_simd(x); });
 }
+TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
+  SKIP_IF_NO_SIMD();
+  RestoreEnvironment restore;
+  const uint32_t cases[][2] = {
+      {0x3FC00000u, 0x3F2AAAAAu}, {0x3F802922u, 0x3F7FADD6u}, {0xBFB0333Cu, 0xBF39F868u},
+      {0x00800000u, 0x7E800000u}, {0xFF7FFFFFu, 0x80000000u}, {0x80000001u, 0xFF800000u},
+      {0x7F800000u, 0x00000000u}, {0xFFA12345u, 0xFFE12345u},
+  };
+  using V = util::native<float>;
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    for (unsigned start = 0; start < std::size(cases); ++start) {
+      std::array<uint32_t, V::size()> input_bits;
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+      const V input = util::load<float>(input_bits.data());
+      const V result = util::rcp_f32_simd(input);
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
+                  cases[(start + lane) % std::size(cases)][1]);
+    }
+  }
+}
+
 TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return 1.0f / x; },
