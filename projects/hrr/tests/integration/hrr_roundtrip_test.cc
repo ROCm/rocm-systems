@@ -214,7 +214,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   };
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     proc.setEnv("AMD_LOG_LEVEL", "0");
     set_proc_search_path(proc);
@@ -237,7 +237,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   }
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("AMD_LOG_LEVEL", "0");
     // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
     // still enables capture. Unset the variable so an inherited value cannot arm it.
