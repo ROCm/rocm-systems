@@ -175,8 +175,9 @@ protected:
         skipReason_.clear();
         if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                        false, minNodes, kNoNodeLimit)) {
-            if (minNodes > kMinGpusPerNode)
-                skipReason_ = "test requires ranks on at least two nodes";
+            skipReason_ = (minNodes > kMinGpusPerNode)
+                              ? "test requires ranks on at least two nodes"
+                              : "MPI process prerequisites not met; see rank-0 output";
             return false;
         }
         int ndev = 0; AssertInitAndGetDevices(&ndev);
@@ -193,8 +194,14 @@ protected:
         *comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         *mh = nullptr;
         ncclResult_t r = RegisterMultiSegmentMr(*comm, *buf, mh);
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
         EXPECT_EQ(r, ncclSuccess) << "multi-segment registration failed (the AIRUNTIME-2351 bug)";
         EXPECT_NE(*mh, nullptr);
+#else
+        (void)r;
+        skipReason_ = "dma-buf export API unavailable at build time";
+        return false;
+#endif
         const bool ok = (r == ncclSuccess && *mh != nullptr);
         if (SyncSkip(!ok)) {
             if (ok) ADD_FAILURE() << "peer failed multi-segment registration";
@@ -309,8 +316,8 @@ TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
 // rejected at registration with ncclInvalidUsage and produces no handle. The
 // wire protocol carries at most NCCL_IB_MAX_SEGMENTS segments.
 TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
     int ndev = 0; AssertInitAndGetDevices(&ndev);
     if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
 
@@ -497,8 +504,8 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
 // nSegments==1 host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers still
 // register and transfer on the unsegmented fast path.
 TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
     int ndev = 0; AssertInitAndGetDevices(&ndev);
 
     const int    rank = MPIEnvironment::world_rank;
