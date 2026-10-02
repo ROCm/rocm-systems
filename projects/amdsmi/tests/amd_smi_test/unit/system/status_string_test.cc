@@ -23,8 +23,7 @@ TEST(SystemUnit, StatusCodeToStringRejectsNullOutPtr) {
 
 TEST(SystemUnit, StatusCodeToStringValidOutPtr) {
   const char* msg = nullptr;
-  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "status_string=&msg",
-                     GetTestVerbosity() >= 1);
+  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "status_string=&msg", GetTestVerbosity() >= 1);
   EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, &msg), AMDSMI_STATUS_SUCCESS);
   EXPECT_NE(msg, nullptr);
 }
