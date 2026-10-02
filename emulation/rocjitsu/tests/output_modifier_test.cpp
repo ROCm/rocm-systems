@@ -286,6 +286,24 @@ TEST(OutputModifierTest, MatchesGfx1201F16) {
       {0xf0u, 0, true, 0x7bffu, 0x0000u, 0x3c00u},
       {0xf0u, 0, true, 0x83ffu, 0x83ffu, 0x0000u},
       {0xf0u, 0, true, 0x0400u, 0x0000u, 0x0400u},
+      // gfx1201 capture (2026-10-02): equal max-finite inputs, both rounding
+      // directions and signs, with FP16_OVFL disabled and enabled.
+      {0xf5u, 1, false, 0x7bffu, 0x7bffu, 0x7c00u},
+      {0x8000f5u, 1, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0xfau, 1, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0x8000fau, 1, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0xf5u, 1, false, 0xfbffu, 0xfbffu, 0xfbffu},
+      {0x8000f5u, 1, false, 0xfbffu, 0xfbffu, 0xfbffu},
+      {0xfau, 1, false, 0xfbffu, 0xfbffu, 0xfc00u},
+      {0x8000fau, 1, false, 0xfbffu, 0xfbffu, 0xfbffu},
+      {0xf5u, 2, false, 0x7bffu, 0x7bffu, 0x7c00u},
+      {0x8000f5u, 2, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0xfau, 2, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0x8000fau, 2, false, 0x7bffu, 0x7bffu, 0x7bffu},
+      {0xf5u, 2, false, 0xfbffu, 0xfbffu, 0xfbffu},
+      {0x8000f5u, 2, false, 0xfbffu, 0xfbffu, 0xfbffu},
+      {0xfau, 2, false, 0xfbffu, 0xfbffu, 0xfc00u},
+      {0x8000fau, 2, false, 0xfbffu, 0xfbffu, 0xfbffu},
   });
 }
 
@@ -303,6 +321,24 @@ TEST(OutputModifierTest, MatchesGfx1201F32) {
       {0xf0u, 0, true, 0x7fc00000u, 0x7fc00000u, 0x00000000u},
       {0xf0u, 0, true, 0x7f7fffffu, 0x00000000u, 0x3f800000u},
       {0xf0u, 0, true, 0x807fffffu, 0x807fffffu, 0x00000000u},
+      // gfx1201 capture (2026-10-02): equal max-finite inputs, both rounding
+      // directions and signs, with FP16_OVFL disabled and enabled.
+      {0xf5u, 1, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f800000u},
+      {0x8000f5u, 1, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f800000u},
+      {0xfau, 1, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f7fffffu},
+      {0x8000fau, 1, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f7fffffu},
+      {0xf5u, 1, false, 0xff7fffffu, 0xff7fffffu, 0xff7fffffu},
+      {0x8000f5u, 1, false, 0xff7fffffu, 0xff7fffffu, 0xff7fffffu},
+      {0xfau, 1, false, 0xff7fffffu, 0xff7fffffu, 0xff800000u},
+      {0x8000fau, 1, false, 0xff7fffffu, 0xff7fffffu, 0xff800000u},
+      {0xf5u, 2, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f800000u},
+      {0x8000f5u, 2, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f800000u},
+      {0xfau, 2, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f7fffffu},
+      {0x8000fau, 2, false, 0x7f7fffffu, 0x7f7fffffu, 0x7f7fffffu},
+      {0xf5u, 2, false, 0xff7fffffu, 0xff7fffffu, 0xff7fffffu},
+      {0x8000f5u, 2, false, 0xff7fffffu, 0xff7fffffu, 0xff7fffffu},
+      {0xfau, 2, false, 0xff7fffffu, 0xff7fffffu, 0xff800000u},
+      {0x8000fau, 2, false, 0xff7fffffu, 0xff7fffffu, 0xff800000u},
   });
 }
 
@@ -317,6 +353,24 @@ TEST(OutputModifierTest, MatchesGfx1201F64) {
       {0xf0u, 0, true, 0x7ff8000000000000u, 0x7ff8000000000000u, 0x0u},
       {0xf0u, 0, true, 0x7fefffffffffffffu, 0x0u, 0x3ff0000000000000u},
       {0xf0u, 0, true, 0x800fffffffffffffu, 0x800fffffffffffffu, 0x0u},
+      // gfx1201 capture (2026-10-02): equal max-finite inputs, both rounding
+      // directions and signs, with FP16_OVFL disabled and enabled.
+      {0xf5u, 1, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {0x8000f5u, 1, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {0xfau, 1, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {0x8000fau, 1, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {0xf5u, 1, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {0x8000f5u, 1, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {0xfau, 1, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {0x8000fau, 1, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {0xf5u, 2, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {0x8000f5u, 2, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {0xfau, 2, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {0x8000fau, 2, false, 0x7fefffffffffffffu, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {0xf5u, 2, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {0x8000f5u, 2, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {0xfau, 2, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {0x8000fau, 2, false, 0xffefffffffffffffu, 0xffefffffffffffffu, 0xfff0000000000000u},
   });
 }
 

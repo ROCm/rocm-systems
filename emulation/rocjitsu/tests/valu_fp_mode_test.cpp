@@ -2184,8 +2184,9 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
 }
 
 std::vector<ArithmeticCase> minmax_output_modifier_cases() {
-  // Expected bits come from gfx1201 v_max_num captures with OMOD/CLAMP.
-  // Equal inputs let every min/max form reuse those output-stage expectations.
+  // Expected bits come from gfx1201 captures with OMOD/CLAMP. The directed
+  // overflow cases were captured for all 30 min/max forms on 2026-10-02.
+  // Equal inputs let every form reuse the same output-stage expectations.
   // The final samples explicitly check the order of combined modifiers.
   struct Sample {
     const char *name;
@@ -2197,7 +2198,7 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
     bool abs = false;
     bool neg = false;
   };
-  constexpr std::array<Sample, 14> f16 = {{
+  constexpr std::array<Sample, 30> f16 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x0001u, 0x0000u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000u, 0x0000u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8400u, 0x8000u},
@@ -2206,6 +2207,23 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7bffu, 0x7c00u},
       {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xfbffu, 0xfbffu},
       {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7bffu, 0x7bffu},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7bffu, 0x7c00u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7bffu, 0x7bffu},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7bffu, 0x7bffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7bffu, 0x7bffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xfbffu, 0xfbffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xfbffu, 0xfbffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xfbffu, 0xfc00u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xfbffu, 0xfbffu},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7bffu, 0x7c00u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7bffu, 0x7bffu},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7bffu, 0x7bffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7bffu, 0x7bffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xfbffu, 0xfbffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xfbffu, 0xfbffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xfbffu, 0xfc00u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xfbffu, 0xfbffu},
       {"Mul2Nan", 1, false, 0xf0u, 0x7e00u, 0x7e00u},
       {"ClampNan", 0, true, 0xf0u, 0x7e00u, 0x0000u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7bffu, 0x3c00u},
@@ -2214,7 +2232,7 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"AbsMul2Clamp", 1, true, 0xf0u, 0xba00u, 0x3c00u, true},
       {"AbsNegMul2", 1, false, 0xf0u, 0xba00u, 0xbe00u, true, true},
   }};
-  constexpr std::array<Sample, 14> f32 = {{
+  constexpr std::array<Sample, 30> f32 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x00000001u, 0x00000000u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x80000000u, 0x00000000u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x80800000u, 0x80000000u},
@@ -2223,6 +2241,23 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7f7fffffu, 0x7f800000u},
       {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xff7fffffu, 0xff7fffffu},
       {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7f7fffffu, 0x7f800000u},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xff7fffffu, 0xff800000u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xff7fffffu, 0xff800000u},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xff7fffffu, 0xff800000u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xff7fffffu, 0xff800000u},
       {"Mul2Nan", 1, false, 0xf0u, 0x7fc00000u, 0x7fc00000u},
       {"ClampNan", 0, true, 0xf0u, 0x7fc00000u, 0x00000000u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7f7fffffu, 0x3f800000u},
@@ -2230,7 +2265,7 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"AbsMul2Clamp", 1, true, 0xf0u, 0xbf400000u, 0x3f800000u, true},
       {"AbsNegMul2", 1, false, 0xf0u, 0xbf400000u, 0xbfc00000u, true, true},
   }};
-  constexpr std::array<Sample, 14> f64 = {{
+  constexpr std::array<Sample, 30> f64 = {{
       {"Mul2Subnormal", 1, false, 0xf0u, 0x1u, 0x0u},
       {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000000000000000u, 0x0u},
       {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8010000000000000u, 0x8000000000000000u},
@@ -2239,6 +2274,31 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
       {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
       {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
       {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7fefffffffffffffu,
+       0x7ff0000000000000u},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7fefffffffffffffu,
+       0x7fefffffffffffffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xffefffffffffffffu,
+       0xffefffffffffffffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xffefffffffffffffu,
+       0xfff0000000000000u},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7fefffffffffffffu,
+       0x7ff0000000000000u},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7fefffffffffffffu,
+       0x7fefffffffffffffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xffefffffffffffffu,
+       0xffefffffffffffffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xffefffffffffffffu,
+       0xfff0000000000000u},
       {"Mul2Nan", 1, false, 0xf0u, 0x7ff8000000000000u, 0x7ff8000000000000u},
       {"ClampNan", 0, true, 0xf0u, 0x7ff8000000000000u, 0x0u},
       {"ClampAboveOne", 0, true, 0xf0u, 0x7fefffffffffffffu, 0x3ff0000000000000u},
