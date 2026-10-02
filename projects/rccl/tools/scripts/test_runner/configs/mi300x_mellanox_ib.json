@@ -4148,7 +4148,8 @@
           "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
           "env_variables": {
             "NCCL_IB_SL": "",
-            "NCCL_IB_TC": ""
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": ""
           }
         }
       ]
