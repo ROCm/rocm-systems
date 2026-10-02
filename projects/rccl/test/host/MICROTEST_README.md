@@ -91,8 +91,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
-  - `ras/diagnostics_gpu.cc` (`DIAGNOSTICS_GPU_CC_PATH`, from
-    `diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
+  - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
+    `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
     GPU inventory, driver-version, ECC, and NVLink collection and summaries.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
@@ -738,3 +738,19 @@ cmake --build build -j"$(nproc)"
 
 Disable coverage instrumentation for the standalone host-only test binaries
 with `-DHOST_TEST_COVERAGE=OFF`.
+
+### Shared RAS diagnostic fixtures
+
+`fakes/ras_registry_test_support.h` owns test installation/reset of the
+`ras.cc` communicator registry. Both operations hold `ncclCommsMutex` and
+clear `ncclCommsSorted`; installation validates allocation before replacing
+the old registry and preserves explicit vacant slots. The RAS and diagnostics
+suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
+owned communicator and recording reporter used by the diagnostic suites.
+
+The GPU diagnostic suite exercises payload filling through the public collectors
+and owns returned records with RAII. Each summarizer has an over-capacity rank
+case; together they exercise all seven bounded rank arrays and check truncated
+rank sets with total counts. ECC maxima are checked with the largest values on
+an earlier rank, and incomplete-report fixtures include hexadecimal hashes
+larger than nine.

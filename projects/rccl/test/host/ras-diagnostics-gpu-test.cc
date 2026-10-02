@@ -18,6 +18,8 @@
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "fmt/format.h"
+#include "fakes/ras_diagnostics_test_support.h"
 #include "cudawrap.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
@@ -38,7 +40,7 @@ ncclResult_t DiagnosticsGpuTestCudaDriverVersion(int* version);
 
 #define ncclCudaDriverVersion DiagnosticsGpuTestCudaDriverVersion
 
-#include DIAGNOSTICS_GPU_CC_PATH
+#include RAS_DIAGNOSTICS_GPU_CC_PATH
 
 #undef ncclCudaDriverVersion
 
@@ -149,23 +151,10 @@ ncclResult_t ncclNvmlDeviceGetNvLinkState(nvmlDevice_t device, unsigned int link
 
 namespace {
 
-struct ReporterState {
-  std::vector<std::string> lines;
-  ncclResult_t result = ncclSuccess;
-  int calls = 0;
-  int failCall = 0;
-};
-
-ncclResult_t CaptureLine(void* target, const char* line) {
-  auto* state = static_cast<ReporterState*>(target);
-  state->lines.emplace_back(line);
-  state->calls++;
-  return state->failCall == 0 || state->calls == state->failCall ? state->result : ncclSuccess;
-}
-
-rasDiagnosticsReporter MakeReporter(ReporterState* state) {
-  return rasDiagnosticsReporter{CaptureLine, nullptr, state};
-}
+using ras_test::OwnedComm;
+using ras_test::ReporterState;
+using ras_test::MakeReporter;
+using ras_test::InstallNcclComms;
 
 bool Contains(const std::vector<std::string>& lines, const std::string& text) {
   for (const std::string& line : lines) {
@@ -183,7 +172,7 @@ rasDiagnosticsRankHeader MakeRank(uint64_t commHash, int rank, int nRanks) {
 }
 
 template <typename T>
-std::vector<char> BuildRecords(std::initializer_list<std::pair<rasDiagnosticsRankHeader, T>> records) {
+std::vector<char> BuildRecords(const std::vector<std::pair<rasDiagnosticsRankHeader, T>>& records) {
   const size_t stride = rasDiagnosticsLocalRecordStride(sizeof(T));
   std::vector<char> data(records.size() * stride, 0);
   size_t offset = 0;
@@ -216,34 +205,8 @@ rasDiagnosticsNvLinkData NvLinkData(int links, int inactive) {
   return rasDiagnosticsNvLinkData{static_cast<uint8_t>(links), static_cast<uint8_t>(inactive)};
 }
 
-struct OwnedComm {
-  std::unique_ptr<ncclComm> comm{new ncclComm{}};
-  std::unique_ptr<ncclPeerInfo[]> peers{new ncclPeerInfo[1]{}};
-
-  OwnedComm(uint64_t hash, int rank, int nRanks, int nvmlDev) {
-    comm->commHash = hash;
-    comm->rank = rank;
-    comm->nRanks = nRanks;
-    comm->nvmlDev = nvmlDev;
-    comm->peerInfoValid = true;
-    comm->peerInfo = peers.get();
-    peers[0].hostHash = hash + 1;
-    peers[0].pidHash = hash + 2;
-  }
-};
-
-void InstallComms(std::initializer_list<ncclComm*> comms) {
-  free(ncclComms);
-  ncclComms = static_cast<ncclComm**>(calloc(comms.size(), sizeof(*ncclComms)));
-  nNcclComms = static_cast<int>(comms.size());
-  int index = 0;
-  for (ncclComm* comm : comms) ncclComms[index++] = comm;
-}
-
 void ResetState() {
-  free(ncclComms);
-  ncclComms = nullptr;
-  nNcclComms = 0;
+  ras_test::ResetNcclComms();
   g_eccThreshold = 0;
   g_paramEnvs.clear();
   g_paramDefaults.clear();
@@ -274,7 +237,6 @@ void ResetState() {
 
 class RasDiagnosticsGpuMicrotest : public ::testing::Test {
  protected:
-  using SummaryFn = ncclResult_t (*)(const rasDiagnosticsContext*, const rasDiagnosticsReporter*, const char*, int);
 
   rasDiagnosticsContext ctx{};
   ReporterState state;
@@ -295,30 +257,42 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
   }
 
   template <typename Payload>
-  void ExpectIncomplete(SummaryFn summarize, const char* checkName, uint64_t commHash, const Payload& payload) {
+  void CollectPayload(rasDiagnosticsCollectLocalFn collect, Payload* payload) {
+    rasDiagnosticsLocalData data{};
+    const auto result = collect(&ctx, &data);
+    ncclUniquePtr<char> recordsOwner(data.records);
+    ASSERT_EQ(ncclSuccess, result);
+    ASSERT_EQ(1, data.nRecords);
+    ASSERT_EQ(rasDiagnosticsLocalRecordStride(sizeof(Payload)), static_cast<size_t>(data.recordStride));
+    ASSERT_EQ(data.recordStride, data.recordsBytes);
+    ASSERT_NE(nullptr, data.records);
+    memcpy(payload, data.records + sizeof(rasDiagnosticsRankHeader), sizeof(*payload));
+  }
+
+  template <typename Payload>
+  void ExpectIncomplete(rasDiagnosticsSummarizeFn summarize, const char* checkName, uint64_t commHash, const Payload& payload) {
     state.lines.clear();
     auto records = BuildRecords<Payload>({{MakeRank(commHash, 0, 2), payload}});
     ASSERT_EQ(ncclSuccess, summarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
     ASSERT_EQ(1u, state.lines.size());
-    EXPECT_EQ(std::string("[INFO] ") + checkName + ": diagnostics incomplete, gathered 1/2 ranks in comm 0x" +
-                std::to_string(commHash) + "/0x" + std::to_string(commHash + 1) + "/0x" +
-                std::to_string(commHash + 2) + " (RAS overlay may not be ready)",
-              state.lines[0]);
+    EXPECT_EQ(fmt::format("[INFO] {}: diagnostics incomplete, gathered 1/2 ranks in comm "
+                          "0x{:x}/0x{:x}/0x{:x} (RAS overlay may not be ready)",
+                          checkName, commHash, commHash + 1, commHash + 2), state.lines[0]);
   }
 
   template <typename Payload>
   void ExpectReporterFailure(
-    SummaryFn summarize, std::initializer_list<std::pair<rasDiagnosticsRankHeader, Payload>> input, int failCall = 1) {
+    rasDiagnosticsSummarizeFn summarize, std::initializer_list<std::pair<rasDiagnosticsRankHeader, Payload>> input) {
     state.lines.clear();
     state.calls = 0;
-    state.failCall = failCall;
-    state.result = ncclRemoteError;
+    state.failCall = 1;
+    state.emitResult = ncclRemoteError;
     auto records = BuildRecords<Payload>(input);
 
     EXPECT_EQ(ncclRemoteError, summarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
-    EXPECT_EQ(failCall, state.calls);
+    EXPECT_EQ(1, state.calls);
 
-    state.result = ncclSuccess;
+    state.emitResult = ncclSuccess;
     state.failCall = 0;
   }
 };
@@ -326,14 +300,14 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
 }  // namespace
 
 TEST_F(RasDiagnosticsGpuMicrotest, SummariesValidateArguments) {
-  const std::array<SummaryFn, 4> summaries = {rasDiagnosticsGpuModelSummarize,
+  const std::array<rasDiagnosticsSummarizeFn, 4> summaries = {rasDiagnosticsGpuModelSummarize,
                                              rasDiagnosticsCudaDriverVersionSummarize,
                                              rasDiagnosticsEccSummarize,
                                              rasDiagnosticsNvLinkSummarize};
   rasDiagnosticsReporter invalid{};
   const char byte = 0;
 
-  for (SummaryFn summarize : summaries) {
+  for (rasDiagnosticsSummarizeFn summarize : summaries) {
     EXPECT_EQ(ncclInternalError, summarize(&ctx, nullptr, &byte, 1));
     EXPECT_EQ(ncclInternalError, summarize(&ctx, &invalid, &byte, 1));
     EXPECT_EQ(ncclSuccess, summarize(&ctx, &reporter, nullptr, 0));
@@ -343,15 +317,18 @@ TEST_F(RasDiagnosticsGpuMicrotest, SummariesValidateArguments) {
   }
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillReportsKnownAndUnknownInventory) {
-  rasDiagnosticsCommSnapshot snapshot{};
-  snapshot.nvmlDev = 1;
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelCollectReportsKnownAndUnknownInventory) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  owned.comm->nvmlDev = 0;
+  InstallNcclComms({owned.comm.get()});
+  owned.comm->nvmlDev = 1;
   ncclNvmlDeviceCount = 2;
   g_deviceCount = 8;
   g_deviceName = "MI300X";
   rasDiagnosticsGpuModelData data{};
 
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
   EXPECT_EQ(8, data.nGpus);
   EXPECT_STREQ("MI300X", data.model);
   ASSERT_EQ(1u, g_handleIndices.size());
@@ -361,36 +338,39 @@ TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillReportsKnownAndUnknownInventory) 
 
   g_deviceCountResult = ncclSystemError;
   g_nameResult = ncclSystemError;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
   EXPECT_EQ(0, data.nGpus);
   EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
 
-  snapshot.nvmlDev = -1;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+  owned.comm->nvmlDev = -1;
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
   EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillSkipsOutOfRangeDevicesAndHandlesLookupFailure) {
-  rasDiagnosticsCommSnapshot snapshot{};
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelCollectSkipsOutOfRangeDevicesAndHandlesLookupFailure) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  owned.comm->nvmlDev = 0;
+  InstallNcclComms({owned.comm.get()});
   ncclNvmlDeviceCount = 2;
   g_deviceCount = 8;
   g_deviceName = "MI300X";
   rasDiagnosticsGpuModelData data{};
 
   for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    snapshot.nvmlDev = nvmlDev;
+    owned.comm->nvmlDev = nvmlDev;
     data = GpuModel(1, "stale");
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
     EXPECT_EQ(8, data.nGpus);
     EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
   }
   EXPECT_TRUE(g_handleIndices.empty());
   EXPECT_TRUE(g_nameDevices.empty());
 
-  snapshot.nvmlDev = 1;
+  owned.comm->nvmlDev = 1;
   g_handleResult = ncclSystemError;
   data = GpuModel(1, "stale");
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
   EXPECT_EQ(8, data.nGpus);
   EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
   ASSERT_EQ(1u, g_handleIndices.size());
@@ -398,30 +378,36 @@ TEST_F(RasDiagnosticsGpuMicrotest, GpuModelFillSkipsOutOfRangeDevicesAndHandlesL
   EXPECT_TRUE(g_nameDevices.empty());
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionFillHandlesSuccessFailureAndZero) {
-  rasDiagnosticsCommSnapshot snapshot{};
+TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionCollectHandlesSuccessFailureAndZero) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  owned.comm->nvmlDev = 0;
+  InstallNcclComms({owned.comm.get()});
   rasDiagnosticsCudaDriverVersionData data{};
   g_driverVersion = 70002000;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
   EXPECT_EQ(70002000u, data.version);
 
   g_driverVersion = 0;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
   EXPECT_EQ(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN, data.version);
 
   g_driverResult = ncclSystemError;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
   EXPECT_EQ(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN, data.version);
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
-  rasDiagnosticsCommSnapshot snapshot{};
-  snapshot.nvmlDev = 0;
+TEST_F(RasDiagnosticsGpuMicrotest, EccCollectRequiresEveryCounter) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  owned.comm->nvmlDev = 0;
+  InstallNcclComms({owned.comm.get()});
+  owned.comm->nvmlDev = 0;
   ncclNvmlDeviceCount = 1;
   g_eccCounters = {{{{1, 2}}, {{3, 4}}}};
   rasDiagnosticsEccData data{};
 
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
   EXPECT_EQ(1u, data.correctedSram);
   EXPECT_EQ(2u, data.correctedDram);
   EXPECT_EQ(3u, data.uncorrectedSram);
@@ -444,7 +430,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
     g_eccResults[failedSlots[slot].first][failedSlots[slot].second] = ncclSystemError;
     data = EccData(true, 9, 9, 9, 9);
 
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
     EXPECT_EQ(slot == 0 ? 0u : 1u, data.correctedSram);
     EXPECT_EQ(slot == 1 ? 0u : 3u, data.uncorrectedSram);
     EXPECT_EQ(slot == 2 ? 0u : 2u, data.correctedDram);
@@ -455,7 +441,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
   for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
   g_handleResult = ncclSystemError;
   data = EccData(true, 9, 9, 9, 9);
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
   EXPECT_EQ(0u, data.correctedSram);
   EXPECT_EQ(0u, data.uncorrectedSram);
   EXPECT_EQ(0u, data.correctedDram);
@@ -465,9 +451,9 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
   g_handleResult = ncclSuccess;
   g_handleIndices.clear();
   for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    snapshot.nvmlDev = nvmlDev;
+    owned.comm->nvmlDev = nvmlDev;
     data = EccData(true, 9, 9, 9, 9);
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsEccFillLocalData(&snapshot, &data));
+    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
     EXPECT_EQ(0u, data.correctedSram);
     EXPECT_EQ(0u, data.uncorrectedSram);
     EXPECT_EQ(0u, data.correctedDram);
@@ -477,9 +463,12 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccFillRequiresEveryCounter) {
   EXPECT_TRUE(g_handleIndices.empty());
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
-  rasDiagnosticsCommSnapshot snapshot{};
-  snapshot.nvmlDev = 0;
+TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectCountsValidAndInactiveLinks) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  owned.comm->nvmlDev = 0;
+  InstallNcclComms({owned.comm.get()});
+  owned.comm->nvmlDev = 0;
   ncclNvmlDeviceCount = 1;
   g_nvLinkValid[0] = 1;
   g_nvLinkValid[1] = 1;
@@ -489,7 +478,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
   g_nvLinkCapabilityResults[3] = ncclSystemError;
   rasDiagnosticsNvLinkData data{};
 
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
   EXPECT_EQ(3, data.nLinks);
   EXPECT_EQ(2, data.nInactive);
   ASSERT_EQ(RAS_DIAG_NVLINK_MAX_LINKS, static_cast<int>(g_nvLinkCapabilityDevices.size()));
@@ -499,19 +488,19 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
 
   g_handleIndices.clear();
   for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    snapshot.nvmlDev = nvmlDev;
+    owned.comm->nvmlDev = nvmlDev;
     data = NvLinkData(9, 9);
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkFillLocalData(&snapshot, &data));
+    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
     EXPECT_EQ(0, data.nLinks);
     EXPECT_EQ(0, data.nInactive);
   }
   EXPECT_TRUE(g_handleIndices.empty());
 
-  snapshot.nvmlDev = 0;
+  owned.comm->nvmlDev = 0;
   g_handleResult = ncclSystemError;
   g_nvLinkCapabilityDevices.clear();
   data = NvLinkData(9, 9);
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkFillLocalData(&snapshot, &data));
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
   EXPECT_EQ(0, data.nLinks);
   EXPECT_EQ(0, data.nInactive);
   ASSERT_EQ(1u, g_handleIndices.size());
@@ -520,8 +509,10 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkFillCountsValidAndInactiveLinks) {
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
-  OwnedComm comm(0x100, 0, 1, 0);
-  InstallComms({comm.comm.get()});
+  OwnedComm comm(0x100, 0x101, 0x102, 0);
+  comm.comm->nRanks = 1;
+  comm.comm->nvmlDev = 0;
+  InstallNcclComms({comm.comm.get()});
   ncclNvmlDeviceCount = 1;
   g_deviceCount = 1;
   g_deviceName = "MI300X";
@@ -537,7 +528,9 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
                                               sizeof(rasDiagnosticsNvLinkData)};
   for (size_t index = 0; index < collectors.size(); index++) {
     rasDiagnosticsLocalData data{};
-    ASSERT_EQ(ncclSuccess, collectors[index](&ctx, &data));
+    const auto result = collectors[index](&ctx, &data);
+    ncclUniquePtr<char> recordsOwner(data.records);
+    ASSERT_EQ(ncclSuccess, result);
     EXPECT_EQ(1, data.nRecords);
     EXPECT_EQ(rasDiagnosticsLocalRecordStride(payloadSizes[index]), static_cast<size_t>(data.recordStride));
     EXPECT_GT(data.recordsBytes, static_cast<int>(sizeof(rasDiagnosticsRankHeader)));
@@ -559,7 +552,6 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
       EXPECT_EQ(0, nvLink->nLinks);
       EXPECT_EQ(0, nvLink->nInactive);
     }
-    free(data.records);
   }
 }
 
@@ -599,21 +591,21 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionSummaryCoversKnownUnknownMismatc
   auto records = BuildRecords<rasDiagnosticsCudaDriverVersionData>(
     {{MakeRank(1, 0, 1), DriverVersion(70002000)},
      {MakeRank(2, 0, 1), DriverVersion(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "70002000 consistent"));
   EXPECT_TRUE(Contains(state.lines, "unavailable across"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsCudaDriverVersionData>(
     {{MakeRank(3, 1, 2), DriverVersion(2)}, {MakeRank(3, 0, 2), DriverVersion(1)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "rank(s) {1} differ from rank 0 (1)"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsCudaDriverVersionData>(
     {{MakeRank(5, 1, 2), DriverVersion(70002000)},
      {MakeRank(5, 0, 2), DriverVersion(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
   EXPECT_EQ("[INFO] CUDA driver version: mismatch across 2 ranks in comm 0x5, rank(s) {1} differ from rank 0 "
             "(unavailable)",
@@ -624,25 +616,25 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionSummaryCoversKnownUnknownMismatc
 
 TEST_F(RasDiagnosticsGpuMicrotest, EccSummaryCoversAvailabilityHealthyAndErrorCases) {
   auto records = BuildRecords<rasDiagnosticsEccData>({{MakeRank(1, 0, 1), EccData(false)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via NVML across 1 ranks"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsEccData>({{MakeRank(2, 0, 1), EccData(true)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "no uncorrected volatile errors across 1 ranks"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsEccData>(
     {{MakeRank(3, 0, 2), EccData(true)}, {MakeRank(3, 1, 2), EccData(false)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "across 1 of 2 ranks"));
 
   state.lines.clear();
   g_eccThreshold = 5;
   records = BuildRecords<rasDiagnosticsEccData>(
-    {{MakeRank(4, 1, 2), EccData(true, 0, 0, 6, 2)}, {MakeRank(4, 0, 2), EccData(true, 5, 1, 0, 0)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), records.size()));
+    {{MakeRank(4, 1, 2), EccData(true, 0, 0, 5, 1)}, {MakeRank(4, 0, 2), EccData(true, 6, 2, 0, 0)}});
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "uncorrected volatile errors on rank(s) {0,1} (worst=2)"));
   EXPECT_TRUE(Contains(state.lines, "corrected volatile errors at or above threshold 5 on rank(s) {0,1} (worst=6)"));
   ASSERT_FALSE(g_paramEnvs.empty());
@@ -654,41 +646,103 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccSummaryCoversAvailabilityHealthyAndErrorCa
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsEccData>(
     {{MakeRank(7, 0, 1), EccData(false)}, {MakeRank(6, 0, 1), EccData(true)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "no uncorrected volatile errors across 1 ranks in comm 0x6"));
   EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via NVML across 1 ranks in comm 0x7"));
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInactiveAndIncomplete) {
   auto records = BuildRecords<rasDiagnosticsNvLinkData>({{MakeRank(1, 0, 1), NvLinkData(0, 0)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(state.lines.empty());
 
   records = BuildRecords<rasDiagnosticsNvLinkData>({{MakeRank(2, 0, 1), NvLinkData(8, 0)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
   EXPECT_EQ("[OK]   NVLink: found 8 link(s) per device, all active across 1 ranks in comm 0x2", state.lines[0]);
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
     {{MakeRank(3, 1, 2), NvLinkData(6, 0)}, {MakeRank(3, 0, 2), NvLinkData(8, 0)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "rank(s) {1} differ from rank 0 (8)"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
     {{MakeRank(3, 1, 2), NvLinkData(8, 1)}, {MakeRank(3, 0, 2), NvLinkData(8, 0)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {1}"));
 
-  ExpectIncomplete(rasDiagnosticsNvLinkSummarize, "NVLink", 4, NvLinkData(8, 0));
+  ExpectIncomplete(rasDiagnosticsNvLinkSummarize, "NVLink", 20, NvLinkData(8, 0));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
     {{MakeRank(6, 0, 1), NvLinkData(8, 0)}, {MakeRank(7, 0, 1), NvLinkData(8, 1)}});
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), records.size()));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "all active across 1 ranks in comm 0x6"));
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {0} across 1 ranks in comm 0x7"));
+}
+
+namespace {
+
+template <typename Payload>
+std::vector<char> BuildOverflowRecords(const Payload& reference, const Payload& mismatch) {
+  const int nRanks = RAS_DIAG_RANK_SET_MAX + 2;
+  std::vector<std::pair<rasDiagnosticsRankHeader, Payload>> ranks;
+  for (int rank = nRanks - 1; rank >= 0; --rank)
+    ranks.push_back({MakeRank(0x20, rank, nRanks), rank == 0 ? reference : mismatch});
+  return BuildRecords<Payload>(ranks);
+}
+
+std::string ExpectedTruncatedRanks() {
+  std::string ranks = "{";
+  for (int rank = 1; rank <= RAS_DIAG_RANK_SET_MAX; ++rank) {
+    if (rank > 1) ranks += ",";
+    ranks += std::to_string(rank);
+  }
+  return ranks + ",...} (N=" + std::to_string(RAS_DIAG_RANK_SET_MAX + 1) + ")";
+}
+
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelSummary_TooManyMismatchesTruncatesBothRankSets) {
+  auto records = BuildOverflowRecords(GpuModel(8, "MI300X"), GpuModel(4, "MI250X"));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsGpuModelSummarize(&ctx, &reporter, records.data(),
+                                                       static_cast<int>(records.size())));
+  ASSERT_EQ(2u, state.lines.size());
+  EXPECT_NE(std::string::npos, state.lines[0].find("count mismatch"));
+  EXPECT_NE(std::string::npos, state.lines[1].find("model mismatch"));
+  for (const auto& line : state.lines)
+    EXPECT_NE(std::string::npos, line.find("rank(s) " + ExpectedTruncatedRanks() + " differ from rank 0"));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionSummary_TooManyMismatchesTruncatesRankSet) {
+  auto records = BuildOverflowRecords(DriverVersion(70002000), DriverVersion(70001000));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(),
+                                                                static_cast<int>(records.size())));
+  ASSERT_EQ(1u, state.lines.size());
+  EXPECT_NE(std::string::npos, state.lines[0].find("rank(s) " + ExpectedTruncatedRanks() + " differ from rank 0"));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, EccSummary_TooManyErrorsTruncatesBothRankSets) {
+  g_eccThreshold = 5;
+  auto records = BuildOverflowRecords(EccData(true), EccData(true, 6, 2));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(),
+                                                  static_cast<int>(records.size())));
+  ASSERT_EQ(2u, state.lines.size());
+  EXPECT_NE(std::string::npos, state.lines[0].find("uncorrected volatile errors on rank(s) " +
+                                                ExpectedTruncatedRanks() + " (worst=2)"));
+  EXPECT_NE(std::string::npos, state.lines[1].find("corrected volatile errors at or above threshold 5 on rank(s) " +
+                                                ExpectedTruncatedRanks() + " (worst=6)"));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummary_TooManyMismatchesTruncatesBothRankSets) {
+  auto records = BuildOverflowRecords(NvLinkData(8, 0), NvLinkData(6, 1));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(),
+                                                     static_cast<int>(records.size())));
+  ASSERT_EQ(2u, state.lines.size());
+  EXPECT_NE(std::string::npos, state.lines[0].find("rank(s) " + ExpectedTruncatedRanks() + " differ from rank 0"));
+  EXPECT_NE(std::string::npos, state.lines[1].find("inactive link(s) on rank(s) " + ExpectedTruncatedRanks()));
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, EveryReporterFailurePropagates) {

@@ -65,7 +65,7 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
-    diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
+    ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     ras-client-test.cc
@@ -738,7 +738,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
-    DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
+    RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
