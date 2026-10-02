@@ -512,6 +512,17 @@ const std::string& SmiNic::telemetry_sysfs_bus_path() const {
   return ports_.empty() ? sysfs_bus_path_ : ports_.front().sysfs_bus_path();
 }
 
+SmiNicKind SmiNic::kind() const {
+  // Checked first: SmiNicIfoe is also built with NicProduct::AINIC.
+  if (type_ == NicType::Fabric) {
+    return SMI_NIC_KIND_UALOE;
+  }
+  if (product_ == NicProduct::AINIC) {
+    return SMI_NIC_KIND_AINIC;
+  }
+  return SMI_NIC_KIND_OTHER;
+}
+
 uint32_t SmiNic::capabilities() const {
   uint32_t caps = 0;
   if (nic_ports_num() > 0) {
