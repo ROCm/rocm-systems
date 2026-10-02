@@ -462,7 +462,7 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
-    enabled.store(false, std::memory_order_release);
+    auto was_enabled = enabled.exchange(false, std::memory_order_acq_rel);
 
     if(auto* controller = hsa::get_queue_controller())
     {
@@ -471,7 +471,7 @@ DispatchThreadTracer::resource_deinit()
             controller->remove_callback(*client_id);
             client_id = std::nullopt;
         });
-        controller->disable_serialization();
+        if(was_enabled) controller->disable_serialization();
     }
 
     ROCP_TRACE << "Clearing agents";
