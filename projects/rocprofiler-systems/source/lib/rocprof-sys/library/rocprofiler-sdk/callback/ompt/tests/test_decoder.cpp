@@ -6,192 +6,66 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <string>
 
 namespace rocprofsys::domains::callback::ompt
 {
 namespace
 {
 
-enum class test_flag_t : int
-{
-    a = 0x1,
-    b = 0x2,
-    c = 0x4,
+constexpr std::array k_table{
+    flag_bit{ .mask = 0x1, .value = "one" },
+    flag_bit{ .mask = 0x2, .value = "two" },
+    flag_bit{ .mask = 0x4, .value = "four" },
 };
 
-// ─── has_flag / to_underlying ────────────────────────────────────────────────
-
-TEST(ompt_flag_utils_test, has_flag_detects_enum_bit)
-{
-    EXPECT_TRUE(has_flag(0x3, test_flag_t::a));
-    EXPECT_TRUE(has_flag(0x3, test_flag_t::b));
-    EXPECT_FALSE(has_flag(0x3, test_flag_t::c));
-}
-
-TEST(ompt_flag_utils_test, has_flag_detects_raw_int_mask)
+TEST(ompt_decoder_test, has_flag_checks_any_bit_of_mask)
 {
     EXPECT_TRUE(has_flag(0x5, 0x4));
     EXPECT_FALSE(has_flag(0x5, 0x2));
 }
 
-TEST(ompt_flag_utils_test, to_underlying_passes_through_non_enum)
+TEST(ompt_decoder_test, has_flag_handles_bit_31_in_signed_flags)
 {
-    EXPECT_EQ(to_underlying(42), 42);
+    EXPECT_TRUE(has_flag(static_cast<int>(0x80000000U), 0x80000000U));
 }
 
-TEST(ompt_flag_utils_test, to_underlying_converts_enum_to_its_underlying_value)
+TEST(ompt_decoder_test, first_match_returns_earliest_table_entry)
 {
-    EXPECT_EQ(to_underlying(test_flag_t::b), 0x2);
+    EXPECT_EQ(first_match(0x6, k_table), "two");
 }
 
-// ─── flag_representation::decode ─────────────────────────────────────────────
-
-using rules::flag_decode_mode;
-using rules::no_match_behavior;
-using test_rule = rules::flag_rule<int>;
-
-TEST(flag_representation_test, first_match_emits_matching_rule)
+TEST(ompt_decoder_test, first_match_returns_nullopt_when_no_bit_set)
 {
-    static constexpr std::array<test_rule, 2> k_table{
-        test_rule{ .mask  = 0x1,
-                   .type  = "t",
-                   .key   = "k",
-                   .value = "one",
-                   .mode  = flag_decode_mode::first_match },
-        test_rule{ .mask  = 0x2,
-                   .type  = "t",
-                   .key   = "k",
-                   .value = "two",
-                   .mode  = flag_decode_mode::first_match },
-    };
-
-    const auto decoded = flag_representation<int>{ 0x2, k_table }.decode();
-
-    ASSERT_EQ(decoded.size(), 1U);
-    EXPECT_EQ(decoded[0].type, "t");
-    EXPECT_EQ(decoded[0].key, "k");
-    EXPECT_EQ(decoded[0].value, "two");
+    EXPECT_FALSE(first_match(0x8, k_table).has_value());
 }
 
-TEST(flag_representation_test, first_match_prefers_earlier_rule_when_both_match)
+TEST(ompt_decoder_test, all_matches_joins_values_in_table_order)
 {
-    static constexpr std::array<test_rule, 2> k_table{
-        test_rule{ .mask  = 0x1,
-                   .type  = "t",
-                   .key   = "k",
-                   .value = "one",
-                   .mode  = flag_decode_mode::first_match },
-        test_rule{ .mask  = 0x2,
-                   .type  = "t",
-                   .key   = "k",
-                   .value = "two",
-                   .mode  = flag_decode_mode::first_match },
-    };
-
-    const auto decoded = flag_representation<int>{ 0x3, k_table }.decode();
-
-    ASSERT_EQ(decoded.size(), 1U);
-    EXPECT_EQ(decoded[0].value, "one");
+    EXPECT_EQ(all_matches(0x5, k_table), "one, four");
 }
 
-TEST(flag_representation_test, first_match_emits_nothing_when_no_rule_matches)
+TEST(ompt_decoder_test, all_matches_reports_none_when_no_bit_set)
 {
-    static constexpr std::array<test_rule, 1> k_table{
-        test_rule{ .mask  = 0x1,
-                   .type  = "t",
-                   .key   = "k",
-                   .value = "one",
-                   .mode  = flag_decode_mode::first_match },
-    };
-
-    EXPECT_TRUE(flag_representation<int>(0x0, k_table).decode().empty());
+    EXPECT_EQ(all_matches(0x0, k_table), "none");
 }
 
-TEST(flag_representation_test, all_matches_joins_matched_values_with_comma)
+TEST(ompt_decoder_test, writer_numbers_arguments_and_skips_empty_match)
 {
-    static constexpr std::array<test_rule, 3> k_table{
-        test_rule{ .mask  = 0x1,
-                   .type  = "t",
-                   .key   = "props",
-                   .value = "a",
-                   .mode  = flag_decode_mode::all_matches },
-        test_rule{ .mask  = 0x2,
-                   .type  = "t",
-                   .key   = "props",
-                   .value = "b",
-                   .mode  = flag_decode_mode::all_matches },
-        test_rule{ .mask  = 0x4,
-                   .type  = "t",
-                   .key   = "props",
-                   .value = "c",
-                   .mode  = flag_decode_mode::all_matches },
-    };
+    auto                  args = function_args_t{};
+    const flag_arg_writer writer{ args, 0x2, "t" };
 
-    const auto decoded = flag_representation<int>{ 0x5, k_table }.decode();
+    writer.first_match("absent", std::array{ flag_bit{ .mask = 0x8, .value = "x" } });
+    writer.first_match("picked", k_table);
+    writer.all_matches("all", k_table);
 
-    ASSERT_EQ(decoded.size(), 1U);
-    EXPECT_EQ(decoded[0].value, "a, c");
-}
-
-TEST(flag_representation_test, all_matches_omits_group_when_no_match_and_behavior_is_omit)
-{
-    static constexpr std::array<test_rule, 1> k_table{
-        test_rule{ .mask        = 0x1,
-                   .type        = "t",
-                   .key         = "props",
-                   .value       = "a",
-                   .mode        = flag_decode_mode::all_matches,
-                   .on_no_match = no_match_behavior::omit },
-    };
-
-    EXPECT_TRUE(flag_representation<int>(0x0, k_table).decode().empty());
-}
-
-TEST(flag_representation_test,
-     all_matches_emits_none_when_no_match_and_behavior_is_emit_none)
-{
-    static constexpr std::array<test_rule, 1> k_table{
-        test_rule{ .mask        = 0x1,
-                   .type        = "t",
-                   .key         = "props",
-                   .value       = "a",
-                   .mode        = flag_decode_mode::all_matches,
-                   .on_no_match = no_match_behavior::emit_none },
-    };
-
-    const auto decoded = flag_representation<int>{ 0x0, k_table }.decode();
-
-    ASSERT_EQ(decoded.size(), 1U);
-    EXPECT_EQ(decoded[0].value, "none");
-}
-
-TEST(flag_representation_test, decodes_multiple_independent_groups_in_order)
-{
-    static constexpr std::array<test_rule, 3> k_table{
-        test_rule{ .mask  = 0x1,
-                   .type  = "t",
-                   .key   = "kind",
-                   .value = "x",
-                   .mode  = flag_decode_mode::first_match },
-        test_rule{ .mask  = 0x2,
-                   .type  = "t",
-                   .key   = "props",
-                   .value = "y",
-                   .mode  = flag_decode_mode::all_matches },
-        test_rule{ .mask  = 0x4,
-                   .type  = "t",
-                   .key   = "props",
-                   .value = "z",
-                   .mode  = flag_decode_mode::all_matches },
-    };
-
-    const auto decoded = flag_representation<int>{ 0x1 | 0x4, k_table }.decode();
-
-    ASSERT_EQ(decoded.size(), 2U);
-    EXPECT_EQ(decoded[0].key, "kind");
-    EXPECT_EQ(decoded[0].value, "x");
-    EXPECT_EQ(decoded[1].key, "props");
-    EXPECT_EQ(decoded[1].value, "z");
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_number, 0U);
+    EXPECT_EQ(args[0].arg_type, "t");
+    EXPECT_EQ(args[0].arg_name, "picked");
+    EXPECT_EQ(args[0].arg_value, "two");
+    EXPECT_EQ(args[1].arg_number, 1U);
+    EXPECT_EQ(args[1].arg_value, "two");
 }
 
 }  // namespace

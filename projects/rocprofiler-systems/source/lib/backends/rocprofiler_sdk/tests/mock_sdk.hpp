@@ -552,7 +552,9 @@ struct mock_sdk
     struct ompt_data_t
     {};
     using ompt_operation_t = int;
+    using ompt_thread_t    = int;
 
+    static constexpr ompt_thread_t    OMPT_THREAD_INITIAL        = 1;
     static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
     static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
     static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;

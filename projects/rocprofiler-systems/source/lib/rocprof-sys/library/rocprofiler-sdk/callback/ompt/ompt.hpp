@@ -100,27 +100,9 @@ collect_args(const typename SdkBackend::callback_tracing_record_t& record)
     const auto* payload =
         static_cast<const SdkBackend::callback_tracing_ompt_data_t*>(record.payload);
 
-    if(!payload)
+    if(payload)
     {
-        return args;
-    }
-
-    const auto representation =
-        make_ompt_flag_representation<SdkBackend>(operation, *payload);
-
-    if(!representation)
-    {
-        return args;
-    }
-
-    for(auto& decoded : representation->decode())
-    {
-        args.emplace_back(argument_info{
-            .arg_number = static_cast<std::uint32_t>(args.size()),
-            .arg_type   = std::string{ decoded.type },
-            .arg_name   = std::string{ decoded.key },
-            .arg_value  = std::move(decoded.value),
-        });
+        append_flag_args<SdkBackend>(args, operation, *payload);
     }
 
     return args;
@@ -272,16 +254,14 @@ should_skip(const typename SdkBackend::callback_tracing_record_t& record)
     if(operation == SdkBackend::OMPT_ID_implicit_task)
     {
         const int flag = payload_data->args.implicit_task.flags;
-        if(has_flag(flag, ompt_task_flag_t::ompt_task_initial))
+        if(has_flag(flag, k_task_initial))
         {
             return true;  // Skips both the start and end
         }
     }
     else if(operation == SdkBackend::OMPT_ID_thread_begin)
     {
-        const auto thread_type =
-            static_cast<ompt_thread_t>(payload_data->args.thread_begin.thread_type);
-        if(thread_type == ompt_thread_t::ompt_thread_initial)
+        if(payload_data->args.thread_begin.thread_type == SdkBackend::OMPT_THREAD_INITIAL)
         {
             return true;
         }
