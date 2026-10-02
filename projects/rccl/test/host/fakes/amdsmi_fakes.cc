@@ -30,8 +30,40 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 ncclResult_t g_amdSmiInitResult = ncclSuccess;
 ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
 
+namespace {
+template <typename... Args>
+ncclResult_t AmdSmiDiagUnavailable(Args...) {
+  return ncclSystemError;
+}
+}  // namespace
+
+std::function<ncclResult_t(uint32_t*)> g_amdSmiDiagGpuCount = AmdSmiDiagUnavailable<uint32_t*>;
+ncclResult_t amd_smi_diagGpuCount(uint32_t* count) { return g_amdSmiDiagGpuCount(count); }
+
+std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagGpuModel =
+    AmdSmiDiagUnavailable<int64_t, char*, size_t>;
+ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len) {
+  return g_amdSmiDiagGpuModel(busId, model, len);
+}
+
+std::function<ncclResult_t(int64_t, struct amdsmiDiagEccCounts*)> g_amdSmiDiagEccCounts =
+    AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagEccCounts*>;
+ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts) {
+  return g_amdSmiDiagEccCounts(busId, counts);
+}
+
+std::function<ncclResult_t(int64_t, struct amdsmiDiagXgmiLinks*)> g_amdSmiDiagXgmiLinks =
+    AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagXgmiLinks*>;
+ncclResult_t amd_smi_diagXgmiLinks(int64_t busId, struct amdsmiDiagXgmiLinks* links) {
+  return g_amdSmiDiagXgmiLinks(busId, links);
+}
+
 void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_amdSmiInitResult = ncclSuccess;
+  g_amdSmiDiagGpuCount = AmdSmiDiagUnavailable<uint32_t*>;
+  g_amdSmiDiagGpuModel = AmdSmiDiagUnavailable<int64_t, char*, size_t>;
+  g_amdSmiDiagEccCounts = AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagEccCounts*>;
+  g_amdSmiDiagXgmiLinks = AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagXgmiLinks*>;
 }
