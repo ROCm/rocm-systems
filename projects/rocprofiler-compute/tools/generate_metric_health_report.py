@@ -564,19 +564,42 @@ def _iteration_banner(
     dispatch_counts: dict[str, int | None],
     stat_label: str,
 ) -> str:
+    """Build the Statistic / iterations header strip.
+
+    Collapses requested iterations and observed top-kernel dispatch counts into
+    one "wl req/disp" pair list when both are available. CLI flag hints
+    (-i / arg2 / -n) are omitted when every pair matches - they only repeat
+    the same number.
+    """
     parts = [f"<b>Statistic:</b> {html.escape(stat_label)}"]
-    if iterations is not None:
+    known_dispatches = {
+        wl: count for wl, count in dispatch_counts.items() if count is not None
+    }
+    if iterations is not None and known_dispatches:
+        pair_bits = [
+            f"{html.escape(wl)} {iterations}/{count}"
+            for wl, count in known_dispatches.items()
+        ]
+        parts.append(
+            "<b>Iterations / top-kernel dispatches:</b> " + ", ".join(pair_bits)
+        )
+        if any(count != iterations for count in known_dispatches.values()):
+            parts.append(
+                f"CLI: vcopy <code>-i {iterations}</code>, "
+                f"nbody arg2={iterations}, "
+                f"mega_kernel <code>-n {iterations}</code>"
+            )
+    elif iterations is not None:
         parts.append(
             f"<b>Requested iterations:</b> n={iterations} "
             f"(vcopy <code>-i {iterations}</code>, "
             f"nbody arg2={iterations}, "
             f"mega_kernel <code>-n {iterations}</code>)"
         )
-    count_bits = []
-    for wl, n in dispatch_counts.items():
-        if n is not None:
-            count_bits.append(f"{html.escape(wl)}={n}")
-    if count_bits:
+    elif known_dispatches:
+        count_bits = [
+            f"{html.escape(wl)}={count}" for wl, count in known_dispatches.items()
+        ]
         parts.append("<b>Top-kernel Count (dispatches):</b> " + ", ".join(count_bits))
     return (
         '<p style="margin:2px 0;color:#37474f;font-size:12px">'
@@ -836,18 +859,26 @@ def build_report(
         )
     if delta_rows:
         n_hi = sum(1 for r in delta_rows if "delta-ge-100" in r)
+        rel_pct = DELTA_REL_THRESHOLD * 100
+        hi_pct = DELTA_HIGHLIGHT_THRESHOLD * 100
+        near_zero = f"{DELTA_NEAR_ZERO:g}"
         improve_section += (
             f"<h2>Value deltas vs {html.escape(baseline_label)} "
-            f"(|rel| ≥ {DELTA_REL_THRESHOLD * 100:.0f}%, {len(delta_rows)} rows)</h2>"
+            f"(|rel| ≥ {rel_pct:.0f}%, {len(delta_rows)} rows)</h2>"
             "<p class='filter-note'>Click a column header to sort "
             "(Kernel name, ID, Metric, |rel|, …). "
-            f"Rows with |rel| ≥ {DELTA_HIGHLIGHT_THRESHOLD * 100:.0f}% "
-            f"are highlighted ({n_hi} rows). "
             f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
             "<code>--view table</code> logs (or recomputed from per-dispatch "
             "data when the Median column is absent). "
-            "|rel| = |new−old|/|old|; pairs with old≈0 are skipped as "
-            "undefined (avoids absurd % when the baseline is zero).</p>"
+            "|rel| = |new−old|/|old|.</p>"
+            "<p class='filter-note'>"
+            f"Include when |rel| ≥ {rel_pct:.0f}% "
+            f"({len(delta_rows)} rows)<br>"
+            f"Highlight when |rel| ≥ {hi_pct:.0f}% "
+            f"({n_hi} rows)<br>"
+            f"Skip when baseline |old| &lt; {near_zero} "
+            "(|rel| undefined)"
+            "</p>"
             "<table class='improve-table sortable-table' id='delta-table'>"
             "<thead><tr>"
             "<th data-sort='str'>Kernel</th>"

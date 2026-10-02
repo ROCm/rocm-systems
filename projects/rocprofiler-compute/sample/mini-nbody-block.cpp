@@ -1,22 +1,38 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
-
-// Vendored from ROCm/HIP-Examples mini-nbody/hip/nbody-block.cpp (Apache-2.0).
-// Local changes for rocprofiler-compute health workloads (AIPROFCOMP-865):
-//   - Accept argv[2] as iteration count (health: nbody-block 131072 500)
+//
+// Vendored from ROCm/HIP-Examples mini-nbody/hip/nbody-block.cpp (Apache-2.0;
+// see LICENSE.mini-nbody). Local changes for rocprofiler-compute health
+// workloads (AIPROFCOMP-865):
+//   - Accept argv[2] as iteration count (health: mini-nbody-block 131072 500)
 //   - Pin host staging buffer (hipHostMalloc); keep device alloc outside loop
 //   - Guard avgTime when nIters < 2
+//   - Inline timer helpers (from upstream mini-nbody/timer.h)
 
 #include "hip/hip_runtime.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "timer.h"
+#include <sys/time.h>
 
 #define BLOCK_SIZE 256
 #define SOFTENING 1e-9f
 
 typedef struct { float4 *pos, *vel; } BodySystem;
+
+static struct timeval timerStart;
+
+static void StartTimer() {
+  gettimeofday(&timerStart, NULL);
+}
+
+// time elapsed in ms
+static double GetTimer() {
+  struct timeval timerStop, timerElapsed;
+  gettimeofday(&timerStop, NULL);
+  timersub(&timerStop, &timerStart, &timerElapsed);
+  return timerElapsed.tv_sec * 1000.0 + timerElapsed.tv_usec / 1000.0;
+}
 
 void randomizeBodies(float *data, int n) {
   for (int i = 0; i < n; i++) {

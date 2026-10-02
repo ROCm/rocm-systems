@@ -7,7 +7,7 @@
 #
 # Default workload iterations: 500 (median-stable). Override with ITERS=.
 #   vcopy:       -n 81920 -b 256 -i ${ITERS}
-#   nbody:       nbody-block 131072 ${ITERS}
+#   nbody:       mini-nbody-block 131072 ${ITERS}
 #   mega_kernel: -b 65536 -n ${ITERS}
 #
 # Usage (on host, after syncing rocprofiler-compute tree):
@@ -131,35 +131,11 @@ echo "MEGA_SMOKE_OK mega_kernel_rc=$mk_rc"
 
 echo "--- build apps ---"
 hipcc -O3 -std=c++17 --offload-arch="${ARCH}" -o sample/vc sample/vcopy.cpp
-
-NBODY_SRC=""
-for src in \
-  "${ROOT}/sample/mini-nbody" \
-  /home/AMD/feizheng/HIP-Examples/mini-nbody \
-  /home/feizheng/HIP-Examples/mini-nbody; do
-  if [[ -d "$src/hip" ]]; then
-    NBODY_SRC=$src
-    break
-  fi
-done
-if [[ -z "$NBODY_SRC" ]]; then
-  echo "Cloning HIP-Examples mini-nbody..."
-  TMP=$(mktemp -d)
-  git clone --depth 1 --filter=blob:none --sparse \
-    https://github.com/ROCm/HIP-Examples.git "$TMP/HIP-Examples"
-  git -C "$TMP/HIP-Examples" sparse-checkout set mini-nbody
-  NBODY_SRC=$TMP/HIP-Examples/mini-nbody
-  mkdir -p sample/mini-nbody
-  cp -a "$NBODY_SRC/." sample/mini-nbody/
-  NBODY_SRC=${ROOT}/sample/mini-nbody
-fi
-if [[ ! -x sample/mini-nbody/hip/nbody-block ]]; then
-  (cd sample/mini-nbody/hip && hipcc -O2 -std=c++17 -I../ -DSHMOO \
-    --offload-arch="${ARCH}" nbody-block.cpp -o nbody-block)
-fi
-chmod +x sample/mini-nbody/hip/nbody-block
+hipcc -O2 -std=c++17 -DSHMOO --offload-arch="${ARCH}" \
+  -o sample/mini-nbody-block sample/mini-nbody-block.cpp
+chmod +x sample/mini-nbody-block
 ./sample/vc -n 65536 -b 256 -i 1 >/dev/null
-./sample/mini-nbody/hip/nbody-block 16384 1 >/dev/null || true
+./sample/mini-nbody-block 16384 1 >/dev/null || true
 echo "APPS_OK"
 
 LOGDIR=${ROOT}/workloads/logs_gfx942_${TAG}
@@ -264,7 +240,7 @@ run_one() {
 
 for mode in spp legacy; do
   run_one "$mode" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
-  run_one "$mode" nbody ./sample/mini-nbody/hip/nbody-block 131072 "$ITERS"
+  run_one "$mode" nbody ./sample/mini-nbody-block 131072 "$ITERS"
   run_one "$mode" mega_kernel ./sample/mega_kernel/mega_kernel_test_gfx942 -b 65536 -n "$ITERS"
 done
 

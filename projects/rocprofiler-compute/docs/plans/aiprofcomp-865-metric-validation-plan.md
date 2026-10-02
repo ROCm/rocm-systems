@@ -109,7 +109,7 @@ until smoke is green.
 | App | Build | Run args |
 |-----|-------|----------|
 | **vcopy** | `hipcc --offload-arch=<arch> -O3 sample/vcopy.cpp -o sample/vc` | `./sample/vc -n 81920 -b 256` |
-| **nbody** | From [HIP-Examples mini-nbody/hip](https://github.com/ROCm/HIP-Examples/tree/master/mini-nbody/hip): `hipcc -I../ -DSHMOO nbody-block.cpp -o nbody-block` | `./nbody-block 131072` |
+| **nbody** | From [HIP-Examples nbody-block.cpp](https://github.com/ROCm/HIP-Examples/blob/master/mini-nbody/hip/nbody-block.cpp): `hipcc -DSHMOO --offload-arch=<arch> sample/mini-nbody-block.cpp -o sample/mini-nbody-block` | `./sample/mini-nbody-block 131072` |
 | **mega_kernel** | Arch-specific (see sample README) | CDNA: e.g. `-b 65536`; gfx1151: README defaults; do **not** use gfx1250’s mistaken `-t 32` wave-size pattern |
 
 ### Profile / analyze commands

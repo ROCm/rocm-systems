@@ -18,7 +18,7 @@ Stable **device VAs within one process** keep L2 channel hashing steadier across
 | Workload | Before | After | Files |
 |----------|--------|-------|-------|
 | **vcopy** | Device alloc once ✓; host `malloc` (pageable); no per-iter alloc/free ✓ | Host H2D/D2H buffers **pinned**; device still once outside `-i` loop | `sample/vcopy.cpp` |
-| **nbody** | Upstream HIP-Examples: device once ✓; host `malloc`; **`nIters` hardcoded 10** (ignored argv[2]) | Vendored under `sample/mini-nbody/`: **argv[2] iters**, host **pinned**, device once | `sample/mini-nbody/hip/nbody-block.cpp`, `timer.h`, `LICENSE`, `README.md` |
+| **nbody** | Upstream HIP-Examples: device once ✓; host `malloc`; **`nIters` hardcoded 10** (ignored argv[2]) | Vendored as `sample/mini-nbody-block.cpp`: **argv[2] iters**, host **pinned**, device once | `sample/mini-nbody-block.cpp`, `LICENSE.mini-nbody` |
 | **mega_kernel** | Device alloc once ✓; host `malloc` for I/O; per-iter only `hipMemcpy`/`hipMemset` ✓ | Host I/O buffers **pinned**; device still once outside `-n` loop | `sample/mega_kernel/main.cpp` |
 
 | Check | vcopy | nbody | mega_kernel |
