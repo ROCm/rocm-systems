@@ -104,6 +104,13 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
+void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                              rocprofiler_user_data_t* /*user_data*/,
+                              void* callback_data)
+{
+    g_sdk_callbacks->kernel_dispatch_callback(record, callback_data);
+}
+
 void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_version*/,
                            uint64_t /*lib_instance*/,
@@ -133,6 +140,15 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       nullptr,
                                                       0,
                                                       tool_tracing_callback,
+                                                      user_data);
+
+    // Always on, so a run without counters still records its dispatches.
+    rocprofiler_tracing_operation_t dispatch_complete = ROCPROFILER_KERNEL_DISPATCH_COMPLETE;
+    g_sdk_wrapper->configure_callback_tracing_service(get_client_ctx(),
+                                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                      &dispatch_complete,
+                                                      1,
+                                                      kernel_dispatch_callback,
                                                       user_data);
 
     // Declare counters before HSA loads so the SDK picks the legacy intercept path;

@@ -15,6 +15,7 @@
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using code_object_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
+using kernel_dispatch_data_t  = rocprofiler_callback_tracing_kernel_dispatch_data_t;
 
 SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
@@ -301,9 +302,7 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
 
         // Store the counter info record in tool_data
         counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
-                                     dispatch_data.dispatch_info.agent_id.handle,
                                      dispatch_data.dispatch_info.kernel_id,
-                                     dispatch_data.dispatch_info.group_segment_size,
                                      counter_id.handle,
                                      tool->counter_id_name_map[counter_id.handle],
                                      record_data[i].counter_value};
@@ -312,8 +311,21 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
             tool->counter_records.push_back(std::move(record));
         }
     }
+}
 
-    const auto&       info = dispatch_data.dispatch_info;
+void SdkCallbacksImpl::kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                                                void*                                 callback_data)
+{
+    if (record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH ||
+        record.operation != ROCPROFILER_KERNEL_DISPATCH_COMPLETE)
+        return;
+
+    assert(callback_data);
+    assert(record.payload);
+    auto*       tool = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
+    const auto* data = static_cast<kernel_dispatch_data_t*>(record.payload);
+
+    const auto&       info = data->dispatch_info;
     dispatch_record_t dispatch{info.dispatch_id,
                                info.agent_id.handle,
                                info.kernel_id,
@@ -322,9 +334,9 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
                                    info.workgroup_size.z,
                                info.group_segment_size,
                                info.private_segment_size,
-                               dispatch_data.start_timestamp,
-                               dispatch_data.end_timestamp,
-                               dispatch_data.correlation_id.internal};
+                               data->start_timestamp,
+                               data->end_timestamp,
+                               record.correlation_id.internal};
     {
         std::lock_guard<std::mutex> lock(tool->mut);
         tool->dispatch_records.push_back(std::move(dispatch));

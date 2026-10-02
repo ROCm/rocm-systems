@@ -17,8 +17,7 @@ using namespace rocprofiler_compute_tool;
 
 namespace
 {
-constexpr const char* kHeader =
-    "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,counter_id,counter_name,counter_value\n";
+constexpr const char* kHeader = "dispatch_id,counter_id,counter_name,counter_value\n";
 
 std::filesystem::path test_directory()
 {
@@ -48,13 +47,11 @@ counter_info_record_t TestCountersWriter::make_record(uint64_t    dispatch_id,
                                                       double      counter_value)
 {
     counter_info_record_t record{};
-    record.dispatch_id     = dispatch_id;
-    record.agent_id        = 2;
-    record.kernel_id       = 3;
-    record.LDS_memory_size = 4;
-    record.counter_id      = 5;
-    record.counter_name    = std::move(counter_name);
-    record.counter_value   = counter_value;
+    record.dispatch_id   = dispatch_id;
+    record.kernel_id     = 3;
+    record.counter_id    = 5;
+    record.counter_name  = std::move(counter_name);
+    record.counter_value = counter_value;
     return record;
 }
 
@@ -67,7 +64,7 @@ TEST_F(TestCountersWriter, Records_AreWrittenOnePerLineInOrder)
 {
     m_tool_data.counter_records = {make_record(0, "SQ_WAVES", 10), make_record(1, "SQ_WAVES", 20)};
 
-    EXPECT_EQ(format(), std::string{kHeader} + "0,2,3,4,5,SQ_WAVES,10\n" + "1,2,3,4,5,SQ_WAVES,20\n");
+    EXPECT_EQ(format(), std::string{kHeader} + "0,5,SQ_WAVES,10\n" + "1,5,SQ_WAVES,20\n");
 }
 
 TEST_F(TestCountersWriter, CounterValue_KeepsDefaultOstreamFormatting)
@@ -79,9 +76,9 @@ TEST_F(TestCountersWriter, CounterValue_KeepsDefaultOstreamFormatting)
 
     std::ostringstream expected;
     expected << kHeader;
-    expected << "0,2,3,4,5,SQ_WAVES," << 0.5 << '\n';
-    expected << "1,2,3,4,5,SQ_WAVES," << 1234567890.0 << '\n';
-    expected << "2,2,3,4,5,SQ_WAVES," << 1e-7 << '\n';
+    expected << "0,5,SQ_WAVES," << 0.5 << '\n';
+    expected << "1,5,SQ_WAVES," << 1234567890.0 << '\n';
+    expected << "2,5,SQ_WAVES," << 1e-7 << '\n';
 
     EXPECT_EQ(format(), expected.str());
 }
@@ -97,7 +94,7 @@ TEST_F(TestCountersWriter, ManyRecords_AreAllWrittenAcrossBatches)
 
     EXPECT_EQ(std::count(csv.begin(), csv.end(), '\n'), kRecords + 1);
     EXPECT_EQ(csv.compare(0, std::string{kHeader}.size(), kHeader), 0);
-    EXPECT_NE(csv.find("\n49999,2,3,4,5,SQ_WAVES,49999\n"), std::string::npos);
+    EXPECT_NE(csv.find("\n49999,5,SQ_WAVES,49999\n"), std::string::npos);
     EXPECT_GT(m_batches, 1);
 }
 
