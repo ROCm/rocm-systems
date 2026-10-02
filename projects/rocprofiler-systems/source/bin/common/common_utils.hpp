@@ -38,7 +38,7 @@ struct translated_args
  */
 [[nodiscard]] translated_args
 translate_arguments(
-    int argc, char** argv, preset_registry& registry,
+    int argc, char* const* argv, preset_registry const& registry,
     const std::unordered_map<std::string, std::string>& deprecated_flags = {});
 
 /**
@@ -189,7 +189,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
     }
     else
     {
-        auto captured = capture_help_text(parser);
+        auto const captured = capture_help_text(parser);
 
         if(print_help_for_domain(captured, topic, tool_name) ||
            print_help_for_topic(captured, topic, tool_name))

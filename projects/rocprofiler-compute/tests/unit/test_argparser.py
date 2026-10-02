@@ -27,6 +27,27 @@ def build_args(argv, experimental=False):
     return parser.parse_args(argv)
 
 
+def help_text(home, argv, capsys):
+    """Return the help output for argv with the given rocprof-compute home."""
+    parser = argparse.ArgumentParser(
+        prog="tool",
+        description="CLI",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    with pytest.raises(SystemExit):
+        parser.parse_args([*argv, "--help"])
+    return capsys.readouterr().out
+
+
+def write_skills_readme(skills_dir):
+    """Create a skills README and return its path."""
+    skills_dir.mkdir(parents=True)
+    readme = skills_dir / "README.md"
+    readme.write_text("skills")
+    return readme
+
+
 # =============================================================================
 # -v / --version
 # =============================================================================
@@ -389,3 +410,27 @@ def test_experimental_action_help_suppression():
 
     # Help should be suppressed
     assert "--test-exp-feature" not in help_text, f"{help_text}"
+
+
+# =============================================================================
+# Agent Skills note in --help
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", [[], ["profile"], ["analyze"]])
+def test_help_shows_skills_in_source_checkout(tmp_path, capsys, mode):
+    readme = write_skills_readme(tmp_path / "skills")
+    output = help_text(tmp_path / "src", mode, capsys)
+    assert f"Agent Skills: see {readme}" in output
+
+
+@pytest.mark.parametrize("mode", [[], ["profile"], ["analyze"]])
+def test_help_shows_skills_in_install(tmp_path, capsys, mode):
+    readme = write_skills_readme(tmp_path / "share" / "rocprofiler-compute" / "skills")
+    home = tmp_path / "libexec" / "rocprofiler-compute"
+    output = help_text(home, mode, capsys)
+    assert f"Agent Skills: see {readme}" in output
+
+
+def test_help_omits_skills_when_not_shipped(tmp_path, capsys):
+    assert "Agent Skills" not in help_text(tmp_path / "src", [], capsys)

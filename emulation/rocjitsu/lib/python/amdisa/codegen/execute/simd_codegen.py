@@ -28,6 +28,26 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.floating_policy import (
+    FLUSH_NEAREST_F32_OPS,
+    ROUNDED_F16_OPS,
+)
+
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
+
+
+def _binary_f32_op(
+    operation: str, *, modifiers: bool = False, reverse: bool = False
+) -> str:
+    capture = '&inst, &wf' if modifiers else '&wf'
+    omod = ', amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)' if modifiers else ''
+    operands = 'b, a' if reverse else 'a, b'
+    return (
+        f'[{capture}](auto a, auto b) {{ return '
+        f'amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::{operation}>({operands}, wf{omod}); }}'
+    )
+
+
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
 #
 # template_name matches the symbol emitted by _generator.gen_shared_execute:
@@ -37,10 +57,10 @@ from __future__ import annotations
 # try_execute_binary_vop2_simd. Use std::*<> for stateless ops.
 SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # --- float32 (IEEE-754 single-rounded, bit-identical to scalar body) ---
-    "v_add_f32_vop2": ("float32_t", "std::plus<>{}"),
-    'v_sub_f32_vop2': ('float32_t', 'std::minus<>{}'),
-    'v_subrev_f32_vop2': ('float32_t', '[](auto a, auto b) { return b - a; }'),
-    'v_mul_f32_vop2': ('float32_t', 'std::multiplies<>{}'),
+    "v_add_f32_vop2": ("float32_t", _binary_f32_op('ADD')),
+    'v_sub_f32_vop2': ('float32_t', _binary_f32_op('SUB')),
+    'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('SUB', reverse=True)),
+    'v_mul_f32_vop2': ('float32_t', _binary_f32_op('MUL')),
     # Legacy / DX9 zero-multiply: (a==0 || b==0) ? 0 : a*b. The ==0 matches both
     # ±0 (as the scalar `a == 0.0f` does). Routed via the VOP3 binary fp glue for
     # the _vop3 twin (which applies abs/neg/omod/clamp around this functor).
@@ -243,8 +263,8 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     ),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
     # round-toward-zero narrowing; proven bit-identical to the scalar helper.
-    # Inputs arrive as raw u32 lanes, bit_cast to f32. The VOP3 twins carry no
-    # modifiers (verified) so they auto-route to VOP3_BINARY_INT with this functor.
+    # Inputs arrive as raw u32 lanes, bit_cast to f32. VOP3 source modifiers
+    # require a scalar fallback before using this raw-word functor.
     'v_cvt_pkrtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -300,11 +320,9 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 #   un_op(simd<Tin>) -> simd<Tout>
 # inside try_execute_unary_vop1_simd. Tin and Tout are both 32-bit lane
 # types and may differ (e.g. int32->float32 for v_cvt_f32_i32). Eligible
-# kernels are those whose host SIMD result is bit-identical to the scalar
-# generated body: elementwise bit ops, exact int<->float casts, and the
-# correctly-rounded IEEE operations (div, sqrt, and — verified per toolchain
-# via the parity test — exp2/log2). NaN/clamp-bearing conversions and the
-# inexact transcendentals (sin/cos) are excluded.
+# kernels preserve the generated scalar result: elementwise bit operations,
+# exact casts, and floating-point helpers with matching guest policies.
+# LOG/EXP and RCP/RSQ use the shared hardware mappings. SIN/COS stay scalar.
 # VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
 # over an f32 source and result (so the VOP3 twin routes through the f32 unary
 # modifier glue rather than reusing the plain VOP1 path).
@@ -607,7 +625,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_rcp_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::rcp_f32_simd(a); }',
+        '[&wf](auto a) { return util::rcp_f32_simd(a, '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
     'v_rcp_iflag_f32_vop1': (
         'float32_t',
@@ -617,27 +636,28 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_rsq_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::rsq_f32_simd(a); }',
+        '[&wf](auto a) { return util::rsq_f32_simd(a, '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
     'v_sqrt_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::sqrt_f32_simd(a); }',
+        '[&wf](auto a) { return util::sqrt_f32_simd(a, '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
-    # --- transcendental exp2/log2. util::{exp,log}_f32_simd wrap stdx::exp2/log2
-    # with the same FTZ flush / special-case guards as the scalar transcendental
-    # reference; the underlying vector libm is bit-exact to scalar std::* on the
-    # supported toolchains (libstdc++ 13 / AVX-512), guarded by
-    # UtilSimd.Exp2/Log2_*_BitExact. v_sin/v_cos excluded: vector libm ~1 ULP off. ---
+    # LOG and EXP share their integer scalar mappings. Their complete
+    # instruction bodies save the host environment for output scaling.
     'v_exp_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::exp_f32_simd(a); }',
+        '[&wf](auto a) { return util::exp_f32_simd(a, '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
     'v_log_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::log_f32_simd(a); }',
+        '[&wf](auto a) { return util::log_f32_simd(a, '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
     # --- float -> int conversions with NaN->0 and saturating clamp. The float
     # comparison masks are re-typed to the int lane via simd_mask_as<> before
@@ -701,45 +721,53 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' auto f = util::f16_to_f32_simd(a);'
         ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
     ),
-    # f16 transcendentals mirror the scalar f32_to_f16(<op>_f32(f16_to_f32(x)))
-    # by applying the f32-domain util::*_f32_simd helper (FTZ flush + canonical
-    # qNaN / NaN-input guards) on the f16->f32 intermediate.
+    # Half transcendentals apply input policy and round before output modifiers.
     'v_rcp_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::rcp_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) { return util::f32_to_f16_simd('
+        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RCP>('
+        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
     ),
     'v_rsq_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) { return util::f32_to_f16_simd('
+        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RSQ>('
+        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
     ),
     'v_sqrt_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::sqrt_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) { return util::f32_to_f16_simd('
+        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::SQRT>('
+        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
     ),
-    # exp/log_f16 inherit the exp2/log2 toolchain guard (UtilSimd.Exp2/Log2_*).
+    # Half LOG/EXP rounds once before applying output modifiers.
     'v_exp_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::exp_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) { return util::f32_to_f16_simd('
+        'amdgpu::transcendental::log_exp_f16_simd<false>(util::f16_to_f32_simd(a), '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
     ),
     'v_log_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::log_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) { return util::f32_to_f16_simd('
+        'amdgpu::transcendental::log_exp_f16_simd<true>(util::f16_to_f32_simd(a), '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
     ),
     # --- f16 <-> f32 / int16 conversions ---
     'v_cvt_f32_f16_vop1': (
         'uint32_t',
         'float32_t',
-        '[](auto a) { return util::f16_to_f32_simd(a); }',
+        '[&wf](auto a) { return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf); }',
     ),
     'v_cvt_f16_f32_vop1': (
         'float32_t',
@@ -867,9 +895,15 @@ SIMD_VOP2_CARRY.update(
 # performs the fused operation in native<double> chunks and applies the current
 # FP16 MODE controls without an intervening f32 rounding. v_fmac_f64 likewise
 # has a dedicated split-VGPR, MODE-aware path in SIMD_VOP2_FMA_F64.
-_FMA_ACC_F32 = '[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }'
-_FMA_ADDK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }'
-_FMA_MULK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }'
+_FMA_ACC_F32 = (
+    '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd(a, b, d, wf); }'
+)
+_FMA_ADDK_F32 = (
+    '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, b, k, wf); }'
+)
+_FMA_MULK_F32 = (
+    '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, k, b, wf); }'
+)
 _FMA_ACC_F16 = (
     '[](auto a, auto b, auto d, auto) {'
     ' return util::f32_to_f16_simd(util::stdx::fma('
@@ -893,7 +927,11 @@ _FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # --- f32 dst-accumulate ---
     'v_fmac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
-    'v_fmac_dx9_zero_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
+    'v_fmac_dx9_zero_f32_vop2': (
+        'float32_t',
+        '0u',
+        '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_dx9_zero_f32_simd(a, b, d, wf); }',
+    ),
     'v_mac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     # --- f32 inline literal ---
     'v_fmaak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
@@ -1092,13 +1130,12 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     'v_div_fmas_f64_vop3',
 }
 
-# VOP3P fma_mix / mad_mix family. The six ops share one body (`a*b + c` plus
-# optional clamp to [0,1]); only the destination shape differs:
-#  - F32     -> v_fma_mix_f32_vop3p (RDNA3+), v_mad_mix_f32_vop3p (CDNA1-4)
+# VOP3P fma_mix / mad_mix family. FMA uses the fused, mode-aware path:
+#  - F32     -> v_fma_mix_f32_vop3p (RDNA), v_mad_mix_f32_vop3p (CDNA1-4)
 #  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
 #  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
 # Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
-# half. neg flips the sign bit. No abs, no omod. Functorless / fixed-op.
+# half. neg flips the sign bit and neg_hi applies ABS. No OMOD.
 SIMD_VOP3P_FMA_MIX_F32: set[str] = {
     'v_fma_mix_f32_vop3p',
     'v_mad_mix_f32_vop3p',
@@ -1250,9 +1287,9 @@ SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
 }
 
 # pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
-# NaN-input payload divergence accepted.
+# Scalar and SIMD execution share hardware NaN selection.
 SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
-    'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_pk_fma_f32_vop3p': '[&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); }',
 }
 
 # v_pk_mov_b32 — each src is a 64-bit SGPR or VGPR pair. op_sel[0] selects the
@@ -1761,7 +1798,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # them on the (correct) scalar path. Only the int-domain twins
     # v_cvt_pk_i16_i32 / v_cvt_pk_u16_u32 above are safe to route through this glue.
     # Normalized f32 pack-converts. src read as raw f32 (bit_cast), scale by K,
-    # clamp, isnan->0, truncate, pack 16|16. Helpers in util/simd.h.
+    # clamp, isnan->0, round once to nearest-even, pack 16|16. Helpers in util/simd.h.
     'v_cvt_pknorm_i16_f32_vop3': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -1993,29 +2030,42 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 }
 
 
-# VOP3 f16 unary: widen f16->f32, apply abs/neg, op, omod/clamp, narrow back.
-# Rounding ops (ceil/floor/trunc/rndne) have no FTZ. sqrt is also no-FTZ
-# (transcendental::sqrt_f32 keeps denormals). The four transcendentals
-# (rcp/rsq/exp/log) reuse util::*_f32_simd which already wraps the scalar
-# transcendental::flush_denorm_f32 carve-outs (FTZ input + matching ±0/Inf
-# blends + NaN-passthrough), so the f16 scalar
-# f32_to_f16(transcendental::op_f32(f16_to_f32(...))) maps directly.
+# VOP3 f16 unary operations widen to f32 for modifiers and narrow the result.
+# Integral rounding preserves input denormals. Transcendentals apply half
+# denormal, overflow and NaN policies and round to f16 before OMOD.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     'v_ceil_f16_vop3': '[](auto a) { return util::ceil_simd(a); }',
     'v_floor_f16_vop3': '[](auto a) { return util::floor_simd(a); }',
     'v_trunc_f16_vop3': '[](auto a) { return util::trunc_simd(a); }',
     'v_rndne_f16_vop3': '[](auto a) { return util::rndne_simd(a); }',
     'v_sqrt_f16_vop3': (
-        '[](auto a) {'
-        ' auto r = util::stdx::sqrt(a);'
-        ' util::stdx::where(util::stdx::isnan(a), r) = a;'
-        ' util::stdx::where(a < 0.0f, r) = std::numeric_limits<float>::quiet_NaN();'
-        ' return r; }'
+        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
+        'amdgpu::transcendental::HalfOperation::SQRT>(a, '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
     ),
-    'v_rcp_f16_vop3': '[](auto a) { return util::rcp_f32_simd(a); }',
-    'v_rsq_f16_vop3': '[](auto a) { return util::rsq_f32_simd(a); }',
-    'v_exp_f16_vop3': '[](auto a) { return util::exp_f32_simd(a); }',
-    'v_log_f16_vop3': '[](auto a) { return util::log_f32_simd(a); }',
+    'v_rcp_f16_vop3': (
+        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
+        'amdgpu::transcendental::HalfOperation::RCP>(a, '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
+    ),
+    'v_rsq_f16_vop3': (
+        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
+        'amdgpu::transcendental::HalfOperation::RSQ>(a, '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
+    ),
+    'v_exp_f16_vop3': (
+        '[&wf](auto a) { return amdgpu::transcendental::log_exp_f16_simd<false>(a, '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
+    ),
+    'v_log_f16_vop3': (
+        '[&wf](auto a) { return amdgpu::transcendental::log_exp_f16_simd<true>(a, '
+        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
+    ),
     # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
     # and applies abs/neg/omod/clamp), mirroring the covered v_fract_f16_vop1.
     'v_fract_f16_vop3': '[](auto a) { return a - util::floor_simd(a); }',
@@ -2061,14 +2111,10 @@ SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
 
 # --- VOP3 floating-point ternary (FMA / MAD family) ------------------------
 #
-# v_fma_*: util::stdx::fma (fused multiply-add, single-rounded). v_fmac/v_mac:
-# same body (the scalar generator emits std::fma for both because of dst-
-# accumulate semantics — src2 == vdst). v_mad: non-fused `a * b + c`. NaN-input
-# divergence between stdx::fma and std::fma (gcc-13 packed FMA picks a
-# different NaN operand to quiet) is accepted, same as the existing VOP2
-# ternary FMA slice — the A/B test skips NaN-input lanes.
+# F32 FMA and accumulator forms share scalar NaN policy; finite lanes retain
+# native SIMD arithmetic. MAD retains its non-fused multiply/add semantics.
 SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
-    'v_fma_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     # min3/max3/med3 (f32): the scalar body composes std::fmax/std::fmin
@@ -2079,11 +2125,7 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
     # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
     'v_fma_dx9_zero_f32_vop3': (
-        '[&wf](auto a, auto b, auto c) {'
-        ' return decltype(a)([&](auto i) {'
-        ' return amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA_DX9_ZERO>('
-        ' static_cast<float>(a[i]), static_cast<float>(b[i]), static_cast<float>(c[i]),'
-        ' wf.fp_round_mode_f32(), 0); }); }'
+        '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); }'
     ),
     'v_max3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
     'v_min3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
@@ -2104,13 +2146,15 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_minimum3_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
     'v_maximumminimum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimummaximum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
-    # Cubemap face ops: ternary f32, per-source abs/neg + result omod/clamp via
-    # the glue; the face-selection is a bit-exact where-cascade (helpers in
-    # simd_glue.h). cubema is inline (exact ×2 of fmax of abs).
-    'v_cubeid_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }',
-    'v_cubema_f32_vop3': '[](auto x, auto y, auto z) { return 2.0f * util::stdx::fmax(util::stdx::abs(x), util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z))); }',
-    'v_cubesc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }',
-    'v_cubetc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }',
+    # Cube applies OMOD itself; false leaves only CLAMP to the operand glue.
+    **{
+        f'v_{op}_f32_vop3': (
+            '[&inst, &wf](auto x, auto y, auto z) { return '
+            + cube_omod(cube_expression(op, 'x', 'y', 'z'), 'inst.inst_')
+            + '; }, false'
+        )
+        for op in CUBE_OPERATIONS
+    },
     # Share the bit-level fixup and guest MODE policy with the scalar executor.
     # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
     'v_div_fixup_f32_vop3': (
@@ -2165,11 +2209,11 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 # v_fmac / v_mac per-isa classes only initialize src0+src1+vdst; the third FMA
 # operand IS vdst (no src2 Operand). The accumulate-form glue reads inst.vdst
 # as the third operand and applies abs/neg only to src0/src1 (per scalar body).
-# NaN payload divergence accepted, same as the non-accumulate ternary slice.
+# F32 NaN selection matches the non-accumulate ternary slice.
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
-    'v_fmac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_mac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_fmac_dx9_zero_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_fmac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
+    'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
+    'v_fmac_dx9_zero_f32_vop3': SIMD_VOP3_TERNARY_FP32['v_fma_dx9_zero_f32_vop3'],
 }
 SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
 SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
@@ -2535,6 +2579,36 @@ def _indent_probe(probe: str) -> str:
     return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
 
 
+_PACKED_NORMALIZED_VOP3 = (
+    'v_cvt_pknorm_i16_f32_vop3',
+    'v_cvt_pknorm_u16_f32_vop3',
+    'v_cvt_pk_norm_i16_f32_vop3',
+    'v_cvt_pk_norm_u16_f32_vop3',
+    'v_cvt_pk_norm_i16_f16_vop3',
+    'v_cvt_pk_norm_u16_f16_vop3',
+)
+
+
+_PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
+
+
+def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
+    """Apply floating source signs before a raw-word SIMD conversion."""
+    operands = ('a', 'b')[:arity]
+    parameters = ', '.join(f'auto {operand}' for operand in operands)
+    sign = f'0x{1 << (bits - 1):x}u'
+    modifiers = ''.join(
+        f' if (inst.inst_.abs & {1 << i}u) {operand} &= ~{sign};'
+        f' if (inst.inst_.neg & {1 << i}u) {operand} ^= {sign};'
+        for i, operand in enumerate(operands)
+    )
+    return (
+        f'[&inst]({parameters}) {{'
+        + modifiers
+        + f' return ({cpp_op})({", ".join(operands)}); }}'
+    )
+
+
 def _mode_aware_f16_result_simd_probe(default_probe: str, ovfl_probe: str) -> str:
     default_body = _indent_probe(default_probe)
     ovfl_body = _indent_probe(ovfl_probe)
@@ -2581,6 +2655,9 @@ def simd_probe_line(
 
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
+    if template_name == 'v_fma_mix_f32_vop3p':
+        # The fused MIX helper establishes MODE and applies denormal controls.
+        return probe
     arithmetic_ops = (
         'add',
         'sub',
@@ -2606,6 +2683,42 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
     dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
     if dtype is None or (fields[1] == 'ldexp' and dtype != 'f16'):
         return probe
+    if dtype == 'f32' and fields[1] in ('sub', 'subrev'):
+        # Reuse the checked SIMD views and share MODE setup for ordinary
+        # operands. Observers and delegates retain their existing path and host
+        # environment; they can execute user code during register access.
+        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
+        macro = 'VOP2_BINARY' if fields[-1] == 'vop2' else 'VOP3_BINARY_FP'
+        native_op = (
+            'std::minus<>{}'
+            if fields[1] == 'sub'
+            else '[](auto a, auto b) { return b - a; }'
+        )
+        native_probe = f'  ROCJITSU_TRY_SIMD_{macro}(float32_t, {native_op});'
+        return (
+            '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && '
+            '!wf.cu().observes_register_access() && '
+            '!wf.cu().debug_active() && !inst.src0.delegate() && '
+            f'!{source1}.delegate() && !inst.vdst.delegate()) {{\n'
+            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
+            f'{_indent_probe(probe)}\n'
+            '  }\n'
+            '  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), '
+            f'wf.fp_denorm_mode_f32())) {{\n{native_probe}\n  }}'
+        )
+    if (
+        dtype == 'f32'
+        and 'dx9' not in fields
+        and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
+    ):
+        # This helper applies guest denormal controls explicitly. Establish MODE
+        # once for the wave, including its output scaling and clamp operations.
+        return (
+            '  {\n'
+            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
+            f'{_indent_probe(probe)}\n'
+            '  }'
+        )
     if dtype in ('f16', 'f64') and fields[1] in ('fma', 'fmac', 'fmaak', 'fmamk'):
         return probe
     mode = 'f32' if dtype == 'f32' else 'f16_f64'
@@ -2815,7 +2928,13 @@ def _simd_probe_line(
     # packed FMA quiets a different NaN operand vs scalar std::fma).
     spec3tf32 = SIMD_VOP3_TERNARY_FP32.get(template_name)
     if spec3tf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32});'
+        # Apply OMOD with mandatory output flushing for DX9 FMA.
+        policy = (
+            ', true /* apply_omod */, true /* force_output_flush */'
+            if template_name == 'v_fma_dx9_zero_f32_vop3'
+            else ''
+        )
+        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32}{policy});'
     spec3tf16 = SIMD_VOP3_TERNARY_FP16.get(template_name)
     if spec3tf16 is not None:
         macro = (
@@ -2876,10 +2995,15 @@ def _simd_probe_line(
     specdotcf16 = SIMD_DOTC_F16.get(template_name)
     if specdotcf16 is not None:
         return f'  ROCJITSU_TRY_SIMD_DOTC_F16({specdotcf16});'
-    # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
-    # for all; the routing picks the matching glue specialization.
+    # VOP3P fma_mix / mad_mix: select fused arithmetic and destination shape.
+    if template_name == 'v_fma_mix_f32_vop3p':
+        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F32);'
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
         return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();'
+    if template_name == 'v_fma_mixlo_f16_vop3p':
+        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_LO);'
+    if template_name == 'v_fma_mixhi_f16_vop3p':
+        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_HI);'
     if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
         return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();'
     if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
@@ -2888,7 +3012,12 @@ def _simd_probe_line(
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
     if specfmacf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32});'
+        policy = (
+            ', true /* force_output_flush */'
+            if template_name == 'v_fmac_dx9_zero_f32_vop3'
+            else ''
+        )
+        return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32}{policy});'
     if template_name in SIMD_VOP3_FMAC_FP16:
         macro = (
             'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16'
@@ -2918,12 +3047,16 @@ def _simd_probe_line(
     spec3bin16 = SIMD_VOP3_BINARY_TRUE16_SRC.get(template_name)
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
+        if template_name in _PACKED_NORMALIZED_VOP3:
+            cpp_op = _modified_conversion_op(cpp_op, bits=16)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:
         if true16_vop3:
             return None
         cpp_t, cpp_op = spec3binx
+        if template_name in _PACKED_NORMALIZED_VOP3:
+            cpp_op = _modified_conversion_op(cpp_op, bits=32)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
     # VOP3-only f32 binary (no VOP2 twin): IEEE maximum/minimum. Per-source
     # abs/neg + result omod/clamp applied by the f32 binary glue.
@@ -2961,7 +3094,12 @@ def _simd_probe_line(
             if true16_vop3
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
-        return f'  {macro}({spec3unaf16});'
+        rounded = (
+            ', true'
+            if template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
+            else ''
+        )
+        return f'  {macro}({spec3unaf16}{rounded});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
@@ -2971,7 +3109,17 @@ def _simd_probe_line(
         spec2v3 = SIMD_VOP2_BINARY.get(base + '_vop2')
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
+            if template_name in _PACKED_RTZ_VOP3:
+                cpp_op = _modified_conversion_op(cpp_op, bits=32)
+                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
             if cpp_t == 'float32_t':
+                if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
+                    operation = (
+                        'SUB' if base == 'v_subrev_f32' else base.split('_')[1].upper()
+                    )
+                    cpp_op = _binary_f32_op(
+                        operation, modifiers=True, reverse=base == 'v_subrev_f32'
+                    )
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
             # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
             # uint32-typed (the functor widens f16->f32 by hand), but their VOP3
@@ -3024,7 +3172,14 @@ def _simd_probe_line(
             if base in _VOP3_UNARY_SKIP:
                 return None
             if base in _VOP3_UNARY_FP_F32:
-                return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op});'
+                modifier_args = (
+                    ', true /* force_output_flush */'
+                    if base.upper() in FLUSH_NEAREST_F32_OPS
+                    else ''
+                )
+                return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op}{modifier_args});'
+            if base in ('v_cvt_i16_f16', 'v_cvt_u16_f16'):
+                cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
             if base in (
                 'v_cvt_i32_f32',
@@ -3035,8 +3190,7 @@ def _simd_probe_line(
                 'v_cvt_floor_i32_f32',
             ):
                 # The VOP1 shortcut does not apply floating source modifiers.
-                # F16 results also use uint32_t storage, but must reach the
-                # mode-aware half-conversion probe below.
+                # Modified F32 inputs use the scalar conversion body.
                 return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
             if base in (
                 'v_cvt_f32_i32',
@@ -3247,22 +3401,22 @@ def _local_coverage_probe(
     ):
         if 'bf16' in template_name:
             convert = 'util::pack_bf16_simd({x}, wf.fp16_ovfl())'
-        elif 'pkrtz' in template_name:
+        elif template_name == 'v_cvt_pkrtz_f16_f32_vop3':
             convert = (
                 'util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>({x}))'
             )
         else:
             convert = 'util::f32_to_f16_mode_simd(std::bit_cast<util::native<float>>({x}), wf.fp16_ovfl())'
-        return call(
-            2,
-            False,
-            0,
+        functor = (
             '[&](auto a, auto b) { return '
             + convert.format(x='a')
             + ' | ('
             + convert.format(x='b')
-            + ' << 16); }',
+            + ' << 16); }'
         )
+        if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
+            functor = _modified_conversion_op(functor, bits=32)
+        return call(2, False, 0, functor)
     if template_name == 'v_cvt_f32_bf16_vop1':
         return call(
             1,

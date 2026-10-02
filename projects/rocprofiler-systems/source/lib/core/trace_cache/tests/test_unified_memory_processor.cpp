@@ -60,12 +60,12 @@ struct recording_output_sink
 {
     void register_file(std::string path, output_format format)
     {
-        files.push_back({ std::move(path), format });
+        files.push_back({ .path = std::move(path), .format = format });
     }
 
     void clear() { files.clear(); }
 
-    std::vector<registered_file> files = {};
+    std::vector<registered_file> files;
 };
 
 // The processor reads output config from timemory globals at construction
@@ -340,7 +340,7 @@ TEST_F(UnifiedMemoryProcessorTest,
     bool saw_gpu2 = false;
     for(const auto& dev : j["devices"])
     {
-        auto        device_id = dev["device_id"].get<std::uint32_t>();
+        auto const  device_id = dev["device_id"].get<std::uint32_t>();
         const auto& h2d       = dev["migrations"]["host_to_device"];
 
         if(device_id == kGpu1)
@@ -401,7 +401,7 @@ TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
 
 TEST_F(UnifiedMemoryProcessorTest, AgentLookupThrowFallsBackSafely)
 {
-    auto sample =
+    auto const sample =
         make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
                                      /*duration=*/100, /*device_id=*/42, agent_type::cpu);
     EXPECT_NO_THROW(processor->handle(sample));
@@ -444,7 +444,7 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
 
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
 {
-    auto explicit_dir = tmp_dir + "/ump-explicit";
+    auto const explicit_dir = tmp_dir + "/ump-explicit";
     ASSERT_FALSE(std::filesystem::exists(explicit_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
     rebuild_processor();
@@ -509,7 +509,7 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
 
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
 {
-    auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
+    auto const nested_dir = tmp_dir + "/ump-nested/a/b/c";
     ASSERT_FALSE(std::filesystem::exists(nested_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
     rebuild_processor();
@@ -546,7 +546,7 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
 
     processor->finalize_processing();
 
-    auto files = registered_files();
+    auto const files = registered_files();
     EXPECT_EQ(files.size(), 2u);
 
     bool saw_txt  = false;

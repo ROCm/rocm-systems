@@ -69,7 +69,7 @@ public:
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, write_ptr_addr_);
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, doorbell_addr_);
 
-    amdgpu::AqlQueueConfig hw{};
+    amdgpu::ComputeQueueConfig hw{};
     hw.address_space = address_space;
     hw.process_id = process_id;
     hw.queue_id = queue_id;

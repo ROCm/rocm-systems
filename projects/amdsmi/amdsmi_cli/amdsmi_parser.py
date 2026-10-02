@@ -349,7 +349,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
-    def _is_command_supported(self, user_input, acceptable_values, command_name, query_error=None):
+    def _is_command_supported(
+        self, user_input, acceptable_values, command_name=None, query_error=None, hint=None
+    ):
         # None: values need root to query; empty: the system does not support it;
         # query_error: reading the values failed, so report that error instead
         if query_error is not None:
@@ -363,9 +365,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                 command_name, outputformat
             )
         elif str(user_input).upper() not in acceptable_values:
-            print(f"Valid inputs are {acceptable_values}")
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                sys.argv[1], str(user_input).upper(), self.helpers.get_output_format()
+                sys.argv[1],
+                str(user_input).upper(),
+                self.helpers.get_output_format(),
+                hint=hint,
             )
         else:
             return str(user_input).upper()
@@ -390,11 +394,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
                 if lim_type not in valid_lim_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], lim_type, output_format
+                        sys.argv[1],
+                        lim_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_lim_types)}.",
                     )
 
                 # Check if the val is a valid integer value
@@ -434,7 +444,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
 
                 if not perf_levels_str:
@@ -717,7 +730,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                             .lower()
                         )
                     except Exception:
-                        sys.exit("Confirmation not given. Exiting without setting value")
+                        print(
+                            "Confirmation not given. Exiting without setting value", file=sys.stderr
+                        )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                     if resp in ("a", "append"):
                         setattr(args, self.dest, path)
                         return
@@ -726,12 +742,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                         setattr(args, self.dest, path)
                         return
                     else:
-                        # User declined to overwrite
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                            path,
-                            CheckOutputFilePath.outputformat,
-                            "User declined to overwrite or append existing file.",
+                        # Declining is not a bad path: the file was fine, the user said no.
+                        print(
+                            "User declined to overwrite or append existing file.", file=sys.stderr
                         )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                 else:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
                         path, CheckOutputFilePath.outputformat
@@ -828,9 +843,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _GPUSelectAction.outputformat,
-                            True,
-                            False,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.GPU,
                         )
 
         return _GPUSelectAction
@@ -864,7 +877,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _NICSelectAction.output_format
+                            selected_device_handles,
+                            _NICSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.NIC,
                         )
 
         return _NICSelectAction
@@ -898,7 +913,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _SwitchSelectAction.output_format
+                            selected_device_handles,
+                            _SwitchSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.SWITCH,
                         )
 
         return _SwitchSelectAction
@@ -937,9 +954,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CPUSelectAction.outputformat,
-                            False,
-                            True,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU,
                         )
 
         return _CPUSelectAction
@@ -978,9 +993,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CoreSelectAction.outputformat,
-                            False,
-                            False,
-                            True,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU_CORE,
                         )
 
         return _CoreSelectAction
@@ -2428,6 +2441,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices or ["N/A"])
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                set_compute_partition_hint = f"\nValid inputs are: {accelerator_set_choices_str}.\nUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
@@ -2546,6 +2560,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         accelerator_set_choices,
                         "--compute-partition",
                         accelerator_query_error,
+                        hint=set_compute_partition_hint,
                     ),
                     required=False,
                     help=set_compute_partition_help,
