@@ -185,9 +185,12 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         self.assertNotIn("-print-file-name=libclang_rt.profile_rocm-", flat_argv)
 
     def test_host_probe_ignores_unresolved_runtime_name(self):
-        _, result, _argv = self.run_host_probe(create_runtime=False)
+        _, result, argv = self.run_host_probe(create_runtime=False)
 
         self.assertEqual(result, "")
+        flat_argv = argv.replace("\n", " ")
+        self.assertIn("-print-file-name=libclang_rt.profile_rocm.a", flat_argv)
+        self.assertIn("-print-file-name=libclang_rt.profile_rocm-", flat_argv)
 
     def test_host_probe_finds_legacy_arch_suffixed_runtime(self):
         # Compilers built without a per-target runtime dir ship only

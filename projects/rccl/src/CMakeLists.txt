@@ -1412,7 +1412,10 @@ if(ENABLE_CODE_COVERAGE)
     # for this object-only host link; older packages leave this path empty and
     # continue to use the generic profile runtime.
     if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
       target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
+    else()
+      message(STATUS "Host ROCm profile runtime: none found, using the generic profile runtime")
     endif()
     target_link_options(rccl PRIVATE
       "LINKER:-u,__llvm_profile_hip_collect_device_data")

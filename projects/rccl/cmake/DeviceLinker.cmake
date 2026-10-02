@@ -230,10 +230,8 @@ if(DL_DEVICE_PROFILE_RT)
     -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
 endif()
 
-# The coverage instrumentation flags and the device profile-runtime link flags
-# always travel together on the fat-object / dispatcher compiles below, so fold
-# the adjacent pair into one variable (both expand to nothing unless
-# ENABLE_FULL_COVERAGE). A future coverage-flag addition is then a single edit.
+# Instrumentation plus the profile-runtime link flags for the standalone `-x hip`
+# fat-object compiles below. Both expand to nothing unless ENABLE_FULL_COVERAGE.
 set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
 
 # ---------------------------------------------------------------------------
