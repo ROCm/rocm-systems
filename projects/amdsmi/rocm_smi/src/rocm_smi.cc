@@ -2087,10 +2087,12 @@ rsmi_status_t rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t blo
 
 // Build the space-separated DPM-level string for pp_dpm_* from a bitmask: bit N
 // selects level N (e.g. 0b101 -> "0 2 "). Bits above the highest settable level
-// are dropped, matching how the driver ignores out-of-range indices. The
-// deep-sleep level ('S') is counted in num_supported but is not writable, so it
-// is excluded from the settable range. Throws RSMI_STATUS_INVALID_ARGS if no
-// settable level remains.
+// are dropped before writing so an out-of-range level never gets requested.
+// The deep-sleep level ('S') is counted in num_supported but is not writable,
+// so it is excluded from the settable range. Throws RSMI_STATUS_UNEXPECTED_DATA
+// if the device reports zero settable levels (this should not happen on any
+// supported ASIC), or RSMI_STATUS_INVALID_ARGS if the mask selects no
+// settable level.
 static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported,
                                            bool has_deep_sleep = false) {
   if (num_supported > RSMI_MAX_NUM_FREQUENCIES) {
@@ -2098,6 +2100,9 @@ static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported
   }
 
   uint32_t settable = (has_deep_sleep && num_supported > 0) ? num_supported - 1 : num_supported;
+  if (settable == 0) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
 
   std::string bf_str;
   std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
@@ -2128,6 +2133,26 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  amd::smi::DevInfoTypes dev_type;
+  const auto& clk_type_it = kClkTypeMap.find(clk_type);
+  if (clk_type_it != kClkTypeMap.end()) {
+    dev_type = clk_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  assert(dv_ind < smi.devices().size());
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
+  assert(dev != nullptr);
+
+  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
+  bool read_only = false;
+  // Dont try to set on pp_dpm* files that are read only
+  if (amd::smi::isReadOnlyForAll(sysfs_path, &read_only) == 0 && read_only) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2139,27 +2164,26 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
-  // assert below is not true
-  assert(dv_ind < smi.devices().size());
+  // Logged before bitfield_to_freq_string()/perf-level-set so this context is
+  // captured even if a later step fails or throws (e.g. no settable level).
+  std::string clock_name = kClkStateMap.find(clk_type)->second;
+  ss << __PRETTY_FUNCTION__ << " | Requested clock frequency set for device " << dv_ind << "for "
+     << clock_name << "\n : mask=0x" << std::hex << freq_bitmask << std::dec
+     << ", num_supported=" << freqs.num_supported
+     << ", deep_sleep=" << (freqs.has_deep_sleep ? "Y" : "N") << ", current=" << freqs.current
+     << " | freqs[0.." << freqs.num_supported << "):";
+  for (uint32_t fi = 0; fi < freqs.num_supported && fi < RSMI_MAX_NUM_FREQUENCIES; ++fi) {
+    ss << " [" << fi << "]=" << freqs.frequency[fi];
+  }
+  LOG_DEBUG(ss);
 
   // The deep-sleep pseudo-level ('S') is counted in freqs.num_supported but is
   // not a writable pp_dpm_* label, so it is excluded from the settable range.
   std::string freq_enable_str =
       bitfield_to_freq_string(freq_bitmask, freqs.num_supported, freqs.has_deep_sleep);
-
-  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
-  assert(dev != nullptr);
-
-  amd::smi::DevInfoTypes dev_type;
-  const auto& clk_type_it = kClkTypeMap.find(clk_type);
-  if (clk_type_it != kClkTypeMap.end()) {
-    dev_type = clk_type_it->second;
-  } else {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  ss << __PRETTY_FUNCTION__ << " | About to try writing clock frequency mask for device " << dv_ind
+     << " for " << clock_name << ": freq_enable_str=|" << freq_enable_str << "|";
+  LOG_DEBUG(ss);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2168,29 +2192,10 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
 
   rsmi_status_t status;
   status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
-  ss << __PRETTY_FUNCTION__ << " | Attempted to set clock frequencies for device " << dv_ind
-     << " to: freq_enable_str=|" << freq_enable_str << "|"
-     << " (mask=0x" << std::hex << freq_bitmask << std::dec
-     << ", num_supported=" << freqs.num_supported
-     << ", deep_sleep=" << (freqs.has_deep_sleep ? "Y" : "N") << ", current=" << freqs.current
-     << ")"
-     << "; returned: " << amd::smi::getRSMIStatusString(status, false) << "\n";
-
-  ss << " | freqs[0.." << freqs.num_supported << "):";
-  for (uint32_t fi = 0; fi < freqs.num_supported && fi < RSMI_MAX_NUM_FREQUENCIES; ++fi) {
-    ss << " [" << fi << "]=" << freqs.frequency[fi];
-  }
+  ss << __PRETTY_FUNCTION__ << " | Wrote clock frequency mask for device " << dv_ind << " for "
+     << clock_name << ": freq_enable_str=|" << freq_enable_str << "|"
+     << "; returned: " << amd::smi::getRSMIStatusString(status, false);
   LOG_DEBUG(ss);
-
-  if (status == RSMI_STATUS_PERMISSION) {
-    std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
-    bool read_only = false;
-    // Only upgrade PERMISSION -> NOT_SUPPORTED when the probe succeeds; if it
-    // fails, keep the real write result (PERMISSION).
-    if (amd::smi::isReadOnlyForAll(sysfs_path, &read_only) == 0 && read_only) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
 
   return status;
 
