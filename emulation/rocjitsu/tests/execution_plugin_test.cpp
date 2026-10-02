@@ -6241,7 +6241,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(ring.data(), &packet, sizeof(packet));
 
   constexpr uint32_t queue_id = 7;
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.address_space = address_space;
   queue.queue_id = queue_id;
   queue.process_id = process_id;

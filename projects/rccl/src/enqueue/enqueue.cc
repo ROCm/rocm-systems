@@ -28,6 +28,8 @@
 #include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
+#include "archinfo.h"
+#include "rccl_float8.h"
 #include "net.h"
 #include "compiler.h"
 #include "rma/rma.h"
@@ -2170,6 +2172,131 @@ static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
 }
 } // namespace
 
+// GRAPH_STREAM_ORDERING=0: makes a capture on the graph origin wait on serialEvent via
+// hipEventWaitExternal, which HIP allows on the origin stream during capture. That wait is what
+// serializes graph launches of one communicator.
+static ncclResult_t rcclGraphOriginWaitSerialEvent(struct ncclComm* comm, cudaStream_t stream) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
+    // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
+    // node can fire immediately. The wait stays unconditional, so graph structure is identical
+    // across all captures (ExternalWait always present) and hipGraphExecUpdate succeeds.
+    // Latch after the record so a failed record is retried instead of suppressed for good.
+    CUDACHECK(cudaEventRecord(ss->serialEvent, ss->liveStream));
+    COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
+  }
+  // everCaptured still has to be set: ncclStrongStream{Acquire,Release} read it to interlock
+  // non-captured work with graphs when a comm sharing this sharedRes uses graphUsageMode=2.
+  COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
+  CUDACHECK(cudaStreamWaitEvent(stream, ss->serialEvent, hipEventWaitExternal));
+  return ncclSuccess;
+}
+
+// Joins a captured addon launch to the per-communicator capture chain, as ncclLaunchPrepare does for
+// kernel plans. The deviceStream half is a copy of ncclLaunchPrepare's and has to follow any change
+// to it by hand.
+static ncclResult_t rcclAddonCaptureOrderBegin(struct ncclComm* comm, cudaStream_t stream,
+                                               struct rcclAddonLaunchState* state) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!ncclGraphStreamOrderingSerialize(comm)) {
+    return rcclGraphOriginWaitSerialEvent(comm, stream);
+  }
+  NCCLCHECK(ncclStrongStreamAcquire(state->graph, ss, /*concurrent=*/false, &state->deviceStream));
+  state->deviceStreamAcquired = true;
+  if (state->deviceStream != stream) {
+    NCCLCHECK(ncclStreamWaitStream(stream, state->deviceStream, comm->sharedRes->scratchEvent));
+  }
+  return ncclSuccess;
+}
+
+// The ncclLaunchFinish side of rcclAddonCaptureOrderBegin, under the same constraint. Releasing
+// deviceStream is left to the caller so that it also happens when the launch failed.
+static ncclResult_t rcclAddonCaptureOrderEnd(struct ncclComm* comm, cudaStream_t stream,
+                                             const struct rcclAddonLaunchState& state) {
+  struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
+  if (!ncclGraphStreamOrderingSerialize(comm)) {
+    return ncclCudaGraphRecordEvent(state.graph, ss->serialEvent, stream);
+  }
+  cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
+  CUDACHECK(cudaEventRecord(finishedEvent, stream));
+  NCCLCHECK(ncclStreamAdvanceToEvent(state.graph, state.deviceStream, finishedEvent));
+  return ncclSuccess;
+}
+
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state) {
+  state->savedDev = -1;
+  state->eventOffered = false;
+  state->capturing = false;
+  state->deviceStreamAcquired = false;
+  state->deviceStream = nullptr;
+  comm->addonStopEvent = nullptr;
+
+  CUDACHECK(hipGetDevice(&state->savedDev));
+  if (state->savedDev != comm->cudaDev) {
+    CUDACHECK(hipSetDevice(comm->cudaDev));
+  }
+
+  // Both decisions below need the capture state, and one query serves both.
+  const bool streamChanged = comm->lastStreamTag != 0 && comm->lastStreamTag != ncclStreamTag(stream);
+  NCCLCHECK(ncclCudaGetCapturingGraph(&state->graph, stream, comm->config.graphUsageMode));
+  state->capturing = ncclCudaGraphValid(state->graph);
+
+  if (streamChanged && !state->capturing) {
+    // doneEvent may carry a node from another capture or from outside one, and waiting on such an
+    // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
+    // ordered through deviceStream below instead, as native captured launches are.
+    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+  }
+
+  // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
+  // records instead, exactly as the native general path does.
+  if (state->capturing) {
+    NCCLCHECK(rcclAddonCaptureOrderBegin(comm, stream, state));
+  } else {
+    state->eventOffered = true;
+    comm->addonStopEvent = comm->doneEvent;
+  }
+
+  return ncclSuccess;
+}
+
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
+                                const struct rcclAddonLaunchState& state, ncclResult_t launchRes) {
+  ncclResult_t result = launchRes;
+  // A cleared field after an offer is the only sign that a kernel took the event and will record
+  // it. Anything else, capture included, still owes the record.
+  const bool taken = state.eventOffered && comm->addonStopEvent == nullptr;
+  comm->addonStopEvent = nullptr;
+
+  if (result == ncclSuccess) {
+    if (!taken) {
+      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
+    }
+    // The tag advances however the event was recorded: it is what tells the next collective on
+    // another stream that an edge is needed.
+    comm->lastStreamTag = ncclStreamTag(stream);
+    if (state.capturing) {
+      NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
+    }
+  }
+
+release:
+  if (state.deviceStreamAcquired) {
+    ncclResult_t releaseRes = ncclStrongStreamRelease(state.graph, &comm->sharedRes->deviceStream,
+                                                      /*concurrent=*/false);
+    if (result == ncclSuccess) result = releaseRes;
+  }
+
+  if (state.savedDev != -1 && state.savedDev != comm->cudaDev) {
+    cudaError_t restoreErr = hipSetDevice(state.savedDev);
+    if (restoreErr != cudaSuccess) {
+      ncclResult_t restoreRes = rcclCudaErrorHandler(restoreErr);
+      if (result == ncclSuccess) result = restoreRes;
+    }
+  }
+  return result;
+}
+
 static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, struct ncclComm* comm, bool capturing,
                                      int driver = -1) {
   if (comm->config.launchOrderImplicit == 1) {
@@ -2308,21 +2435,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
 
     if (useLaunchStream) {
       // GRAPH_STREAM_ORDERING=0: run kernels on the graph origin (launchStream) without a
-      // secondary captureStream. Serialize graph launches by waiting on serialEvent via
-      // hipEventWaitExternal, which HIP allows on the origin stream during capture.
-      struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
-      if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
-        // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
-        // node can fire immediately. The wait stays unconditional, so graph structure is identical
-        // across all captures (ExternalWait always present) and hipGraphExecUpdate succeeds.
-        // Latch after the record so a failed record is retried instead of suppressed for good.
-        CUDACHECKGOTO(cudaEventRecord(ss->serialEvent, ss->liveStream), result, failure);
-        COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
-      }
-      // everCaptured still has to be set: ncclStrongStream{Acquire,Release} read it to interlock
-      // non-captured work with graphs when a comm sharing this sharedRes uses graphUsageMode=2.
-      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
-      CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, ss->serialEvent, hipEventWaitExternal), result, failure);
+      // secondary captureStream.
+      NCCLCHECKGOTO(rcclGraphOriginWaitSerialEvent(comm, launchStream), result, failure);
       deviceStream = launchStream;
     } else {
       NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream,
@@ -3472,10 +3586,6 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
 #if defined(RCCL_BFLOAT16)
     hip_bfloat16 bf16;
 #endif
-#if defined(RCCL_FLOAT8)
-    rccl_float8 f8;
-    rccl_bfloat8 bf8;
-#endif
     void* ptr;
   };
   u64 = 0;
@@ -3521,12 +3631,12 @@ static ncclResult_t hostToDevRedOp(ncclDevRedOpFull* opFull, ncclRedOp_t op, ncc
       break;
 #if defined(RCCL_FLOAT8)
     case ncclFloat8e4m3:
-      opFull->op = ncclDevPreMulSum;
-      f8 = static_cast<rccl_float8>(float(1.0 / comm->nRanks));
-      break;
     case ncclFloat8e5m2:
+      // FuncPreMulSum<fp8> takes a float scalar (reduce_kernel.h). An fp8 scalar would
+      // be encoded with the host typedef, which is OCP even where the device decodes
+      // FNUZ, and 1/nRanks is not representable in fp8 for most rank counts.
       opFull->op = ncclDevPreMulSum;
-      bf8 = static_cast<rccl_bfloat8>(float(1.0 / comm->nRanks));
+      f32 = float(1.0 / comm->nRanks);
       break;
 #endif
     case ncclFloat16:
@@ -4736,6 +4846,16 @@ ncclResult_t ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDa
     if (size < 1) return ncclInternalError;
     user->opFull.scalarArgIsPtr = false;
     std::memcpy(&user->opFull.scalarArg, scalar, size);
+#if defined(RCCL_FLOAT8)
+    if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+      // FuncPreMulSum<fp8> takes a float scalar. The byte is in the device's fp8 encoding,
+      // like the payload and like an ncclScalarDevice scalar, so decode it as the device would.
+      float f = rcclFp8ToFloat(*static_cast<uint8_t const*>(scalar), datatype == ncclFloat8e5m2,
+                               rcclFp8DeviceIsFnuz(comm->archName));
+      user->opFull.scalarArg = 0;
+      std::memcpy(&user->opFull.scalarArg, &f, sizeof(f));
+    }
+#endif
   } else {
     user->opFull.scalarArgIsPtr = true;
     user->opFull.scalarArg = reinterpret_cast<uint64_t>(scalar);
