@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -161,6 +162,11 @@ start_context(const context::context* ctx)
     service.enabled.rlock([&](const auto& enabled) { already_enabled = enabled; });
     if(already_enabled) return;
 
+    // Counted before serialization is acquired, and uncounted in stop_context() only after it is
+    // released, so the write interceptor cannot take its fast path while this service may still
+    // need dispatches serialized (see is_active_on_agent()).
+    note_counting_started();
+
     // Scope serialization to the agents this context collects on. An empty set still means
     // every agent, so an unrestricted context serializes the whole machine as before.
     CHECK_NOTNULL(controller)->enable_serialization(service.agents);
@@ -175,6 +181,7 @@ start_context(const context::context* ctx)
     if(!transitioned)
     {
         controller->disable_serialization(service.agents);
+        note_counting_stopped();
         return;
     }
 
@@ -235,6 +242,9 @@ stop_context(const context::context* ctx)
         // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
     }
+
+    // Only once serialization is released; see start_context().
+    note_counting_stopped();
 
     // After the drain. consumer_thread_t::exit() also waits until its queue is empty before
     // joining, and add() consumes inline once the thread is gone, so a late completion is still
