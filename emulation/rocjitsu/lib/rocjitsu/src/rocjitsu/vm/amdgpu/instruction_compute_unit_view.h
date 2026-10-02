@@ -52,6 +52,8 @@ public:
   bool observes_register_access() const;
   bool debug_active() const;
   rj_code_arch_t arch() const;
+  uint32_t cus_per_shader_array() const;
+  uint32_t shader_array_cu_id() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
   uint32_t vgpr_allocation_block_size() const;

@@ -243,8 +243,7 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_locks_when_disabled)
                                                "pthread_mutex_trylock" };
     for(const auto& name : lock_names)
     {
-        EXPECT_EQ(configured_names.end(),
-                  std::find(configured_names.begin(), configured_names.end(), name))
+        EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, name))
             << "unexpected configuration of: " << name;
     }
 }
@@ -275,8 +274,7 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_rwlocks_when_disabled)
     };
     for(const auto& name : rwlock_names)
     {
-        EXPECT_EQ(configured_names.end(),
-                  std::find(configured_names.begin(), configured_names.end(), name))
+        EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, name))
             << "unexpected configuration of: " << name;
     }
 }
@@ -306,8 +304,7 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_spinlocks_when_disabled)
                                                "pthread_spin_unlock" };
     for(const auto& name : spin_names)
     {
-        EXPECT_EQ(configured_names.end(),
-                  std::find(configured_names.begin(), configured_names.end(), name))
+        EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, name))
             << "unexpected configuration of: " << name;
     }
 }
@@ -333,8 +330,7 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_barrier_when_disabled)
     initializer();
 
     EXPECT_EQ(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(),
-                        "pthread_barrier_wait"))
+              std::ranges::find(configured_names, "pthread_barrier_wait"))
         << "unexpected configuration of: pthread_barrier_wait";
 }
 
@@ -358,8 +354,7 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_join_when_disabled)
     ASSERT_TRUE(initializer);
     initializer();
 
-    EXPECT_EQ(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "pthread_join"))
+    EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, "pthread_join"))
         << "unexpected configuration of: pthread_join";
 }
 

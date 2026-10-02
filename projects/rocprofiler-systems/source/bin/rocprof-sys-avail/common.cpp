@@ -5,6 +5,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/string_utility.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/mpl/apply.hpp>
@@ -484,13 +485,14 @@ filter_operations(const std::string& env_var_name, std::vector<std::string>& cho
     // Filter out unsupported operations for the OMPT domain.
     if(*_domain == "ompt")
     {
-        choices.erase(
-            std::remove_if(choices.begin(), choices.end(),
-                           [](const std::string& op) {
-                               return op == "omp_callback_functions" ||  // internal
-                                      op == "omp_thread_end";            // unsupported
-                           }),
-            choices.end());
+        choices.erase(std::ranges::remove_if(
+                          choices,
+                          [](const std::string& op) {
+                              return op == "omp_callback_functions" ||  // internal
+                                     op == "omp_thread_end";            // unsupported
+                          })
+                          .begin(),
+                      choices.end());
     }
 }
 

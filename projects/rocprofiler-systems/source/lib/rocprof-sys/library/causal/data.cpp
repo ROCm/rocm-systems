@@ -25,6 +25,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 
+#include <algorithm>
 #include <timemory/data/atomic_ring_buffer.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -62,12 +63,12 @@ auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIO
 auto speedup_dist      = []() {
     const size_t               _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
-    std::generate(_v.begin(), _v.end(),
-                       [_value = 0]() mutable { return (_value += speedup_divisions); });
+    std::ranges::generate(
+        _v, [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
     const size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
-    std::sort(_v.begin(), _v.end());
+    std::ranges::sort(_v);
     if(_v.back() > 100)
     {
         throw std::runtime_error(
@@ -124,11 +125,10 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // exclude internal libraries used by rocprof-sys
     if(_scopes.contains(sf::BINARY_FILTER))
     {
-        _filters.emplace_back(sf{ .mode  = sf::FILTER_EXCLUDE,
-                                  .scope = sf::BINARY_FILTER,
-                                  .expression =
-                                      "lib(rocprof-sys[-\\.]|dyninst|"
-                                      "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+        _filters.emplace_back(sf{ .mode       = sf::FILTER_EXCLUDE,
+                                  .scope      = sf::BINARY_FILTER,
+                                  .expression = "lib(rocprof-sys[-\\.]|dyninst|"
+                                                "gotcha\\.|unwind\\.so\\.99)" });
     }
 
     // in function mode, it generally doesn't help to experiment on main function since
@@ -627,9 +627,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                     _eligible_pc_hist.emplace_back(std::make_pair(itr.first, itr.second));
                 }
 
-                std::sort(
-                    _eligible_pc_hist.begin(), _eligible_pc_hist.end(),
-                    [](auto&& _lhs, auto&& _rhs) { return _lhs.second > _rhs.second; });
+                std::ranges::sort(_eligible_pc_hist, [](auto&& _lhs, auto&& _rhs) {
+                    return _lhs.second > _rhs.second;
+                });
 
                 for(const auto& itr : _eligible_pc_hist)
                 {
@@ -644,10 +644,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 }
 
                 // sort by most samples
-                std::sort(_samples.begin(), _samples.end(),
-                          [](const auto& _lhs, const auto& _rhs) {
-                              return _lhs.second > _rhs.second;
-                          });
+                std::ranges::sort(_samples, [](const auto& _lhs, const auto& _rhs) {
+                    return _lhs.second > _rhs.second;
+                });
 
                 for(const auto& itr : _samples)
                 {
