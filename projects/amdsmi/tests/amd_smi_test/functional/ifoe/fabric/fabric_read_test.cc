@@ -214,8 +214,8 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
-            DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string",
-                               "id=" + std::to_string(it.id), VERB(STANDARD));
+            DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=" + std::to_string(it.id),
+                               VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
