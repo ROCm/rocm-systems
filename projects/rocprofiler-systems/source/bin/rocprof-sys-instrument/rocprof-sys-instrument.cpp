@@ -87,7 +87,8 @@ get_default_max_library_functions()
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
 }
 
-constexpr int k_invalid_fd = -1;
+constexpr int k_invalid_fd          = -1;
+constexpr int k_exec_failure_status = 127;
 
 struct pipe_fds
 {
@@ -135,14 +136,16 @@ exec_with_stdout_to_pipe(const std::string& exe_path, pipe_fds fds,
                          const std::vector<char*>& envp)
 {
     ::close(fds.read_fd);
-    ::dup2(fds.write_fd, STDOUT_FILENO);
+    if(::dup2(fds.write_fd, STDOUT_FILENO) < 0)
+    {
+        ::_exit(k_exec_failure_status);
+    }
     ::close(fds.write_fd);
 
     auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
     ::execve(exe_path.c_str(), argv.data(), envp.data());
 
-    // Return from execve means it failed: use "command could not be executed" status
-    constexpr int k_exec_failure_status = 127;
+    // Return from execve means it failed
     ::_exit(k_exec_failure_status);
 }
 
