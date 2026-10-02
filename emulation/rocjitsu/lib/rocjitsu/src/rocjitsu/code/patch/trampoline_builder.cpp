@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/error_report.h"
 
 #include <algorithm>
@@ -215,25 +216,25 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   }
   const RegisterSet arg_regs = arg_registers(abi);
 
-  // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
-  // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel
-  // is not synthesized). The orchestrator sets the bound; it defaults to the
-  // conservative cross-ISA allocatable limit.
-  const uint32_t sgpr_bound =
-      std::min<uint32_t>(plan.kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+  // Target/scc/special-state selection stays within the kernel's ordinary SGPRs,
+  // so a temp never lands past the patched kernel's actual .sgpr_count (a wider
+  // kernel is not synthesized) or in a CDNA kernel's special-register tail. The
+  // orchestrator sets plan.kernel_sgpr_count; it defaults to the conservative
+  // cross-ISA allocatable limit.
+  const uint32_t sgpr_bound = ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count);
 
   // The entry-storage pair holds a value produced once at kernel entry and read
-  // at arbitrary later sites, so both lanes must be inside the allocation the
-  // temps are drawn from.
+  // at arbitrary later sites, so both lanes must be inside the range the temps
+  // are drawn from.
   RegisterSet entry_storage;
   if (plan.entry_storage_base) {
     const uint32_t last = static_cast<uint32_t>(*plan.entry_storage_base) + 1u;
     if (last >= sgpr_bound) {
-      report(error_out,
-             ("probe-call resource planning: entry-storage pair s[" +
-              std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) +
-              "] is not inside the kernel's " + std::to_string(sgpr_bound) + "-SGPR allocation")
-                 .c_str());
+      report(error_out, ("probe-call resource planning: entry-storage pair s[" +
+                         std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) +
+                         "] is not below s" + std::to_string(sgpr_bound) +
+                         ", where the kernel's ordinary SGPRs end")
+                            .c_str());
       return false;
     }
     entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});

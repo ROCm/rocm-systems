@@ -48,6 +48,14 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 /// allocation's top six SGPRs, matching LLVM's getBaseReservedNumSGPRs.
 inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 6;
 
+/// @brief Exclusive upper bound on the ordinary SGPRs of a kernel that allocates
+///        @p kernel_sgpr_count SGPRs.
+///
+/// @details Excludes the CDNA special-register tail, then clamps to
+/// REGISTER_SET_ALLOCATABLE_SGPRS. Zero when the allocation is no larger than
+/// the tail.
+[[nodiscard]] uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count);
+
 /// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
 ///
 /// @details CDNA is Wave64; gfx1250 is Wave32-only; RDNA opts into Wave32 via the

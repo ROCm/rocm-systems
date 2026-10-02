@@ -731,8 +731,8 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out))
     return std::nullopt;
 
-  const auto planned = plan_dbi_entry_prologue(KernelBlockScope(scope), kernel.descriptor, arch_,
-                                               *kernel_sgpr_count, reserved, &err);
+  const std::optional<DbiEntryProloguePlan> planned = plan_dbi_entry_prologue(
+      KernelBlockScope(scope), kernel.descriptor, arch_, *kernel_sgpr_count, reserved, &err);
   if (!planned) {
     // Every rejection the planner reports is a property of the kernel, so its
     // message alone does not say why this kernel was asked to carry a prologue

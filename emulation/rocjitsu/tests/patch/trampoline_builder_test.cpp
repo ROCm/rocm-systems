@@ -663,7 +663,7 @@ TEST(TrampolineBuilderPlan, ProbeBodyClobberingEntryStorageFails) {
   EXPECT_FALSE(plan.is_probe_call);
 }
 
-// Both lanes must sit inside the allocation the temps are drawn from; a pair at
+// Both lanes must sit inside the range the temps are drawn from; a pair at
 // or past the bound is one the exclusion cannot keep the envelope away from.
 TEST(TrampolineBuilderPlan, EntryStoragePairPastTheKernelAllocationFails) {
   TrampolinePlan plan;
@@ -675,6 +675,54 @@ TEST(TrampolineBuilderPlan, EntryStoragePairPastTheKernelAllocationFails) {
                                                   /*probe_body_clobbers=*/{}, &err));
   EXPECT_NE(err.find("entry-storage pair"), std::string::npos) << err;
   EXPECT_FALSE(plan.is_probe_call);
+}
+
+// A 32-SGPR kernel with s0..s17 live and the entry-storage pair at s[18:19],
+// passing the pointer with SCC, EXEC and VCC preserved. The target pair, SCC
+// temp and EXEC save take s[20:21], s22 and s[24:25], so the VCC save is next in
+// line at s[26:27].
+TrampolinePlan entry_storage_crowded_plan(rj_code_arch_t arch) {
+  TrampolinePlan plan;
+  plan.arch = arch;
+  plan.kernel_sgpr_count = 32;
+  plan.entry_storage_base = 18;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  plan.preserve_scc = true;
+  plan.preserve_exec = true;
+  plan.preserve_vcc = true;
+  return plan;
+}
+
+RegisterSet sgprs_below(uint16_t count) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < count; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+  return live;
+}
+
+// On CDNA s[26:27] holds FLAT_SCRATCH, so the VCC save has no room left.
+TEST(TrampolineBuilderPlan, EnvelopeTempsStayBelowTheCdnaSpecialRegisterTail) {
+  TrampolinePlan plan = entry_storage_crowded_plan(ROCJITSU_CODE_ARCH_CDNA4);
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), sgprs_below(18),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("VCC preservation temp"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// RDNA keeps VCC outside the SGPR file, so the same site saves VCC in s[26:27].
+TEST(TrampolineBuilderPlan, RdnaEnvelopeTempsUseTheWholeAllocation) {
+  TrampolinePlan plan = entry_storage_crowded_plan(ROCJITSU_CODE_ARCH_RDNA4);
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), sgprs_below(18),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const uint16_t vcc_lo = scalar_operand_vcc_lo(plan.arch);
+  const auto saved =
+      std::ranges::find_if(plan.special_state_saves,
+                           [&](const SpecialStateSlot &slot) { return slot.operand == vcc_lo; });
+  ASSERT_NE(saved, plan.special_state_saves.end());
+  EXPECT_EQ(saved->temp_base, 26u);
 }
 
 // A kernel with no entry prologue has no pair to read, so the argument names a

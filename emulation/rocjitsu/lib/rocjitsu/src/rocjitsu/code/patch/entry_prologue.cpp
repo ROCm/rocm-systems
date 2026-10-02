@@ -7,7 +7,6 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
-#include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
 #include <array>
@@ -41,14 +40,10 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
   }
 
   const uint32_t floor = dbi_entry_storage_floor(blocks, desc, arch);
-  // A CDNA allocation's top SGPRs alias VCC, FLAT_SCRATCH and XNACK_MASK, so
-  // storage there would be overwritten by any write to those.
-  const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
-  const uint32_t ordinary = kernel_sgpr_count > tail ? kernel_sgpr_count - tail : 0;
-  const uint32_t bound = std::min<uint32_t>(ordinary, REGISTER_SET_ALLOCATABLE_SGPRS);
+  const uint32_t bound = ordinary_sgpr_bound(arch, kernel_sgpr_count);
   std::string limit = "below s" + std::to_string(bound);
-  if (tail != 0 && ordinary < REGISTER_SET_ALLOCATABLE_SGPRS)
-    limit += " (the top " + std::to_string(tail) + " of the kernel's " +
+  if (bound < std::min<uint32_t>(kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS))
+    limit += " (the top " + std::to_string(kCdnaSpecialSgprTailReserve) + " of the kernel's " +
              std::to_string(kernel_sgpr_count) + " SGPRs hold special registers)";
 
   // find_free_run takes a uint16_t search start. Rejecting a floor at or past
@@ -62,6 +57,9 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
     return std::nullopt;
   }
 
+  // TODO: split the pairs. One contiguous run is more conservative than needed:
+  // the pairs only have to be even and disjoint, and the temp pair only has to
+  // be dead at entry.
   const auto base = find_free_run(reserved, RegClass::SGPR, kDbiEntryStorageRegisters,
                                   static_cast<uint16_t>(floor), /*base_alignment=*/2, bound);
   if (!base) {
