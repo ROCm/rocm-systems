@@ -34,27 +34,36 @@ namespace kernel_abi
 {
 inline constexpr auto bytes_per_item = std::uint64_t{16};
 inline constexpr auto workgroup_size = std::uint16_t{1024};
-inline constexpr auto bytes_per_tile = bytes_per_item * workgroup_size;
+
+constexpr std::uint64_t
+items_for_size(std::uint64_t size)
+{
+    return size / bytes_per_item + static_cast<std::uint64_t>(size % bytes_per_item != 0);
+}
+
+constexpr std::uint64_t
+first_local_item(std::uint64_t thread, std::uint64_t stride, std::uint64_t logical_base)
+{
+    const auto base_mod = logical_base % stride;
+    return (thread >= base_mod) ? (thread - base_mod) : (stride - (base_mod - thread));
+}
 
 struct copy_descriptor_t
 {
     std::uint64_t source_address      = 0;
     std::uint64_t destination_address = 0;
     std::uint64_t size                = 0;
-    std::uint64_t first_tile          = 0;
-    std::uint64_t tile_count          = 0;
 };
 
 struct kernel_args_t
 {
     std::uint64_t descriptors_address = 0;
     std::uint64_t descriptor_count    = 0;
-    std::uint64_t total_tiles         = 0;
-    std::uint64_t launched_tiles      = 0;
+    std::uint64_t launched_items      = 0;
 };
 
-static_assert(sizeof(copy_descriptor_t) == 40);
-static_assert(sizeof(kernel_args_t) == 32);
+static_assert(sizeof(copy_descriptor_t) == 24);
+static_assert(sizeof(kernel_args_t) == 24);
 }  // namespace kernel_abi
 }  // namespace blit
 }  // namespace kernel_replay
