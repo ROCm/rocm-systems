@@ -12,6 +12,10 @@ import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
+from utils.metrics.collectable import (
+    apply_composite_metrics,
+    cache_collectable_expressions,
+)
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -218,6 +222,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
+    cache_collectable_expressions(dfs, dfs_type)
     expressions = [
         expr
         for df_id in dfs
@@ -284,6 +289,14 @@ def eval_metric(
                 f"Variance corrected for metric: {row_id} {metric_name} {col}"
             )
         dfs[df_id].loc[row_id, col] = eval_result
+
+    apply_composite_metrics(
+        dfs,
+        dfs_type,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+    )
 
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()

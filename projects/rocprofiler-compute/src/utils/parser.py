@@ -19,8 +19,18 @@ from pc_sampling.pc_sampling_analysis import (
 from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.collectable import (
+    COLLECT_SUM_SPECS_ATTR,
+    COLLECTABLE_IDS_ATTR,
+    WEIGHTED_AVG_ATTR,
+    WEIGHTED_AVG_SUBS_ATTR,
+)
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
+from utils.metrics.expression import (
+    gen_counter_list,
+    parse_collect_sum_submetrics,
+    parse_weighted_avg_submetrics,
+)
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -222,6 +232,10 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
+    weighted_avg_specs: dict[str, dict[str, Any]] = {}
+    weighted_avg_subs: dict[str, list[str]] = {}
+    collectable_ids: dict[str, str] = {}
+    collect_sum_specs: dict[str, list[str]] = {}
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
@@ -234,6 +248,22 @@ def _build_metric_table_df(
             profile_panel_filter=profile_panel_filter,
         ):
             continue
+
+        collectable_id = entries.get("_collectable_id")
+        if isinstance(collectable_id, str) and collectable_id:
+            collectable_ids[metric_idx] = collectable_id
+
+        avg_entry = entries.get("avg")
+        if isinstance(avg_entry, str):
+            weighted_subs = parse_weighted_avg_submetrics(avg_entry)
+            if weighted_subs:
+                weighted_avg_subs[metric_idx] = weighted_subs
+            sum_refs = parse_collect_sum_submetrics(avg_entry)
+            if sum_refs:
+                collect_sum_specs[metric_idx] = sum_refs
+        weighted_meta = entries.get("_weighted_avg")
+        if isinstance(weighted_meta, dict):
+            weighted_avg_specs[metric_idx] = weighted_meta
 
         values: list[Any] = [metric_idx, key]
         eqn_content: list[Any] = []
@@ -277,6 +307,10 @@ def _build_metric_table_df(
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
+    df.attrs[WEIGHTED_AVG_ATTR] = weighted_avg_specs
+    df.attrs[WEIGHTED_AVG_SUBS_ATTR] = weighted_avg_subs
+    df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
     return df, expressions
 
 
@@ -763,3 +797,60 @@ def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> pd.DataFrame
             )
     # Convert dict to DataFrame for downstream pandas-based processing
     return pd.DataFrame(mspec.get_class_members(), index=[0])
+
+
+def reconcile_sysinfo_l2_channels(sys_info: pd.DataFrame) -> pd.DataFrame:
+    """Down-correct inflated L2 channel counts in saved sysinfo.
+
+    Isolating via ``ROCR_VISIBLE_DEVICES`` can yield a single-XCD profiled
+    device (``cu_per_gpu=38``, ``se_per_gpu=4`` on MI300X) while amd-smi
+    still reports SPX. Re-analyzing those workloads without this step still
+    expands block 18 to 128 channels and yields N/A for channels 16–127.
+    """
+    from utils.specs import MachineSpecsCDNA, totall2_banks
+
+    if sys_info.empty:
+        return sys_info
+    row = sys_info.iloc[0]
+    gpu_arch = row.get("gpu_arch")
+    if not isinstance(gpu_arch, str) or not gpu_arch.startswith("gfx9"):
+        return sys_info
+
+    probe = MachineSpecsCDNA(
+        gpu_arch=str(gpu_arch),
+        gpu_model=str(row["gpu_model"]) if pd.notna(row.get("gpu_model")) else None,
+        cu_per_gpu=(
+            str(int(row["cu_per_gpu"])) if pd.notna(row.get("cu_per_gpu")) else None
+        ),
+        se_per_gpu=(
+            str(int(row["se_per_gpu"])) if pd.notna(row.get("se_per_gpu")) else None
+        ),
+        num_xcd=str(int(row["num_xcd"])) if pd.notna(row.get("num_xcd")) else None,
+        l2_banks=(str(int(row["l2_banks"])) if pd.notna(row.get("l2_banks")) else None),
+        compute_partition=(
+            str(row["compute_partition"])
+            if pd.notna(row.get("compute_partition"))
+            else None
+        ),
+    )
+    reason = probe._should_downcorrect_inflated_multi_xcd(None)
+    if not reason:
+        return sys_info
+
+    out = sys_info.copy()
+    out.loc[out.index[0], "num_xcd"] = 1
+    out.loc[out.index[0], "compute_partition"] = "CPX"
+    corrected = totall2_banks(
+        probe.gpu_arch,
+        probe.gpu_model,
+        probe.l2_banks,
+        "CPX",
+    )
+    if corrected is not None:
+        out.loc[out.index[0], "total_l2_chan"] = int(corrected)
+    console_warning(
+        "analyze",
+        f"{reason}. Using num_xcd=1 / total_l2_chan="
+        f"{out.iloc[0].get('total_l2_chan')} for L2 channel expansion.",
+    )
+    return out
