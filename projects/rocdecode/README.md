@@ -52,7 +52,9 @@ source builds and nightly/CI artifacts.
 
 On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/video-acceleration-api-va-api-now-available-on-windows/) backend (Mesa's VA-API on D3D12 translation layer) for hardware-accelerated decoding. The vaon12 driver and libva are provided by TheRock for Windows under `%ROCM_PATH%\lib\rocm_sysdeps`; no separate download is required. The following additional tools are needed:
 
-* **Visual Studio 2022** with C++ desktop workload (MSVC compiler, C++17)
+* **Visual Studio 2022** version 17.13 or later with the C++ desktop workload (MSVC 19.43+, C++17).
+  Earlier toolsets fail at link time because ROCm's prebuilt libraries reference C++ standard library
+  internals introduced in MSVC 19.43 (see [TheRock Windows support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md)).
 * **CMake** 3.21 or later (the `Visual Studio 17 2022` generator requires 3.21)
 * **Windows SDK** (provides D3D12 and DXGI headers/libraries)
 
