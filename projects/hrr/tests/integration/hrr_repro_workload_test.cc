@@ -109,13 +109,13 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
 }
 
 // Occupies its stream long enough that anything enqueued behind it cannot
-// complete before work submitted to an independent stream. The accumulator
-// feeds a store so the loop cannot be optimized away, and it is chained so the
-// iterations cannot be reassociated into a closed form.
-__global__ void hrr_repro_spin(uint64_t iters, unsigned* sink) {
-  unsigned acc = 1;
-  for (uint64_t i = 0; i < iters; ++i) acc = acc * 1664525u + 1013904223u;
-  sink[0] = acc;
+// complete before work submitted to an independent stream. Bounded by the
+// constant-rate wall clock rather than an iteration count: a fixed count runs
+// 2 s on one part and past the 20-minute CI limit on another.
+__global__ void hrr_repro_spin(uint64_t ticks) {
+  const uint64_t start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
+  }
 }
 
 // ===========================================================================
@@ -376,23 +376,25 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
   }
 
   constexpr uint64_t kVal64 = 0xDEADBEEFFEEDFACEull;
-  // Long enough to cover the memset that follows it on any part, short enough
-  // not to lengthen the suite noticeably. Correctness does not depend on the
-  // exact value: too small only makes the unfixed code flaky again rather than
-  // making the fixed code fail.
-  constexpr uint64_t kSpinIters = 200000000ull;
+  // Long enough to cover the host enqueueing the memset and the write that
+  // follow it, short enough not to lengthen the suite noticeably. Correctness
+  // does not depend on the exact value: too small only makes the unfixed code
+  // flaky again rather than making the fixed code fail.
+  constexpr uint64_t kSpinMs = 500;
+  int ticksPerMs = 0;  // hipDeviceAttributeWallClockRate is in kHz
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&ticksPerMs,
+                                      hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(ticksPerMs > 0);
 
   hipStream_t s;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
   uint64_t* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, sizeof(uint64_t)));
-  unsigned* sink = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&sink, sizeof(unsigned)));
 
   // Null stream: a long spin, then the zeroing queued behind it.
   hipLaunchKernelGGL(hrr_repro_spin, dim3(1), dim3(1), 0, nullptr,
-                     kSpinIters, sink);
+                     kSpinMs * static_cast<uint64_t>(ticksPerMs));
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipMemset(d, 0, sizeof(uint64_t)));
 
@@ -407,7 +409,6 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
   HRR_HIP_CHECK(hipMemcpy(&h64, d, sizeof(h64), hipMemcpyDeviceToHost));
   REQUIRE(h64 == kVal64);
 
-  HRR_HIP_CHECK(hipFree(sink));
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
