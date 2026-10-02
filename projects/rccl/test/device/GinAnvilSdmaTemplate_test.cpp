@@ -765,17 +765,18 @@ TEST_F(GinAnvilSdmaTemplateTest, Wait_NoFenceWhenIncomplete) {
 // H21/H22: a strong signal still resolves the peer queue so fenceBeforeSignal
 // quiets SDMA instead of racing the payload via IPC. hasWins=false is a
 // standalone barrier signal; hasWins=true is a windowed sub-threshold put.
-__global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t bytes) {
+__global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t bytes, ncclGinSignal_t signalId = 0,
+                                       bool hasCounter = false, ncclGinSignalOp_t op = ncclGinSignalInc) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinSignalDescriptor sig{};
   sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-  sig.indexedSignal.signalId = 0;
+  sig.indexedSignal.signalId = signalId;
   ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
       ginCtx, ncclCoopThread{}, 1, hasWins, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
-      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0, false,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, op, 0, hasCounter, 0, false,
       nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
@@ -839,14 +840,14 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalResolvesQueue) {
 }
 
 // H23: windowed PutValue with a strong signal also resolves the peer queue.
-__global__ void kernelPutValueIpcSignalQuiesce(TemplateHarness* h, uint64_t value) {
+__global__ void kernelPutValueIpcSignalQuiesce(TemplateHarness* h, uint64_t value, ncclGinSignal_t signalId = 0) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinSignalDescriptor sig{};
   sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-  sig.indexedSignal.signalId = 0;
+  sig.indexedSignal.signalId = signalId;
   ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
       ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, value, sig,
       ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
@@ -938,12 +939,13 @@ static uint64_t downloadU64(const DeviceBuffer<uint8_t>& buf) {
 // Peer 1, one channel, sdmaChannel 0: markSdmaDirty sets bit peer * numCh + effCh.
 constexpr uint64_t kPeer1DirtyBit = 1ULL << 1;
 
-// Signals always IPC-mapped; mapDst lets dst resolve too, and remoteSignalAddrs enables fusion where SDMA_IS_OSS7.
+// mapDst IPC-maps dst; remoteSignalAddrs routes signals only via signal_remote_addrs and enables fusion on OSS7.
 struct SdmaSignalEnv {
   DeviceBuffer<uint8_t> src{1};
   DeviceBuffer<uint8_t> dst{sizeof(uint64_t)};
   DeviceBuffer<uint64_t> signals{2};
   DeviceBuffer<uint64_t> dirty{1};
+  DeviceBuffer<uint64_t> counters{1};
   DeviceBuffer<uintptr_t> sigAddrs{2};
   DeviceBuffer<ncclGinAnvilIpcBufEntry> entry{2};
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> q{1};
@@ -959,9 +961,12 @@ struct SdmaSignalEnv {
     host.ctx.signals = signals.ptr;
     host.ctx.nSignals = 2;
     host.ctx.sdmaDirty = dirty.ptr;
+    host.ctx.counters = counters.ptr;
     sigAddrs.copyFrom(std::vector<uintptr_t>{0, reinterpret_cast<uintptr_t>(signals.ptr)});
     host.ctx.signal_remote_addrs = remoteSignalAddrs ? sigAddrs.ptr : nullptr;
-    if (mapDst) {
+    if (remoteSignalAddrs) {
+      mapIpcTo(&host, &entry, &dst, sizeof(uint64_t));  // Signals resolve only via signal_remote_addrs[peer].
+    } else if (mapDst) {
       mapIpcToTwo(&host, &entry, &dst, sizeof(uint64_t), &signals, 2 * sizeof(uint64_t));
     } else {
       mapIpcTo(&host, &entry, &signals, 2 * sizeof(uint64_t));
@@ -1051,7 +1056,7 @@ static void checkMultiSegmentSplit(bool fused) {
     {
       StubRecordOnlyScope recordOnly;
       ASSERT_TRUE(readStubLog().recordOnly) << "else the stub would copy up to 2 * kGinPutSegBytes into 8-byte buffers";
-      kernelPutSignalQuiesce<<<1, 1>>>(env.h.ptr, /*hasWins=*/true, c.bytes);
+      kernelPutSignalQuiesce<<<1, 1>>>(env.h.ptr, /*hasWins=*/true, c.bytes, /*signalId=*/1);
       ASSERT_EQ(hipGetLastError(), hipSuccess);
       ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
       log = readStubLog();
@@ -1064,15 +1069,15 @@ static void checkMultiSegmentSplit(bool fused) {
       EXPECT_EQ(reinterpret_cast<uintptr_t>(log.calls[i].dst), dst + off) << i;
       EXPECT_EQ(reinterpret_cast<uintptr_t>(log.calls[i].src), src + off) << i;
       EXPECT_EQ(log.calls[i].size, std::min(kSeg, c.bytes - off)) << i;
-      EXPECT_EQ(log.calls[i].signal, (last && fused) ? env.signals.ptr : nullptr) << i;
+      EXPECT_EQ(log.calls[i].signal, (last && fused) ? env.signals.ptr + 1 : nullptr) << i;
     }
     if (fused) {
       EXPECT_EQ(readQuietCount(), 0ULL);
-      EXPECT_EQ(env.signals.download(), 0ULL);
+      EXPECT_EQ(env.signals.copyTo()[1], 0ULL);
     } else {
       EXPECT_EQ(log.calls[c.nSeg].op, sdma_anvil::kSdmaStubQuiet);
       EXPECT_EQ(readQuietCount(), 1ULL);
-      EXPECT_EQ(env.signals.download(), 1ULL);
+      EXPECT_EQ(env.signals.copyTo()[1], 1ULL);
     }
   }
 }
@@ -1086,6 +1091,18 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentFusedSignalsLastSegment) {
     GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
   }
   checkMultiSegmentSplit(/*fused=*/true);
+  // Fusion needs SignalInc and no counter: a counter or a SignalAdd keeps one segment unfused (put, then quiet).
+  SdmaSignalEnv env(/*threshold=*/0, /*mapDst=*/true, /*remoteSignalAddrs=*/true);
+  for (const bool counter : {true, false}) {
+    StubRecordOnlyScope recordOnly;
+    ASSERT_TRUE(readStubLog().recordOnly);
+    kernelPutSignalQuiesce<<<1, 1>>>(env.h.ptr, true, 64, 1, counter, counter ? ncclGinSignalInc : ncclGinSignalAdd);
+    syncAndCheck();
+    const sdma_anvil::SdmaStubLog log = readStubLog();
+    ASSERT_EQ(log.count, 2U) << "counter=" << counter;
+    EXPECT_EQ(log.calls[0].op, sdma_anvil::kSdmaStubPut) << "counter=" << counter;
+    EXPECT_EQ(log.calls[1].op, sdma_anvil::kSdmaStubQuiet) << "counter=" << counter;
+  }
 }
 
 // Unfused SDMA-path PutValue: a hit lands, marks dirty and quiets; a dst resolve miss drops the value and skips quiet.
@@ -1109,12 +1126,13 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   if (!sdmaIsOss7()) {
     GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
   }
+  constexpr uint64_t kVal = 0x5A5A5A5A5A5A5A5AULL;
   SdmaSignalEnv env(/*threshold=*/0, /*mapDst=*/true, /*remoteSignalAddrs=*/true);
   sdma_anvil::SdmaStubLog log{};
   {
     StubRecordOnlyScope recordOnly;
     ASSERT_TRUE(readStubLog().recordOnly);
-    kernelPutValueIpcSignalQuiesce<<<1, 1>>>(env.h.ptr, 0x5A5A5A5A5A5A5A5AULL);
+    kernelPutValueIpcSignalQuiesce<<<1, 1>>>(env.h.ptr, kVal, /*signalId=*/1);
     syncAndCheck();
     log = readStubLog();
   }
@@ -1122,11 +1140,14 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   EXPECT_EQ(log.calls[0].op, sdma_anvil::kSdmaStubPutSignal);
   EXPECT_EQ(log.calls[0].dst, static_cast<void*>(env.dst.ptr));
   EXPECT_EQ(log.calls[0].size, sizeof(uint64_t));
-  EXPECT_EQ(log.calls[0].signal, env.signals.ptr);
+  EXPECT_EQ(log.calls[0].signal, env.signals.ptr + 1) << "signal_remote_addrs[peer 1] + signalId * 8";
   EXPECT_EQ(env.dirty.download(), kPeer1DirtyBit);
-  EXPECT_EQ(env.signals.download(), 0ULL);
+  EXPECT_EQ(env.signals.copyTo()[1], 0ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
   EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  kernelPutValueIpcSignalQuiesce<<<1, 1>>>(env.h.ptr, kVal, /*signalId=*/1);  // Copying stub: the value must land.
+  syncAndCheck();
+  EXPECT_EQ(downloadU64(env.dst), kVal);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
