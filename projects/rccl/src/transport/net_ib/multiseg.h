@@ -53,6 +53,19 @@ static inline uint32_t ncclIbGetConnectCaps(const char* devName, size_t len) {
   return trailer.magic == NCCL_IB_CONNECT_CAPS_MAGIC ? trailer.caps : 0;
 }
 
+// Set in every CTS entry's nreqs when the receiver also wrote the side table for
+// that slot. Only sent to peers that advertised NCCL_IB_CAP_MULTISEG, so slots
+// with only single-segment receives keep the legacy wire format.
+#define NCCL_IB_CTS_NREQS_SIDE_TABLE (1u << 31)
+
+static inline uint32_t ncclIbCtsNreqs(uint32_t nreqs) {
+  return nreqs & ~NCCL_IB_CTS_NREQS_SIDE_TABLE;
+}
+
+static inline bool ncclIbCtsHasSideTable(uint32_t nreqs) {
+  return (nreqs & NCCL_IB_CTS_NREQS_SIDE_TABLE) != 0;
+}
+
 // A multi-segment registration is only usable if the peer can parse the
 // per-segment CTS side table. Single-segment buffers keep the legacy wire
 // format, so they are accepted whatever the peer advertised.
