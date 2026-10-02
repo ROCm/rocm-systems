@@ -125,10 +125,11 @@ TEST(DiagnosticsP2pMicrotest, FabricHandleKeepsXgmiAndPcieAdvice) {
   EXPECT_NE(std::string(ncclDiagP2pEdgeAdvice(&pcie)).find("amd-smi topology -d"), std::string::npos);
 }
 
-TEST(DiagnosticsP2pMicrotest, FabricEdgeAdviceIsGenericPairCheck) {
+TEST(DiagnosticsP2pMicrotest, OtherPathEdgeAdviceIsPairCheck) {
   const ncclDiagP2pEdgeInfo fabricHandle = MakeEdge(PATH_C2C, ncclDiagP2pHandleCuMemFabric);
   const ncclDiagP2pEdgeInfo netPath = MakeEdge(PATH_NET, ncclDiagP2pHandleLegacyIpc);
-  for (const ncclDiagP2pEdgeInfo* edge : {&fabricHandle, &netPath}) {
+  const ncclDiagP2pEdgeInfo disPath = MakeEdge(PATH_DIS, ncclDiagP2pHandleLegacyIpc);
+  for (const ncclDiagP2pEdgeInfo* edge : {&fabricHandle, &netPath, &disPath}) {
     const std::string advice = ncclDiagP2pEdgeAdvice(edge);
     EXPECT_NE(advice.find("amd-smi topology -t"), std::string::npos) << advice;
     EXPECT_NE(advice.find("amd-smi topology -a"), std::string::npos) << advice;
@@ -148,7 +149,8 @@ TEST(DiagnosticsP2pMicrotest, ImportAdviceNamesHipForEveryHandle) {
   const ncclDiagP2pEdgeInfo posixFd = MakeEdge(PATH_NVL, ncclDiagP2pHandleCuMemPosixFd);
   EXPECT_NE(std::string(ncclDiagP2pImportAdvice(&direct)).find("HIP peer-access"), std::string::npos);
   EXPECT_NE(std::string(ncclDiagP2pImportAdvice(&legacyIpc)).find("HIP IPC"), std::string::npos);
-  EXPECT_NE(std::string(ncclDiagP2pImportAdvice(&posixFd)).find("HIP virtual-memory"), std::string::npos);
+  EXPECT_NE(std::string(ncclDiagP2pImportAdvice(&posixFd)).find("HIP virtual-memory POSIX-FD"),
+            std::string::npos);
 }
 
 TEST(DiagnosticsP2pMicrotest, FabricImportAdviceFallsBackToEdgeAdvice) {

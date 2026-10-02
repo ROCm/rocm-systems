@@ -243,6 +243,9 @@ earlier HIP errors only. The following table summarizes the steps:
      - Check peer access and DMA support with ``amd-smi topology -a`` and
        ``amd-smi topology -d``, then check the IOMMU mode and the PCIe ACS
        settings of the host.
+   * - Any other ``path``, for example ``path=DIS``
+     - Check the link type and peer access between the two GPUs with
+       ``amd-smi topology -t`` and ``amd-smi topology -a``.
    * - ``handle=LEGACY_CUDA_IPC``
      - Check that all processes see the GPUs and can share IPC handles, see
        :ref:`diagnostics-containers`.
@@ -251,9 +254,6 @@ earlier HIP errors only. The following table summarizes the steps:
        share memory handles, see :ref:`diagnostics-containers`.
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
-   * - ``handle=CUMEM_FABRIC`` on a path that is neither XGMI nor PCIe
-     - Check the link type and peer access between the two GPUs with
-       ``amd-smi topology -t`` and ``amd-smi topology -a``.
 
 For example, a failed edge between two GPUs connected by XGMI is reported as:
 

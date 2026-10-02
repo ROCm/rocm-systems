@@ -45,6 +45,7 @@ static const char* const kDiagHeader  = "NCCL DIAG === NCCL Diagnostics ===";
 static const char* const kDiagSummary = "NCCL DIAG [OK]   p2p: all ";
 
 // Report lines that indicate a failed or incomplete check (src/diagnostics.cc, src/diagnostics/p2p.cc).
+// test/host/CMakeLists.txt fails the configure step when a marker leaves this list or the product text.
 static const char* const kDiagFailureMarkers[] = {
     "transport detect returned",
     "p2p: active check returned",

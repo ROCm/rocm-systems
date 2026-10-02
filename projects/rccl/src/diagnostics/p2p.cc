@@ -206,8 +206,7 @@ static bool ncclDiagP2pIsFabricEdge(const struct ncclDiagP2pEdgeInfo* edge) {
 
 static const char* ncclDiagP2pEdgeAdvice(const struct ncclDiagP2pEdgeInfo* edge) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // AMD GPUs have no IMEX fabric domain to check, so a fabric handle keeps the XGMI or PCIe advice of its path;
-  // only fabric edges on other paths get the generic pair check.
+  // AMD GPUs have no IMEX fabric domain to check, so the advice follows the path alone, whatever the handle.
   switch (edge->pathType) {
   case PATH_NVL:
   case PATH_NVB:
@@ -219,13 +218,9 @@ static const char* ncclDiagP2pEdgeAdvice(const struct ncclDiagP2pEdgeInfo* edge)
     return "check peer access and DMA support of the affected pair with 'amd-smi topology -a' and "
            "'amd-smi topology -d', then check Linux bare-metal IOMMU mode and PCIe ACS settings";
   default:
-    break;
-  }
-  if (ncclDiagP2pIsFabricEdge(edge)) {
     return "inspect the link type and peer access of the affected GPU pair with 'amd-smi topology -t' and "
            "'amd-smi topology -a'";
   }
-  return "inspect the affected GPU pair with 'amd-smi topology'";
 #else
   if (ncclDiagP2pIsFabricEdge(edge)) {
     return "check the IMEX domain with 'nvidia-imex-ctl -H -N' (nodes READY, connectivity C) and verify access to "

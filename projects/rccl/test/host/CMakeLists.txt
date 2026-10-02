@@ -59,6 +59,32 @@ rccl_assert_source_line("${_rccl_src_root}/graph/topo.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/diagnostics-p2p-test.cc"
   "${_rccl_amd_path_names}" "the AMD topoPathTypeStr in graph/topo.cc")
 unset(_rccl_amd_path_names)
+# DiagnosticsTests.cpp (rccl-UnitTests) finds failed checks by kDiagFailureMarkers; each marker must stay
+# both in that list and in the report line it marks.
+set(_rccl_diag_tests "${CMAKE_CURRENT_LIST_DIR}/../DiagnosticsTests.cpp")
+set(_rccl_diag_core_markers "transport detect returned" "p2p: active check returned")
+set(_rccl_diag_p2p_markers
+  "p2p: setup failed" "p2p: destination buffer unavailable" "p2p: peer-memory import failed"
+  "p2p: write mismatch" "p2p: read mismatch" "p2p: topology check failed" "p2p: launch/check failed"
+  "p2p: resource cleanup failed")
+foreach(_marker IN LISTS _rccl_diag_core_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics.cc"
+    "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+endforeach()
+foreach(_marker IN LISTS _rccl_diag_p2p_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+    "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+endforeach()
+# The local setup line is assembled from NCCL_DIAG_P2P_RUNTIME; kReportCases in
+# diagnostics-p2p-test.cc checks its printed form.
+rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+  "NCCL DIAG [INFO] p2p: local \" NCCL_DIAG_P2P_RUNTIME" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+foreach(_marker IN LISTS _rccl_diag_core_markers _rccl_diag_p2p_markers ITEMS "p2p: local HIP setup failed")
+  rccl_assert_source_line("${_rccl_diag_tests}" "\"${_marker}\"," "the report line it marks in src/diagnostics")
+endforeach()
+unset(_rccl_diag_tests)
+unset(_rccl_diag_core_markers)
+unset(_rccl_diag_p2p_markers)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
