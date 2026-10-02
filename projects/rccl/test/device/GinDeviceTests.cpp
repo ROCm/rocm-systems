@@ -805,19 +805,32 @@ TEST_F(GinDeviceTest, PostGfd_MultiPeer) {
 
 // Expected-timeout bound for proxy waits that must fail fast; 2^20 cycles is well under a millisecond.
 constexpr uint64_t kProxyShortTimeoutCycles = 1ULL << 20;
-// Watchdog deadline for waits that only an abort poll should end; far longer than one testAbort poll interval.
-constexpr uint64_t kProxyWatchdogCycles = 1ULL << 30;
 
-// Watchdog for one block: until state[0] reaches nDone, after cycles it records a rescue in state[1] and keeps
+// gfx11 lowers clock64() to the 20-bit SHADER_CYCLES register, so a production clock64 timeout can fire on a wrap.
+static bool clock64Wraps() {
+  hipDeviceProp_t prop{};
+  EXPECT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+  return std::strncmp(prop.gcnArchName, "gfx11", 5) == 0;
+}
+constexpr char kClock64WrapSkip[] = "gfx11 clock64() wraps at 20 bits, so production clock64 timeouts fire early";
+
+// Watchdog deadline: 2 s of wall_clock64 ticks (constant rate, 64-bit on every arch), far beyond any abort poll.
+static uint64_t watchdogDeadlineTicks() {
+  int rateKhz = 0;
+  EXPECT_EQ(hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0), hipSuccess);
+  return 2000ULL * static_cast<uint64_t>(std::max(rateKhz, 1));
+}
+
+// Watchdog for one block: until state[0] reaches nDone, after ticks it records a rescue in state[1] and keeps
 // cis[pe] at pis[pe], so a wait that ignores abortFlag ends as a test failure instead of a hang.
-static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe, uint32_t nDone, uint64_t cycles,
+static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe, uint32_t nDone, uint64_t ticks,
                                           uint32_t* state) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> done(state[0]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[pe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[pe]);
-  const uint64_t startCycle = clock64();
+  const uint64_t startTick = wall_clock64();
   while (done.load(cuda::memory_order_acquire) < nDone) {
-    if (clock64() - startCycle >= cycles) {
+    if (wall_clock64() - startTick >= ticks) {
       state[1] = 1u;
       ci.store(pi.load(cuda::memory_order_acquire), cuda::memory_order_release);
     }
@@ -912,16 +925,17 @@ struct GinApiFlushRig {
   std::vector<uint32_t> hostIssued;
 };
 
-// Block 0 runs the blocking Flush; block 1 drains the local queue only if Flush outlives kProxyWatchdogCycles.
+// Block 0 runs the blocking Flush; block 1 drains the local queue only if Flush outlives watchdogTicks.
 // state[0] counts block 0 threads that returned, state[1] records a rescue.
-__global__ void kernelGinApiFlushBlocking(ncclGinCtx ctx, uint32_t* abortFlag, uint32_t* state) {
+__global__ void kernelGinApiFlushBlocking(ncclGinCtx ctx, uint32_t* abortFlag, uint64_t watchdogTicks,
+                                          uint32_t* state) {
   if (blockIdx.x == 0) {
     ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, ncclCoopCta{}, /*hasDescriptor=*/false,
                                                       /*descriptor=*/nullptr, cuda::memory_order_acquire, abortFlag);
     cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).fetch_add(1u, cuda::memory_order_release);
   } else if (threadIdx.x == 0) {
     ncclGinProxyGpuCtx_t* proxyCtx = &static_cast<ncclGinProxyGpuCtx_t*>(ctx.handle)[ctx.contextId];
-    drainAfterDeadline(proxyCtx, ctx.rank, blockDim.x, kProxyWatchdogCycles, state);
+    drainAfterDeadline(proxyCtx, ctx.rank, blockDim.x, watchdogTicks, state);
   }
 }
 
@@ -934,7 +948,8 @@ TEST_F(GinDeviceTest, Flush_FlushesEveryPeerOnLocalQueue) {
   DeviceBuffer<uint32_t> d_state(2);
   d_state.zero();
 
-  kernelGinApiFlushBlocking<<<2, Rig::kThreads>>>(rig.UploadAndMakeCtx(), rig.d_abortFlag.ptr, d_state.ptr);
+  kernelGinApiFlushBlocking<<<2, Rig::kThreads>>>(rig.UploadAndMakeCtx(), rig.d_abortFlag.ptr, watchdogDeadlineTicks(),
+                                                  d_state.ptr);
   syncAndCheck();
   EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{Rig::kThreads, 0u}))
     << "{returned, rescued}: rescued=1 means a local flush wait ignored abortFlag and the watchdog drained cis";
@@ -1307,10 +1322,11 @@ __global__ void kernelGinApiWait(ncclGinCtx ctx, ncclGinRequest_t request, int c
   ci.store(pi.load(cuda::memory_order_relaxed), cuda::memory_order_release);
 }
 
-// Block 0 runs one Wait overload under abortFlag; an optional block 1 drains cis[peer] if Wait outlives cycles.
+// Block 0 runs one Wait overload under abortFlag; an optional block 1 drains cis[peer] if Wait outlives watchdogTicks.
 // state[0] is set once Wait returns, state[1] once the watchdog rescued it; only the timed arm writes outResult.
 __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, bool timed, uint32_t* abortFlag,
-                                      uint64_t cycles, ncclResult_t* outResult, uint32_t* state) {
+                                      uint64_t timeoutCycles, uint64_t watchdogTicks, ncclResult_t* outResult,
+                                      uint32_t* state) {
   if (threadIdx.x != 0) {
     return;
   }
@@ -1318,7 +1334,7 @@ __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, 
     if (timed) {
       *outResult = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false,
                                                                     /*descriptor=*/nullptr, cuda::memory_order_acquire,
-                                                                    abortFlag, cycles);
+                                                                    abortFlag, timeoutCycles);
     } else {
       ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, request, /*hasDescriptor=*/false, /*descriptor=*/nullptr,
                                                        cuda::memory_order_acquire, abortFlag);
@@ -1327,7 +1343,7 @@ __global__ void kernelGinApiWaitAbort(ncclGinCtx ctx, ncclGinRequest_t request, 
     return;
   }
   const ncclGinCpuProxyRequest& req = reinterpret_cast<const ncclGinCpuProxyRequest&>(request);
-  drainAfterDeadline(proxyCtxOf(ctx), req.peer, /*nDone=*/1u, cycles, state);
+  drainAfterDeadline(proxyCtxOf(ctx), req.peer, /*nDone=*/1u, watchdogTicks, state);
 }
 
 // Two proxy contexts (context 0 is a decoy) and ctx.rank != peer, so a wrong context or wrong flush queue shows up.
@@ -1528,15 +1544,19 @@ TEST_F(GinProxyFlushWaitTest, WaitGateHonorsAbortFlag) {
   d_abortFlag.upload(1u);
   DeviceBuffer<ncclResult_t> d_result(1);
   DeviceBuffer<uint32_t> d_state(2);
+  const uint64_t watchdogTicks = watchdogDeadlineTicks();
   for (const bool timed : {true, false}) {
     SCOPED_TRACE(timed ? "timeout overload" : "blocking overload");
+    if (timed && clock64Wraps()) {
+      continue; // kClock64WrapSkip: the timed arm needs the production clock64 timeout to outlast the abort poll.
+    }
     Upload();
     d_result.upload(ncclInternalError);
     d_state.zero();
 
     // The timeout overload bounds itself; the blocking one gets the watchdog block so a dropped flag fails, not hangs.
     kernelGinApiWaitAbort<<<timed ? 1 : 2, 1>>>(MakeCtx(), request, timed, d_abortFlag.ptr, kConsumerCycles,
-                                                d_result.ptr, d_state.ptr);
+                                                watchdogTicks, d_result.ptr, d_state.ptr);
     syncAndCheck();
 
     if (timed) {
@@ -1552,6 +1572,9 @@ TEST_F(GinProxyFlushWaitTest, WaitGateHonorsAbortFlag) {
 }
 
 TEST_F(GinProxyFlushWaitTest, WaitPublishesLastIssuedGetOnceFlushConsumed) {
+  if (clock64Wraps()) {
+    GTEST_SKIP() << kClock64WrapSkip;
+  }
   // kIssued must differ from the live lastIssuedGet (0x7110) and be rolling-ahead of visible.
   constexpr uint32_t kIssued = 0x00000002u;
   lastVisibleGet_[Idx(kContextId, kPeer)] = 0xFFFFFFFEu;
@@ -1795,41 +1818,44 @@ TEST_F(GinDeviceTest, ProxyFlush_ComparesAcrossUint32Wrap) {
 }
 
 TEST_F(GinDeviceTest, ProxyFlush_AbortFlagExitsWithSuccessBeforeTimeout) {
+  if (clock64Wraps()) {
+    GTEST_SKIP() << kClock64WrapSkip;
+  }
   EXPECT_EQ(runProxyFlush({5u, 5u}, {4u, 5u}, /*pe=*/0u, /*abortValue=*/1u, kProxyFlushLongTimeoutCycles), ncclSuccess)
     << "a set abortFlag must end the spin through testAbort, not through the timeout";
 }
 
 // Block 0 times the fastest of three ready flushes against a pending no-timeout flush that only the abort poll ends.
-// Block 1 drains peer 1 only if block 0 outlives kProxyWatchdogCycles; state is {returned, rescued}.
-__global__ void kernelProxyFlushNoTimeout(ncclGinProxyGpuCtx_t* ctx, uint32_t* abortFlag, uint64_t* outCycles,
-                                          uint32_t* state) {
+// Block 1 drains peer 1 only if block 0 outlives watchdogTicks; state is {returned, rescued}. Times are wall_clock64.
+__global__ void kernelProxyFlushNoTimeout(ncclGinProxyGpuCtx_t* ctx, uint32_t* abortFlag, uint64_t watchdogTicks,
+                                          uint64_t* outTicks, uint32_t* state) {
   if (threadIdx.x != 0) {
     return;
   }
   if (blockIdx.x == 1) {
-    drainAfterDeadline(ctx, /*pe=*/1, /*nDone=*/1u, kProxyWatchdogCycles, state);
+    drainAfterDeadline(ctx, /*pe=*/1, /*nDone=*/1u, watchdogTicks, state);
     return;
   }
   nccl::gin::proxy::flush(ctx, /*pe=*/0u, cuda::memory_order_acquire, abortFlag); // warms the ctx, pis and cis lines
-  uint64_t readyCycles = ~uint64_t{0};
+  uint64_t readyTicks = ~uint64_t{0};
   for (int i = 0; i < 3; ++i) {
-    const uint64_t t0 = clock64();
+    const uint64_t t0 = wall_clock64();
     nccl::gin::proxy::flush(ctx, /*pe=*/0u, cuda::memory_order_acquire, abortFlag);
-    const uint64_t t1 = clock64();
-    if (t1 - t0 < readyCycles) {
-      readyCycles = t1 - t0;
+    const uint64_t t1 = wall_clock64();
+    if (t1 - t0 < readyTicks) {
+      readyTicks = t1 - t0;
     }
   }
-  const uint64_t t0 = clock64();
+  const uint64_t t0 = wall_clock64();
   nccl::gin::proxy::flush(ctx, /*pe=*/1u, cuda::memory_order_acquire, abortFlag);
-  const uint64_t t1 = clock64();
-  outCycles[0] = readyCycles;
-  outCycles[1] = t1 - t0;
+  const uint64_t t1 = wall_clock64();
+  outTicks[0] = readyTicks;
+  outTicks[1] = t1 - t0;
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).store(1u, cuda::memory_order_release);
 }
 
 TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
-  // Peer 0 is complete; peer 1 lags, so only the abort poll ends its wait. A ratio is independent of clock64 units.
+  // Peer 0 is complete; peer 1 lags, so only the abort poll ends its wait. A ratio is independent of the tick rate.
   ProxyFlushQueues queues({3u, 5u}, {3u, 4u});
   DeviceBuffer<uint32_t> d_abort(1);
   DeviceBuffer<uint64_t> d_cycles(2);
@@ -1838,7 +1864,8 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
   DeviceBuffer<uint32_t> d_state(2);
   d_state.zero();
 
-  kernelProxyFlushNoTimeout<<<2, 1>>>(queues.d_ctx.ptr, d_abort.ptr, d_cycles.ptr, d_state.ptr);
+  kernelProxyFlushNoTimeout<<<2, 1>>>(queues.d_ctx.ptr, d_abort.ptr, watchdogDeadlineTicks(), d_cycles.ptr,
+                                      d_state.ptr);
   syncAndCheck();
   EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u}))
     << "{returned, rescued}: rescued=1 means the no-timeout flush ignored abortFlag and the watchdog drained cis[1]";
