@@ -92,8 +92,8 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     }
 
     const auto& _dispatch_info = record.dispatch_data->dispatch_info;
-    const auto* _kern_sym_data =
-        tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
+    const auto  _kern_sym_data =
+        trace_cache::get_metadata_registry().get_kernel_symbol(_dispatch_info.kernel_id);
 
     auto _bundle =
         counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),

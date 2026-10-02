@@ -89,6 +89,8 @@ struct backend
     using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using scratch_memory_record_t        = Wrapper::scratch_memory_record;
+    using code_object_load_data_t        = Wrapper::code_object_load_data;
+    using code_object_kernel_symbol_register_data_t = Wrapper::kernel_symbol_data;
 #if ROCPROFILER_VERSION >= 700
     using async_correlation_id_t    = Wrapper::async_correlation_id_t;
     using tracing_hip_stream_data_t = Wrapper::hip_stream_data;
@@ -138,6 +140,11 @@ struct backend
         Wrapper::CALLBACK_TRACING_MARKER_CORE_API;
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
+
+    // ─── Code object operation constants ─────────────────────────────────────────
+    static constexpr tracing_operation_t CODE_OBJECT_LOAD = Wrapper::CODE_OBJECT_LOAD;
+    static constexpr tracing_operation_t CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER =
+        Wrapper::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
 
 #if ROCPROFILER_VERSION >= 600
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =
