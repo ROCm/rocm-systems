@@ -643,9 +643,9 @@ def lvm_over_nvme(devno):
     of their own: LVM implements a dm-raid LV as a tree of rimage/rmeta
     sub-LVs, and every one of them carries an "LVM-" dm uuid, so the recursion
     classifies each member as an LVM layer and keeps descending until it
-    reaches the physical volumes. MD RAID is not device-mapper at all and never
-    reaches here -- backing_storage labels it "md" and backing_supported
-    rejects it outright.
+    reaches the physical volumes. A top-level MD RAID is not device-mapper, so
+    backing_storage labels it "md" and backing_supported rejects it outright;
+    if MD is nested beneath LVM, this walk rejects it as a non-NVMe leaf.
     """
     try:
         start = os.path.realpath(os.path.join("/sys/dev/block", devno))
