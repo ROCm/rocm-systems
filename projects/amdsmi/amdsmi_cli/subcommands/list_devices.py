@@ -179,6 +179,7 @@ class ListDevicesCommands:
             is_ainic_info_read = False
             ainic_info = {
                 "bdf": "N/A",
+                "Type": "N/A",
                 "Permanent Address": "N/A",
                 "Product Name": "N/A",
                 "Part Number": "N/A",
@@ -206,6 +207,7 @@ class ListDevicesCommands:
         # CSV format is intentionally aligned with Host
         if self.logger.is_csv_format():
             self.logger.store_ainic_output(args.nic, "nic_bdf", ainic_info["bdf"])
+            self.logger.store_ainic_output(args.nic, "type", ainic_info["Type"])
             self.logger.store_ainic_output(args.nic, "mode", mode)
             # Keep the column for alignment; blank it when there is no netdev.
             self.logger.store_ainic_output(
@@ -218,6 +220,7 @@ class ListDevicesCommands:
             self.logger.store_ainic_output(args.nic, "capability", ";".join(capability))
         else:
             self.logger.store_ainic_output(args.nic, "bdf", ainic_info["bdf"])
+            self.logger.store_ainic_output(args.nic, "type", ainic_info["Type"])
             self.logger.store_ainic_output(args.nic, "mode", mode)
             if is_netdev:
                 self.logger.store_ainic_output(

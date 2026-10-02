@@ -721,6 +721,13 @@ class AmdSmiNicHealthState(IntEnum):
     UNSUPPORTED = amdsmi_wrapper.AMDSMI_NIC_HEALTH_UNSUPPORTED
 
 
+class AmdSmiNicType(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_NIC_TYPE_UNKNOWN
+    AINIC = amdsmi_wrapper.AMDSMI_NIC_TYPE_AINIC
+    UALOE = amdsmi_wrapper.AMDSMI_NIC_TYPE_UALOE
+    OTHER = amdsmi_wrapper.AMDSMI_NIC_TYPE_OTHER
+
+
 class AmdSmiRegType(IntEnum):
     XGMI = amdsmi_wrapper.AMDSMI_REG_XGMI
     WAFL = amdsmi_wrapper.AMDSMI_REG_WAFL
@@ -2506,6 +2513,9 @@ def _decode_nic_capabilities(bitmask: int) -> List[str]:
 def amdsmi_get_ainic_info_summary(nic_info):
     return {
         "bdf": _format_bdf(nic_info.bus.bdf),
+        "Type": _nic_type_label(
+            _nic_type_from_value(nic_info.asic.type), nic_info.asic.vendor_name.decode("utf-8")
+        ),
         "UUID": nic_info.asic.permanent_address.decode("utf-8"),
         "Permanent Address": nic_info.asic.permanent_address.decode("utf-8"),
         # "Device Name": nic_info.asic.product_name.decode('utf-8'),
@@ -2678,6 +2688,48 @@ def amdsmi_get_nic_fw_info(
     return fw_info_dict
 
 
+def _nic_type_from_value(value: int) -> AmdSmiNicType:
+    """Decode the C type byte; a value past the enum (a newer library) reads as UNKNOWN."""
+    try:
+        return AmdSmiNicType(value)
+    except ValueError:
+        return AmdSmiNicType.UNKNOWN
+
+
+_NIC_TYPE_LABELS = {AmdSmiNicType.AINIC: "AINIC", AmdSmiNicType.UALOE: "UALoE"}
+
+
+def _nic_type_label(nic_type: AmdSmiNicType, vendor_name: str) -> str:
+    """Display name of a NIC type; OTHER shows the vendor so unlike cards stay distinguishable."""
+    if nic_type == AmdSmiNicType.OTHER and vendor_name:
+        return vendor_name
+    return _NIC_TYPE_LABELS.get(nic_type, "N/A")
+
+
+def amdsmi_get_nic_type(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> AmdSmiNicType:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    nic_type = amdsmi_wrapper.amdsmi_nic_type_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_nic_type(processor_handle, ctypes.byref(nic_type)))
+
+    return _nic_type_from_value(nic_type.value)
+
+
+def amdsmi_get_nic_type_label(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
+    """Display name of the NIC's type, read without the full ainic info (six getters).
+
+    The vendor name is read only for OTHER, the one type shown by its vendor.
+    """
+    nic_type = amdsmi_get_nic_type(processor_handle)
+    vendor_name = ""
+    if nic_type == AmdSmiNicType.OTHER:
+        asic = amdsmi_wrapper.amdsmi_nic_asic_info_t()
+        _check_res(amdsmi_wrapper.amdsmi_get_nic_asic_info(processor_handle, ctypes.byref(asic)))
+        vendor_name = asic.vendor_name.decode("utf-8")
+    return _nic_type_label(nic_type, vendor_name)
+
+
 def amdsmi_get_nic_telemetry(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> Dict[str, Any]:
@@ -2707,7 +2759,7 @@ def amdsmi_get_nic_telemetry(
         "health": {
             "state": health_state,
             "error_count": _u(telem.health.error_count, 0xFFFFFFFF),
-            "reporter": telem.health.reporter.decode("utf-8"),
+            "reporter": telem.health.reporter.decode("utf-8") or "N/A",
         },
         "port_split": {
             "splittable": _u(telem.port_split.splittable, 0xFF),

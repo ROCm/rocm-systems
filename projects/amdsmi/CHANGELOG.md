@@ -65,10 +65,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
-- **`amd-smi list --nic` now enumerates Infinity Fabric over Ethernet (IFoE) endpoints**.  
+- **`amd-smi list --nic` now enumerates UALoE endpoints**.  
   - The `ifoe`-bound functions (`0x1022:0x1747`) were absent from the NIC inventory. They now appear as rows reporting their BDF and `MODE: fwctl-only`. Their firmware versions come from `amd-smi firmware --nic`, which reaches them with no change.
   - These endpoints have no VPD, no hwmon node, and no netdev, so identity, `PERMANENT_ADDRESS`, and every `metric --nic` field read `N/A` for them. They are listed rather than filtered so `--nic all` resolves to the same device set in every subcommand.
   - NIC indices are positional, so adding these rows renumbers the AI-NIC cards that follow them. Select a device by BDF where the identity has to be stable.
+
+- **Added ``amdsmi_get_nic_type()`` and a ``type`` field in ``amdsmi_nic_asic_info_t``**.  
+  - The new ``amdsmi_nic_type_t`` reports ``AMDSMI_NIC_TYPE_AINIC``, ``AMDSMI_NIC_TYPE_UALOE``, ``AMDSMI_NIC_TYPE_OTHER`` or ``AMDSMI_NIC_TYPE_UNKNOWN``. Callers no longer have to infer the kind from ``MODE`` or the vendor name; a Pensando card whose ports were not found is ``fwctl-only`` as well. The getter and the field report the same value.
+  - The field is one ``uint8_t`` placed in the alignment padding before ``capability``, so ``sizeof(amdsmi_nic_asic_info_t)`` and every existing offset are unchanged and callers built against the old header keep working.
+
+- **Added ``TYPE`` to ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
+  - It shows ``AINIC``, ``UALoE``, or the vendor name for any other NIC, and ``N/A`` when the type is unknown. In ``metric --nic`` it is the first field of each block, so the all-``N/A`` block of a UALoE endpoint is not read as a failure.
+  - ``list --nic`` also adds a ``type`` column to CSV output, right after the BDF.
 
 - **`amd-smi list --nic` now notes when PCI VPD was unreadable**.  
   - `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` come from `/sys/bus/pci/devices/*/vpd`, which is mode 0600, so an unprivileged run cannot be told apart from a card with no VPD image. When the caller is not root and any of the three reads `N/A`, one note on stderr says so. JSON and CSV output are unaffected.
@@ -276,6 +284,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The NIC is now enumerated with an empty `rdma_dev`.
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
   - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
+
+- **Fixed ``amd-smi metric --nic`` printing an empty ``REPORTER`` for NICs with no health reporter**.  
+  - ``amdsmi_get_nic_telemetry()`` in the Python interface returned an empty ``health.reporter`` string where every other unavailable telemetry field reads ``N/A``, so the ``HEALTH`` block of a UALoE endpoint showed ``REPORTER:`` with no value.
+  - It now reports ``N/A``. The C API is unchanged and still returns an empty ``reporter``.
 
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.

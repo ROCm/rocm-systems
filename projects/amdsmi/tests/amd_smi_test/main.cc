@@ -48,6 +48,7 @@
 #include "functional/ifoe/fabric/fabric_read.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
 #include "functional/ifoe/tray/tray_info_read.h"
+#include "functional/nic/identity/nic_type_read.h"
 #include "functional/nic/telemetry/telemetry_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
@@ -354,6 +355,11 @@ TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
 
 TEST(NicFunctionalReadOnly, TestNicTelemetryRead) {
   TestNicTelemetryRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(NicFunctionalReadOnly, TestNicTypeRead) {
+  TestNicTypeRead tst;
   RunGenericTest(&tst);
 }
 
