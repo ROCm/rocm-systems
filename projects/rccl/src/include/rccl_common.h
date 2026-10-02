@@ -266,6 +266,8 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
+// Sets ceAllReduceFastPath on each queued CE task from its receive window; no bootstrap.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
