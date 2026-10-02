@@ -65,6 +65,13 @@ CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode
     retry_event_pending_.store(false, std::memory_order_release);
     handle_doorbell(ts);
   });
+  stall_recheck_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *message) {
+    if (!message || message->payload() != stall_recheck_generation_)
+      return;
+    stall_recheck_pending_ = false;
+    stall_recheck_tick_ = simdojo::TICK_MAX;
+    handle_doorbell(ts);
+  });
   dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *message) {
     if (!message || message->payload() != dispatch_continuation_generation_)
       return;
@@ -840,8 +847,10 @@ void CommandProcessor::startup() {
     erase_cluster_workgroups(entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume the ring after the blocking packet's completion is durable.
-    if (entry.blocks_following && engine())
+    if (entry.blocks_following && engine()) {
+      stall_recheck_backoff_ = 1;
       arm_stall_recheck(engine()->context(partition_id()).current_tick());
+    }
   });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
   // Waves admitted before engine attachment could not notify the pool driver.
@@ -854,6 +863,9 @@ void CommandProcessor::startup() {
 void CommandProcessor::shutdown() {
   stop_doorbell_monitor();
   retry_event_pending_.store(false, std::memory_order_release);
+  stall_recheck_pending_ = false;
+  stall_recheck_tick_ = simdojo::TICK_MAX;
+  ++stall_recheck_generation_;
   if (is_primary_ && engine()) {
     engine()->primary_release();
     is_primary_ = false;
@@ -3279,6 +3291,9 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
         flush_gpu_caches();
         if (submission.complete)
           submission.complete(true);
+        // Completion can release an earlier queue in this same service pass.
+        stall_recheck_backoff_ = 1;
+        arm_stall_recheck(now);
         state.submissions.pop_front();
         queue.command_access.reset();
         if (!state.submissions.empty())
@@ -3908,6 +3923,8 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
     }
     if (!state.submissions.empty()) {
       queue.command_retry_pending = true;
+      // Yielding the packet budget is runnable work, not an external wait.
+      stall_recheck_backoff_ = 1;
       arm_stall_recheck(now);
     }
   } catch (const std::exception &error) {
@@ -4829,7 +4846,18 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
   // which is where a 12x slowdown came from. Backing off is nearly free in
   // simulated time: with no other event pending the engine jumps straight to the
   // re-check, so a longer interval skips idle ticks rather than adding latency.
-  schedule_event(&doorbell_event_, now + stall_recheck_backoff_);
+  // Several queues or retry sites can remain blocked on the same pass. Keep
+  // one live re-check; otherwise each retry can enqueue several more. Fresh
+  // work can reset the backoff and pull the deadline earlier. Only that case
+  // leaves a stale event, which the generation check ignores when it fires.
+  const simdojo::Tick tick = now + stall_recheck_backoff_;
+  if (stall_recheck_pending_ && stall_recheck_tick_ <= tick)
+    return;
+  stall_recheck_pending_ = true;
+  stall_recheck_tick_ = tick;
+  schedule_event(
+      &stall_recheck_event_, tick,
+      std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, ++stall_recheck_generation_));
   stall_recheck_backoff_ = std::min(stall_recheck_backoff_ * 2, kMaxStallRecheckBackoff);
 }
 
