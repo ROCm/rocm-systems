@@ -1201,7 +1201,7 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1221,7 +1221,7 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1241,7 +1241,7 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1261,7 +1261,7 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1281,7 +1281,7 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1301,7 +1301,7 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1321,7 +1321,7 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1341,7 +1341,7 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1361,7 +1361,7 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1381,7 +1381,7 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1401,7 +1401,7 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1421,7 +1421,7 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1441,7 +1441,7 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1461,7 +1461,7 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1639,7 +1639,7 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1659,7 +1659,7 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1679,7 +1679,7 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1699,7 +1699,7 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1719,7 +1719,7 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1739,7 +1739,7 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1759,7 +1759,7 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::O>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::O>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1779,7 +1779,7 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::U>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::U>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1799,7 +1799,7 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1819,7 +1819,7 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1839,7 +1839,7 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1859,7 +1859,7 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1879,7 +1879,7 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1899,7 +1899,7 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3185,7 +3185,7 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3206,7 +3206,7 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3227,7 +3227,7 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3248,7 +3248,7 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3269,7 +3269,7 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3290,7 +3290,7 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3311,7 +3311,7 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3598,7 +3598,7 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3619,7 +3619,7 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3640,7 +3640,7 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3661,7 +3661,7 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3682,7 +3682,7 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3703,7 +3703,7 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }
@@ -3724,7 +3724,7 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
     const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
             s0, s1, inst_.abs, inst_.neg, compare_policy))
       result |= (1ULL << lane);
   }

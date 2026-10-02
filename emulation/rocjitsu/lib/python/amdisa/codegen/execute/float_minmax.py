@@ -45,7 +45,7 @@ _TEMPLATE = re.compile(
 
 
 def _format(dtype: str) -> str:
-    return f'amdgpu::comparison::{FORMATS[dtype]}'
+    return f'amdgpu::fp_format::{FORMATS[dtype]}'
 
 
 def _call(

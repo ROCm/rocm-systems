@@ -758,22 +758,22 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Min3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Min3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Min3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Min3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -803,22 +803,22 @@ RJ_NOINLINE void VMin3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Min3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Min3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Min3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Min3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -836,22 +836,22 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Max3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Max3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Max3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Max3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -881,22 +881,22 @@ RJ_NOINLINE void VMax3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Max3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Max3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Max3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Max3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -970,22 +970,22 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Minimum3>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum3>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Minimum3>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum3>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -1015,22 +1015,22 @@ RJ_NOINLINE void VMinimum3F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Minimum3>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum3>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Minimum3>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum3>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -1048,22 +1048,22 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Maximum3>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum3>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Maximum3>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum3>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -1093,22 +1093,22 @@ RJ_NOINLINE void VMaximum3F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Maximum3>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum3>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Maximum3>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum3>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -1154,22 +1154,22 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Med3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Med3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Med3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Med3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -1199,22 +1199,22 @@ RJ_NOINLINE void VMed3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Med3Num>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Med3Num>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::Med3Num>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Med3Num>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2701,22 +2701,22 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinMaxNum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinMaxNum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinMaxNum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinMaxNum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2746,22 +2746,22 @@ RJ_NOINLINE void VMinmaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinMaxNum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinMaxNum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinMaxNum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinMaxNum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2779,22 +2779,22 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaxMinNum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxMinNum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaxMinNum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxMinNum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2824,22 +2824,22 @@ RJ_NOINLINE void VMaxminNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaxMinNum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxMinNum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaxMinNum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxMinNum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2913,22 +2913,22 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinimumMaximum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinimumMaximum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinimumMaximum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinimumMaximum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2958,22 +2958,22 @@ RJ_NOINLINE void VMinimummaximumF16Vop3::execute_modifier_impl(amdgpu::Wavefront
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinimumMaximum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinimumMaximum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MinimumMaximum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinimumMaximum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -2991,22 +2991,22 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaximumMinimum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaximumMinimum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaximumMinimum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaximumMinimum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
@@ -3036,22 +3036,22 @@ RJ_NOINLINE void VMaximumminimumF16Vop3::execute_modifier_impl(amdgpu::Wavefront
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(
-      amdgpu::comparison::F16,
-      amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaximumMinimum>{
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaximumMinimum>{
           amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::comparison::F16>(wf, inst_.omod, inst_.clamp);
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::comparison::F16>(
+          static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
-              amdgpu::minmax::Operation<amdgpu::comparison::F16, amdgpu::minmax::MaximumMinimum>{
+              amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaximumMinimum>{
                   compare_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),

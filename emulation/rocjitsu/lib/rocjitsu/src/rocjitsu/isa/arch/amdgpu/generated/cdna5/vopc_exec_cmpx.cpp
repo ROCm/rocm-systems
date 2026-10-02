@@ -33,7 +33,7 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -46,7 +46,7 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -81,7 +81,7 @@ RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -94,7 +94,7 @@ RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -120,7 +120,7 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -133,7 +133,7 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -168,7 +168,7 @@ RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -181,7 +181,7 @@ RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -207,7 +207,7 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -220,7 +220,7 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -255,7 +255,7 @@ RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -268,7 +268,7 @@ RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -294,7 +294,7 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -307,7 +307,7 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -342,7 +342,7 @@ RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -355,7 +355,7 @@ RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -381,7 +381,7 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -394,7 +394,7 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -429,7 +429,7 @@ RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -442,7 +442,7 @@ RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -468,7 +468,7 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -481,7 +481,7 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -516,7 +516,7 @@ RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -529,7 +529,7 @@ RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -555,7 +555,7 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -568,8 +568,8 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -603,7 +603,7 @@ RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -616,7 +616,7 @@ RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -642,7 +642,7 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -655,8 +655,8 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -690,7 +690,7 @@ RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -703,7 +703,7 @@ RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -729,7 +729,7 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -742,7 +742,7 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -777,7 +777,7 @@ RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -790,7 +790,7 @@ RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -816,7 +816,7 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -829,7 +829,7 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -864,7 +864,7 @@ RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -877,7 +877,7 @@ RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -903,7 +903,7 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -916,7 +916,7 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -951,7 +951,7 @@ RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -964,7 +964,7 @@ RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -990,7 +990,7 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1003,7 +1003,7 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1038,7 +1038,7 @@ RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1051,7 +1051,7 @@ RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1077,7 +1077,7 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1090,7 +1090,7 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1125,7 +1125,7 @@ RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1138,7 +1138,7 @@ RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1164,7 +1164,7 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1177,7 +1177,7 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1212,7 +1212,7 @@ RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy =
                  amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1225,7 +1225,7 @@ RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1251,7 +1251,7 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1264,7 +1264,7 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1299,7 +1299,7 @@ RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1312,7 +1312,7 @@ RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1338,7 +1338,7 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1351,7 +1351,7 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1386,7 +1386,7 @@ RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1399,7 +1399,7 @@ RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1425,7 +1425,7 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1438,7 +1438,7 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1473,7 +1473,7 @@ RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1486,7 +1486,7 @@ RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1512,7 +1512,7 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1525,7 +1525,7 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1560,7 +1560,7 @@ RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1573,7 +1573,7 @@ RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1599,7 +1599,7 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1612,7 +1612,7 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1647,7 +1647,7 @@ RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1660,7 +1660,7 @@ RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1686,7 +1686,7 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1699,7 +1699,7 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1734,7 +1734,7 @@ RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1747,7 +1747,7 @@ RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1773,7 +1773,7 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1786,8 +1786,8 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1821,7 +1821,7 @@ RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1834,7 +1834,7 @@ RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1860,7 +1860,7 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1873,8 +1873,8 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1908,7 +1908,7 @@ RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -1921,7 +1921,7 @@ RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -1947,7 +1947,7 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -1960,7 +1960,7 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -1995,7 +1995,7 @@ RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2008,7 +2008,7 @@ RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2034,7 +2034,7 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2047,7 +2047,7 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2082,7 +2082,7 @@ RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2095,7 +2095,7 @@ RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2121,7 +2121,7 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2134,7 +2134,7 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2169,7 +2169,7 @@ RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2182,7 +2182,7 @@ RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2208,7 +2208,7 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2221,7 +2221,7 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2256,7 +2256,7 @@ RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2269,7 +2269,7 @@ RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2295,7 +2295,7 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2308,7 +2308,7 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2343,7 +2343,7 @@ RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2356,7 +2356,7 @@ RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2382,7 +2382,7 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                        auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2395,7 +2395,7 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2430,7 +2430,7 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
             inst, wf,
             [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())](auto a,
                                                                                          auto b) {
-              return amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+              return amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
                   a, b, compare_policy);
             },
             [&](uint64_t value) { wf.set_exec(value); }))
@@ -2443,7 +2443,7 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
         continue;
       const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
       const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-      if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+      if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
               s0, s1, compare_policy))
         result |= (1ULL << lane);
     }
@@ -2465,7 +2465,7 @@ void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2478,7 +2478,7 @@ void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2491,7 +2491,7 @@ void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Eq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2504,7 +2504,7 @@ void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Eq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2517,7 +2517,7 @@ void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Le>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2530,7 +2530,7 @@ void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Le>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2543,7 +2543,7 @@ void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Gt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2556,7 +2556,7 @@ void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Gt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2569,7 +2569,7 @@ void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2582,7 +2582,7 @@ void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2595,7 +2595,7 @@ void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2608,7 +2608,7 @@ void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2621,7 +2621,7 @@ void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::O>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::O>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2634,8 +2634,8 @@ void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::O>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::O>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -2647,7 +2647,7 @@ void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::U>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::U>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2660,8 +2660,8 @@ void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::U>(
-            s0, s1, compare_policy))
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::U>(s0, s1,
+                                                                                    compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -2673,7 +2673,7 @@ void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nge>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2686,7 +2686,7 @@ void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nge>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2699,7 +2699,7 @@ void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlg>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2712,7 +2712,7 @@ void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlg>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2725,7 +2725,7 @@ void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ngt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2738,7 +2738,7 @@ void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ngt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2751,7 +2751,7 @@ void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nle>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2764,7 +2764,7 @@ void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nle>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2777,7 +2777,7 @@ void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Neq>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2790,7 +2790,7 @@ void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Neq>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
@@ -2803,7 +2803,7 @@ void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
           inst, wf,
           [compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())](auto a,
                                                                                            auto b) {
-            return amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlt>(
+            return amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
                 a, b, compare_policy);
           },
           [&](uint64_t value) { wf.set_exec(value); }))
@@ -2816,7 +2816,7 @@ void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlt>(
+    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
             s0, s1, compare_policy))
       result |= (1ULL << lane);
   }

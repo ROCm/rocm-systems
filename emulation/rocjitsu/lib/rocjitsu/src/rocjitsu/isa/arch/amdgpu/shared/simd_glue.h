@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
@@ -698,11 +699,11 @@ template <typename Fmt>
 inline output_modifier::Policy output_modifier_policy(const Wavefront &wf, uint32_t omod,
                                                       uint32_t clamp) {
   output_modifier::Policy policy;
-  if constexpr (std::is_same_v<Fmt, comparison::F32>) {
+  if constexpr (std::is_same_v<Fmt, fp_format::F32>) {
     policy.omod = effective_vop3_omod_f32(wf, omod);
     policy.round_mode = wf.fp_round_mode_f32();
   } else {
-    if constexpr (std::is_same_v<Fmt, comparison::F16>)
+    if constexpr (std::is_same_v<Fmt, fp_format::F16>)
       policy.omod = effective_vop3_omod_f16(wf, omod);
     else
       policy.omod = effective_vop3_omod_f64(wf, omod);
@@ -2451,7 +2452,7 @@ template <typename Float, typename Inst, typename UnOp>
 [[nodiscard]] inline bool try_execute_unary_vop3_rounded_simd(Inst &inst, Wavefront &wf,
                                                               UnOp un_op) {
   static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
-  using Fmt = std::conditional_t<std::is_same_v<Float, float>, comparison::F32, comparison::F64>;
+  using Fmt = std::conditional_t<std::is_same_v<Float, float>, fp_format::F32, fp_format::F64>;
   const auto raw_operation = [un_op](auto bits) {
     const auto value = std::bit_cast<util::native<Float>>(bits);
     return std::bit_cast<decltype(bits)>(un_op(value));

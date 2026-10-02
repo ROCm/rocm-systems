@@ -6,6 +6,7 @@
 /// cases, and scalar/SIMD agreement.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "util/simd.h"
@@ -22,6 +23,7 @@
 namespace {
 
 namespace cmp = rocjitsu::amdgpu::comparison;
+namespace fmt = rocjitsu::amdgpu::fp_format;
 namespace mm = rocjitsu::amdgpu::minmax;
 namespace om = rocjitsu::amdgpu::output_modifier;
 namespace fp = rocjitsu::amdgpu::floating_operation;
@@ -29,7 +31,7 @@ namespace fp = rocjitsu::amdgpu::floating_operation;
 // Exercise the common wrapper with explicit results, including every source bit.
 // The same cases run on scalar values and SIMD lanes.
 template <typename V> void expect_modifier_stage_order() {
-  using F32 = cmp::F32;
+  using F32 = fmt::F32;
   const auto expect_bits = [](V actual, uint32_t expected) {
     if constexpr (std::is_same_v<V, uint32_t>) {
       EXPECT_EQ(actual, expected);
@@ -194,17 +196,17 @@ template <typename Fmt> void expect_matches_reference(typename Fmt::Lane x) {
 
 TEST(OutputModifierTest, F16EveryEncodingMatchesReference) {
   for (uint32_t x = 0; x <= 0xffffu; ++x)
-    expect_matches_reference<cmp::F16>(x);
+    expect_matches_reference<fmt::F16>(x);
 }
 
 TEST(OutputModifierTest, F32MatchesReference) {
-  for (const uint32_t x : specials_and_random<cmp::F32>())
-    expect_matches_reference<cmp::F32>(x);
+  for (const uint32_t x : specials_and_random<fmt::F32>())
+    expect_matches_reference<fmt::F32>(x);
 }
 
 TEST(OutputModifierTest, F64MatchesReference) {
-  for (const uint64_t x : specials_and_random<cmp::F64>())
-    expect_matches_reference<cmp::F64>(x);
+  for (const uint64_t x : specials_and_random<fmt::F64>())
+    expect_matches_reference<fmt::F64>(x);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +236,7 @@ template <typename Fmt> void expect_witnesses(const std::vector<Witness<Fmt>> &w
 }
 
 TEST(OutputModifierTest, MatchesGfx1201F16) {
-  expect_witnesses<cmp::F16>({
+  expect_witnesses<fmt::F16>({
       // Active OMOD maps zero and subnormal inputs to +0.
       {0xf0u, 1, false, 0x0001u, 0x0000u, 0x0000u},
       {0xf0u, 3, false, 0x0001u, 0x0000u, 0x0000u},
@@ -259,7 +261,7 @@ TEST(OutputModifierTest, MatchesGfx1201F16) {
 }
 
 TEST(OutputModifierTest, MatchesGfx1201F32) {
-  expect_witnesses<cmp::F32>({
+  expect_witnesses<fmt::F32>({
       {0xf0u, 1, false, 0x00000001u, 0x00000000u, 0x00000000u},
       {0xf0u, 1, false, 0x80000000u, 0x80000000u, 0x00000000u},
       {0xf0u, 3, false, 0x80800000u, 0xbf800000u, 0x80000000u},
@@ -276,7 +278,7 @@ TEST(OutputModifierTest, MatchesGfx1201F32) {
 }
 
 TEST(OutputModifierTest, MatchesGfx1201F64) {
-  expect_witnesses<cmp::F64>({
+  expect_witnesses<fmt::F64>({
       {0xf0u, 1, false, 0x1u, 0x0u, 0x0u},
       {0xf0u, 3, false, 0x8010000000000000u, 0xbff0000000000000u, 0x8000000000000000u},
       {0xf0u, 2, false, 0x3ff0000000000000u, 0x0u, 0x4010000000000000u},
@@ -314,12 +316,12 @@ TEST(OutputModifierTest, SimdMatchesScalar) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
 #if __has_include(<experimental/simd>)
-    expect_simd_matches_scalar<cmp::F16, util::native<uint32_t>>();
-    expect_simd_matches_scalar<cmp::F32, util::native<uint32_t>>();
+    expect_simd_matches_scalar<fmt::F16, util::native<uint32_t>>();
+    expect_simd_matches_scalar<fmt::F32, util::native<uint32_t>>();
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-    expect_simd_matches_scalar<cmp::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
+    expect_simd_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
-    expect_simd_matches_scalar<cmp::F64, util::native<uint64_t>>();
+    expect_simd_matches_scalar<fmt::F64, util::native<uint64_t>>();
 #endif
 #endif
   }

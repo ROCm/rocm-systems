@@ -70,7 +70,7 @@ def evaluate_expr(
     """
     args = [a, b, *(modifiers or ()), policy]
     return (
-        f'{_NS}::evaluate<{_NS}::{FORMATS[dtype]}, {_NS}::{RELATIONS[op]}>'
+        f'{_NS}::evaluate<amdgpu::fp_format::{FORMATS[dtype]}, {_NS}::{RELATIONS[op]}>'
         f'({", ".join(args)})'
     )
 
