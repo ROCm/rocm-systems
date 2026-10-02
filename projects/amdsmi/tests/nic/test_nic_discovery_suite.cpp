@@ -84,7 +84,7 @@ static void make_fake_pci_device(const fs::path& root, const std::string& bdf,
 
 // Builds the real Pensando shape: upstream bridge -> intermediate 0x1001 bridge
 // -> ionic port, with sys/bus/pci/devices/<bdf> symlinked into sys/devices the
-// way the kernel does it. is_downstream_port() proves ancestry off the canonical
+// way the kernel does it. is_downstream_port() proves ancestry off the resolved
 // path, so the nesting has to be genuine for the port to attach.
 static void make_fake_pci_tree(const fs::path& root, const std::string& domain,
                                const std::string& bridge_bdf, const std::string& bridge_dev,
@@ -237,7 +237,7 @@ int main() {
   }
   fs::remove_all(disc_root);
 
-  // ---- Broadcom Rdma positive: an aux-driver symlink whose canonical target
+  // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
   //      passes through /<bdf>/ exercises the match_canonical=true branch of
   //      the shared is_driver_bound_to_bdf helper (its most intricate path). ----
   fs::path rdma_root = make_tmp_root();
@@ -495,7 +495,7 @@ int main() {
                   "hwmon3/temp1_input")
         << "46000\n";
     // hwmon_temp_path builds from the port's sys/bus/pci/devices path, so the
-    // node it reports is reached through that symlink, not the canonical one.
+    // node it reports is reached through that symlink, not the resolved one.
     const fs::path expected = hw_root / "sys/bus/pci/devices/0000:04:00.0/hwmon/hwmon3/temp1_input";
 
     SmiNicSubsystemPensando hw_disc;

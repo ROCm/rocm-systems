@@ -2687,9 +2687,9 @@ def amdsmi_get_nic_telemetry(
     telem = amdsmi_wrapper.amdsmi_nic_telemetry_t()
     _check_res(amdsmi_wrapper.amdsmi_get_nic_telemetry(processor_handle, ctypes.byref(telem)))
 
-    # Width-max sentinels mean the NIC does not expose the metric; surface "N/A".
-    def _u(value, sentinel):
-        return "N/A" if value == sentinel else value
+    # Width-max reserved values mean the NIC does not expose the metric; surface "N/A".
+    def _u(value, unsupported_value):
+        return "N/A" if value == unsupported_value else value
 
     # A future firmware/library could report a state past the current enum;
     # degrade to UNKNOWN rather than raising a non-AmdSmiException ValueError.

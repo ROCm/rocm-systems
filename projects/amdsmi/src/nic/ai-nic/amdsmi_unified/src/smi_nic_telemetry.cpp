@@ -71,7 +71,7 @@ transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& 
 
     SmiSysfsReader::SysfsValue value;
     if (SmiSysfsReader::readLine(path.value(), value) != SmiSysfsReader::SysfsStatus::Success) {
-      continue;  // present but unreadable: leave the sentinel
+      continue;  // present but unreadable: leave the reserved value
     }
     if (!std::holds_alternative<int>(value)) {
       continue;
@@ -116,7 +116,7 @@ transport::Result<NicHealth> NicTelemetry::get_health(const ::SmiNic& nic) const
     }
   }
   /**
-   * Saturate one below the "unsupported" sentinel so a huge (or overflowing)
+   * Saturate one below the "unsupported" reserved value so a huge (or overflowing)
    * count is never misread as kErrorCountUnsupported. UINT32_MAX is
    * reserved to mean "not exposed" and must not be producible by a real reading.
    */
@@ -160,7 +160,7 @@ transport::Result<NicTelemetrySnapshot> NicTelemetry::get_snapshot(const ::SmiNi
   } else {
     /**
      * No reporter exposed: distinct Unsupported state (not Unknown, which means
-     * "reporter present but indeterminate"), with the error_count sentinel and
+     * "reporter present but indeterminate"), with the error_count reserved value and
      * the empty reporter left by value-initialization.
      */
     snap.health.state = static_cast<uint8_t>(HealthState::Unsupported);

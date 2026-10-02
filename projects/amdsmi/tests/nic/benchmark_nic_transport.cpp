@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
   bool netlink_available = false;
 #ifdef HAVE_LIBNL3
   auto test_nl = netlink_transport->get_pause_params(iface);
-  netlink_available = (test_nl.success || test_nl.error_code != ENOTSUP);
+  netlink_available = (test_nl.success || (test_nl.error_code != ENOTSUP));
   std::cout << "  Netlink: " << netlink_transport->backend_name();
   if (!netlink_available) {
     std::cout << " (NOT AVAILABLE - initialization failed)";

@@ -95,7 +95,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A card that exposes no separate management function is unaffected: health keeps using the address the rest of telemetry uses.
 
 - **`amd-smi fabric` now reports `UNKNOWN` instead of a real state for fabric fields it could not read**.  
-  - `FABRIC_TYPE`, `ADDR_MODE`, and `ACCEL_STATE` were defaulted through `std::numeric_limits<T>::max()`, which is not specialized for enumeration types and so yielded `0` rather than the intended sentinel. A GPU with no readable UALink data therefore reported `UALOE`, `SOURCE_ALIASING`, and `UNCONFIGURED` as if they had been measured.
+  - `FABRIC_TYPE`, `ADDR_MODE`, and `ACCEL_STATE` were defaulted through `std::numeric_limits<T>::max()`, which is not specialized for enumeration types and so yielded `0` rather than the intended reserved value. A GPU with no readable UALink data therefore reported `UALOE`, `SOURCE_ALIASING`, and `UNCONFIGURED` as if they had been measured.
   - The three fields now default to `AMDSMI_FABRIC_TYPE_UNKNOWN`, `AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN`, and `AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN`. The integer fields on the same structure were already correct and are unchanged.
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  

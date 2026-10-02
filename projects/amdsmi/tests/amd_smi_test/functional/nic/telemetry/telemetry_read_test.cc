@@ -87,15 +87,15 @@ void TestNicTelemetryRead::Run(void) {
     EXPECT_LT(strnlen(telem.health.reporter, sizeof(telem.health.reporter)),
               sizeof(telem.health.reporter));
 
-    // Each temperature is either a plausible reading or the unsupported sentinel.
+    // Each temperature is either a plausible reading or the unsupported reserved value.
     for (uint16_t t : {telem.temperature.asic_temp_c, telem.temperature.transceiver_temp_c,
                        telem.temperature.board_temp_c}) {
-      EXPECT_TRUE(t == UINT16_MAX || t <= 150) << "implausible temperature: " << t;
+      EXPECT_TRUE((t == UINT16_MAX) || (t <= 150)) << "implausible temperature: " << t;
     }
 
     // Bind every remaining public field by name so a field dropped or renamed
     // from the copy bridge fails to compile here (companion to the sizeof guard).
-    EXPECT_TRUE(telem.port_split.splittable == UINT8_MAX || telem.port_split.splittable <= 1)
+    EXPECT_TRUE((telem.port_split.splittable == UINT8_MAX) || (telem.port_split.splittable <= 1))
         << "implausible splittable: " << static_cast<unsigned>(telem.port_split.splittable);
     const uint8_t split_count = telem.port_split.split_count;
     const uint32_t error_count = telem.health.error_count;  // any value is valid

@@ -9855,7 +9855,7 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
  *  @platform{host} @platform{gpu_bm_linux}
  *
  *  @note Health and port-split are read over devlink (libnl3); temperature via
- *  sysfs/hwmon. A metric the NIC does not expose is reported through sentinels
+ *  sysfs/hwmon. A metric the NIC does not expose is reported through reserved values
  *  in its sub-struct (per-width max value), not a failed call. The call fails
  *  only when the handle is not a NIC.
  *

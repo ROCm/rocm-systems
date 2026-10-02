@@ -10,9 +10,17 @@
 #include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
 
+#include <cstdio>
 #include <cstring>
 
+#include "smi_nic_log.h"
+
 namespace amd::nic::netlink {
+
+namespace {
+// "family=<int> cmd=<u8> flags=0x<u16>" fits well within this.
+constexpr size_t kQueryHeadTextLen = 64;
+}  // namespace
 
 GenericNetlinkClient::GenericNetlinkClient() : socket_(), connected_(false) {}
 
@@ -65,6 +73,21 @@ static int callback_wrapper(struct nl_msg* msg, void* arg) {
 int GenericNetlinkClient::query(int family_id, uint8_t cmd, uint8_t version,
                                 std::function<int(NLMessage&)> build_fn, MessageHandler handler,
                                 void* arg, uint16_t flags) {
+  const int ret =
+      query_impl(family_id, cmd, version, std::move(build_fn), std::move(handler), arg, flags);
+  if (amd::smi::nic::log::is_enabled()) {
+    char head[kQueryHeadTextLen];
+    std::snprintf(head, sizeof(head), "family=%d cmd=%u flags=0x%x", family_id,
+                  static_cast<unsigned>(cmd), static_cast<unsigned>(flags));
+    NIC_LOG_DEBUG(std::string("netlink query ") + head + " -> " +
+                  ((ret < 0) ? (std::string("FAIL ") + nl_geterror(-ret)) : "SUCCESS"));
+  }
+  return ret;
+}
+
+int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version,
+                                     std::function<int(NLMessage&)> build_fn,
+                                     MessageHandler handler, void* arg, uint16_t flags) {
   if (!connected_) {
     return -NLE_BAD_SOCK;
   }

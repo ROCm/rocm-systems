@@ -909,7 +909,7 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
   }
 
   // C2 field-copy bridge. The snapshot already carries the public-matching
-  // sentinels (per-width max) for unexposed metrics, so a straight copy is
+  // reserved values (per-width max) for unexposed metrics, so a straight copy is
   // correct; *info = {} zero-fills reserved[]. The static guard breaks the
   // build if the internal layout grows, forcing this copy to be revisited.
   static_assert(sizeof(tel::NicTelemetrySnapshot) == 84,
@@ -941,7 +941,7 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
   if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  if (stats == nullptr && *num_stats > 0) {
+  if ((stats == nullptr) && (*num_stats > 0)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -988,7 +988,7 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
   if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  if (stats == nullptr && *num_stats > 0) {
+  if ((stats == nullptr) && (*num_stats > 0)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -8581,7 +8581,7 @@ static amdsmi_status_t run_dracut_f() {
 amdsmi_status_t amdsmi_set_nic_filter(amdsmi_nic_filter_t mode) {
   // No AMDSMI_CHECK_INIT(): the filter is read during amdsmi_init, so callers
   // set it before init.
-  if (mode != AMDSMI_NIC_FILTER_ALL && mode != AMDSMI_NIC_FILTER_AINIC_ONLY) {
+  if ((mode != AMDSMI_NIC_FILTER_ALL) && (mode != AMDSMI_NIC_FILTER_AINIC_ONLY)) {
     return AMDSMI_STATUS_INVAL;
   }
 
