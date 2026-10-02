@@ -621,10 +621,15 @@ typedef enum { RSMI_NPM_STATUS_DISABLED, RSMI_NPM_STATUS_ENABLED } rsmi_npm_stat
  *
  */
 typedef struct {
-  rsmi_npm_status_t status;      //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  rsmi_npm_status_t status;       //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit).
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in Watts
+                                  //!< (board/node_power).
+  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
+                                  //!< current_node_power.
 } rsmi_npm_info_t;
 
 /**
@@ -3183,6 +3188,8 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_ha
 
 rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
                                               rsmi_npm_balancing_mode_t mode);
+
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
 
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
 

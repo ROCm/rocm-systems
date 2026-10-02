@@ -2728,7 +2728,10 @@ struct_amdsmi_npm_info_t._fields_ = [
     ('limit', ctypes.c_uint64),
     ('ubb_power_threshold', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 5),
+    ('max_node_power_limit', ctypes.c_uint64),
+    ('current_node_power', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 3),
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
@@ -4371,6 +4374,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_set_npm_limit = _libraries['libamd_smi.so'].amdsmi_set_npm_limit
+    amdsmi_set_npm_limit.restype = amdsmi_status_t
+    amdsmi_set_npm_limit.argtypes = [amdsmi_node_handle, uint64_t]
+except AttributeError:
+    pass
+try:
     amdsmi_get_fw_info = _libraries['libamd_smi.so'].amdsmi_get_fw_info
     amdsmi_get_fw_info.restype = amdsmi_status_t
     amdsmi_get_fw_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fw_info_t)]
@@ -5575,7 +5584,8 @@ __all__ = \
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
     'amdsmi_set_gpu_process_isolation', 'amdsmi_set_gpu_ptl_formats',
     'amdsmi_set_gpu_ptl_state', 'amdsmi_set_gpu_uma_carveout',
-    'amdsmi_set_npm_balancing_mode', 'amdsmi_set_power_cap',
+    'amdsmi_set_npm_balancing_mode', 'amdsmi_set_npm_limit',
+    'amdsmi_set_power_cap',
     'amdsmi_set_soc_pstate', 'amdsmi_set_ttm_pages_limit',
     'amdsmi_set_xgmi_plpd', 'amdsmi_shut_down',
     'amdsmi_smu_fw_version_t', 'amdsmi_sock_info_t',

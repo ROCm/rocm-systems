@@ -136,6 +136,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
 /// requiring subnormal rounding, overflow or exceptional-value handling use
 /// the scalar architectural primitive.
 template <typename Float>
+  requires(!(UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
 inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
                            util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
   using F = DivisionFormat<Float>;
@@ -184,6 +185,23 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   }
   return std::pair{std::bit_cast<util::native<Float>>(result), post_bits};
 }
+
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+template <typename Float>
+  requires(sizeof(Float) == 8)
+inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
+                           util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
+  util::native<Float> result(0);
+  uint64_t post_bits = 0;
+  for (std::size_t lane = 0; lane < result.size(); ++lane) {
+    const auto scalar =
+        div_scale<Float>(value[lane], denominator[lane], numerator[lane], rounding, denorm);
+    result[lane] = scalar.value;
+    post_bits |= uint64_t{scalar.post_scale} << lane;
+  }
+  return std::pair{result, post_bits};
+}
+#endif
 
 template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)

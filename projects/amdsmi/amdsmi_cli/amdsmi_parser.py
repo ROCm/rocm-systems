@@ -1282,11 +1282,18 @@ class AMDSMIParser(argparse.ArgumentParser):
     ):
         """Override *parser*.error() so that combining any of *gtt_flags* with
         --gpu / -g produces a clear mutual-exclusion message instead of
-        the confusing "expected at least one argument" from --gpu."""
+        the confusing "expected at least one argument" from --gpu. Only
+        argparse's missing-value diagnostic is replaced."""
         _original_error = parser.error
 
         def _intercept(message):
-            if set(gtt_flags).intersection(sys.argv) and {"--gpu", "-g"}.intersection(sys.argv):
+            error_prefix = message.split(":", 1)[0]
+            if (
+                set(gtt_flags).intersection(sys.argv)
+                and {"--gpu", "-g"}.intersection(sys.argv)
+                and error_prefix in {"argument -g/--gpu", "argument --gpu/-g"}
+                and "expected at least one argument" in message
+            ):
                 flag_str = "/".join(gtt_flags)
                 _original_error(
                     f"argument {flag_str}: not allowed with argument --gpu/-g ({reason})"
@@ -2673,6 +2680,19 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="{POWER_BALANCING,FREQUENCY_BALANCING}",
                 )
 
+            # Node power limit is enabled on guest (1VF), maintain order
+            max_node_power_limit = self.helpers.get_max_node_power_limit()
+            set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
+            set_value_exclusive_group.add_argument(
+                "-n",
+                "--node-power-limit",
+                action="store",
+                type=lambda value: self._positive_int(value, "--node-power-limit"),
+                required=False,
+                help=set_node_power_limit_help,
+                metavar="WATTS",
+            )
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -2889,6 +2909,15 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_parser,
             gtt_flags=("--node-balancing-mode",),
             reason="--node-balancing-mode is a system-wide setting, not per-GPU",
+        )
+        # Improve the --gpu error message if combined with --node-power-limit;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-power-limit", "-n"),
+            reason="--node-power-limit is a node-wide setting, not per-GPU",
         )
 
         # Set accepts default devices of all

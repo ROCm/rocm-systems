@@ -66,7 +66,13 @@ class NodeCommands:
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A", "balancing_mode": "N/A"}
+        npm_dict = {
+            "limit": "N/A",
+            "status": "N/A",
+            "threshold": "N/A",
+            "balancing_mode": "N/A",
+            "current_node_power": "N/A",
+        }
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
@@ -89,6 +95,7 @@ class NodeCommands:
                 limit = npm_info.get("limit", "N/A")
                 status = npm_info.get("status", npm_info.get("current", "N/A"))
                 ubb_power_threshold = npm_info.get("ubb_power_threshold", "N/A")
+                current_node_power = npm_info.get("current_node_power", "N/A")
 
                 if limit != "N/A":
                     npm_dict["limit"] = limit
@@ -101,6 +108,9 @@ class NodeCommands:
                 # Add UBB power threshold if available
                 if ubb_power_threshold != "N/A":
                     npm_dict["threshold"] = ubb_power_threshold
+                # Add current node power if available
+                if current_node_power != "N/A":
+                    npm_dict["current_node_power"] = current_node_power
 
                 try:
                     mode = amdsmi_interface.amdsmi_get_npm_balancing_mode(args.nodes)
@@ -166,6 +176,8 @@ class NodeCommands:
                 node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
                 balancing_mode = npm_dict.get("balancing_mode", "N/A")
                 node_output.append(f"        BALANCING_MODE: {balancing_mode}")
+                current_node_power = npm_dict.get("current_node_power", "N/A")
+                node_output.append(f"        CURRENT_NODE_POWER: {current_node_power} {power_unit}")
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -191,12 +203,15 @@ class NodeCommands:
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
-                csv_dict = {}
+                # Only node 0 is currently supported; mirror the gpu/cpu/nic
+                # CSV surfaces, which always lead with a device identifier.
+                csv_dict = {"node": 0}
                 if args.power_management:
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
                     csv_dict["balancing_mode"] = npm_dict.get("balancing_mode", "N/A")
+                    csv_dict["current_node_power"] = npm_dict.get("current_node_power", "N/A")
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:
@@ -218,6 +233,11 @@ class NodeCommands:
                     if threshold != "N/A":
                         npm_dict["threshold"] = self.helpers.unit_format(
                             self.logger, threshold, power_unit
+                        )
+                    current_node_power_value = npm_dict.get("current_node_power", "N/A")
+                    if current_node_power_value != "N/A":
+                        npm_dict["current_node_power"] = self.helpers.unit_format(
+                            self.logger, current_node_power_value, power_unit
                         )
                     node_output["power_management"] = npm_dict
                 if args.base_board_temps and base_board_temp_dict:

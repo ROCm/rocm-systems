@@ -49,6 +49,7 @@ if(AIS_INSTALL_EXAMPLES)
         api
         common
         basics
+        batch
         async
     )
     foreach(example_dir ${AIS_EXAMPLE_DIRS})

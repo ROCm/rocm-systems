@@ -21,6 +21,7 @@ from .amdsmi_interface import amdsmi_get_npm_info
 from .amdsmi_interface import amdsmi_get_npm_balancing_mode
 from .amdsmi_interface import amdsmi_set_npm_balancing_mode
 from .amdsmi_interface import amdsmi_get_tray_info
+from .amdsmi_interface import amdsmi_set_npm_limit
 
 # ESMI Dependent Functions
 try:

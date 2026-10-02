@@ -225,7 +225,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_name_value_pairs(Args&&... args)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         if constexpr(has_trace_cache_arg_pairs_v<Args...>)
         {
@@ -331,7 +331,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_annotation_args(Args&&... args)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string   args_str = {};
         std::uint32_t idx      = 0;
@@ -349,7 +349,7 @@ struct category_region
     template <typename T>
     static std::string serialize_return_arg(T&& value)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string args_str = {};
         append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
@@ -378,8 +378,8 @@ struct category_region
             return;
         }
 
-        auto key = entry_key{ .name = name, .category = std::string{ category } };
-        auto itr = map_name_to_args.find(key);
+        auto const key = entry_key{ .name = name, .category = std::string{ category } };
+        auto const itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
         {
             auto& entry = itr->second.back();
@@ -405,10 +405,10 @@ struct category_region
     void cache_stop(const char* name, std::string_view category)
     {
         const entry_key key{ .name = name, .category = std::string{ category } };
-        auto            x = map_name_to_args.find(key);
+        auto const      x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
-            auto entry = std::move(x->second.back());
+            auto const entry = std::move(x->second.back());
             x->second.pop_back();
             if(x->second.empty())
             {
@@ -591,7 +591,7 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
@@ -636,8 +636,8 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         ++tracing::push_count();
     }
 
-    auto _hash = tim::add_hash_id(name);
-    name       = tim::get_hash_identifier_fast(_hash);
+    auto const _hash = tim::add_hash_id(name);
+    name             = tim::get_hash_identifier_fast(_hash);
 
     if constexpr(_ct_use_causal)
     {
@@ -693,10 +693,10 @@ category_region<CategoryT>::append_cache_args(std::string_view name,
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _hash = tim::add_hash_id(name);
-    name       = tim::get_hash_identifier_fast(_hash);
+    auto const _hash = tim::add_hash_id(name);
+    name             = tim::get_hash_identifier_fast(_hash);
     region_cache::instance().append_cache_args(name.data(), category_name,
                                                std::move(serialized_args));
 }
@@ -717,7 +717,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
@@ -821,7 +821,7 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_use_causal())
     {

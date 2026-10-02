@@ -152,7 +152,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
         causal::delay::get_global().load(std::memory_order_relaxed);
 
     causal::sampling::block_backtrace_samples();
-    auto ret = (*_func)(_args...);
+    auto const ret = (*_func)(_args...);
     causal::sampling::unblock_backtrace_samples();
 
     if(state::thread::get() < ::rocprofsys::state::thread::Internal)
@@ -190,7 +190,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
         return (*func)(set_v, sig);
     }
 
-    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+    auto const _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t set = *set_v;
     causal_gotcha::remove_signals(&set);
@@ -198,11 +198,11 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
 
     const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
-    auto* _data         = blocking_gotcha_t::at(16);
-    auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
+    auto const* _data         = blocking_gotcha_t::at(16);
+    auto        f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
 
     causal::sampling::block_backtrace_samples();
-    auto ret = (*f_sigwaitinfo)(&set, &info);
+    auto const ret = (*f_sigwaitinfo)(&set, &info);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
@@ -233,7 +233,7 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
         return (*_func)(_set_v, _info_v);
     }
 
-    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+    auto const _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t set = *_set_v;
     causal_gotcha::remove_signals(&set);
@@ -242,7 +242,7 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
     const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
-    auto ret = (*_func)(&set, &_info);
+    auto const ret = (*_func)(&set, &_info);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
@@ -272,7 +272,7 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
         return (*_func)(_set_v, _info_v, _wait_v);
     }
 
-    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+    auto const _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t set = *_set_v;
     causal_gotcha::remove_signals(&set);
@@ -281,7 +281,7 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
     const std::int64_t _delay_value = _active ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
-    auto ret = (*_func)(&set, &_info, _wait_v);
+    auto const ret = (*_func)(&set, &_info, _wait_v);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
@@ -312,7 +312,7 @@ blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigs
     int  _sig     = 0;
     ::sigprocmask(SIG_SETMASK, _set_v, &_old_set);
     // sigwait is wrapped so no need to block/unblock signals
-    auto ret = ::sigwait(_set_v, &_sig);
+    auto const ret = ::sigwait(_set_v, &_sig);
     ::sigprocmask(SIG_SETMASK, &_old_set, nullptr);
 
     return ret;
