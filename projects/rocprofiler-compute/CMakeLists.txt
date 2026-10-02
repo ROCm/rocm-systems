@@ -1332,6 +1332,26 @@ install(
     PATTERN "Makefile"
     PATTERN "workloads" EXCLUDE
 )
+# Agent Skills
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
+    COMPONENT main
+    USE_SOURCE_PERMISSIONS
+)
+# Docs the skills link to
+install(
+    DIRECTORY docs/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/docs
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.rst"
+    PATTERN "*.md"
+    PATTERN "archive" EXCLUDE
+    PATTERN "design" EXCLUDE
+    PATTERN "sphinx" EXCLUDE
+    PATTERN "_templates" EXCLUDE
+)
 # modulefile
 install(
     FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua

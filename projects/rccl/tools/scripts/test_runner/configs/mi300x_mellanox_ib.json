@@ -1030,6 +1030,32 @@
         {"name": "HostApi_GraphCaptureReplayPutWait_Proxy", "description": "Host API: two-node proxy graph capture and repeated replay", "test_filter": "HostApiTest.GraphCaptureReplayPutWait"}
       ]
     },
+    "host_api_rma_disable": {
+      "extends": "host_api_tests_symmem",
+      "description": "NCCL_RMA_DISABLE=1 on a single node: every peer is in the LSA team, so the whole Host API suite must still pass over the copy engine. NCCL_PARAM is cached per process, so the flag has to come from the environment.",
+      "env_variables": {
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {"name": "HostApi_RmaDisableIntraNodePutUsesCe", "description": "Host API: NCCL_RMA_DISABLE=1 leaves intra-node put/wait working", "test_filter": "HostApiTest.RmaDisableIntraNodePutUsesCe"}
+      ]
+    },
+    "host_api_rma_disable_proxy": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {"name": "HostApi_RmaDisableCrossNodePutFails_Sym", "description": "Host API: NCCL_RMA_DISABLE=1, symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of hanging", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"},
+        {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
+      ]
+    },
 
     "rma_external_plugin_put_signal": {
       "extends": "default",
@@ -5089,6 +5115,22 @@
       "name": "Host API Graph Capture - Proxy",
       "description": "Two-node proxy graph capture and repeated replay for PutSignal/WaitSignal",
       "config": "host_api_graph_proxy",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - RMA Disabled",
+      "description": "Host API suite on a single node with NCCL_RMA_DISABLE=1 (copy engine only)",
+      "config": "host_api_rma_disable",
+      "enabled": true
+    },
+    {
+      "name": "Host API RMA Disabled - Proxy",
+      "description": "Two-node NCCL_RMA_DISABLE=1: cross-node put/wait must fail cleanly on symmetric and non-symmetric windows",
+      "config": "host_api_rma_disable_proxy",
       "num_ranks": 2,
       "num_nodes": 2,
       "num_gpus": 1,

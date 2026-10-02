@@ -157,7 +157,7 @@ private:
         }
 
         Policy::audit_incoming(std::string_view{ m_data->tool_id }, args...);
-        auto result = (*callee)(args...);
+        auto const result = (*callee)(args...);
         Policy::audit_outgoing(std::string_view{ m_data->tool_id }, result);
 
         return result;

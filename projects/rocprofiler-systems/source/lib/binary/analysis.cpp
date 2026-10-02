@@ -41,9 +41,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -87,7 +85,7 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
             auto*               _section     = const_cast<asection*>(itr);
             const bfd_vma       _section_vma = bfd_section_vma(_section);
             const bfd_size_type _section_len = bfd_section_size(_section);
-            auto                _section_range =
+            auto const          _section_range =
                 address_range{ _section_vma, _section_vma + _section_len };
             _section_map[_section_range] = _section;
         }
@@ -148,7 +146,7 @@ get_binary_info(const std::vector<std::string>&  _files,
         {
             return false;
         }
-        auto _path = path::realpath(_v.pathname);
+        auto const _path = path::realpath(_v.pathname);
         return (path::is_regular_file(_path) && _satisfies_binary_filter(_path));
     };
 
@@ -158,9 +156,9 @@ get_binary_info(const std::vector<std::string>&  _files,
         auto _exists = std::set<std::string>{};
         for(const auto& itr : _files)
         {
-            auto _filename = path::realpath(itr);
+            auto const _filename = path::realpath(itr);
             if(path::is_regular_file(_filename) && _satisfies_binary_filter(_filename) &&
-               _exists.find(_filename) == _exists.end())
+               !_exists.contains(_filename))
             {
                 _data.emplace_back(parse_line_info(_filename, _process_dwarf,
                                                    _process_bfd, _include_all));
@@ -170,7 +168,7 @@ get_binary_info(const std::vector<std::string>&  _files,
     }
 
     // get the memory maps
-    auto _maps = procfs::get_contiguous_maps(process::get_id(), _filter, false);
+    auto const _maps = procfs::get_contiguous_maps(process::get_id(), _filter, false);
 
     for(auto& itr : _data)
     {
@@ -187,10 +185,10 @@ get_binary_info(const std::vector<std::string>&  _files,
     {
         for(const auto& mitr : itr.mappings)
         {
-            auto mrange = address_range{ mitr.load_address, mitr.last_address };
+            auto const mrange = address_range{ mitr.load_address, mitr.last_address };
             for(auto& sitr : itr.symbols)
             {
-                auto _addr = sitr.address + mitr.load_address;
+                auto const _addr = sitr.address + mitr.load_address;
                 if(mrange.contains(_addr))
                 {
                     sitr.load_address = mitr.load_address;
@@ -222,22 +220,22 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
 
     if constexpr(ExcludeInternal)
     {
-        static auto _exclude_range = []() {
-            auto _maps                 = ::tim::procfs::maps::iterate_program_headers();
-            auto _exclude_range_v      = std::set<address_range>{};
-            auto _insert_exclude_range = [&_maps,
-                                          &_exclude_range_v](const std::string& _v) {
-                auto _base_v = path::filename(_v);
-                auto _real_v = path::realpath(_v);
-                for(const auto& mitr : _maps)
-                {
-                    if(path::filename(mitr.pathname) == _base_v || _real_v == _v)
+        static auto const _exclude_range = []() {
+            auto       _maps            = ::tim::procfs::maps::iterate_program_headers();
+            auto       _exclude_range_v = std::set<address_range>{};
+            auto const _insert_exclude_range =
+                [&_maps, &_exclude_range_v](const std::string& _v) {
+                    auto const _base_v = path::filename(_v);
+                    auto const _real_v = path::realpath(_v);
+                    for(const auto& mitr : _maps)
                     {
-                        _exclude_range_v.emplace(
-                            address_range{ mitr.load_address, mitr.last_address });
+                        if(path::filename(mitr.pathname) == _base_v || _real_v == _v)
+                        {
+                            _exclude_range_v.emplace(
+                                address_range{ mitr.load_address, mitr.last_address });
+                        }
                     }
-                }
-            };
+                };
 
             for(const auto& itr : binary::get_link_map("librocprof-sys.so", "", ""))
             {
@@ -252,7 +250,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             return _exclude_range_v;
         }();
 
-        for(auto itr : _exclude_range)
+        for(auto const itr : _exclude_range)
         {
             if(itr.contains(_addr))
             {
@@ -280,9 +278,9 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         _lk.lock();
     }
 
-    auto _entry = tim::unwind::entry{ _addr };
+    auto const _entry = tim::unwind::entry{ _addr };
 
-    auto citr = _cache_p->entries.find(_entry);
+    auto const citr = _cache_p->entries.find(_entry);
     if(citr != _cache_p->entries.end())
     {
         if(citr->second.error == 0)
@@ -300,7 +298,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
 
     if(_v.error != 0 && _v.lineinfo)
     {
-        auto _lineinfo = _v.lineinfo.get();
+        auto const _lineinfo = _v.lineinfo.get();
         if(_lineinfo)
         {
             _v.name  = _lineinfo.name;
@@ -324,5 +322,4 @@ lookup_ipaddr_entry<true>(uintptr_t, unw_context_t*, tim::unwind::cache*);
 
 template std::optional<tim::unwind::processed_entry>
 lookup_ipaddr_entry<false>(uintptr_t, unw_context_t*, tim::unwind::cache*);
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary
