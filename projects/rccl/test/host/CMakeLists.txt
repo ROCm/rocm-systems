@@ -170,21 +170,10 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc.
-  # Its own binary, not rccl-UnitTestsMicroInit: that target links fakes/gin_fakes.cc
-  # (init.cc needs its ncclGinInit doubles), which fakes ncclGinQueryLastError -- a
-  # symbol this unit defines, so the two cannot share a link line; fakes/nccl_stubs.cc's
-  # ncclGinHostFinalize collides the same way.
-  # Deliberately short: the usual bootstrap/topo/transport/nccl_stubs/hip floor is absent
-  # because -ffunction-sections/--gc-sections drops everything the covered paths never
-  # reach, so nothing in it is referenced. Add a fakes file when the linker asks for it --
-  # an undefined symbol is a louder signal than a fail-loud stub, and it keeps this
-  # binary's dependency surface an honest statement of what gin_host.cc's tested paths use.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
-    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
-    fakes/nccl_fakes.cc                  # ncclDebugLog + the debug-level data symbols
-    fakes/os_fakes.cc                    # src/os/linux.cc ncclOsCpuCount/ncclOsSetAffinity
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -815,7 +804,7 @@ foreach(_variant "" "-uncached" "-faultinj")
 endforeach()
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
+# rccl-UnitTestsMicroGinHost
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}

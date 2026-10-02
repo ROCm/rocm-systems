@@ -4,16 +4,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/gin/gin_host.cc, pulled in via GIN_HOST_CC_PATH.
-//
-// Currently covers the GIN proxy-thread NUMA affinity pin. Two halves:
-//   - the CONSUME half, ncclGinProgress (src/gin/gin_host.cc:60-63), which pins
-//     the proxy thread to ginState->cpuAffinity when that set is non-empty; and
-//   - the PRODUCE half, ginDevCommSetupWithBackend (src/gin/gin_host.cc:392-393),
-//     which stashes comm->cpuAffinity into ginState just before the progress
-//     threads are spawned. Covering only the consumer would leave that one
-//     assignment free to be deleted with both consumer cases still green.
-
 #include <gtest/gtest.h>
 #include <memory>
 
@@ -31,14 +21,6 @@
 
 #include GIN_HOST_CC_PATH
 
-// gin_host.cc references these two symbols only from the setup/spawn path, which
-// was dead-code-stripped until the producer test below made it live. Neither has
-// a fakes file to live in: ncclTeamRail is defined in nccl_device/core.cc, whose
-// only double today is target-shaped (fakes/dev_runtime_micro_fakes.cc, for
-// rccl-UnitTestsMicro), and ncclSetThreadName's owner (misc/debug.cc) has no fakes
-// file at all. Stub them here so the one setup path this test drives links without
-// dragging in those TUs. A rail team of stride 1 keeps ginDevCommSetupWithBackend's
-// stride checks satisfied.
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) {
   ncclTeam_t team{};
   team.nRanks = 1;
@@ -50,9 +32,6 @@ void ncclSetThreadName(std::thread&, const char*, ...) {}
 
 namespace {
 
-// Build a minimal ncclGinState the affinity path reads: cpuAffinity plus the
-// stop signal that makes ncclGinProgress return after pinning. Everything else
-// is default-constructed and never touched on this path.
 class GinHostProxyAffinityMicrotest : public ::testing::Test {
 protected:
   ncclGinState ginState_;
@@ -81,27 +60,20 @@ TEST_F(GinHostProxyAffinityMicrotest, NonEmptyAffinity_PinsProxyThreadToThatCpuS
 
   RunProgressOnce();
 
-  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());       // applied exactly once
-  EXPECT_TRUE(CPU_ISSET(3, &g_ncclOsSetAffinityMasks[0]));   // the stashed mask
-  EXPECT_EQ(1, CPU_COUNT(&g_ncclOsSetAffinityMasks[0]));     // and only that cpu
+  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
+  EXPECT_TRUE(CPU_ISSET(3, &g_ncclOsSetAffinityMasks[0]));
+  EXPECT_EQ(1, CPU_COUNT(&g_ncclOsSetAffinityMasks[0]));
 }
 
-// The guard: an empty affinity set (ncclOsCpuCount == 0) means the comm was
-// never NUMA-pinned, so the proxy thread must be left with its inherited
-// affinity rather than pinned to an empty set (which would be a hard error).
 TEST_F(GinHostProxyAffinityMicrotest, EmptyAffinity_LeavesProxyThreadAffinityUnchanged) {
-  g_ncclOsCpuCountValue = 0;  // ncclOsCpuCount(cpuAffinity) reports "empty"
+  g_ncclOsCpuCountValue = 0;
 
   RunProgressOnce();
 
-  EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: the guard really ran
-  EXPECT_TRUE(g_ncclOsSetAffinityMasks.empty());  // ncclOsSetAffinity not called
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
+  EXPECT_TRUE(g_ncclOsSetAffinityMasks.empty());
 }
 
-// A scriptable GIN backend vtable. ginDevCommSetupWithBackend calls createContext
-// once per connection; we hand back a context and a device handle whose
-// needsProxyProgress flag is set, so the setup path decides it must spawn progress
-// threads and therefore reaches the affinity stash.
 struct FakeGinBackend {
   ncclNetDeviceHandle_t devHandle{};
   void* ginCtx = reinterpret_cast<void*>(0x1);
@@ -112,8 +84,8 @@ FakeGinBackend* g_fakeGinBackend = nullptr;
 ncclResult_t FakeCreateContext(void* /*collComm*/, ncclGinConfig_t* /*config*/, void** ginCtx,
                                ncclNetDeviceHandle_t** devHandle) {
   g_fakeGinBackend->createContextCalls++;
-  g_fakeGinBackend->devHandle.handle = reinterpret_cast<void*>(0x2);  // non-null: setup accepts it
-  g_fakeGinBackend->devHandle.needsProxyProgress = 1;                 // forces the spawn path
+  g_fakeGinBackend->devHandle.handle = reinterpret_cast<void*>(0x2);
+  g_fakeGinBackend->devHandle.needsProxyProgress = 1;
   *ginCtx = g_fakeGinBackend->ginCtx;
   *devHandle = &g_fakeGinBackend->devHandle;
   return ncclSuccess;
@@ -161,12 +133,7 @@ protected:
     for (int t = 0; t < ginState.proxyNthreads; t++) {
       if (ginState.thread[t].joinable()) ginState.thread[t].join();
     }
-    // Release the ncclGinStateDevComm the setup path callocs and links into
-    // ginState->devComms; nothing else frees it (ncclSharedResources has no
-    // destructor), so the opt-in ASAN arm would flag the leak. Done here rather
-    // than in the test body so it runs even when an ASSERT above returns early.
-    // Also exercises FakeDestroyContext. Guarded on the list actually being
-    // populated, so a setup that failed before linking is not freed twice.
+
     if (ginState.devComms != nullptr) {
       EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
     }
@@ -194,13 +161,6 @@ TEST_F(GinHostProxyAffinitySetupMicrotest, StashesCommAffinityBeforeSpawningProx
   EXPECT_TRUE(ginState.proxyThreadsCreated);             // it took the spawn branch
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &ginState.cpuAffinity));  // comm mask stashed verbatim
 
-  // End-to-end: join the sole proxy thread and confirm the real worker pinned
-  // itself to the comm's mask, exercising the whole produce -> spawn -> consume
-  // handoff rather than just poking the field. The stash-before-spawn ordering
-  // is what gives the worker a happens-before view of the mask here; note this
-  // is not a deterministic guard against reordering the stash below the spawn
-  // loop -- that variant is a data race (UB), which only a thread sanitizer
-  // would reliably flag, not a value assertion.
   ginState.thread[0].join();
   ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &g_ncclOsSetAffinityMasks[0]));

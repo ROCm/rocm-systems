@@ -1,17 +1,3 @@
-# rccl-UnitTestsMicroGinHost — CTest categories for the host-only src/gin/gin_host.cc
-# micro-tests (no GPU, no librccl/HIP runtime); build in Release and Debug.
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
-#
-# Every suite in gin-host-test.cc is named `GinHost*` (the binary's UpperCamel stem,
-# see MICROTEST_README.md "Naming a new microtest"), so the single pattern below
-# picks up new suites in this binary without another edit here.
-#
-# Tiers:
-#   quick — canonical anchor.
-#   standard — merge quick; override labels.
-#   comprehensive — merge quick; override labels.
-#   full — merge quick; override labels.
-
 test_categories:
   quick: &micro_ginhost_quick
     description: "Smoke — host-only src/gin/gin_host.cc micro-tests (GIN proxy affinity paths), sub-second."
