@@ -1022,12 +1022,21 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   ncclResult_t ret = ncclSuccess;
   ncclResult_t iflushRet = ncclSuccess;
   struct ncclIbRequest* req = NULL;
-  bool hasData = false;
-  for (int i = 0; i < n; i++)
-    if (sizes[i]) hasData = true;
-  if (comm->flushEnabled == 0 || !hasData) return ncclSuccess;
+  struct ncclIbMrHandle* mhandle = NULL;
+  int last = -1;
+  bool anyMultiSeg = false;
+  if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+  for (int i = 0; i < n; i++) {
+    if (sizes[i] == 0) continue;
+    last = i;
+    if (mhandles[i] != NULL && ((struct ncclIbMrHandle*)mhandles[i])->nSegments > 1) anyMultiSeg = true;
+  }
+  if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
   NCCLCHECK(ncclIbCreateFlushQp(comm));
 
+  // Only flush once using the last non-zero receive, unless a multi-segment
+  // handle is involved (see below).
+  mhandle = (struct ncclIbMrHandle*)mhandles[last];
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, iflushFail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
@@ -1056,37 +1065,29 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       struct ibv_send_wr* badWriteWr;
       NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
     }
+    // The scratchpad and single-segment cases post one read. A multi-segment
+    // handle may span several MRs, so then every non-zero entry and every
+    // segment it overlaps gets a read, posted as one chain.
+    struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
+    int nFlushWrs = 0;
     if (useGpuFlushMem) {
-      wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
-      wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
-      wr.sg_list = &comm->devs[i].gpuFlush.sge;
-      wr.num_sge = 1;
-      wr.opcode = IBV_WR_RDMA_READ;
-      wr.send_flags = IBV_SEND_SIGNALED;
-
-      TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-            wr.wr_id);
-      TIME_START(4);
-      struct ibv_send_wr* bad_wr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
-      TIME_STOP(4);
-
-      ncclIbAddEvent(req, i);
-
-      TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-            wr.wr_id);
+      memset(&flushWrs[0], 0, sizeof(flushWrs[0]));
+      flushWrs[0].wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
+      flushWrs[0].wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+      nFlushWrs = 1;
+    } else if (!anyMultiSeg) {
+      memset(&flushWrs[0], 0, sizeof(flushWrs[0]));
+      flushWrs[0].wr.rdma.remote_addr = (uint64_t)data[last];
+      flushWrs[0].wr.rdma.rkey = mhandle->mrs[i]->rkey;
+      nFlushWrs = 1;
     } else {
-      // A multi-recv may place each entry in a different MR. Build one chain
-      // that touches every non-zero entry and every segment it overlaps.
-      struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
-      int nFlushWrs = 0;
       for (int r = 0; r < n; r++) {
         if (sizes[r] == 0) continue;
-        struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[r];
-        if (mhandle != NULL && mhandle->nSegments > 1) {
+        struct ncclIbMrHandle* rh = (struct ncclIbMrHandle*)mhandles[r];
+        if (rh != NULL && rh->nSegments > 1) {
           int flushSeg[NCCL_IB_MAX_SEGMENTS];
           int nFlushSeg =
-            ncclIbSegmentsOverlappingRange(mhandle->nSegments, mhandle->segStart, mhandle->segLen, (uintptr_t)data[r],
+            ncclIbSegmentsOverlappingRange(rh->nSegments, rh->segStart, rh->segLen, (uintptr_t)data[r],
                                            (size_t)sizes[r], flushSeg, NCCL_IB_MAX_SEGMENTS);
           if (nFlushSeg < 1) {
             WARN("NET/IB: flush buffer %p size %d does not overlap any registered segment", data[r], sizes[r]);
@@ -1095,9 +1096,9 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
           }
           for (int s = 0; s < nFlushSeg; s++) {
             int seg = flushSeg[s];
-            uintptr_t segBase = mhandle->segStart[seg];
+            uintptr_t segBase = rh->segStart[seg];
             uintptr_t rangeStart = (uintptr_t)data[r];
-            struct ibv_mr* flushMr = mhandle->segMrs[seg][i];
+            struct ibv_mr* flushMr = rh->segMrs[seg][i];
             if (flushMr == NULL) {
               WARN("NET/IB: flush missing MR for receive %d segment %d device %d", r, seg, i);
               ret = ncclInternalError;
@@ -1109,7 +1110,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
             nFlushWrs++;
           }
         } else {
-          struct ibv_mr* flushMr = ncclIbMrForRange(mhandle, (uintptr_t)data[r], sizeof(int), i);
+          struct ibv_mr* flushMr = ncclIbMrForRange(rh, (uintptr_t)data[r], sizeof(int), i);
           if (flushMr == NULL) {
             WARN("NET/IB: flush missing MR for receive %d buffer %p", r, data[r]);
             ret = ncclInternalError;
@@ -1121,36 +1122,39 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
           nFlushWrs++;
         }
       }
-      for (int w = 0; w < nFlushWrs; w++) {
-        flushWrs[w].wr_id = wr.wr_id;
-        flushWrs[w].sg_list = &comm->devs[i].gpuFlush.sge;
-        flushWrs[w].num_sge = 1;
-        flushWrs[w].opcode = IBV_WR_RDMA_READ;
-        flushWrs[w].send_flags = (w == nFlushWrs - 1) ? IBV_SEND_SIGNALED : 0;
-        flushWrs[w].next = (w + 1 < nFlushWrs) ? &flushWrs[w + 1] : NULL;
-      }
-      TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=%ld)", __func__, nFlushWrs,
-            req, req->base, wr.wr_id);
-      TIME_START(4);
-      struct ibv_send_wr* bad_wr = NULL;
-      iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
-      TIME_STOP(4);
-      if (iflushRet != ncclSuccess) {
-        // Prefix posts do not call ncclIbAddEvent. Count accepted WRs so we keep
-        // the request when a signaled tail is lost, matching isendFail.
-        int posted = 0;
-        for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
-        if (posted > 0) {
-          ncclIbAddEvent(req, i);
-          req->type = NCCL_NET_IB_REQ_FAILED;
-          *request = req;
-          ncclIbStatsFatalError(&comm->base.stats);
-          return ncclSuccess;
-        }
-        goto iflushFail;
-      }
-      ncclIbAddEvent(req, i);
     }
+    for (int w = 0; w < nFlushWrs; w++) {
+      flushWrs[w].wr_id = wr.wr_id;
+      flushWrs[w].sg_list = &comm->devs[i].gpuFlush.sge;
+      flushWrs[w].num_sge = 1;
+      flushWrs[w].opcode = IBV_WR_RDMA_READ;
+      flushWrs[w].send_flags = (w == nFlushWrs - 1) ? IBV_SEND_SIGNALED : 0;
+      flushWrs[w].next = (w + 1 < nFlushWrs) ? &flushWrs[w + 1] : NULL;
+    }
+    TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=%ld)", __func__, nFlushWrs,
+          req, req->base, wr.wr_id);
+    TIME_START(4);
+    struct ibv_send_wr* bad_wr = NULL;
+    iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
+    TIME_STOP(4);
+    if (iflushRet != ncclSuccess) {
+      // Prefix posts do not call ncclIbAddEvent. Count accepted WRs so we keep
+      // the request when a signaled tail is lost, matching isendFail.
+      int posted = 0;
+      for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
+      if (posted > 0) {
+        ncclIbAddEvent(req, i);
+        req->type = NCCL_NET_IB_REQ_FAILED;
+        *request = req;
+        ncclIbStatsFatalError(&comm->base.stats);
+        return ncclSuccess;
+      }
+      goto iflushFail;
+    }
+    ncclIbAddEvent(req, i);
+
+    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+          wr.wr_id);
   }
 
   *request = req;
