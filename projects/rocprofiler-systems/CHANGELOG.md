@@ -6,6 +6,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
+### Added
+
+- `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`), so a process can be profiled to rocpd in one session and to Perfetto in the next.
+
 ### Changed
 
 - Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
