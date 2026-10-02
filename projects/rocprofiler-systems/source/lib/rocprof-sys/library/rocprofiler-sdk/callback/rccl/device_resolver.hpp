@@ -14,7 +14,7 @@ namespace rocprofsys::domains::callback::rccl
 {
 
 template <policies::domain_service::backend SdkBackend>
-struct device_id_resolver
+struct device_resolver
 {
     template <policies::domain_service::externals Externals>
     static void configure_comm_cu_device_function()

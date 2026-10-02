@@ -17,7 +17,7 @@ using test_support::mock_sdk;
 
 TEST(rccl_device_id_resolver_test, resolve_device_id_defaults_to_zero_for_null_comm)
 {
-    const auto device_id = rccl::device_id_resolver<mock_sdk>::resolve_device_id(nullptr);
+    const auto device_id = rccl::device_resolver<mock_sdk>::resolve_device_id(nullptr);
 
     EXPECT_EQ(device_id, 0U);
 }
@@ -30,8 +30,7 @@ TEST(rccl_device_id_resolver_test,
 {
     int fake_comm{};
 
-    const auto device_id =
-        rccl::device_id_resolver<mock_sdk>::resolve_device_id(&fake_comm);
+    const auto device_id = rccl::device_resolver<mock_sdk>::resolve_device_id(&fake_comm);
 
     EXPECT_EQ(device_id, 0U);
 }

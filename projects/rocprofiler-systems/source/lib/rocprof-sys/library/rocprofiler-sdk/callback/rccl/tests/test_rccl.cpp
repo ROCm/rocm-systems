@@ -35,7 +35,7 @@ using ::testing::StrictMock;
 
 using sdk      = mock_sdk_with_tracing;
 using ext      = externals_with_tracing;
-using resolver = rccl::device_id_resolver<sdk>;
+using resolver = rccl::device_resolver<sdk>;
 
 constexpr std::uint64_t k_timestamp = 555;
 

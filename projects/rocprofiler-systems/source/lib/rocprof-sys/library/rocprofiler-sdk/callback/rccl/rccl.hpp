@@ -95,7 +95,7 @@ on_rccl_configure()
         .thread_id  = k_no_thread_id,
         .extdata    = k_empty_json });
 
-    rccl::device_id_resolver<SdkBackend>::template configure_comm_cu_device_function<
+    rccl::device_resolver<SdkBackend>::template configure_comm_cu_device_function<
         Externals>();
 }
 
@@ -119,7 +119,7 @@ on_rccl_exit(typename SdkBackend::callback_tracing_record_t record,
     }
 
     const auto device_id =
-        rccl::device_id_resolver<SdkBackend>::resolve_device_id(info.comm);
+        rccl::device_resolver<SdkBackend>::resolve_device_id(info.comm);
 
     const auto [cumulative, is_first_registration] =
         rccl::transferred_bytes_tracker<Externals>::add_bytes(device_id, info.size);

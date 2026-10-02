@@ -272,15 +272,11 @@ struct wrapper
     static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
 
 #if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
-    static constexpr bool k_are_nccl_fp8_types_available = true;
+    static constexpr nccl_data_type_t NCCL_FP8_E4M3                  = ncclFp8E4M3;
+    static constexpr nccl_data_type_t NCCL_FP8_E5M2                  = ncclFp8E5M2;
+    static constexpr bool             k_are_nccl_fp8_types_available = true;
 #else
     static constexpr bool k_are_nccl_fp8_types_available = false;
-#endif
-
-#if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
-
-    static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
-    static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
 #endif
 
     // ─── RCCL API ID constants ─────────────────────────────────────────────────

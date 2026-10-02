@@ -13,10 +13,10 @@ enum class event_type
 };
 
 template <policies::domain_service::backend SdkBackend>
-struct rccl_event_info
+struct event_info
 {
     template <typename EventT>
-    rccl_event_info(const EventT& event, event_type ev_type)
+    event_info(const EventT& event, event_type ev_type)
     : type(ev_type)
     , comm(event.comm)
     {
@@ -35,7 +35,7 @@ struct rccl_event_info
         }
     }
 
-    rccl_event_info() = default;
+    event_info() = default;
 
     size_t                  size = 0;  ///< Transfer size in bytes
     event_type              type{ event_type::recv };
@@ -43,7 +43,7 @@ struct rccl_event_info
 };
 
 template <policies::domain_service::backend SdkBackend>
-[[nodiscard]] inline rccl_event_info<SdkBackend>
+[[nodiscard]] inline event_info<SdkBackend>
 extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
 {
     if(record.payload == nullptr)
@@ -58,30 +58,24 @@ extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
     switch(operation)
     {
         case SdkBackend::RCCL_API_ID_ncclAllGather:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllGather,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclAllGather, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclAllToAll:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllToAll,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclAllToAll, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclAllReduce:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAllReduce,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclAllReduce, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclGather:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclGather,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclGather, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclRecv:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclRecv, event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclRecv, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclReduce:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclReduce,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclReduce, event_type::recv };
         case SdkBackend::RCCL_API_ID_ncclBroadcast:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclBroadcast,
-                                                event_type::send };
+            return event_info<SdkBackend>{ payload.args.ncclBroadcast, event_type::send };
         case SdkBackend::RCCL_API_ID_ncclReduceScatter:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclReduceScatter,
-                                                event_type::send };
+            return event_info<SdkBackend>{ payload.args.ncclReduceScatter,
+                                           event_type::send };
         case SdkBackend::RCCL_API_ID_ncclSend:
-            return rccl_event_info<SdkBackend>{ payload.args.ncclSend, event_type::send };
+            return event_info<SdkBackend>{ payload.args.ncclSend, event_type::send };
         default: break;
     }
 
@@ -95,8 +89,7 @@ extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
     {
         if(operation == SdkBackend::RCCL_API_ID_ncclAlltoAll)
         {
-            return rccl_event_info<SdkBackend>{ payload.args.ncclAlltoAll,
-                                                event_type::recv };
+            return event_info<SdkBackend>{ payload.args.ncclAlltoAll, event_type::recv };
         }
     }
 

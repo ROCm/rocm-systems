@@ -1169,7 +1169,7 @@ struct externals
         std::optional<std::int64_t> system_tid;
     };
 
-    // Tests set these to drive device_id_resolver::configure_comm_cu_device_function();
+    // Tests set these to drive device_resolver::configure_comm_cu_device_function();
     // the defaults model "symbol not found, no error text".
     static inline void*       dlsym_result   = nullptr;
     static inline const char* dlerror_result = nullptr;
