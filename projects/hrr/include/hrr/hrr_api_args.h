@@ -73,8 +73,10 @@
  * v6: pointer arguments whose pointee used to be dropped now carry it inline
  * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
  * before v6 cannot be read by a v6 reader: re-capture rather than replay an
- * old recording. */
-#define HRR_VERSION ((uint16_t)6u)
+ * old recording.
+ * v7: hipLibraryGetModule inserted into HipDispatchTable, shifting compiler
+ * API IDs (hipPopCallConfiguration … hipUnregisterFatBinary) up by one. */
+#define HRR_VERSION ((uint16_t)7u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
