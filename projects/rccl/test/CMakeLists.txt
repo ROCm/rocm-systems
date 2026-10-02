@@ -964,9 +964,7 @@ if(BUILD_TESTS)
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
 
-      # Separate binary for the same reason: a GIN plugin is selected once per
-      # process, so the fault-injection env has to be set before any other test
-      # has brought a communicator up.
+      # Own binary: the GIN plugin is chosen once per process, so the fault env must come first.
       add_executable(rccl-GinConnectLeakMPI
         common/main_mpi.cpp
         common/MPIHelpers.cpp
@@ -982,9 +980,7 @@ if(BUILD_TESTS)
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
 
-      # The test binaries are installed, so the plugin has to travel with them.
-      # Without this an installed run finds nothing at the build-tree path and
-      # skips, and the regression is never covered outside a build directory.
+      # Install the plugin next to the test binaries so installed runs find it.
       rocm_install(FILES "${RCCL_GIN_EXAMPLE_PLUGIN}"
                    COMPONENT tests
                    DESTINATION ${CMAKE_INSTALL_BINDIR})
