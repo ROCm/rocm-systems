@@ -130,10 +130,16 @@ ParserResult RocVideoParser::GetNalUnit() {
     nal_unit_size_ = 0;
     curr_start_code_offset_ = next_start_code_offset_;  // save the current start code offset
 
-    // Search for the next start code. Both operands are uint32_t, so the size needs testing
-    // separately: a one byte packet would otherwise make pic_data_size_ - 2 wrap to 0xFFFFFFFF
-    // and run the scan past the end of the buffer.
-    while (pic_data_size_ >= 3 && curr_byte_offset_ < pic_data_size_ - 2) {
+    // A start code is three bytes, so there is nothing to scan in a smaller buffer. The check
+    // belongs here rather than in the loop condition: it also keeps pic_data_size_ - 2 from
+    // wrapping, both operands being uint32_t, and it does not depend on the callers resetting
+    // start_code_num_ for the return below to be reached.
+    if (pic_data_size_ < 3) {
+        return PARSER_NOT_FOUND;
+    }
+
+    // Search for the next start code
+    while (curr_byte_offset_ < pic_data_size_ - 2) {
         if (pic_data_buffer_ptr_[curr_byte_offset_] == 0 && pic_data_buffer_ptr_[curr_byte_offset_ + 1] == 0 && pic_data_buffer_ptr_[curr_byte_offset_ + 2] == 0x01) {
             curr_start_code_offset_ = next_start_code_offset_;  // save the current start code offset
 
