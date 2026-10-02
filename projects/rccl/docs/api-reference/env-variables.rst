@@ -202,17 +202,18 @@ in the following table.
 
     * - | ``NCCL_RUN_RAS_DIAGNOSTICS``
         | Runs the RAS diagnostics at every communicator initialization. RCCL
-          compares the ``NCCL_*`` environment and the driver version across
-          the ranks and prints a report with the ``NCCL DIAG`` prefix to the
+          compares the ``NCCL_*`` environment, the driver version, and the GPU
+          configuration across the ranks, checks the GPUs for ECC errors and
+          down XGMI links, and prints a report with the ``NCCL DIAG`` prefix to the
           ``stdout`` of the process that hosts rank 0. Requires
           ``NCCL_RAS_ENABLE=1`` (default). See :ref:`using-rccl-ras-diagnostics`.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
     * - | ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
-        | Number of corrected volatile ECC errors at or above which the RAS
-          diagnostics report a GPU. Has no effect while the ECC check reports
-          ``unavailable`` on AMD GPUs.
+        | Number of correctable ECC errors, as reported by AMD SMI, at or above
+          which the RAS diagnostics report a GPU. Uncorrectable and deferred
+          errors are always reported.
       - | ``0``: Corrected errors are not reported (default).
         | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
 
