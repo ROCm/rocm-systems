@@ -21,8 +21,12 @@ std::pair<uint16_t, uint16_t> SmiNicSubsystem::read_pci_ids(
   std::string device_path = sysfs_bus_path + "/device";
 
   SmiSysfsReader::SysfsValue vendor_val, device_val;
-  if (SmiSysfsReader::readLine(vendor_path, vendor_val) == SmiSysfsReader::SysfsStatus::Success &&
-      SmiSysfsReader::readLine(device_path, device_val) == SmiSysfsReader::SysfsStatus::Success) {
+  // Discovery rescans every PCI device, so successful reads stay out of the debug log.
+  constexpr bool kIsSuccessLogged = false;
+  if ((SmiSysfsReader::readLine(vendor_path, vendor_val, kIsSuccessLogged) ==
+       SmiSysfsReader::SysfsStatus::Success) &&
+      (SmiSysfsReader::readLine(device_path, device_val, kIsSuccessLogged) ==
+       SmiSysfsReader::SysfsStatus::Success)) {
     try {
       if (std::holds_alternative<int>(vendor_val)) {
         vendor_id = static_cast<uint16_t>(std::get<int>(vendor_val));

@@ -43,7 +43,7 @@ class SmiNicSubsystem {
 
   // True if the driver bound at driver_dir claims bdf. match_canonical=false:
   // a direct child entry named <bdf> counts (PCI driver dir). match_canonical=true:
-  // any symlink whose canonical target path contains /<bdf>/ counts (auxiliary
+  // any symlink whose resolved target path contains /<bdf>/ counts (auxiliary
   // driver dir). driver_dir already includes any test sysfs-root prefix.
   bool is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
                               bool match_canonical) const;

@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
                 r.healthy ? "healthy" : "error", r.error_count);
   }
   if (result.value.empty()) {
-    std::printf("  (no reporters — device exposes none, reported as unsupported)\n");
+    std::printf("  (no reporters: device exposes none, reported as unsupported)\n");
   }
   return 0;
 }

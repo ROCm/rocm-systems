@@ -85,7 +85,7 @@ void SmiNicSubsystemPensando::discover_ports(
         std::string port_sysfs_bus_path = pci_path + "/" + port_bdf;
         auto [port_vendor_id, port_device_id] = read_pci_ids(port_sysfs_bus_path);
 
-        if (port_vendor_id == VENDOR_ID && port_device_id == PORT_ID) {
+        if ((port_vendor_id == VENDOR_ID) && (port_device_id == PORT_ID)) {
           if (is_downstream_port(port_bdf, bridge_bdf, pci_path)) {
             SmiNicPort port(iface_name, port_bdf, sysfs_class_path, port_sysfs_bus_path, transport,
                             &kPensandoStatTable);

@@ -14,7 +14,7 @@
 namespace amd::smi::nic::telemetry {
 
 /**
- * Sentinels: a field a NIC does not expose is reported with these rather than a
+ * Reserved values: a field a NIC does not expose is reported with these rather than a
  * fabricated value, so a caller can distinguish "unsupported" from a real read.
  */
 constexpr uint16_t kTempUnsupported = UINT16_MAX;
@@ -63,7 +63,7 @@ struct NicPortSplit {
 /**
  * All live telemetry in one read. Standard-layout (three standard-layout PODs),
  * so a future public bridge can map it field-for-field. A metric the NIC does
- * not expose is written as sentinels in its sub-struct (asic/transceiver/board =
+ * not expose is written as reserved values in its sub-struct (asic/transceiver/board =
  * kTempUnsupported; health state Unknown + error_count kErrorCountUnsupported +
  * empty reporter; splittable/split_count = kCountUnsupported), so the snapshot
  * always populates for a valid NIC rather than failing whole.
@@ -80,7 +80,7 @@ struct NicTelemetrySnapshot {
  *
  * A metric a vendor does not expose at all yields Result.success == false with
  * error_code == ENOTSUP. A partially-supported metric yields success with the
- * unavailable fields set to their sentinel.
+ * unavailable fields set to their reserved value.
  */
 class NicTelemetry {
  public:
@@ -93,8 +93,8 @@ class NicTelemetry {
   /**
    * Reads identity/firmware via devlink (DEVLINK_CMD_INFO_GET). This is the only
    * source for a portless (fwctl-only) card with no host netdev. Unlike the
-   * getters above it performs no aggregation — the version list is an
-   * intentionally raw, vendor-defined name/value set — so it forwards the devlink
+   * getters above it performs no aggregation (the version list is an
+   * intentionally raw, vendor-defined name/value set), so it forwards the devlink
    * result unchanged rather than mirroring it into a separate telemetry struct.
    */
   transport::Result<::amd::nic::netlink::DevlinkDeviceInfo> get_device_info(
@@ -102,9 +102,9 @@ class NicTelemetry {
 
   /**
    * One-shot read of all three metrics. Always succeeds for a valid NIC; a
-   * metric the NIC does not expose is reported via its sub-struct sentinels
+   * metric the NIC does not expose is reported via its sub-struct reserved values
    * (see NicTelemetrySnapshot). This is the seam a future public bridge forwards
-   * to, keeping the sentinel-fallback policy next to the code that produces it.
+   * to, keeping the reserved-value fallback policy next to the code that produces it.
    */
   transport::Result<NicTelemetrySnapshot> get_snapshot(const ::SmiNic& nic) const;
 

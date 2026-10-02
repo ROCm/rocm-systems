@@ -29,6 +29,7 @@ readonly TEST_TARGETS=(
   benchmark_nic_transport
   test_nic_telemetry_suite
   test_nic_vpd_suite
+  test_nic_log_suite
   test_nic_discovery_suite
   probe_devlink_health
   probe_devlink_port
