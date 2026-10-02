@@ -6,6 +6,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**API:**
+
+- Added `pipe_id` to the kernel dispatch completion records, `rocprofiler_callback_tracing_kernel_dispatch_data_t` and `rocprofiler_buffer_tracing_kernel_dispatch_record_t`: the hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. It is reported for dispatches that complete through KFD dispatch-log signal-less completion (`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1`), and is `ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE` (-1) otherwise, including on every `ROCPROFILER_KERNEL_DISPATCH_ENQUEUE` callback.
+
 ### Changed
 
 ### Resolved issues

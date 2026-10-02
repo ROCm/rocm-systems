@@ -1469,7 +1469,7 @@ The following table lists the various fields or the columns in the output CSV fi
                <td>Identifies HIP stream ID to which kernel or memory copy operation was submitted. Defaults to 0 if the hip-stream-display option is not enabled</td>
             </tr>
             <tr>
-               <th rowspan="8">Kernel information</th>
+               <th rowspan="9">Kernel information</th>
                <td>Grid_Size</td>
                <td>The total number of work-items (or, threads) launched as a part of the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied by the total workgroup (or, block) size.</td>
             </tr>
@@ -1500,6 +1500,10 @@ The following table lists the various fields or the columns in the output CSV fi
             <tr>
                <td>Group_Segment_Size</td>
                <td>The group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched.</td>
+            </tr>
+            <tr>
+               <td>Pipe_Id</td>
+               <td>Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS). Only present in CSV converted from a rocpd database of schema 3.0.5 or later; direct rocprofv3 CSV output does not carry it.</td>
             </tr>
             <tr>
                <th rowspan="5">Resource usage</th>
@@ -1843,6 +1847,7 @@ Here are the properties of the JSON output schema:
                      - **x** *(integer, required)*: X dimension.
                      - **y** *(integer, required)*: Y dimension.
                      - **z** *(integer, required)*: Z dimension.
+               - **pipe_id** *(integer, required)*: Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (``ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS``).
          - **hip_api** *(array)*: HIP API records.
             - **Items** *(object)*
                - **size** *(integer, required)*: Size of the HIP API record.
