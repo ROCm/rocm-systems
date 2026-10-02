@@ -523,37 +523,10 @@ void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
     handle_aperture_mgr_->Free(gpu_addr);
 }
 
-/* hsaKmtOpenKFD() references a forked child inherited rather than took. Every
- * component that opened before the fork still holds one in the child's copy of
- * its own state and may close it there - ROCr's KfdDriver does from
- * hsa_shut_down() and from its destructor at exit - but none of them can say
- * which reference it is closing. hsaKmtCloseKFD() therefore gives these back
- * before it touches dxg_open_count, which from then on counts only opens made
- * in this process.
- *
- * Lives outside hsakmtRuntime because clear_after_fork() replaces that object.
- * Accumulates, so a fork from a child that has reopened adds that child's own
- * opens to whatever it still owed its parent.
- */
-static unsigned long inherited_open_count = 0;
-
-/* Move the counts this process inherited out of the live ones. Called from
- * child_fork_handler(), so plain stores and a relaxed exchange on a lock-free
- * atomic only: no allocation and no locking.
- */
-static void disown_inherited_refs(void) {
-  inherited_open_count += dxg_runtime->dxg_open_count;
-  dxg_runtime->dxg_open_count = 0;
-  topology_disown_snapshot_refs();
-}
-
 /* is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
  * because the process can fork without calling the fork function in
  * libc (using clone or calling the system call directly).
- *
- * The first call to notice such a fork also disowns the inherited counts, as
- * child_fork_handler() would have done had it run.
  */
 bool is_forked_child(void) {
   if (dxg_runtime->is_forked)
@@ -563,7 +536,6 @@ bool is_forked_child(void) {
   if (dxg_runtime->parent_pid != cur_pid) {
     dxg_runtime->is_forked = true;
     dxg_runtime->parent_pid = cur_pid;
-    disown_inherited_refs();
     return true;
   }
 
@@ -592,12 +564,14 @@ static void child_fork_handler(void) {
 
   /* Sever the references the child inherited but never took, before any public
    * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
-   * is_forked is set, but moving the counts aside means that even a path that
-   * bypasses it cannot decrement the parent's bookkeeping, and that the close
-   * or release a component later issues for one of them is recognized as such.
-   * Heavier snapshot and object teardown waits for clear_after_fork().
+   * is_forked is set, but zeroing the counts means that even a path that
+   * bypasses it cannot decrement the parent's bookkeeping. The inherited open
+   * count is cleared with a plain store and the snapshot count with a relaxed
+   * store on a lock-free atomic, so neither allocates nor takes a lock; heavier
+   * snapshot and object teardown waits for clear_after_fork().
    */
-  disown_inherited_refs();
+  dxg_runtime->dxg_open_count = 0;
+  topology_clear_snapshot_refs();
 
   /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
    * no other thread would be mid-operation during the fork snapshot. In the
@@ -843,20 +817,6 @@ open_failed:
 HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   HSAKMT_STATUS result;
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
-
-  /* A close is matched to an inherited open before a live one. Closes carry no
-   * identity, so this is what keeps a component that opened before a fork from
-   * closing, in the child, an open another component made there: teardown
-   * needs one close per inherited open plus one per live open, and while any
-   * caller still holds a live open fewer closes than that have arrived. An
-   * inherited reference never owns anything here, so giving one back tears
-   * nothing down.
-   */
-  is_forked_child();
-  if (inherited_open_count > 0) {
-    --inherited_open_count;
-    return HSAKMT_STATUS_SUCCESS;
-  }
 
   if (dxg_runtime->dxg_open_count > 0) {
     /* Recognize the last reference without consuming it yet. The teardown below
