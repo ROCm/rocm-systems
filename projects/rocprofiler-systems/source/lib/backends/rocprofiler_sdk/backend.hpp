@@ -174,6 +174,52 @@ struct backend
 #endif
 
 #if ROCPROFILER_VERSION >= 600
+    // ─── OMPT types and constants ─────────────────────────────────────────────────
+    using ompt_operation_t             = Wrapper::ompt_operation_t;
+    using callback_tracing_ompt_data_t = Wrapper::ompt_data_t;
+    using ompt_thread_t                = Wrapper::ompt_thread_t;
+
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = Wrapper::OMPT_THREAD_INITIAL;
+
+    static constexpr ompt_operation_t OMPT_ID_thread_begin =
+        Wrapper::OMPT_ID_thread_begin;
+    static constexpr ompt_operation_t OMPT_ID_thread_end = Wrapper::OMPT_ID_thread_end;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin =
+        Wrapper::OMPT_ID_parallel_begin;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end =
+        Wrapper::OMPT_ID_parallel_end;
+    static constexpr ompt_operation_t OMPT_ID_task_create = Wrapper::OMPT_ID_task_create;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule =
+        Wrapper::OMPT_ID_task_schedule;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task =
+        Wrapper::OMPT_ID_implicit_task;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize =
+        Wrapper::OMPT_ID_device_initialize;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize =
+        Wrapper::OMPT_ID_device_finalize;
+    static constexpr ompt_operation_t OMPT_ID_device_load = Wrapper::OMPT_ID_device_load;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released =
+        Wrapper::OMPT_ID_mutex_released;
+    static constexpr ompt_operation_t OMPT_ID_dependences = Wrapper::OMPT_ID_dependences;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence =
+        Wrapper::OMPT_ID_task_dependence;
+    static constexpr ompt_operation_t OMPT_ID_lock_init = Wrapper::OMPT_ID_lock_init;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy =
+        Wrapper::OMPT_ID_lock_destroy;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire =
+        Wrapper::OMPT_ID_mutex_acquire;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired =
+        Wrapper::OMPT_ID_mutex_acquired;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock = Wrapper::OMPT_ID_nest_lock;
+    static constexpr ompt_operation_t OMPT_ID_flush     = Wrapper::OMPT_ID_flush;
+    static constexpr ompt_operation_t OMPT_ID_cancel    = Wrapper::OMPT_ID_cancel;
+    static constexpr ompt_operation_t OMPT_ID_dispatch  = Wrapper::OMPT_ID_dispatch;
+    static constexpr ompt_operation_t OMPT_ID_error     = Wrapper::OMPT_ID_error;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions =
+        Wrapper::OMPT_ID_callback_functions;
+#endif
+
+#if ROCPROFILER_VERSION >= 600
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =
         Wrapper::CALLBACK_TRACING_ROCDECODE_API;
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_OMPT =
