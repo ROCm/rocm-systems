@@ -259,16 +259,12 @@ TEST_F(ucx_gotcha_test, test_configure_function_names)
 
     ASSERT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS));
     // A representative sample of the wrapped UCX symbols.
-    EXPECT_NE(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "ucp_tag_send_nbx"));
-    EXPECT_NE(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "ucp_tag_recv_nbx"));
     EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "ucp_put_nbx"));
+              std::ranges::find(configured_names, "ucp_tag_send_nbx"));
     EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "ucp_get_nbx"));
+              std::ranges::find(configured_names, "ucp_tag_recv_nbx"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "ucp_put_nbx"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "ucp_get_nbx"));
 }
 
 TEST_F(ucx_gotcha_test, test_audit_incoming_generic)

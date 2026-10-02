@@ -9,6 +9,7 @@
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/settings/types.hpp>
@@ -1358,22 +1359,23 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         if(itr.second->get_name() == "papi_events")
         {
             auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
+            _choices.erase(std::ranges::remove_if(
+                               _choices,
                                [](const auto& citr) {
                                    return std::regex_search(
                                               citr,
                                               std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
                                           std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
+                               })
+                               .begin(),
+                           _choices.end());
             _choices.emplace_back(
                 "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
         }
     }
 
-    std::sort(_settings.begin(), _settings.end(), [](const auto& _lhs, const auto& _rhs) {
+    std::ranges::sort(_settings, [](const auto& _lhs, const auto& _rhs) {
         auto const _lhs_v = _lhs->get_name();
         auto const _rhs_v = _rhs->get_name();
         if(_lhs_v.length() > 4 && _rhs_v.length() > 4 &&
@@ -1436,15 +1438,16 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         if(itr.second->get_name() == "papi_events")
         {
             auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
+            _choices.erase(std::ranges::remove_if(
+                               _choices,
                                [](const auto& citr) {
                                    return std::regex_search(
                                               citr,
                                               std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
                                           std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
+                               })
+                               .begin(),
+                           _choices.end());
             _choices.emplace_back(
                 "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
@@ -1467,16 +1470,16 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         _category_count_vec.emplace_back(itr.first);
     }
 
-    std::sort(_category_count_vec.begin(), _category_count_vec.end(),
-              [&_category_count_map](const auto& _lhs, const auto& _rhs) {
-                  auto const _lhs_v = _category_count_map.at(_lhs);
-                  auto const _rhs_v = _category_count_map.at(_rhs);
-                  if(_lhs_v == _rhs_v)
-                  {
-                      return _lhs < _rhs;
-                  }
-                  return _lhs_v > _rhs_v;
-              });
+    std::ranges::sort(_category_count_vec,
+                      [&_category_count_map](const auto& _lhs, const auto& _rhs) {
+                          auto const _lhs_v = _category_count_map.at(_lhs);
+                          auto const _rhs_v = _category_count_map.at(_rhs);
+                          if(_lhs_v == _rhs_v)
+                          {
+                              return _lhs < _rhs;
+                          }
+                          return _lhs_v > _rhs_v;
+                      });
 
     auto _groups =
         std::unordered_map<std::string, std::vector<std::shared_ptr<tim::vsettings>>>{};
@@ -1490,10 +1493,12 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
                 _groups[citr].emplace_back(itr);
             }
         }
-        _settings.erase(std::remove_if(_settings.begin(), _settings.end(),
-                                       [&citr](const auto& itr) {
-                                           return itr->get_categories().count(citr) > 0;
-                                       }),
+        _settings.erase(std::ranges::remove_if(_settings,
+                                               [&citr](const auto& itr) {
+                                                   return itr->get_categories().count(
+                                                              citr) > 0;
+                                               })
+                            .begin(),
                         _settings.end());
     }
 

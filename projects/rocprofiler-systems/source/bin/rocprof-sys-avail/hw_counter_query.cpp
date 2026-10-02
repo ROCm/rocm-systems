@@ -5,6 +5,7 @@
 
 #include "core/agent_manager.hpp"
 
+#include <algorithm>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -113,8 +114,8 @@ get_agent_counter_info(const std::vector<std::pair<size_t, const agent*>>& gpu_a
                       });
             for(auto& ci : it->second)
             {
-                std::sort(
-                    ci.dimension_info.begin(), ci.dimension_info.end(),
+                std::ranges::sort(
+                    ci.dimension_info,
                     [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; });
             }
         }
@@ -165,36 +166,35 @@ query_gpu_hw_counters()
         }
 
         auto counters = it->second;
-        std::sort(counters.begin(), counters.end(),
-                  [](const counter_info& lhs, const counter_info& rhs) {
-                      if(lhs.info.is_constant && rhs.info.is_constant)
-                      {
-                          return lhs.info.id < rhs.info.id;
-                      }
-                      if(lhs.info.is_constant)
-                      {
-                          return true;
-                      }
-                      if(rhs.info.is_constant)
-                      {
-                          return false;
-                      }
+        std::ranges::sort(counters, [](const counter_info& lhs, const counter_info& rhs) {
+            if(lhs.info.is_constant && rhs.info.is_constant)
+            {
+                return lhs.info.id < rhs.info.id;
+            }
+            if(lhs.info.is_constant)
+            {
+                return true;
+            }
+            if(rhs.info.is_constant)
+            {
+                return false;
+            }
 
-                      if(!lhs.info.is_derived && !rhs.info.is_derived)
-                      {
-                          return lhs.info.id < rhs.info.id;
-                      }
-                      if(!lhs.info.is_derived)
-                      {
-                          return true;
-                      }
-                      if(!rhs.info.is_derived)
-                      {
-                          return false;
-                      }
+            if(!lhs.info.is_derived && !rhs.info.is_derived)
+            {
+                return lhs.info.id < rhs.info.id;
+            }
+            if(!lhs.info.is_derived)
+            {
+                return true;
+            }
+            if(!rhs.info.is_derived)
+            {
+                return false;
+            }
 
-                      return lhs.info.id < rhs.info.id;
-                  });
+            return lhs.info.id < rhs.info.id;
+        });
 
         for(const auto& ci : counters)
         {

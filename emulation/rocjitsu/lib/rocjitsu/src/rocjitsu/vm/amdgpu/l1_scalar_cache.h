@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -13,9 +13,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
-class GpuVm;
 class L2Cache;
-enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Scalar Cache (K$) controller for SMEM instructions.
 ///
@@ -81,6 +79,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuVm *gpu_vm_ = nullptr;
+  VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;
 };
 
