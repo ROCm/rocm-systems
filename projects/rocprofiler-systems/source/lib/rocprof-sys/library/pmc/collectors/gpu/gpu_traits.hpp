@@ -40,7 +40,7 @@ using ::rocprofsys::pmc::device_type;
 [[nodiscard]] inline bool
 is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
 {
-    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
+    return !bdf.empty() && visible_bdfs.contains(bdf);
 }
 
 /**
@@ -201,7 +201,7 @@ struct gpu_traits
 
         for(auto& device : devices)
         {
-            auto index = device->get_index();
+            auto const index = device->get_index();
 
             bool should_include = (filter.mode == device_selection_mode::all) ||
                                   (filter.mode == device_selection_mode::specific &&
@@ -224,7 +224,7 @@ struct gpu_traits
 
             if(should_include && device->is_supported())
             {
-                auto supported = device->get_supported_metrics();
+                auto const supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
         }

@@ -257,9 +257,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from su
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
-    OFF
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON
 )

@@ -33,7 +33,7 @@ get_bundle()
 const auto&
 sampling_signals()
 {
-    static auto _v = get_sampling_signals();
+    static auto const _v = get_sampling_signals();
     return _v;
 }
 
@@ -81,7 +81,7 @@ causal_gotcha::stop()
 void
 causal_gotcha::remove_signals(sigset_t* _set)
 {
-    for(auto _sig : sampling_signals())
+    for(auto const _sig : sampling_signals())
     {
         if(sigismember(_set, _sig) != 0)
         {

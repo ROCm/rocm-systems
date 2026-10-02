@@ -1163,8 +1163,8 @@ static void windowCloseIpcPeers(struct ncclComm* comm, struct ncclDevrWindow* wi
 // RCCL: register a non-sym window. Mirrors upstream sym's two-stage shape:
 //   (1) intra-node mapping via cudaIpcOpenMemHandle peer pointers, when
 //       lsaSize > 1.
-//   (2) inter-node MR via ncclRmaProxyRegister, when hostRmaSupport. Same
-//       call upstream issues from symMemoryRegisterRma.
+//   (2) inter-node MR via ncclRmaProxyRegister, when hostRmaSupport and not
+//       NCCL_RMA_DISABLE. Same call upstream issues from symMemoryRegisterRma.
 static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags,
                                          void* localRegHandle, ncclWindow_t* outWinDev) {
   struct ExchangeEntry {
@@ -1184,7 +1184,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
   int* teamRankList = devr->lsaRankList;
 
   bool doIpc = teamSize > 1;
-  bool doRma = comm->hostRmaSupport && (teamSize < comm->nRanks);
+  bool doRma = comm->hostRmaSupport && (teamSize < comm->nRanks) && !ncclParamRMADisable();
 
   struct ncclDevrWindow* win = nullptr;
   cudaStream_t stream = nullptr;

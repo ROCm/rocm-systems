@@ -122,7 +122,7 @@ backtrace_metrics::description()
 std::vector<std::string>
 backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
 {
-    auto& _v = get_papi_labels(_tid);
+    auto const& _v = get_papi_labels(_tid);
     return _v ? *_v : std::vector<std::string>{};
 }
 
@@ -177,8 +177,8 @@ apply_for_all_thread_names(std::int64_t                            _tid,
 {
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
     {
-        auto _hw_cnt_labels = *get_papi_labels(_tid);
-        for(auto& itr : _hw_cnt_labels)
+        auto const _hw_cnt_labels = *get_papi_labels(_tid);
+        for(auto const& itr : _hw_cnt_labels)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty())
@@ -252,7 +252,7 @@ void
 cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t timestamp_ns,
                                Value value, std::int64_t _tid)
 {
-    auto _tid_name = fmt::format("[{}]", _tid);
+    auto const _tid_name = fmt::format("[{}]", _tid);
 
     const size_t stack_id        = 0;
     const size_t parent_stack_id = 0;
@@ -316,10 +316,10 @@ backtrace_metrics::sample(int)
         return;
     }
 
-    auto _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu       = tim::get_clock_thread_now<std::int64_t, std::nano>();
-    m_mem_peak  = _cache.get_peak_rss();
-    m_ctx_swch  = _cache.get_num_priority_context_switch() +
+    auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
+    m_cpu             = tim::get_clock_thread_now<std::int64_t, std::nano>();
+    m_mem_peak        = _cache.get_peak_rss();
+    m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
     m_page_flt = _cache.get_num_major_page_faults() + _cache.get_num_minor_page_faults();
 
@@ -329,7 +329,7 @@ backtrace_metrics::sample(int)
         constexpr auto hw_category_idx =
             tim::index_of<category::thread_hardware_counter, categories_t>::value;
 
-        auto _tid = threading::get_id();
+        auto const _tid = threading::get_id();
         if(m_valid.test(hw_category_idx) && m_valid.test(hw_counters_idx))
         {
             assert(get_papi_vector(_tid).get() != nullptr);
@@ -386,8 +386,8 @@ backtrace_metrics::configure(bool _setup, std::int64_t _tid)
 void
 backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
 {
-    auto _hw_cnt_labels = *get_papi_labels(_tid);
-    auto _tid_name      = fmt::format("[{}]", _tid);
+    auto const _hw_cnt_labels = *get_papi_labels(_tid);
+    auto       _tid_name      = fmt::format("[{}]", _tid);
 
     if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
     {
@@ -417,7 +417,7 @@ backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
        get_valid(type_list<hw_counters>{}, _valid) &&
        get_valid(category::thread_hardware_counter{}, _valid))
     {
-        for(auto& itr : _hw_cnt_labels)
+        for(auto const& itr : _hw_cnt_labels)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty())
@@ -438,7 +438,7 @@ backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
 void
 backtrace_metrics::fini_perfetto(std::int64_t _tid, valid_array_t _valid)
 {
-    auto        _hw_cnt_labels = *get_papi_labels(_tid);
+    auto const  _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
     if(!_thread_info)
@@ -621,7 +621,9 @@ backtrace_metrics::post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) c
 void
 backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const
 {
-    auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
+    auto const is_category_enabled = [&](const auto& _category) {
+        return (*this)(_category);
+    };
 
     if(is_category_enabled(category::thread_cpu_time{}))
     {
