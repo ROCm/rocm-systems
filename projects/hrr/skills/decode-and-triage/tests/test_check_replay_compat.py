@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import check_replay_compat as crc  # noqa: E402

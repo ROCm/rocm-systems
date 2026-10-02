@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import analyze_replay_finding as arf  # noqa: E402
@@ -91,6 +91,56 @@ Reason: Write access to a read-only page
         self.assertEqual(finding.fault_class, "read_only_page_fault")
         self.assertEqual(finding.outcome, "MAF")
 
+    def test_the_summary_outranks_a_stale_progress_line(self) -> None:
+        """Progress is printed at the first kernel and then periodically.
+
+        The summary prints skipped rather than attempted, so attempted is
+        pass + fail + skipped, and a nonzero skipped count is what tells that
+        apart from pass + fail.
+        """
+        text = (
+            "[HRR progress] elapsed_s=0.0 seq=12 kernels=1 d2h_pass=0 "
+            'd2h_fail=0 d2h_attempted=0 last="first_kernel"\n'
+            "[HRR]   Kernels launched: 40\n"
+            "[HRR]   D2H checks     : 30 pass (30 exact, 0 within tol), "
+            "1 fail, 2 skipped\n"
+            "[HRR] FAIL\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        self.assertEqual(finding.kernels_launched, 40)
+        self.assertEqual(
+            (finding.d2h_pass, finding.d2h_fail, finding.d2h_attempted), (30, 1, 33)
+        )
+
+    def test_a_pass_line_with_d2h_failures_keeps_its_fault_details(self) -> None:
+        """It is classified as a divergence, so it is reported as one."""
+        text = (
+            "[HRR progress] elapsed_s=0.0 seq=12 kernels=1 d2h_pass=0 "
+            'd2h_fail=2 d2h_attempted=2 last="first_kernel"\n'
+            "[HRR] PASS\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        report = arf.render_markdown(arf.finalize(finding))
+        self.assertEqual(finding.fault_class, "nan_inf_divergence")
+        self.assertIn("## Fault details", report)
+        self.assertNotIn("## Replay result", report)
+
+    def test_a_replay_that_launched_no_kernels_says_zero(self) -> None:
+        """Zero is a count the summary printed, not a missing one."""
+        text = (
+            "[HRR]   Kernels launched: 0\n"
+            "[HRR]   D2H checks     : 1 pass (1 exact, 0 within tol), "
+            "0 fail, 0 skipped\n"
+            "[HRR] PASS\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        report = arf.render_markdown(arf.finalize(finding))
+        self.assertEqual(finding.kernels_launched, 0)
+        self.assertIn("- **Kernels launched**: 0", report)
+
 
 class RecordedCaptureTests(unittest.TestCase):
     """Checks against replay output recorded from a gfx950 host.
@@ -100,7 +150,7 @@ class RecordedCaptureTests(unittest.TestCase):
     finding.
     """
 
-    FIXTURES = SCRIPT_DIR.parent / "evals" / "fixtures"
+    FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
     def _analyze(self, *names: str) -> arf.Finding:
         finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
@@ -122,6 +172,61 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.archive_events, 185469)
         self.assertEqual(finding.archive_kernels, 13233)
         self.assertEqual(finding.d2h_fail, 0)
+
+    def test_clean_replay_takes_its_totals_from_the_summary(self) -> None:
+        """This log has the summary and no progress line at all."""
+        finding = self._analyze("replay_pass.log", "info_pass.txt")
+        self.assertEqual(finding.d2h_attempted, 32)
+        self.assertEqual(finding.kernels_launched, 13233)
+        report = arf.render_markdown(finding)
+        self.assertIn("## Replay result", report)
+        self.assertIn("pass=32 fail=0 attempted=32", report)
+        self.assertIn("- **Kernels launched**: 13233", report)
+        self.assertNotIn("## Fault details", report)
+
+    def test_clean_replay_reports_no_failing_event_in_json(self) -> None:
+        """The runner asks for progress, and the first kernel always prints it.
+
+        JSON prints every field, so the event and kernel named on the way have
+        to be cleared rather than hidden the way the markdown hides them.
+        """
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(
+            "[HRR progress] elapsed_s=0.0 seq=12 kernels=1 d2h_pass=0 "
+            'd2h_fail=0 d2h_attempted=0 last="first_kernel"\n'
+            "[HRR] Event 7: hipModuleLaunchKernel\n"
+            + (self.FIXTURES / "replay_pass.log").read_text(encoding="utf-8"),
+            "replay.log",
+            finding,
+        )
+        payload = json.loads(json.dumps(arf.finalize(finding).to_dict()))
+        for key in (
+            "failing_event_seq",
+            "failing_call_index",
+            "failing_api",
+            "last_progress_kernel",
+            "kernel_name",
+        ):
+            self.assertIsNone(payload[key], key)
+        self.assertEqual(payload["kernels_launched"], 13233)
+        self.assertEqual(payload["d2h_attempted"], 32)
+
+    def test_a_fault_at_the_first_event_names_it(self) -> None:
+        """Event and call indices are zero-based, so 0 is a real index."""
+        finding = arf.Finding(
+            outcome="MAF",
+            fault_class="illegal_memory_access",
+            failing_event_seq=0,
+            failing_call_index=0,
+        )
+        report = arf.render_markdown(finding)
+        self.assertIn("- **Failing event seq**: 0", report)
+        self.assertIn("- **Failing call index**: 0", report)
+        report = arf.render_markdown(
+            arf.Finding(outcome="MAF", fault_class="illegal_memory_access")
+        )
+        self.assertIn("- **Failing event seq**: n/a", report)
+        self.assertIn("- **Failing call index**: n/a", report)
 
     def test_truncated_kernel_names_are_ignored(self) -> None:
         """Every name in this capture's table is cut off by the column width."""
