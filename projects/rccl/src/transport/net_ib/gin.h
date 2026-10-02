@@ -97,6 +97,15 @@ static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
   return lhsSegments == rhsSegments && lhsSegments >= 1 && lhsSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 
+// Peer segOff tables feed unsigned offset math: they must start at 0 and never decrease.
+static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
+  if (segOff == NULL || nSegments < 1 || nSegments > NCCL_RMA_MAX_SEGMENTS || segOff[0] != 0) return 0;
+  for (int s = 0; s < nSegments; s++) {
+    if (segOff[s + 1] < segOff[s]) return 0;
+  }
+  return 1;
+}
+
 // Per-rank segOff table from registration allgather; falls back to the local map.
 static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
   if (rankSegOff == NULL || rank < 0) return localSegOff;
