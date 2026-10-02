@@ -116,6 +116,13 @@ file/rank, collective, and message size. This matches rccl-tests, which runs
 warmups again at every size in a sweep while keeping one communicator-wide
 sequence number.
 
+This removes the initial per-size warmup batch in `rccl-tests/src/common.cu`
+(`TimeTest`). `BenchTime` subsequently records a sync collective for each
+enabled in-place/out-of-place pass and correctness-check calls. JSONL records
+do not identify those phases, so the report includes them; it is not a
+measured-iterations-only aggregate. Doubling `--warmup` would discard measured
+calls without correctly removing those later phases.
+
 The report classifies bottlenecks per message size (evaluated in this order):
 - **unknown** — zero wall time (degenerate record)
 - **gpu-compute (no proxy)** — kernel-only collective with no proxy ops
@@ -130,3 +137,37 @@ The report classifies bottlenecks per message size (evaluated in this order):
 
 - RCCL v2.30+ (profiler v5 API)
 - `LD_LIBRARY_PATH` must include the RCCL build with v5 support
+
+## CI validation
+
+From the repository root, run the host-only regression tests:
+
+```bash
+python3 -m pytest -q projects/rccl/test/test_accl_report.py \
+  projects/rccl/test/test_accl_profiler_ci.py projects/rccl/test/test_plan_rccl_ci.py
+```
+
+These exercise the planner, artifact discovery, rendered Bash preflight checks,
+JSONL validation, and failure summaries. They do not replace GPU qualification.
+
+To qualify a PR branch with a fresh gfx950 build and the two-node Ruby sweep:
+
+```bash
+gh workflow run therock-rccl-ci.yml --ref YOUR_PR_BRANCH \
+  -f test_suites=accl-profiler -f accl_profiler_nodes=2
+```
+
+`test_suites` accepts any comma-separated subset of `single-node`, `rocprof`,
+`pytorch`, `jax`, `madengine`, and `accl-profiler`. The default `auto` preserves
+the normal event-based policy. Explicit selections build only their GPU families.
+After the fresh build finishes, repeat with `-f artifact_run_id=BUILD_RUN_ID`
+to test the skipped-build/reuse path without rebuilding. Use artifacts from the
+same commit when claiming runtime qualification of that commit.
+
+The CI sweep uses five iterations and two initial warmups per size, with a
+1K–256M factor-two sweep, to bound profiler pool pressure. It still rejects any
+dropped/leaked records, incomplete summaries, missing ranks or requested sizes,
+and report failures. AllGather/ReduceScatter descriptor bytes are per-rank
+contributions, not rccl-tests' aggregate buffer bytes. A successful process exit
+alone is not a passing profiler run. Keep `manifest.json`, the reports, preflight
+log, and raw JSONL artifacts as the qualification evidence.

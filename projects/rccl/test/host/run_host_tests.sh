@@ -263,6 +263,7 @@ do_accl_profiler_guards() {
   "$PYTEST_PYTHON" -m pytest \
     "$RCCL_ROOT/test/test_accl_report.py" \
     "$RCCL_ROOT/test/test_accl_profiler_ci.py" \
+    "$RCCL_ROOT/test/test_plan_rccl_ci.py" \
     -v
 }
 

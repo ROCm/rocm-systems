@@ -87,7 +87,9 @@ jobs:
             echo '::error::nodes must be a positive integer'
             exit 1
           fi
+          umask 077
           mkdir -p "${WORK_DIR}"
+          chmod 700 "${WORK_DIR}"
           probe="${WORK_DIR}/.write-probe.$$"
           touch "${probe}"
           rm -f "${probe}"
@@ -123,8 +125,8 @@ jobs:
             --min-bytes 1K \
             --max-bytes 256M \
             --step-factor 2 \
-            --iterations 20 \
-            --warmup-iterations 5
+            --iterations 5 \
+            --warmup-iterations 2
 
       - name: Cancel Slurm job
         if: always()
