@@ -37,10 +37,17 @@
 #include "profiler.h"
 
 #include "nccl_stubs.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 
 #include "signature-drift.h"
 ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDdaUseFabricPath, ncclDdaUseFabricPath);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDdaIpcCommInit, ncclDdaIpcCommInit);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDdaIpcCommFini, ncclDdaIpcCommFini);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDdaFabricCommInit, ncclDdaFabricCommInit);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDdaFabricCommFini, ncclDdaFabricCommFini);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclAsyncJob;
@@ -72,11 +79,19 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
-ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
-bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
+static bool DefaultDdaUseFabricPath(struct ncclComm*) { return false; }
+static ncclResult_t DefaultDdaCommFini(struct ncclComm*) { return ncclSuccess; }
+static ncclResult_t DefaultDdaCommInit(struct ncclComm*) { ::abort(); }
+std::function<bool(struct ncclComm*)> g_ncclDdaUseFabricPath = DefaultDdaUseFabricPath;
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommInit = DefaultDdaCommInit;
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommFini = DefaultDdaCommFini;
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommInit = DefaultDdaCommInit;
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommFini = DefaultDdaCommFini;
+bool ncclDdaUseFabricPath(struct ncclComm* comm) { return g_ncclDdaUseFabricPath(comm); }
+ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { return g_ncclDdaIpcCommInit(comm); }
+ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return g_ncclDdaIpcCommFini(comm); }
+ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { return g_ncclDdaFabricCommInit(comm); }
+ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return g_ncclDdaFabricCommFini(comm); }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
@@ -243,6 +258,11 @@ void ResetNcclStubs() {
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclDdaUseFabricPath = DefaultDdaUseFabricPath;
+  g_ncclDdaIpcCommInit = DefaultDdaCommInit;
+  g_ncclDdaIpcCommFini = DefaultDdaCommFini;
+  g_ncclDdaFabricCommInit = DefaultDdaCommInit;
+  g_ncclDdaFabricCommFini = DefaultDdaCommFini;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;

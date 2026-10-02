@@ -156,6 +156,11 @@ do_host_tests() {
     # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
+    # ENABLE_DDA defaults ON, so the binaries above compile the setup calls.
+    # init.cc gates them at the preprocessor, so this arm is the one that
+    # compiles them out. See test/host/CMakeLists.txt.
+    "rccl-UnitTestsMicroInit-nodda:$SCRIPT_DIR/host_tests_micro_init_nodda.xml"
+    "rccl-UnitTestsMicroDdaDisabled:$SCRIPT_DIR/host_tests_micro_dda_disabled.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the

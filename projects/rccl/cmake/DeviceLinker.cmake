@@ -618,6 +618,26 @@ add_custom_command(
   VERBATIM
 )
 
+# Empty when ENABLE_DDA=OFF so the top-level device_linker_build DEPENDS list
+# can keep naming these objects. The sets below overwrite the paths when the
+# kernels are actually compiled.
+set(DDA_ALL_REDUCE_IPC_FAT_OBJ "")
+set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "")
+set(DDA_ALL_GATHER_IPC_FAT_OBJ "")
+set(DDA_ALLTOALL_IPC_FAT_OBJ "")
+set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "")
+set(DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ "")
+set(DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ "")
+set(DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ "")
+set(DDA_ALL_GATHER_FABRIC_FAT_OBJ "")
+set(DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ "")
+set(DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ "")
+set(DDA_ALLTOALL_FABRIC_FAT_OBJ "")
+set(DDA_ALLTOALL_FABRIC_LL_FAT_OBJ "")
+set(DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ "")
+set(DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ "")
+set(DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ "")
+if(ENABLE_DDA)
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
 set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
 set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
@@ -698,6 +718,7 @@ add_custom_command(
   COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
+endif()
 
 # ===========================================================================
 # gin_alltoall_sdma.cu.cpp: GIN-SDMA alltoall kernel.
@@ -796,6 +817,7 @@ endif()
 # ===========================================================================
 # dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
 # ===========================================================================
+if(ENABLE_DDA)
 set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric.o")
 
 add_custom_command(
@@ -1050,6 +1072,7 @@ add_custom_command(
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
+endif()
 
 # ===========================================================================
 # CE-reduce kernels: per-instantiation device TUs from gensrc/ce_reduce/.

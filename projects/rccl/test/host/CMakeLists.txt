@@ -789,12 +789,20 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroInit and variants
 # ---------------------------------------------------------------------------
+# init.cc calls DDA setup under ENABLE_DDA. That define is private to librccl,
+# so pass the shipping default here. --disable-dda leaves it unset and the
+# setup calls are compiled out, matching the library.
+if(NOT DEFINED ENABLE_DDA OR ENABLE_DDA)
+  set(_MICRO_DDA_DEF ENABLE_DDA)
+else()
+  set(_MICRO_DDA_DEF "")
+endif()
 foreach(_variant "" "-uncached" "-faultinj")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
-    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
+    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} ${_MICRO_DDA_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
@@ -802,6 +810,24 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 endforeach()
+
+# init.cc gates DDA setup on ENABLE_DDA. The binaries above follow the library
+# (on by default). This one always compiles that setup out, so the disabled arm
+# is tested even when the library still builds DDA.
+rccl_add_micro_binary(rccl-UnitTestsMicroInit-nodda
+  SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY ENABLE_DDA
+  EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
+
+# Stubs linked when DDA kernels are compiled out. Always hipified; this binary
+# compiles that TU and does not link the real kernels or dda_fakes.cc.
+rccl_add_micro_binary(rccl-UnitTestsMicroDdaDisabled
+  SOURCES
+    dda-kernels-disabled-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/dda_kernels_disabled.cc
+    ../common/main_altrsmi.cpp
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)

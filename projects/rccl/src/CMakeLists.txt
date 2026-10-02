@@ -90,6 +90,7 @@ set(SRC_FILES
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
   algorithms/dda/device/device_buffer.cc
+  algorithms/dda/dda_kernels_disabled.cc
   diagnostics.cc
   diagnostics.h
   diagnostics/device/p2p.cu
@@ -583,6 +584,41 @@ set(SRC_FILES
   tuning/tuning_int.h
 )
 
+# --disable-dda / -DENABLE_DDA=OFF: drop the DDA device kernels and the
+# communicator setup that allocates their scratch, peer tables, and barriers.
+# Host selection still links, via dda_kernels_disabled.cc, and never picks DDA.
+if(NOT ENABLE_DDA)
+  set(_DDA_KERNEL_SOURCES
+    algorithms/dda/all_gather/dda_all_gather_fabric.cu
+    algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu
+    algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu
+    algorithms/dda/all_gather/dda_all_gather_ipc.cu
+    algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
+    algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
+    algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
+    algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+    algorithms/dda/alltoall/dda_alltoall_fabric.cu
+    algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
+    algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
+    algorithms/dda/alltoall/dda_alltoall_ipc.cu
+    algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
+    algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
+    algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
+    algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
+    algorithms/dda/device/device_buffer.cc
+    algorithms/dda/fabric/fabric_gpu_barrier.cu
+    algorithms/dda/fabric/fabric_init.cu
+    algorithms/dda/fabric/fabric_mem_handler.cc
+    algorithms/dda/ipc/ipc_gpu_barrier.cu
+    algorithms/dda/ipc/ipc_init.cu
+    algorithms/dda/ipc/ipc_mem_handler.cc
+  )
+  foreach(_dda_src IN LISTS _DDA_KERNEL_SOURCES)
+    list(REMOVE_ITEM SRC_FILES ${_dda_src})
+  endforeach()
+  message(STATUS "ENABLE_DDA=OFF: DDA kernels and communicator setup are not compiled")
+endif()
+
 # Prepend src/ to all source files for proper paths from root
 list(TRANSFORM SRC_FILES PREPEND "src/")
 
@@ -965,6 +1001,12 @@ add_custom_target(update_git_version
 )
 
 list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
+
+# dda_kernels_disabled.cc is always hipified so host tests can compile the
+# stubs. The library links it only when the real kernels are not built.
+if(ENABLE_DDA)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_kernels_disabled\\.cc$")
+endif()
 
 # Set up RCCL library
 #==================================================================================================
