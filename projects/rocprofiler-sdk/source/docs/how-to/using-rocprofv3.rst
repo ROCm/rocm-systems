@@ -881,6 +881,8 @@ Here is a sample input.json file for collecting tracing summary:
 
 Here is the input schema (properties) of JSON or YAML input files:
 
+-  **job_replay_mode** *(string)*: ``application`` (default) runs each job as its own application run; ``kernel`` runs the jobs as the passes of one kernel replay run (see :ref:`using-kernel-replay-rocprofv3`).
+
 -  **jobs** *(array)*: ``rocprofv3`` input data per application run.
 
    -  **Items** *(object)*: Data for ``rocprofv3``
@@ -1003,6 +1005,8 @@ Here is a sample input.txt file for specifying counters for collection:
 While the input file in text format can only be used for counter collection, JSON and YAML formats support all the command-line options for profiling. The input file in YAML or JSON format has an array of profiling configurations called jobs. Each job is used to configure profiling for an application execution.
 
 Here is the input schema (properties) of JSON or YAML input files:
+
+-  **job_replay_mode** *(string)*: ``application`` (default) runs each job as its own application run; ``kernel`` runs the jobs as the passes of one kernel replay run, where each job collects one counter group or the dispatch thread trace (see :ref:`using-kernel-replay-rocprofv3`).
 
 -  **jobs** *(array)*: ``rocprofv3`` input data per application run
 
