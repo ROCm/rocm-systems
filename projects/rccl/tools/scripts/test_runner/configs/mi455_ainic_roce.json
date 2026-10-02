@@ -2765,6 +2765,16 @@
           }
         },
         {
+          "name": "CE_MultiSegment_RecvOffset_BEFORE",
+          "description": "Faulted twin of CE_RecvOffset. Compiled only with ENABLE_FAULT_INJECTION.",
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult",
+          "env_variables": {
+            "NCCL_WIN_ENABLE": "1",
+            "NCCL_MULTI_SEGMENT_REGISTER": "1",
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
           "name": "CE_MultiSegment_Elastic_Gating",
           "description": "CE selects the GPU multi-segment window and rejects the elastic window",
           "test_filter": "UBR_MultiSegment.CE_Elastic_Gating",
@@ -6070,15 +6080,6 @@
           "env_variables": {
             "NCCL_DEBUG_SUBSYS": "REG,TUNING",
             "RCCL_CE_ALLREDUCE": "0"
-          }
-        },
-        {
-          "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
-          "description": "CE receive-offset BEFORE control for symmetric LSA. Compiled only with ENABLE_FAULT_INJECTION.",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
-          "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1",
-            "NCCL_CTA_POLICY": "2"
           }
         },
         {
