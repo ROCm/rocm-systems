@@ -463,6 +463,42 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
   EXPECT_NE(line_with_prefix(trace, "end 45 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
+  WaveFixture fixture(1);
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(plugin_config().c_str());
+    plugin.onInit();
+
+    constexpr uint32_t Dispatch = 50;
+    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+    plugin.onAmdgpuDispatchExecutionBegin(Dispatch);
+    Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(wave);
+
+    // Execution end normally follows every wave halt. Exercise the malformed
+    // order explicitly: rejecting the end must not free the dispatch state
+    // cached by the still-subscribed wave. ASan catches the former use after
+    // free on this instruction callback.
+    plugin.onAmdgpuDispatchExecutionEnd(Dispatch);
+    const std::array<uint32_t, 1> add_words{0x7E000200};
+    SyntheticInstruction add("v_add_f32", add_words);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x4000, add, wave);
+    EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&wave));
+
+    plugin.onAmdgpuWavefrontHalted(wave);
+    EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&wave));
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("dispatch ended with live wavefronts"), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 50 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 50 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 50 "), trace.size());
+}
+
 TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatches) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_dispatch_name("target_kernel");

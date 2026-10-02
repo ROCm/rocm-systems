@@ -62,7 +62,8 @@ The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
 To profile one kernel in a multi-dispatch application, set `dispatch_name` to
-the exact kernel name:
+the exact normalized display name shown in quotes in RocJITsu's VM dispatch
+log:
 
 ```json
 "perfsim": {
@@ -70,6 +71,18 @@ the exact kernel name:
   "dispatch_name": "_topk_topp_kernel"
 }
 ```
+
+For example, the mangled ELF symbol `_Z11racy_kernelPKfPf` has the normalized
+display name `racy_kernel`: demangling removes its argument list, a leading
+`void `, and whitespace. A VM dispatch log line contains both forms:
+
+```text
+dispatch #1 d=0 "racy_kernel" symbol="_Z11racy_kernelPKfPf" ...
+```
+
+Copy the quoted display name, not the `symbol="..."` field. Copying a mangled
+symbol can therefore miss, and overloads that normalize to the same display
+name are selected together.
 
 Nonmatching dispatches still execute normally in RocJITsu, including their
 functional memory effects. The adapter only suppresses their observer event
@@ -89,11 +102,13 @@ of distinct workgroups whose events are staged for each selected dispatch:
 }
 ```
 
-The cap does not skip functional execution. It only limits observer events,
-and is disabled when omitted. A capped trace is incomplete and must not be
-treated as an exact full-grid result unless the backend explicitly reconstructs
-the full population from dispatch geometry and the workload satisfies that
-backend's scaling assumptions.
+The cap admits the first distinct RocJITsu workgroup IDs encountered in
+wave-dispatch order; after an ID is admitted, all of that workgroup's observed
+waves remain eligible. The cap does not skip functional execution. It only
+limits observer events, and is disabled when omitted. A capped trace is
+incomplete and must not be treated as an exact full-grid result unless the
+backend explicitly reconstructs the full population from dispatch geometry and
+the workload satisfies that backend's scaling assumptions.
 
 Configure Perfsim through its own environment, then launch the workload:
 

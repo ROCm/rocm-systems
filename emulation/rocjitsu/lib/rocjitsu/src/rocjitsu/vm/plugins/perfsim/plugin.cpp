@@ -894,7 +894,10 @@ struct PerfsimPlugin::Impl {
       }
     }
     for (auto iter = dispatches.begin(); iter != dispatches.end();) {
-      if (shutdown || iter->second.ended)
+      // Subscribed wave state caches a pointer to its dispatch entry. A
+      // malformed execution-end callback can arrive while waves are still
+      // live, so retain that entry until every such wave has been retired.
+      if (shutdown || (iter->second.ended && iter->second.live_waves == 0))
         iter = dispatches.erase(iter);
       else
         ++iter;
@@ -1395,6 +1398,7 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   PerfsimWavefrontState &wave = *wave_iter->second;
   const uint32_t dispatch_id =
       static_cast<uint32_t>(wave.wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
+  bool retired_ended_dispatch = false;
   auto dispatch_iter = impl_->dispatches.find(dispatch_id);
   if (dispatch_iter != impl_->dispatches.end()) {
     DispatchState &dispatch = dispatch_iter->second;
@@ -1404,9 +1408,12 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
       impl_->reject(dispatch_id, "wavefront halted without a terminating instruction");
     if (dispatch.live_waves != 0)
       --dispatch.live_waves;
+    retired_ended_dispatch = dispatch.ended && dispatch.live_waves == 0;
   }
   impl_->physical_waves.erase(wave_iter);
   wf.clear_plugin_state(slot_index());
+  if (retired_ended_dispatch)
+    impl_->drain_epoch(/*shutdown=*/false);
 }
 
 void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,

@@ -84,6 +84,14 @@ TEST(PluginConfigResolver, OptionalArgMayBeAbsentOrProvided) {
   EXPECT_NE(out.find("\"label\": \"target\""), std::string::npos);
 }
 
+TEST(PluginConfigResolver, DefaultTakesPrecedenceOverOptionalMarker) {
+  const char *schema =
+      R"({ "label": { "type": "string", "default": "fallback", "optional": true } })";
+  std::string out;
+  EXPECT_TRUE(resolve(schema, "", out));
+  EXPECT_NE(out.find("\"label\": \"fallback\""), std::string::npos);
+}
+
 TEST(PluginConfigResolver, WrongTypeFails) {
   const char *schema = R"({ "level": { "type": "number", "default": 3 } })";
   std::string out;
