@@ -30,4 +30,16 @@
 template <typename T>
 int smi_ethtool_ioctl(const std::string& device, T* data);
 
+/**
+ * One-line, human-readable rendering of an ethtool reply for the debug log.
+ * The permanent address is masked (see amd::smi::nic::log::mask_tail).
+ */
+std::string smi_ethtool_describe(const ethtool_stats& v);
+std::string smi_ethtool_describe(const ethtool_gstrings& v);
+std::string smi_ethtool_describe(const ethtool_drvinfo& v);
+std::string smi_ethtool_describe(const ethtool_pauseparam& v);
+std::string smi_ethtool_describe(const ethtool_fecparam& v);
+std::string smi_ethtool_describe(const ethtool_link_settings& v);
+std::string smi_ethtool_describe(const ethtool_perm_addr& v);
+
 #endif  // __SMI_ETHTOOL_IOCTL_H__
