@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -674,7 +675,10 @@ public:
   matrix_coexecution::SharedPool &async_pool();
 
   /// @brief Whether this concrete target has the MODE/VGPR-MSB setreg fixup.
-  bool setreg_vgpr_msb_fixup() const { return setreg_vgpr_msb_fixup_; }
+  bool setreg_vgpr_msb_fixup() const { return target_capabilities_.setreg_vgpr_msb_fixup; }
+
+  /// @brief Semantic capabilities of the selected concrete target.
+  const IsaTargetCapabilities &target_capabilities() const { return target_capabilities_; }
 
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
@@ -1341,7 +1345,7 @@ protected:
   uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
-  const bool setreg_vgpr_msb_fixup_ = false;
+  const IsaTargetCapabilities target_capabilities_;
   std::unique_ptr<Decoder> decoder_;
   SgprFile sgpr_file_{"sgpr"};
   /// Null slots are idle; materialized waves persist across dispatches.
@@ -1619,6 +1623,9 @@ inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
 inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
+}
+inline const IsaTargetCapabilities &InstructionComputeUnitView::target_capabilities() const {
+  return raw_cu().target_capabilities();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline bool InstructionComputeUnitView::observes_register_access() const {

@@ -11,6 +11,7 @@
   "exec_mode": "functional",
   "vm": {
     "arch": "rdna4",
+    "target": "gfx1201",
     "gpu": {
       "device": {
         "gpu_id": 8716,

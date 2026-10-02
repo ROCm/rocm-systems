@@ -31,6 +31,9 @@ struct IsaTargetCapabilities {
   /// S_SETREG_IMM32_B32(MODE) has the adjacency hazard that require the
   /// target-specific software fixup.
   bool setreg_vgpr_msb_fixup = false;
+  /// Whether F32 multiply results and exception causes have been qualified
+  /// against the shared integer model on this concrete target.
+  bool qualified_mul_f32 = false;
   /// Whether the selected provider implements execution for this target.
   bool execution_implemented = false;
 };

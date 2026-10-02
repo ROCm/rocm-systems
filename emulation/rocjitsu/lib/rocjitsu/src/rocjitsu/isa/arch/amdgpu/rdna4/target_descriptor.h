@@ -13,7 +13,11 @@ namespace rocjitsu::rdna4 {
 inline constexpr std::array<std::string_view, 2> kTargetAliases{"gfx1200", "gfx1201"};
 inline constexpr std::array<IsaGpuTargetDescription, 2> kModelGpuTargets{{
     {ROCJITSU_CODE_TARGET_GFX1200, "gfx1200", EF_AMDGPU_MACH_AMDGCN_GFX1200},
-    {ROCJITSU_CODE_TARGET_GFX1201, "gfx1201", EF_AMDGPU_MACH_AMDGCN_GFX1201},
+    {ROCJITSU_CODE_TARGET_GFX1201,
+     "gfx1201",
+     EF_AMDGPU_MACH_AMDGCN_GFX1201,
+     0,
+     {.qualified_mul_f32 = true}},
 }};
 inline constexpr std::array<IsaGpuTargetDescription, 2> kExecutionGpuTargets{{
     {ROCJITSU_CODE_TARGET_GFX1200,
@@ -25,7 +29,7 @@ inline constexpr std::array<IsaGpuTargetDescription, 2> kExecutionGpuTargets{{
      "gfx1201",
      EF_AMDGPU_MACH_AMDGCN_GFX1201,
      0,
-     {.execution_implemented = true}},
+     {.qualified_mul_f32 = true, .execution_implemented = true}},
 }};
 
 constexpr IsaTargetDescriptor

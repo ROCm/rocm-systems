@@ -2593,6 +2593,29 @@ def simd_probe_line(
     return _guard_mode_arithmetic_probe(template_name, probe)
 
 
+def integer_transcendental_probe_line(
+    template_name: str, *, true16_vop3: bool = False
+) -> str | None:
+    """Build the probe for a pure integer transcendental mapping."""
+    base, _, form = template_name.rpartition('_')
+    transcendental = {
+        'v_log_f32': 'LOG',
+        'v_exp_f32': 'EXP',
+        'v_sin_f32': 'SIN',
+        'v_cos_f32': 'COS',
+        'v_rcp_f32': 'RCP',
+        'v_rsq_f32': 'RSQ',
+        'v_sqrt_f32': 'SQRT',
+    }.get(base)
+    if transcendental and form in ('vop1', 'vop3') and not true16_vop3:
+        return (
+            '  if (amdgpu::try_execute_transcendental_f32_simd'
+            f'<{str(form == "vop3").lower()}>(inst, wf, '
+            f'amdgpu::transcendental::F32Operation::{transcendental})) return;'
+        )
+    return None
+
+
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
     if template_name == 'v_fma_mix_f32_vop3p':

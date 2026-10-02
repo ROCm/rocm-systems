@@ -90,7 +90,7 @@ void ComputeUnitCore::observe_vgpr_write(const Wavefront *wf, uint32_t reg_idx, 
 namespace {
 constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
 
-bool has_setreg_vgpr_msb_fixup(const ComputeUnitCore::Config &config) {
+IsaTargetCapabilities resolve_target_capabilities(const ComputeUnitCore::Config &config) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaGpuTargetDescription *target = nullptr;
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
@@ -98,7 +98,7 @@ bool has_setreg_vgpr_msb_fixup(const ComputeUnitCore::Config &config) {
   } else if (const IsaTargetDescriptor *descriptor = registry.find(config.arch)) {
     target = registry.find_default_gpu_target(*descriptor);
   }
-  return target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
+  return target ? target->capabilities : IsaTargetCapabilities{};
 }
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
@@ -150,7 +150,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
       wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
       vgpr_allocation_block_size_(vgpr_allocation_block_size),
       scratch_slots_per_cu_(config.num_wf_slots),
-      setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)),
+      target_capabilities_(resolve_target_capabilities(config)),
       decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
                    ? Decoder::create(config.arch)
                    : Decoder::create(default_isa_target_registry(), config.target)),

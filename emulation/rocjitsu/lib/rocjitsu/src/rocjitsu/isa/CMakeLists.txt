@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_isa
+    arch/amdgpu/shared/hwfloat/mul_f32.cpp
+    arch/amdgpu/shared/reciprocal_simd.cpp
+    arch/amdgpu/shared/transcendental_simd.cpp
     decoder.cpp
     execution_backend.cpp
     operand.cpp

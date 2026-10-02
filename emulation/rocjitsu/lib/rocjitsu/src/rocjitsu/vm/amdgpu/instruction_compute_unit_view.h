@@ -18,6 +18,7 @@ class SimulationEngine;
 }
 
 namespace rocjitsu {
+struct IsaTargetCapabilities;
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
@@ -59,6 +60,8 @@ public:
   Lds &lds();
   bool sram_ecc() const;
   bool setreg_vgpr_msb_fixup() const;
+  /// Semantic capabilities of the selected concrete target.
+  const IsaTargetCapabilities &target_capabilities() const;
   /// Whether register accesses have a diagnostic or plugin consumer.
   bool observes_register_access() const;
   bool debug_active() const;

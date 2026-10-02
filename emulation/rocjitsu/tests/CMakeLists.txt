@@ -640,6 +640,8 @@ add_executable(
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
+    hwfloat_mul_f32_test.cpp
+    hwfloat_mul_f32_execution_test.cpp
     image_access_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
@@ -708,6 +710,8 @@ add_executable(
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    reciprocal_simd_test.cpp
+    transcendental_simd_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
     isa_diagnostics_test.cpp

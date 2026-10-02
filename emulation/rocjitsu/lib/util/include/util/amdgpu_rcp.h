@@ -18,32 +18,35 @@ namespace util::detail {
 // one-ULP differences from the polynomial, not an assumed internal hardware
 // implementation. The complete mapping remains within the ISA's 1-ULP bound.
 // Coefficients use quarter units of the normalized result's FP32 ULP.
+namespace rcp {
+struct Coefficient {
+  uint32_t constant;
+  uint32_t linear;
+  uint16_t quadratic;
+  uint16_t cubic;
+};
+inline constexpr Coefficient coefficients[] = {
+    {67108864u, 2097138u, 65462u, 1925u}, {65075262u, 1971966u, 59693u, 1705u},
+    {63161283u, 1857674u, 54582u, 1516u}, {61356675u, 1753039u, 50039u, 1352u},
+    {59652323u, 1657001u, 45986u, 1210u}, {58040098u, 1568644u, 42359u, 1086u},
+    {56512727u, 1487171u, 39104u, 977u},  {55063683u, 1411884u, 36174u, 882u},
+    {53687091u, 1342172u, 33529u, 798u},  {52377649u, 1277499u, 31136u, 724u},
+    {51130563u, 1217390u, 28966u, 658u},  {49941480u, 1161426u, 26992u, 599u},
+    {48806446u, 1109234u, 25194u, 547u},  {47721858u, 1060483u, 23552u, 501u},
+    {46684427u, 1014876u, 22050u, 459u},  {45691141u, 972149u, 20673u, 421u},
+    {44739242u, 932065u, 19408u, 388u},   {43826196u, 894410u, 18244u, 357u},
+    {42949672u, 858991u, 17171u, 330u},   {42107522u, 825636u, 16181u, 305u},
+    {41297762u, 794186u, 15266u, 282u},   {40518559u, 764500u, 14418u, 262u},
+    {39768215u, 736447u, 13632u, 243u},   {39045157u, 709911u, 12902u, 226u},
+    {38347922u, 684783u, 12223u, 210u},   {37675151u, 660966u, 11591u, 196u},
+    {37025580u, 638371u, 11002u, 183u},   {36398027u, 616915u, 10452u, 171u},
+    {35791394u, 596522u, 9938u, 160u},    {35204649u, 577124u, 9458u, 150u},
+    {34636833u, 558658u, 9007u, 140u},    {34087042u, 541063u, 8585u, 131u},
+};
+} // namespace rcp
+
 inline uint32_t amdgpu_rcp_polynomial(uint32_t mantissa) {
-  struct Coefficient {
-    uint32_t constant;
-    uint32_t linear;
-    uint16_t quadratic;
-    uint16_t cubic;
-  };
-  static constexpr Coefficient coefficients[] = {
-      {67108864u, 2097138u, 65462u, 1925u}, {65075262u, 1971966u, 59693u, 1705u},
-      {63161283u, 1857674u, 54582u, 1516u}, {61356675u, 1753039u, 50039u, 1352u},
-      {59652323u, 1657001u, 45986u, 1210u}, {58040098u, 1568644u, 42359u, 1086u},
-      {56512727u, 1487171u, 39104u, 977u},  {55063683u, 1411884u, 36174u, 882u},
-      {53687091u, 1342172u, 33529u, 798u},  {52377649u, 1277499u, 31136u, 724u},
-      {51130563u, 1217390u, 28966u, 658u},  {49941480u, 1161426u, 26992u, 599u},
-      {48806446u, 1109234u, 25194u, 547u},  {47721858u, 1060483u, 23552u, 501u},
-      {46684427u, 1014876u, 22050u, 459u},  {45691141u, 972149u, 20673u, 421u},
-      {44739242u, 932065u, 19408u, 388u},   {43826196u, 894410u, 18244u, 357u},
-      {42949672u, 858991u, 17171u, 330u},   {42107522u, 825636u, 16181u, 305u},
-      {41297762u, 794186u, 15266u, 282u},   {40518559u, 764500u, 14418u, 262u},
-      {39768215u, 736447u, 13632u, 243u},   {39045157u, 709911u, 12902u, 226u},
-      {38347922u, 684783u, 12223u, 210u},   {37675151u, 660966u, 11591u, 196u},
-      {37025580u, 638371u, 11002u, 183u},   {36398027u, 616915u, 10452u, 171u},
-      {35791394u, 596522u, 9938u, 160u},    {35204649u, 577124u, 9458u, 150u},
-      {34636833u, 558658u, 9007u, 140u},    {34087042u, 541063u, 8585u, 131u},
-  };
-  const Coefficient coefficient = coefficients[mantissa >> 18];
+  const auto coefficient = rcp::coefficients[mantissa >> 18];
   const uint32_t fraction = mantissa & 0x3ffffu;
   const uint64_t linear_product = uint64_t{coefficient.linear} * fraction;
   const uint32_t shift = linear_product >= (uint64_t{1} << 38) ? 15 : 14;
