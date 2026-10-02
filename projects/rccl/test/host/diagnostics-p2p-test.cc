@@ -21,13 +21,15 @@
 
 // graph/topo.cc owns topoPathTypeStr and is not part of this binary; the report under test only reads it,
 // so this TU supplies its own copy under a private name. test/host/CMakeLists.txt fails the configure step
-// when the AMD topoPathTypeStr in graph/topo.cc no longer matches this copy.
+// when this initializer and the AMD topoPathTypeStr in graph/topo.cc differ; keep it on one line.
 #define topoPathTypeStr diagnosticsP2pTestPathNames
 
 #include DIAG_P2P_CC_PATH
 
-const char* diagnosticsP2pTestPathNames[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB",
-                                             "P2C", "PXN",  "PHB", "SYS", "NET", "DIS"};
+// clang-format off
+const char* diagnosticsP2pTestPathNames[] =
+    {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+// clang-format on
 
 #undef topoPathTypeStr
 
@@ -58,7 +60,9 @@ std::string Lower(std::string s) {
 
 // The free text of a report line: every key=value token dropped, since those keep their NCCL names.
 std::string FreeText(const std::string& line) {
-  std::istringstream words(line);
+  // Starts at the report prefix: the "<host>:<pid> " written before it is not report text.
+  const size_t prefix = line.find("NCCL DIAG ");
+  std::istringstream words(prefix == std::string::npos ? line : line.substr(prefix));
   std::string word, text;
   while (words >> word) {
     if (word.find('=') != std::string::npos) continue;
@@ -76,6 +80,11 @@ void ExpectNoNvidiaTerms(const std::string& text, const std::string& context) {
 
 std::string Context(int pathType, int handleType) {
   return "path=" + std::to_string(pathType) + " handle=" + std::to_string(handleType);
+}
+
+TEST(DiagnosticsP2pMicrotest, FreeTextIgnoresHostPrefix) {
+  EXPECT_EQ(FreeText("cuda-ci:42 NCCL DIAG [INFO] p2p: write mismatch srcRank=0"),
+            "NCCL DIAG [INFO] p2p: write mismatch ");
 }
 
 TEST(DiagnosticsP2pMicrotest, EdgeAdviceNamesAmdSmiForEveryEdge) {
@@ -109,8 +118,15 @@ TEST(DiagnosticsP2pMicrotest, PcieEdgeAdviceChecksAccessDmaAndHost) {
   }
 }
 
+TEST(DiagnosticsP2pMicrotest, FabricHandleKeepsXgmiAndPcieAdvice) {
+  const ncclDiagP2pEdgeInfo xgmi = MakeEdge(PATH_NVL, ncclDiagP2pHandleCuMemFabric);
+  const ncclDiagP2pEdgeInfo pcie = MakeEdge(PATH_PXB, ncclDiagP2pHandleCuMemFabric);
+  EXPECT_NE(std::string(ncclDiagP2pEdgeAdvice(&xgmi)).find("amd-smi xgmi -l"), std::string::npos);
+  EXPECT_NE(std::string(ncclDiagP2pEdgeAdvice(&pcie)).find("amd-smi topology -d"), std::string::npos);
+}
+
 TEST(DiagnosticsP2pMicrotest, FabricEdgeAdviceIsGenericPairCheck) {
-  const ncclDiagP2pEdgeInfo fabricHandle = MakeEdge(PATH_NVL, ncclDiagP2pHandleCuMemFabric);
+  const ncclDiagP2pEdgeInfo fabricHandle = MakeEdge(PATH_C2C, ncclDiagP2pHandleCuMemFabric);
   const ncclDiagP2pEdgeInfo netPath = MakeEdge(PATH_NET, ncclDiagP2pHandleLegacyIpc);
   for (const ncclDiagP2pEdgeInfo* edge : {&fabricHandle, &netPath}) {
     const std::string advice = ncclDiagP2pEdgeAdvice(edge);

@@ -225,9 +225,10 @@ The edge fields have the following meaning:
        ``CUMEM_OTHER``.
 
 The suggested next step at the end of each line depends on the line. A
-``peer-memory import failed`` line suggests a step for its ``handle``. The
-other edge lines suggest a step for their ``path``. ``local HIP setup failed``
-points to earlier HIP errors only. The following table summarizes the steps:
+``peer-memory import failed`` line suggests a step for its ``handle``, except
+for ``handle=CUMEM_FABRIC``, which takes the step for the path. The other edge
+lines suggest a step for their ``path``. ``local HIP setup failed`` points to
+earlier HIP errors only. The following table summarizes the steps:
 
 .. list-table::
    :header-rows: 1
@@ -250,6 +251,9 @@ points to earlier HIP errors only. The following table summarizes the steps:
        share memory handles, see :ref:`diagnostics-containers`.
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
+   * - ``handle=CUMEM_FABRIC`` on a path that is neither XGMI nor PCIe
+     - Check the link type and peer access between the two GPUs with
+       ``amd-smi topology -t`` and ``amd-smi topology -a``.
 
 For example, a failed edge between two GPUs connected by XGMI is reported as:
 
