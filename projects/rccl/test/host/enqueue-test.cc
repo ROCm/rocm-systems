@@ -2059,6 +2059,275 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
+// rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
+// bracket an addon collective wraps its own launch in.
+//
+// AICOMRCCL-2184: the epilogue records comm->doneEvent unless a kernel took it as
+// its stop event. The production launches that take nothing are the CE two-shot
+// AllReduce and the hierarchical ReduceScatter, which need CE-capable hardware or
+// eight nodes, so the arm is only assertable here.
+//
+// In the two cases that must not record, the hipEventRecord hook fails every
+// call: an unexpected call then shows up twice, in the hook's call count and in
+// the result the bracket returns.
+//
+// Each case installs the capture answer it relies on instead of inheriting it: a host binary has no
+// graph and can only answer "not capturing", and a case that took that answer without asking for it
+// would look covered while never reaching capture at all.
+// ===========================================================================
+
+namespace {
+// Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
+hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
+hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+
+// ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
+// device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
+struct AddonComm {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  AddonComm() {
+    comm->cudaDev   = g_currentDevice;
+    comm->doneEvent = kAddonDoneEvent;
+  }
+  ncclComm* c() { return comm.get(); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  hipEvent_t recordedEvent = nullptr;
+  hipStream_t recordedStream = nullptr;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    recordedEvent = event;
+    recordedStream = stream;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  ASSERT_EQ(1, record.calls);
+  EXPECT_EQ(kAddonDoneEvent, recordedEvent);
+  EXPECT_EQ(kAddonStream, recordedStream);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  // The tag advances however the event reached the stream, so the next collective on another
+  // stream still gets its edge.
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclInternalError,
+            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
+// rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
+// per-communicator chain that ncclLaunchPrepare / ncclLaunchFinish capture native collectives into:
+// sharedRes->deviceStream when graphStreamOrdering is on, its serialEvent when it is off.
+// ===========================================================================
+
+namespace {
+hipStream_t const        kAddonDeviceStream = reinterpret_cast<hipStream_t>(0xD57);
+hipStream_t const        kAddonLiveStream   = reinterpret_cast<hipStream_t>(0x11E);
+hipEvent_t const         kAddonScratchEvent = reinterpret_cast<hipEvent_t>(0x5C8);
+hipEvent_t const         kAddonSerialEvent  = reinterpret_cast<hipEvent_t>(0x5E1);
+unsigned long long const kAddonGraphId      = 42;
+
+struct CapturingAddonComm : AddonComm {
+  std::unique_ptr<ncclSharedResources> sharedRes{new ncclSharedResources{}};
+  explicit CapturingAddonComm(int graphStreamOrdering) {
+    comm->config.graphStreamOrdering    = graphStreamOrdering;
+    comm->sharedRes                     = sharedRes.get();
+    sharedRes->scratchEvent             = kAddonScratchEvent;
+    sharedRes->deviceStream.liveStream  = kAddonLiveStream;
+    sharedRes->deviceStream.serialEvent = kAddonSerialEvent;
+  }
+};
+
+ncclResult_t CapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  if (graph) {
+    *graph         = ncclCudaGraphNone(mode);
+    graph->graphId = kAddonGraphId;
+  }
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceStreamChain) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  struct ncclStrongStream* const deviceStream = &ac.c()->sharedRes->deviceStream;
+  std::vector<std::string> calls;
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool, hipStream_t* workStream) {
+                       EXPECT_EQ(kAddonGraphId, graph.graphId);
+                       EXPECT_EQ(deviceStream, ss);
+                       *workStream = kAddonDeviceStream;
+                       calls.push_back("acquire");
+                       return ncclSuccess;
+                     });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [&](hipStream_t waiter, hipStream_t waited, hipEvent_t event) {
+    EXPECT_EQ(kAddonStream, waiter);
+    EXPECT_EQ(kAddonDeviceStream, waited);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    calls.push_back("wait");
+    return ncclSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonStream, stream);
+    calls.push_back(event == kAddonDoneEvent      ? "recordDone"
+                    : event == kAddonScratchEvent ? "recordScratch"
+                                                  : "recordOther");
+    return hipSuccess;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToEvent, [&](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    calls.push_back("advance");
+    return ncclSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease, [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(deviceStream, ss);
+    calls.push_back("release");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
+    calls.push_back("launch");
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "recordScratch", "advance",
+                                      "release"}),
+            calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/0);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  int bootstrapRecords = 0;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    if (event == kAddonSerialEvent) {
+      EXPECT_EQ(kAddonLiveStream, stream);
+      ++bootstrapRecords;
+    }
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int flags) {
+    EXPECT_EQ(kAddonStream, stream);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(static_cast<unsigned int>(hipEventWaitExternal), flags);
+    return hipSuccess;
+  });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent, [](struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return ncclSuccess;
+  });
+
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  }
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  // The live-stream record only bootstraps the first capture's external wait.
+  EXPECT_EQ(1, bootstrapRecords);
+  EXPECT_EQ(2, wait.calls);
+  EXPECT_EQ(2, graphRecord.calls);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.graphOriginCaptured);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.everCaptured);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
+  AddonComm ac;  // no sharedRes: touching the capture chain would crash, not just miscount
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+    if (graph) *graph = ncclCudaGraphNone(mode);
+    return ncclSuccess;
+  });
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [](hipStream_t, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent,
+                         [](struct ncclCudaGraph, hipEvent_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  EXPECT_EQ(0, waitStream.calls);
+  EXPECT_EQ(0, graphRecord.calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDeviceStream) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                       *workStream = kAddonDeviceStream;
+                       return ncclSuccess;
+                     });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook advance(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(1, acquire.calls);
+  EXPECT_EQ(1, release.calls);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0, advance.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
 // getImplicitOrder (enqueue.cc:2091)
 // Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
 // CUDA driver-version arm is #if'd out, so only two arms are reachable:
