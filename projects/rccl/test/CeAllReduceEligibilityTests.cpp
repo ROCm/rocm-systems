@@ -322,6 +322,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         bool                                         expected;
         std::unordered_map<std::string, std::string> extraEnv;
         std::string                                  archName;
+        int                                          lsaSize = 0; // 0: the team spans nRanks
     };
 
     // The 2-shot cap is part of the opt-in env, not the suite. gfx1250's table
@@ -357,6 +358,9 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
         {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
          (kCeArMaxMsgBytesDefault / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
+        // One node, but the LSA team is narrower than the comm.
+        {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
+        {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
     };
 
     for(const auto& tc : cases)
@@ -370,13 +374,16 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                     CeAllReduceMockComm mock;
                     mock.reset(tc.archName.empty() ? nullptr : tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
+                    mock.comm.devrState.lsaSize = tc.lsaSize ? tc.lsaSize : tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
 
+                    // No eligible case survives a driver outside the CE range.
+                    const bool expected = tc.expected && isCeRuntimeDriverSupported();
                     const bool result =
                         rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
-                    EXPECT_EQ(result, tc.expected) << tc.name;
+                    EXPECT_EQ(result, expected) << tc.name;
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))
