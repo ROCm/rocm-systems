@@ -1515,11 +1515,6 @@ auto has_prefix(std::string_view str, std::string_view prefix) -> bool {
   return ((str.size() >= prefix.size()) && (str.compare(0, prefix.size(), prefix) == 0));
 }
 
-auto make_expected_source_tree_path(const fs::path& source_tree_prefix, std::string_view dir_name)
-    -> fs::path {
-  return fs::path{source_tree_prefix.string() + std::string{dir_name}};
-}
-
 auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
     -> std::optional<std::string_view> {
   const auto trimmed_line = trim(line);
@@ -1545,50 +1540,6 @@ auto resolve_symlink_target_path(const fs::path& source_link, const fs::path& ta
     return fs::weakly_canonical(target, err_code);
   }
   return fs::weakly_canonical(source_link.parent_path() / target, err_code);
-}
-
-auto is_valid_source_symlink(std::string_view caller, const fs::path& version_dir,
-                             std::string_view dir_name, const fs::path& source_tree_prefix)
-    -> bool {
-  const auto source_link = (version_dir / kAmdgpuDkmsSourceSymlinkName);
-  auto err_code = std::error_code{};
-
-  if (fs::exists(source_link, err_code)) {
-    if (fs::is_symlink(source_link, err_code)) {
-      const auto target = fs::read_symlink(source_link, err_code);
-      if (err_code) {
-        auto outstream = std::ostringstream{};
-        outstream << "Cannot read source symlink at: " << source_link << ": " << err_code.message();
-        log_dkms_debug(caller, outstream.str());
-        return false;
-      }
-
-      const auto expected_target = make_expected_source_tree_path(source_tree_prefix, dir_name);
-      auto target_err = std::error_code{};
-      auto expected_err = std::error_code{};
-      const auto resolved_target = resolve_symlink_target_path(source_link, target, target_err);
-      const auto resolved_expected = fs::weakly_canonical(expected_target, expected_err);
-      if ((!target_err) && (!expected_err) && (resolved_target == resolved_expected)) {
-        return true;
-      }
-
-      auto outstream = std::ostringstream{};
-      outstream << "Source symlink at: " << source_link << " points to: " << target
-                << "; expected: " << expected_target;
-      log_dkms_debug(caller, outstream.str());
-      return false;
-    }
-
-    auto outstream = std::ostringstream{};
-    outstream << source_link << " exists but is not a symlink";
-    log_dkms_debug(caller, outstream.str());
-    return false;
-  }
-
-  auto outstream = std::ostringstream{};
-  outstream << "No source symlink at: " << source_link;
-  log_dkms_debug(caller, outstream.str());
-  return false;
 }
 
 auto read_dkms_conf(std::string_view caller, const fs::path& conf_path)
@@ -1695,23 +1646,10 @@ auto package_version_from_kernel_symlink(std::string_view caller, const fs::path
 }
 
 auto is_valid_dkms_package(std::string_view caller, const fs::path& version_dir,
-                           std::string_view dir_name, const fs::path& source_tree_prefix) -> bool {
-  if (!is_valid_source_symlink(caller, version_dir, dir_name, source_tree_prefix)) {
-    return false;
-  }
-
-  // Open the checked /usr/src tree. Do not follow version_dir/source again; that
-  // symlink can change between the check and the open.
+                           std::string_view dir_name) -> bool {
+  // DKMS source_tree is configurable, so follow the source symlink instead of assuming /usr/src.
   const auto dkms_conf_path =
-      (make_expected_source_tree_path(source_tree_prefix, dir_name) / kDkmsAmdgpuDkmsConfName);
-  auto err_code = std::error_code{};
-  if (!fs::exists(dkms_conf_path, err_code)) {
-    auto outstream = std::ostringstream{};
-    outstream << "No " << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path;
-    log_dkms_debug(caller, outstream.str());
-    return false;
-  }
-
+      (version_dir / kAmdgpuDkmsSourceSymlinkName / kDkmsAmdgpuDkmsConfName);
   const auto package_info = read_dkms_conf(caller, dkms_conf_path);
   if (!package_info.has_value()) {
     return false;
@@ -1787,10 +1725,9 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
   return AMDSMI_STATUS_SUCCESS;
 }
 
-auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root,
-                                        std::string_view source_tree_prefix,
-                                        std::string_view release, std::string_view machine,
-                                        std::string* active_version) -> amdsmi_status_t {
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
+                                        std::string_view machine, std::string* active_version)
+    -> amdsmi_status_t {
   if (active_version == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
@@ -1807,8 +1744,7 @@ auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root,
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  if (!is_valid_dkms_package(__func__, root / *selected, *selected,
-                             fs::path{std::string{source_tree_prefix}})) {
+  if (!is_valid_dkms_package(__func__, root / *selected, *selected)) {
     auto outstream = std::ostringstream{};
     outstream << "Kernel symlink package " << *selected << " is not a validated DKMS package";
     log_dkms_debug(__func__, outstream.str());

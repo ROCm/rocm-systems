@@ -5801,8 +5801,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   auto package_version = std::string{};
   auto uts = utsname{};
   if (uname(&uts) == 0) {
-    smi_amdgpu_get_active_dkms_version(kAmdgpuDkmsRoot, kAmdgpuDkmsSourcePrefix, uts.release,
-                                       uts.machine, &package_version);
+    smi_amdgpu_get_active_dkms_version(kAmdgpuDkmsRoot, uts.release, uts.machine, &package_version);
   }
   status = smi_amdgpu_parse_driver_versions(module_version, package_version, info);
   if (status != AMDSMI_STATUS_SUCCESS) {

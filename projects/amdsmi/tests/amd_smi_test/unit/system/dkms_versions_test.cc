@@ -238,10 +238,9 @@ TEST(SystemUnit, ActiveDkmsVersionSelectsKernelSymlinkPackage) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(active_version, kVersionA);
 }
 
@@ -250,10 +249,9 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsMissingKernelSymlink) {
   fixture.add_package(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
@@ -263,20 +261,18 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsUnvalidatedKernelSymlinkTarget) {
   fixture.add_kernel_symlink(kVersionB);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
 TEST(SystemUnit, ActiveDkmsVersionRejectsNullOutput) {
   auto fixture = DkmsTreeFixture{};
 
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, nullptr),
-      AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, nullptr),
+            AMDSMI_STATUS_INVAL);
 }
 
 TEST(SystemUnit, ActiveDkmsVersionRejectsEmptyRelease) {
@@ -285,10 +281,9 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsEmptyRelease) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         "", kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), "", kKernelMachine,
+                                               &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
@@ -298,10 +293,9 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsEmptyMachine) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, "", &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease, "",
+                                               &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
@@ -311,10 +305,9 @@ TEST(SystemUnit, ActiveDkmsVersionSelectsAbsoluteKernelSymlink) {
   fixture.add_absolute_kernel_symlink(kVersionA);
 
   auto active_version = std::string{};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(active_version, kVersionA);
 }
 
@@ -325,10 +318,9 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsMalformedKernelSymlinkTarget) {
       (std::string{"not-a-version/"} + kKernelRelease + "/" + kKernelMachine));
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
@@ -338,10 +330,9 @@ TEST(SystemUnit, ActiveDkmsVersionAcceptsRelativeSourceSymlink) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(active_version, kVersionA);
 }
 
@@ -355,29 +346,29 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsMissingDkmsConf) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
-TEST(SystemUnit, ActiveDkmsVersionRejectsWrongSourceSymlinkTarget) {
+TEST(SystemUnit, ActiveDkmsVersionAcceptsSourceTreeOutsideDefaultPrefix) {
   auto fixture = DkmsTreeFixture{};
   fixture.add_package(kVersionA);
   const auto version_dir = fixture.dkms_root() / kVersionA;
-  const auto decoy_tree = fixture.dkms_root() / "decoy";
-  fs::create_directories(decoy_tree);
+  const auto default_tree = fs::path{std::string{fixture.source_tree_prefix()} + kVersionA};
+  const auto custom_tree = fixture.dkms_root().parent_path() / "custom_src" / kVersionA;
+  fs::create_directories(custom_tree.parent_path());
+  fs::rename(default_tree, custom_tree);
   fs::remove(version_dir / "source");
-  fs::create_directory_symlink(decoy_tree, version_dir / "source");
+  fs::create_directory_symlink(custom_tree, version_dir / "source");
   fixture.add_kernel_symlink(kVersionA);
 
-  auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_TRUE(active_version.empty());
+  auto active_version = std::string{};
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(active_version, kVersionA);
 }
 
 TEST(SystemUnit, ActiveDkmsVersionRejectsPackageNameMismatch) {
@@ -397,10 +388,9 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsPackageNameMismatch) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
 
@@ -421,9 +411,8 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsPackageVersionMismatch) {
   fixture.add_kernel_symlink(kVersionA);
 
   auto active_version = std::string{"unchanged"};
-  EXPECT_EQ(
-      smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), fixture.source_tree_prefix(),
-                                         kKernelRelease, kKernelMachine, &active_version),
-      AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(smi_amdgpu_get_active_dkms_version(fixture.dkms_root().string(), kKernelRelease,
+                                               kKernelMachine, &active_version),
+            AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(active_version.empty());
 }
