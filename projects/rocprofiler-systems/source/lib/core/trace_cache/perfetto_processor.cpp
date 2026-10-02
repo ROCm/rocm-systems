@@ -624,11 +624,14 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
     auto kernel_symbol = m_metadata.get_kernel_symbol(_kds.kernel_id);
     auto _agent_device_id =
         m_agent_manager.get_agent_by_handle(_kds.agent_id_handle).device_type_index;
+    // Every handler in this file prefixes its locals with _.
+    // NOLINTBEGIN(readability-identifier-naming)
     auto _queue_id_handle = _kds.queue_id_handle;
     auto _stream_handle   = _kds.stream_handle;
     auto _corr_id         = _kds.correlation_id_internal;
     auto _beg_ts          = _kds.start_timestamp;
     auto _end_ts          = _kds.end_timestamp;
+    // NOLINTEND(readability-identifier-naming)
 
     if(!kernel_symbol.has_value())
     {
@@ -676,6 +679,8 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 void
 perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 {
+    // Every handler in this file prefixes its locals with _.
+    // NOLINTBEGIN(readability-identifier-naming)
     auto        _corr_id         = _sms.correlation_id_internal;
     auto        _stream_id       = _sms.stream_handle;
     auto        _queue_id_handle = _sms.queue_id_handle;
@@ -685,6 +690,7 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
         (_t_info && _t_info->index_data) ? _t_info->index_data->sequent_value : 0U;
     auto _beg_ts = _sms.start_timestamp;
     auto _end_ts = _sms.end_timestamp;
+    // NOLINTEND(readability-identifier-naming)
 
     auto _agent_device_id =
         m_agent_manager.get_agent_by_handle(_sms.agent_id_handle).device_type_index;
@@ -748,11 +754,14 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 void
 perfetto_processor_t::handle(const memory_copy_sample& _mcs)
 {
+    // Every handler in this file prefixes its locals with _.
+    // NOLINTBEGIN(readability-identifier-naming)
     auto _corr_id   = _mcs.correlation_id_internal;
     auto _thrd_id   = _mcs.thread_id;
     auto _stream_id = _mcs.stream_handle;
     auto _beg_ts    = _mcs.start_timestamp;
     auto _end_ts    = _mcs.end_timestamp;
+    // NOLINTEND(readability-identifier-naming)
 
     auto _src_agent_log_node_id =
         m_agent_manager.get_agent_by_handle(_mcs.src_agent_id_handle).logical_node_id;
@@ -816,11 +825,14 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         }
     };
 
-    const auto _thrd_id    = _mas.thread_id;
-    const auto _corr_id    = _mas.correlation_id_internal;
-    const auto _stream_id  = _mas.stream_handle;
-    const auto _beg_ts     = _mas.start_timestamp;
-    const auto _end_ts     = _mas.end_timestamp;
+    // Every handler in this file prefixes its locals with _.
+    // NOLINTBEGIN(readability-identifier-naming)
+    const auto _thrd_id   = _mas.thread_id;
+    const auto _corr_id   = _mas.correlation_id_internal;
+    const auto _stream_id = _mas.stream_handle;
+    const auto _beg_ts    = _mas.start_timestamp;
+    const auto _end_ts    = _mas.end_timestamp;
+    // NOLINTEND(readability-identifier-naming)
     const auto _addr_val   = _mas.address_value;
     const auto _alloc_size = _mas.allocation_size;
 
@@ -872,9 +884,12 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
 void
 perfetto_processor_t::handle(const region_sample& _rs)
 {
-    const auto _corr_id  = _rs.correlation_id_internal;
-    const auto _beg_ts   = _rs.start_timestamp;
-    const auto _end_ts   = _rs.end_timestamp;
+    // Every handler in this file prefixes its locals with _.
+    // NOLINTBEGIN(readability-identifier-naming)
+    const auto _corr_id = _rs.correlation_id_internal;
+    const auto _beg_ts  = _rs.start_timestamp;
+    const auto _end_ts  = _rs.end_timestamp;
+    // NOLINTEND(readability-identifier-naming)
     const auto _category = _rs.category;
     const auto _name     = _rs.name;
 

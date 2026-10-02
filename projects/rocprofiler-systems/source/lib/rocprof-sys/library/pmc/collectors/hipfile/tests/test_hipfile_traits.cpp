@@ -71,6 +71,9 @@ struct stub_settings
     static enabled_metrics get_hipfile_enabled_metrics() { return hipfile_metrics; }
 };
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileTraitsTest : public ::testing::Test
 {
 protected:

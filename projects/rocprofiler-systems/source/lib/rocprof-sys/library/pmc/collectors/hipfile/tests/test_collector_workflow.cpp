@@ -172,6 +172,9 @@ constexpr std::uint64_t k_b1000 = 1000;
 constexpr std::uint64_t k_b3000 = 3000;
 }  // namespace test_bytes
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileCollectorTest : public ::testing::Test
 {
 protected:

@@ -77,8 +77,12 @@ private:
     /// @brief hipFile entry points, or nulls when libhipfile could not be loaded.
     struct api
     {
+        // hipFileError_t is the external hipFile C typedef. The members are
+        // already get_version and get_stats_l3.
+        // NOLINTBEGIN(readability-identifier-naming)
         hipFileError_t (*get_version)(unsigned*, unsigned*, unsigned*) = nullptr;
         hipFileError_t (*get_stats_l3)(stats_l3_t*)                    = nullptr;
+        // NOLINTEND(readability-identifier-naming)
     };
 
     /**
