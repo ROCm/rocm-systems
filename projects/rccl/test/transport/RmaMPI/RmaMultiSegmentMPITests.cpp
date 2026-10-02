@@ -1255,6 +1255,64 @@ TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
     EXPECT_EQ(mh, nullptr);
 }
 
+// POSITIVE after NEGATIVE: the registration consensus buffer is per-comm and
+// reused by every registration. After a collectively rejected registration,
+// later registrations with shrinking and growing segment counts must each see
+// only their own layout and move data across every segment.
+TEST_F(RmaMultiSegmentMPITest, RegistrationAfterCollectiveRejectionTransfers)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* probe = AllocSym(2, kSegRequestBytes);
+    if (SyncSkip(probe == nullptr))
+        GTEST_SKIP() << "multi-segment VMM allocation unavailable on this host";
+    void *probeMh = nullptr, *probeGh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    const int badNSeg = worldRank_ == 0 ? NCCL_RMA_MAX_SEGMENTS + 1 : 2;
+    MultiSegmentVmmBuffer* bad = AllocSym(badNSeg, kSegRequestBytes);
+    if (SyncSkip(bad == nullptr))
+        GTEST_SKIP() << "asymmetric failure layout allocation unavailable";
+    void *badMh = nullptr, *badGh = nullptr;
+    ASSERT_EQ(ncclInvalidUsage, RegMr(bad->ptr, bad->totalSize, &badMh, &badGh));
+    ASSERT_EQ(badMh, nullptr);
+
+    constexpr uint8_t kSentinel = 0xA5;
+    const int nSegs[] = {4, 2, 3};
+    for (int i = 0; i < (int)(sizeof(nSegs) / sizeof(nSegs[0])); i++)
+    {
+        SCOPED_TRACE(::testing::Message() << "round " << i << " nSeg " << nSegs[i]);
+        MultiSegmentVmmBuffer* bb = AllocSym(nSegs[i], kSegRequestBytes);
+        ASSERT_FALSE(SyncSkip(bb == nullptr)) << "symmetric allocation failed after rejection";
+
+        void *mh = nullptr, *gh = nullptr;
+        ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, bb->totalSize, &mh, &gh));
+        ASSERT_NE(mh, nullptr);
+
+        const uint8_t seed = (uint8_t)(0x30 + i);
+        if (worldRank_ == 0)
+            FillBuf(bb->ptr, bb->totalSize, seed);
+        if (worldRank_ == 1)
+            FillSentinel(bb->ptr, bb->totalSize, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess, rma_->iput(rmaCtx_, 0, 0, mh, bb->totalSize, 0, mh, 1,
+                                              ncclRmaOptFlagsDefault, &req));
+            ASSERT_TRUE(PollUntilDone(req));
+        }
+        Barrier();
+
+        if (worldRank_ == 1)
+            EXPECT_TRUE(VerifyBuf(bb->ptr, bb->totalSize, seed));
+        Barrier();
+    }
+}
+
 // NEGATIVE (range guard): out-of-range IPut offsets/sizes must be rejected with
 // ncclInvalidArgument and must NOT post anything (recv stays untouched).
 TEST_F(RmaMultiSegmentMPITest, IPutOutOfRangeRejectedNoCorruption)

@@ -246,6 +246,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
     cComm->sendComm = NULL;
   }
 
+  free(cComm->regConsensus);
   memset(cComm, 0, sizeof(*cComm));
 
   free(cCommArray);
@@ -497,6 +498,18 @@ ncclResult_t ncclRmaIbProxyConnect(void* ctx, void* handles[], int nranks, int r
   // Connect.
   NCCLCHECK(ncclGinIbConnect(ctx, handles, nranks, rank, listenComm, collComm));
 
+  // Registration must not fail locally before its first collective, so the
+  // receive buffer is allocated here. It is page-aligned because allGather
+  // registers whole pages for remote write.
+  struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)*collComm;
+  ncclResult_t ret =
+      ncclIbMalloc(&cComm->regConsensus, (size_t)nranks * sizeof(struct ncclRmaIbProxyRegistration));
+  if (ret != ncclSuccess) {
+    ncclGinIbCloseColl(*collComm);
+    *collComm = NULL;
+    return ret;
+  }
+
   return ncclSuccess;
 }
 
@@ -598,12 +611,7 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
   struct ncclRmaIbProxyMrHandle* rmaMrHandle = NULL;
   struct ncclRmaIbProxyRegistration localRegistration = {};
-  struct ncclRmaIbProxyRegistration registrationsStack[64];
-  struct ncclRmaIbProxyRegistration* registrations = NULL;
-  int registrationsHeap = 0;
-  ncclResult_t* statusOnly = NULL;
-  int* haveRecv = NULL;
-  int haveRecvHeap = 0;
+  struct ncclRmaIbProxyRegistration* registrations = (struct ncclRmaIbProxyRegistration*)cComm->regConsensus;
   uintptr_t localVas[NCCL_RMA_MAX_SEGMENTS] = {};
   uint32_t localRkeys[NCCL_RMA_MAX_SEGMENTS * NCCL_IB_MAX_DEVS_PER_NIC] = {};
   ncclResult_t ret = ncclSuccess;
@@ -611,20 +619,6 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   int registered = 0;
 
   *mhandle = NULL;
-  // The first allGather receive buffer cannot live only on the heap: a
-  // calloc failure would jump to fail before peers reach that collective.
-  if (cComm->nranks <= (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
-    registrations = registrationsStack;
-    memset(registrations, 0, sizeof(*registrations) * (size_t)cComm->nranks);
-  } else {
-    // Do not goto fail on calloc: peers would block in the first allGather.
-    ret = ncclCalloc(&registrations, cComm->nranks);
-    if (ret == ncclSuccess) {
-      registrationsHeap = 1;
-    } else {
-      registrations = NULL;
-    }
-  }
   ret = ncclCalloc(&rmaMrHandle, 1);
   if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
@@ -737,53 +731,6 @@ reconcile:
   if (ncclRmaRegistrationHandleReady(rmaMrHandle, nSeg)) {
     memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   }
-  // nranks>64: compact have/status recvs overlay the unused stack slab.
-  {
-    int allHaveRegs = (registrations != NULL);
-    if (cComm->nranks > (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
-      int have = (registrations != NULL);
-      haveRecv = (int*)ncclRmaCompactConsensusRecv(registrations, registrationsStack, sizeof(registrationsStack),
-                                                   cComm->nranks, sizeof(int));
-      if (haveRecv == NULL) {
-        ret = ncclCalloc(&haveRecv, cComm->nranks);
-        if (ret != ncclSuccess) {
-          WARN("NET/IB/RMA: failed to allocate registration consensus buffer");
-          goto fail;
-        }
-        haveRecvHeap = 1;
-      }
-      NCCLCHECKGOTO(cComm->allGather(cComm, &have, haveRecv, sizeof(int)), ret, fail);
-      allHaveRegs = 1;
-      for (int r = 0; r < cComm->nranks; r++) {
-        if (!haveRecv[r]) {
-          allHaveRegs = 0;
-        }
-      }
-      if (haveRecvHeap) {
-        free(haveRecv);
-        haveRecv = NULL;
-        haveRecvHeap = 0;
-      }
-    }
-    if (!allHaveRegs) {
-      ncclResult_t st = localRegistration.status != ncclSuccess ? localRegistration.status : ncclSystemError;
-      ncclResult_t* stRecv = (ncclResult_t*)ncclRmaCompactConsensusRecv(
-          registrations, registrationsStack, sizeof(registrationsStack), cComm->nranks, sizeof(ncclResult_t));
-      if (stRecv == NULL) {
-        NCCLCHECKGOTO(ncclCalloc(&statusOnly, cComm->nranks), ret, fail);
-        stRecv = statusOnly;
-      }
-      NCCLCHECKGOTO(cComm->allGather(cComm, &st, stRecv, sizeof(ncclResult_t)), ret, fail);
-      ret = st;
-      for (int r = 0; r < cComm->nranks; r++) {
-        if (stRecv[r] != ncclSuccess) {
-          ret = stRecv[r];
-          break;
-        }
-      }
-      goto fail;
-    }
-  }
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(struct ncclRmaIbProxyRegistration)),
                 ret, fail);
 
@@ -834,7 +781,6 @@ reconcile:
                                  sizeof(uint32_t) * nSeg * NCCL_IB_MAX_DEVS_PER_NIC),
                 ret, fail);
 
-  if (registrationsHeap) free(registrations);
   *mhandle = rmaMrHandle;
   return ncclSuccess;
 
@@ -850,9 +796,6 @@ fail:
     free(rmaMrHandle->rankSegOff);
     free(rmaMrHandle);
   }
-  if (registrationsHeap) free(registrations);
-  if (haveRecvHeap) free(haveRecv);
-  free(statusOnly);
   return ret;
 }
 
