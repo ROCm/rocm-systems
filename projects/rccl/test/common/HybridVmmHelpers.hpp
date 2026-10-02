@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -268,11 +269,15 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
                   cpuBytes.data(), 1, MPI_UINT64_T, localComm);
 
     // Use RCCL's production IPC socket transport to duplicate descriptors with
-    // SCM_RIGHTS. The hash only needs to be unique while these node-local
-    // sockets are alive; the local leader's PID provides that scope.
-    uint64_t socketHash = localRank == 0
-        ? (static_cast<uint64_t>(getpid()) << 32) ^ UINT64_C(0x48594252)
-        : 0;
+    // SCM_RIGHTS. The sockets are abstract (no filesystem permissions), so the
+    // name must not be predictable by other local processes.
+    uint64_t socketHash = 0;
+    if (localRank == 0)
+    {
+        std::random_device entropy;
+        socketHash = (static_cast<uint64_t>(entropy()) << 32) ^ entropy() ^
+                     static_cast<uint64_t>(getpid());
+    }
     MPI_Bcast(&socketHash, 1, MPI_UINT64_T, 0, localComm);
 
     volatile uint32_t abortFlag = 0;
@@ -408,39 +413,23 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
     }
     if (localCpuHandle != 0) (void)hipMemRelease(localCpuHandle);
 
-    if (localOk)
+    // Every segment needs device access; the imported host segments also need
+    // host access.
+    size_t accessOffset = 0;
+    for (size_t segment = 0; localOk && segment < tmp.segSizes.size(); ++segment)
     {
-        size_t accessOffset = 0;
-        for (size_t segment = 0; segment < tmp.segSizes.size(); ++segment)
-        {
-            const char* prefix = segment == 0
-                ? "hipMemSetAccess(hybrid GPU segment "
-                : "hipMemSetAccess(hybrid imported host segment ";
-            if (!SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
-                                        hipMemLocationTypeDevice, dev, prefix, segment, reason))
-            {
-                localOk = false;
-                break;
-            }
-            accessOffset += tmp.segSizes[segment];
-        }
-    }
-
-    if (localOk)
-    {
-        size_t accessOffset = gpuBytes;
-        for (size_t segment = 1; segment < tmp.segSizes.size(); ++segment)
-        {
-            if (!SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
-                                        hipMemLocationTypeHost, 0,
-                                        "hipMemSetAccess(hybrid host segment ",
-                                        segment, reason))
-            {
-                localOk = false;
-                break;
-            }
-            accessOffset += tmp.segSizes[segment];
-        }
+        const bool hostSegment = segment > 0;
+        localOk = SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
+                                         hipMemLocationTypeDevice, dev,
+                                         hostSegment ? "hipMemSetAccess(hybrid imported host segment "
+                                                     : "hipMemSetAccess(hybrid GPU segment ",
+                                         segment, reason);
+        if (localOk && hostSegment)
+            localOk = SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
+                                             hipMemLocationTypeHost, 0,
+                                             "hipMemSetAccess(hybrid host segment ",
+                                             segment, reason);
+        accessOffset += tmp.segSizes[segment];
     }
 
     bool allOk = MPIHelpers::allRanksTrue(localOk, localComm);
