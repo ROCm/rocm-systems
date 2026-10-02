@@ -412,7 +412,7 @@ stop_context(rocprofiler_context_id_t idx)
 #endif
                 if(_expected->device_spm)
                 {
-                    rocprofiler::SPM::spm_stop_agent_ctx(const_cast<context*>(_expected));
+                    rocprofiler::SPM::spm_stop_agent_ctx(_expected);
                 }
 
                 return ROCPROFILER_STATUS_SUCCESS;
