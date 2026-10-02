@@ -857,6 +857,17 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
   return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
+// Symmetric windows have equal offsets on every rank and a min-size bound, so all ranks agree.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm) {
+  for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue); task != nullptr;
+       task = task->next) {
+    const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
+    task->ceAllReduceFastPath = task->func == ncclFuncAllReduce && task->recvWin != nullptr &&
+                                (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+                                ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
+  }
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
