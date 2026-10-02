@@ -55,6 +55,22 @@ ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* 
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
 int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote, int prefixLen);
 
+/* ── Multiplane test-only wrappers (host-only, no HW). ── */
+
+/* Convert an IPv4 or IPv6 address string to the 16-byte ibv_gid representation.
+ * IPv4 addresses are stored as IPv4-mapped IPv6 (::ffff:x.x.x.x).
+ * Returns ncclInvalidArgument on unparseable input. */
+ncclResult_t ncclIbCastTestIpToGid(const char* ipStr, uint8_t gid[16]);
+
+/* Convert a 16-byte GID to colon-separated hex string
+ * (e.g. "fe80:0000:...:0002").  buf must be at least 40 bytes. */
+void ncclIbCastTestGidToString(const uint8_t gid[16], char* buf, int bufLen);
+
+/* Reset multiplane module state so IbCastMultiplaneLoad() can be called again.
+ * Test-only: not thread-safe, must not be called while other threads may be
+ * loading or querying multiplane state. */
+void ncclIbCastTestMultiplaneReset(void);
+
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
 #ifdef ENABLE_FAULT_INJECTION
 
