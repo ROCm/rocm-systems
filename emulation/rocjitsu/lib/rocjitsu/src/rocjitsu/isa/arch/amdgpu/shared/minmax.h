@@ -165,7 +165,7 @@ template <typename Fmt, typename Op, typename V> constexpr V apply(V a, V b, V c
 /// @details Accepts unsigned encodings, scalar or SIMD.
 template <typename Fmt, typename Op, typename V, typename... Vs>
   requires(1 + sizeof...(Vs) == Op::kSources && (std::is_same_v<V, Vs> && ...) &&
-           comparison::detail::is_lane_v<Fmt, V>)
+           fp_format::is_lane_v<Fmt, V>)
 constexpr V evaluate(const Policy &policy, V a, Vs... rest) {
   return detail::apply<Fmt, Op>(comparison::prepare<Fmt>(a, policy),
                                 comparison::prepare<Fmt>(rest, policy)...);

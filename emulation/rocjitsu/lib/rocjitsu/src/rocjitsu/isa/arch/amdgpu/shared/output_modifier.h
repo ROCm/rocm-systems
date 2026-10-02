@@ -74,7 +74,7 @@ template <typename Fmt> constexpr typename Fmt::Lane overflow(bool negative, con
 ///
 /// FP16_OVFL overrides the overflow rule for F16, selecting max finite.
 template <typename Fmt, typename V> constexpr V scale(V bits, const Policy &policy) {
-  static_assert(comparison::detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
   if (policy.omod == 0)
@@ -115,7 +115,7 @@ template <typename Fmt, typename V> constexpr V scale(V bits, const Policy &poli
 /// | Greater than 1.0  | 1.0                                  |
 /// | Otherwise         | Original bits                        |
 template <typename Fmt, typename V> constexpr V clamp(V bits, const Policy &policy) {
-  static_assert(comparison::detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
   if (!policy.clamp)
