@@ -255,6 +255,11 @@ struct dlog_session
     // the stream enters the error state, cleared when a real poll of it shows no
     // error, so a sticky POLLERR does not spam the log. Reader thread only.
     bool pollerr_active = false;
+
+    // Once-per-episode latch for the notify-count read() fault warning, cleared by
+    // the next successful read. Separate from pollerr_active so neither fault
+    // suppresses or re-arms the other's warning. Reader thread only.
+    bool notify_read_err_logged = false;
 };
 
 struct reader_state
@@ -467,7 +472,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
     {
         const auto* wptr_base = static_cast<const uint8_t*>(s->smap) + s->info.wptr_offset;
         for(uint32_t r = 0; r < s->info.num_regions; ++r)
-            s->cursors.rptr[r] = load_wptr_low32(wptr_base, 0, r);
+            s->cursors.rptr[r] = load_wptr_low32(wptr_base, r);
         s->cursors.rptr_init = true;
     }
 
@@ -500,9 +505,10 @@ teardown_session(dlog_session* s)
         s->gpu_id,
         s->overflow.size());
     s->overflow.clear();
-    s->overflow_warned = false;
-    s->quarantined     = false;
-    s->pollerr_active  = false;
+    s->overflow_warned        = false;
+    s->quarantined            = false;
+    s->pollerr_active         = false;
+    s->notify_read_err_logged = false;
 
     if(s->smap != MAP_FAILED)
     {
@@ -621,7 +627,7 @@ session_has_pending(const dlog_session& s)
     // as "not yet primed", so a fresh (zeroed wptr) stream reads as not pending.
     for(uint32_t r = 0; r < s.info.num_regions; ++r)
     {
-        const uint32_t w = load_wptr_low32(wptr_base, 0, r);
+        const uint32_t w = load_wptr_low32(wptr_base, r);
         const uint32_t c = s.cursors.rptr[r];
         if(w != c) return true;
     }
@@ -988,22 +994,25 @@ drain_sessions_bounded(reader_state& st)
 // read, drained it); the count VALUE is discarded because wptr, not the count, is
 // the drain target. Any other errno is a real fd fault: log it once (matching the
 // poll-error path) so it is not swallowed, and let the terminal-revents scan below
-// quarantine the stream on the HUP/ERR the same fault will raise. `pollerr_active`
-// doubles as the once-per-episode latch so a persistently faulting fd does not spam
-// the log every pass.
+// quarantine the stream on the HUP/ERR the same fault will raise.
+// `notify_read_err_logged` latches the warning so a persistently faulting fd does
+// not spam the log every pass.
 void
 read_stream_notify_count(dlog_session& s)
 {
     uint64_t _count = 0;
     for(;;)
     {
-        const ssize_t _n = ::read(s.stream_fd, &_count, sizeof(_count));
-        if(_n == static_cast<ssize_t>(sizeof(_count))) return;  // count consumed
+        const ssize_t _n        = ::read(s.stream_fd, &_count, sizeof(_count));
+        const bool    _consumed = _n == static_cast<ssize_t>(sizeof(_count));
+        if(_consumed || (_n < 0 && errno == EAGAIN))  // EAGAIN: already 0
+        {
+            s.notify_read_err_logged = false;
+            return;
+        }
         if(_n < 0 && errno == EINTR) continue;
-        if(_n < 0 && errno == EAGAIN) return;  // already 0: nothing to consume
-        // A short read or an unexpected errno is a real fault. Warn once (latched
-        // on pollerr_active, cleared by the poll loop when a clean poll follows).
-        if(!s.pollerr_active)
+        // A short read or an unexpected errno is a real fault: warn once per episode.
+        if(!s.notify_read_err_logged)
         {
             ROCP_WARNING << fmt::format(
                 "KFD dispatch-log: gpu_id={} notify-count read failed (rc={} errno={}); the "
@@ -1011,7 +1020,7 @@ read_stream_notify_count(dlog_session& s)
                 s.gpu_id,
                 _n,
                 _n < 0 ? errno : 0);
-            s.pollerr_active = true;
+            s.notify_read_err_logged = true;
         }
         return;
     }

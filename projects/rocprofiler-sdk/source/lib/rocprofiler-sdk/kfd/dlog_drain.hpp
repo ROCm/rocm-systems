@@ -101,15 +101,15 @@ dlog_ring_bytes_from_kb_str(std::string_view v)
 
 // The BO carries one 8-byte wptr slot per region (u64 wptr[num_regions]); firmware
 // writes only the low 32 bits, the high word stays zero. Address slot `region` by
-// its BYTE offset (base + wptr_offset + region * 8), then acquire-load the low word
+// its BYTE offset from the wptr[] base (base + region * 8), then acquire-load the low word
 // at that address (little-endian: the low word is AT the slot base, not +4). Indexing
 // the array as a packed uint32_t* would use a 4-byte stride and read region i's slot
 // from the wrong place -- every wptr read must go through this helper.
 inline uint32_t
-load_wptr_low32(const volatile void* base, uint64_t wptr_offset, uint32_t region)
+load_wptr_low32(const volatile void* base, uint32_t region)
 {
     const auto* slot = reinterpret_cast<const volatile uint32_t*>(
-        static_cast<const volatile uint8_t*>(base) + wptr_offset +
+        static_cast<const volatile uint8_t*>(base) +
         static_cast<uint64_t>(region) * sizeof(uint64_t));
     return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
 }
@@ -287,14 +287,14 @@ copy_pipes(const uint8_t*       records_base,
         // Prime each read cursor to the current producer index: discard any backlog
         // present at attach (a fresh KFD stream is zeroed, so this is 0 there).
         for(uint32_t p = 0; p < num_regions; ++p)
-            cursors.rptr[p] = load_wptr_low32(wptr_base, 0, p);
+            cursors.rptr[p] = load_wptr_low32(wptr_base, p);
         cursors.rptr_init = true;
     }
 
     uint64_t copied = 0;
     for(uint32_t p = 0; p < num_regions; ++p)
     {
-        const uint32_t w = load_wptr_low32(wptr_base, 0, p);
+        const uint32_t w = load_wptr_low32(wptr_base, p);
         const uint32_t r = cursors.rptr[p];
         if(w == r) continue;
 
