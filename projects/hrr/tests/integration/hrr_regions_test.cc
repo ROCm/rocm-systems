@@ -79,6 +79,11 @@ constexpr size_t kProbeFarOff = 1u << 20;  // past the end of the probe alloc
 // pointer embedded in a by-value struct instead of passed whole. Sized apart
 // from the first so find_alloc_base can tell the two allocations apart.
 constexpr size_t kProbe2Bytes = 32 * 1024;
+
+// A guarded replay takes as long as any other replay of this archive: seconds.
+// Minutes means the fault was never delivered and the replay is waiting on a
+// kernel that will not finish.
+constexpr int kGuardReplayTimeoutSeconds = 300;
 }  // namespace
 
 __global__ void hrr_regions_fill(float* p, int n, float v) {
@@ -591,8 +596,13 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
   }
 
   SECTION("--guard-blocks makes the overrun fault") {
-    auto [rc, out] = hrr_playback_merged(archive, "--guard-blocks");
+    // A fault the GPU never reports leaves the replay in hipDeviceSynchronize
+    // until CI kills the whole suite. Killed by the watchdog it would also
+    // pass the rc != 0 test below, so it is ruled out first.
+    auto [rc, out] = hrr_playback_watchdog(archive, kGuardReplayTimeoutSeconds,
+                                           "--guard-blocks");
     INFO("Guarded replay:\n" << out);
+    REQUIRE(rc != kHrrWatchdogKilled);
     if (rc == 0) {
       // The only acceptable clean run is one where nothing was guarded — no VMM
       // support, or every reservation failed. If blocks were relocated and the
