@@ -370,6 +370,23 @@ HIP_TEST_CASE(Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGloba
   REQUIRE(module_bytes == library_bytes);
 }
 
+// @asserts: hipLibraryGetModule - a loaded library yields a non-null stable module handle
+HIP_TEST_CASE(Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullStableModule) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod, library));
+  REQUIRE(mod != nullptr);
+
+  hipModule_t mod2 = nullptr;
+  HIP_CHECK(hipLibraryGetModule(&mod2, library));
+  REQUIRE(mod2 == mod);
+}
+
 // @asserts: hipKernelGetLibrary - a kernel round-trips back to the exact library handle it was obtained from
 HIP_TEST_CASE(Contract_Library_HipKernelGetLibrary_Default_RoundTrips) {
   std::vector<char> code;

@@ -356,6 +356,9 @@ Version history, so an archive written by an older runtime can be placed:
   `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`. A v6 reader
   ignores that field and would replay a packed blob with the recorded pitch,
   reading past its end. See 2D/3D Memcpy and Memset below.
+  `hipLibraryGetModule` inserted into `HipDispatchTable`, shifting the nine
+  compiler API IDs (545..553 → 546..554). Archives written at v6 decode those
+  compiler events as the wrong API under v7.
 
 ```
 <output_dir>/

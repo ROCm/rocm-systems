@@ -1827,6 +1827,9 @@ contract:
   Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGlobal:
     <<: *level_0
     tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullStableModule:
+    <<: *level_0
+    tags: [library, P0]
   Contract_Library_HipKernelGetLibrary_Default_RoundTrips:
     <<: *level_0
     tags: [library, P0]

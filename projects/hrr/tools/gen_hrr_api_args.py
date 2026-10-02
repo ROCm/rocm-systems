@@ -1960,7 +1960,9 @@ _HEADER_PREAMBLE = """\
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
+ * a packed blob with the recorded pitch, reading past its end.
+ * hipLibraryGetModule inserted into HipDispatchTable, shifting compiler
+ * API IDs (hipPopCallConfiguration … hipUnregisterFatBinary) up by one. */
 #define HRR_VERSION ((uint16_t)7u)
 
 /* Written once at byte 0 of events.bin. */
