@@ -529,12 +529,9 @@ restore(const device_snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
             }
         }
 
-        if(!device_regions.empty())
-        {
-            auto copy_status = batch_copy(device_regions);
-            if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
-            restored += device_regions.size();
-        }
+        auto copy_status = batch_copy(device_regions);
+        if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+        restored += device_regions.size();
         return HSA_STATUS_SUCCESS;
     });
 
