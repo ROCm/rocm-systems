@@ -1,0 +1,15 @@
+{
+  "job_replay_mode": "kernel",
+  "jobs": [
+    {
+      "pmc": ["SQ_WAVES", "SQ_INSTS_VALU", "GRBM_COUNT"],
+      "kernel_replay_beta_enabled": true
+    },
+    {
+      "advanced_thread_trace": true
+    },
+    {
+      "pmc": ["SQ_WAVES", "SQ_INSTS_VALU", "GRBM_GUI_ACTIVE"]
+    }
+  ]
+}

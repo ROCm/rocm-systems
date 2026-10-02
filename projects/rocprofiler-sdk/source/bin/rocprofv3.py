@@ -1304,6 +1304,30 @@ For attachment profiling of running processes:
     return (parser.parse_args(rocp_args), app_args)
 
 
+# How the jobs of a JSON or YAML input file are replayed. "application", the default and the only
+# behavior before job_replay_mode existed, runs each job as its own run of the application.
+# "kernel" runs every job as one pass of a single kernel replay run (see plan_kernel_replay_jobs).
+JOB_REPLAY_MODES = ("application", "kernel")
+
+
+class input_jobs(list):
+    """The jobs of an input file, together with the file-level settings that apply to all of them."""
+
+    def __init__(self, jobs, job_replay_mode="application"):
+        super().__init__(jobs)
+        self.job_replay_mode = job_replay_mode
+
+
+def input_job_replay_mode(data, input_file):
+    mode = data.get("job_replay_mode", "application")
+    if mode not in JOB_REPLAY_MODES:
+        fatal_error(
+            f"{input_file}: job_replay_mode must be one of "
+            f"{', '.join(JOB_REPLAY_MODES)}, not {mode!r}"
+        )
+    return mode
+
+
 def parse_yaml(yaml_file):
     try:
         import yaml
@@ -1322,7 +1346,9 @@ def parse_yaml(yaml_file):
             itr["sub_directory"] = "pass_"
             lst.append(itr)
 
-        return [dotdict(itr) for itr in lst]
+        return input_jobs(
+            [dotdict(itr) for itr in lst], input_job_replay_mode(data, yaml_file)
+        )
 
     except yaml.YAMLError as exc:
         fatal_error(f"{exc}")
@@ -1341,7 +1367,9 @@ def parse_json(json_file):
             itr["sub_directory"] = "pass_"
             lst.append(itr)
 
-        return [dotdict(itr) for itr in lst]
+        return input_jobs(
+            [dotdict(itr) for itr in lst], input_job_replay_mode(data, json_file)
+        )
 
     except Exception as e:
         fatal_error(f"{e}")
@@ -1482,6 +1510,101 @@ def att_options_conflicting_with_kernel_replay(args):
         )
         if getattr(args, attr, None)
     ]
+
+
+def plan_kernel_replay_jobs(jobs):
+    """Fold the jobs of a job_replay_mode: kernel input file into the arguments of one run.
+
+    Each job is one kernel replay pass, in file order, and selects exactly one per-pass service: a
+    counter group (pmc) or the dispatch thread trace (advanced_thread_trace). Thread trace settings
+    (att_*) belong to the thread trace job, except att_library_path, which only says where the
+    decoder is. Every other option a job sets describes the run as a whole, so jobs that set the
+    same option must agree on its value.
+
+    Returns the run's arguments: pmc as the counter groups in pass order, advanced_thread_trace
+    when a job traces, and kernel_replay_att_after_groups, the number of counter groups that run
+    ahead of the thread trace pass.
+    """
+    run_options = {}
+    option_owner = {}
+    groups = []
+    att_job = None
+    att_after_groups = 0
+
+    for number, job in enumerate(jobs, start=1):
+        rotation = [
+            key
+            for key in ("pmc_groups", "pmc_group_interval")
+            if job.get(key) is not None
+        ]
+        if rotation:
+            fatal_error(
+                f"job_replay_mode: kernel: job {number} sets {' and '.join(rotation)}. Each job "
+                "is one replay pass, so give each counter group a job of its own with pmc."
+            )
+
+        counters = job.get("pmc")
+        traces = bool(job.get("advanced_thread_trace"))
+        if counters and traces:
+            fatal_error(
+                f"job_replay_mode: kernel: job {number} sets both pmc and "
+                "advanced_thread_trace. A replay pass runs one of them, never both: the thread "
+                "trace perturbs the counters. Give each its own job."
+            )
+        if not counters and not traces:
+            fatal_error(
+                f"job_replay_mode: kernel: job {number} selects nothing to collect on its pass. "
+                "Each job needs pmc or advanced_thread_trace."
+            )
+
+        if traces:
+            if att_job is not None:
+                fatal_error(
+                    f"job_replay_mode: kernel: jobs {att_job} and {number} both set "
+                    "advanced_thread_trace. A replay runs at most one thread trace pass."
+                )
+            att_job = number
+            att_after_groups = len(groups)
+        else:
+            groups.append(
+                list(counters) if isinstance(counters, (list, tuple)) else [counters]
+            )
+
+        for key, value in job.items():
+            if key in ("pmc", "advanced_thread_trace", "sub_directory") or value is None:
+                continue
+            if key.startswith("att_") and key != "att_library_path" and not traces:
+                fatal_error(
+                    f"job_replay_mode: kernel: job {number} sets {key} but does not set "
+                    "advanced_thread_trace. Thread trace settings belong to the thread trace job."
+                )
+            if key in run_options and run_options[key] != value:
+                fatal_error(
+                    f"job_replay_mode: kernel: jobs {option_owner[key]} and {number} set "
+                    f"'{key}' to different values ({run_options[key]!r} vs {value!r}). Every job "
+                    "is a pass of one run, so options other than pmc and the thread trace "
+                    "settings apply to the whole run and must agree."
+                )
+            run_options.setdefault(key, value)
+            option_owner.setdefault(key, number)
+
+    if not groups:
+        fatal_error(
+            "job_replay_mode: kernel requires at least one job with pmc: kernel replay "
+            "replays dispatches to collect counter groups."
+        )
+    if run_options.get("replay_mode", "kernel") != "kernel":
+        fatal_error(
+            f"job_replay_mode: kernel: job {option_owner['replay_mode']} sets replay_mode to "
+            f"{run_options['replay_mode']!r}"
+        )
+
+    run_options["replay_mode"] = "kernel"
+    run_options["pmc"] = groups
+    if att_job is not None:
+        run_options["advanced_thread_trace"] = True
+        run_options["kernel_replay_att_after_groups"] = att_after_groups
+    return dotdict(run_options)
 
 
 def patch_args(data):
@@ -2278,8 +2401,15 @@ def run(app_args, args, **kwargs):
 
         # Route counter collection through the in-process kernel-replay service. The SDK derives
         # the pass count from the number of counter groups (plus one with --att) via the tool's
-        # pass-count callback, so there is nothing else to communicate.
+        # pass-count callback. The only other thing to communicate is where the thread trace pass
+        # goes: first from the command line, or where its job sits with job_replay_mode: kernel.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+        if args.advanced_thread_trace:
+            update_env(
+                "ROCPROF_KERNEL_REPLAY_ATT_AFTER_GROUPS",
+                int(getattr(args, "kernel_replay_att_after_groups", None) or 0),
+                overwrite=True,
+            )
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
@@ -2617,6 +2747,41 @@ def main(argv=None):
             fatal_error(
                 "--selected-regions and --collection-period are mutually exclusive"
             )
+
+    # An input file opts in to running its jobs as the passes of one kernel replay run. Files
+    # without job_replay_mode never reach this branch, so each of their jobs remains a run of its
+    # own, with or without --replay-mode kernel.
+    if getattr(inp_args, "job_replay_mode", "application") == "kernel":
+        pass_options = [
+            name
+            for name, attr in (("--pmc", "pmc"), ("--att", "advanced_thread_trace"))
+            if getattr(cmd_args, attr, None)
+        ]
+        if pass_options:
+            fatal_error(
+                "job_replay_mode: kernel takes what each replay pass collects from the jobs "
+                "of the input file, so " + " and ".join(pass_options) + " cannot also be "
+                "given on the command line. Add a job for that pass instead."
+            )
+        if getattr(cmd_args, "replay_mode", None) == "application":
+            fatal_error(
+                "--replay-mode application contradicts job_replay_mode: kernel in the "
+                "input file"
+            )
+
+        args = get_args(cmd_args, plan_kernel_replay_jobs(inp_args))
+        if not args.kernel_replay_beta_enabled:
+            fatal_error(
+                "job_replay_mode: kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled (or kernel_replay_beta_enabled in a job)"
+            )
+        if has_set_attr(args, "pid") or has_set_attr(args, "collection_period"):
+            fatal_error(
+                "job_replay_mode: kernel is not compatible with attach mode (--pid) or "
+                "--collection-period"
+            )
+        validate_selected_regions_conflicts(args)
+        return run(app_args, args, pass_id=1)
 
     # Check if we should use multi-pass mode:
     # 1. Multiple --pmc flags on CLI (cli_multipass)

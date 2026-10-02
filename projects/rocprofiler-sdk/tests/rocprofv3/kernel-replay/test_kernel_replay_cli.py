@@ -38,6 +38,16 @@ def default_script_path():
     )
 
 
+def default_schema_path():
+    """Locate the documented input-file schema relative to this file in the source tree."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.normpath(
+        os.path.join(
+            here, "..", "..", "..", "source", "docs", "rocprofv3_input_schema.json"
+        )
+    )
+
+
 _MODULE = None
 
 
@@ -51,21 +61,28 @@ def rocprofv3():
 
 
 @contextlib.contextmanager
-def input_file(jobs):
-    """Write `jobs` out as a rocprofv3 JSON input file, or yield None when there are none."""
+def input_file(jobs, file_options=None, suffix=".json"):
+    """Write `jobs` (plus any top-level `file_options`) out as a rocprofv3 JSON or YAML input file,
+    or yield None when there are none."""
     if jobs is None:
         yield None
         return
-    fd, path = tempfile.mkstemp(suffix=".json")
+    document = dict(file_options or {}, jobs=jobs)
+    fd, path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "w") as ofs:
-        json.dump({"jobs": jobs}, ofs)
+        if suffix == ".json":
+            json.dump(document, ofs)
+        else:
+            import yaml
+
+            yaml.safe_dump(document, ofs)
     try:
         yield path
     finally:
         os.remove(path)
 
 
-def launched_runs(*argv, jobs=None):
+def launched_runs(*argv, jobs=None, file_options=None, suffix=".json"):
     """Report the application runs rocprofv3 would start for the given command line.
 
     `run` is replaced for the duration, so nothing is executed and no environment is touched.
@@ -81,7 +98,7 @@ def launched_runs(*argv, jobs=None):
     original = module.run
     module.run = record
     try:
-        with input_file(jobs) as path:
+        with input_file(jobs, file_options, suffix) as path:
             argv = list(argv) + (["-i", path] if path else []) + ["--", "/bin/true"]
             module.main(argv)
     finally:
@@ -433,6 +450,218 @@ def test_counter_collection_is_never_itself_a_conflict():
     assert service_conflicts(pmc_groups=[["SQ_WAVES"], ["GRBM_COUNT"]]) == []
 
 
+# job_replay_mode: kernel -- the jobs of an input file become the passes of one run.
+
+KERNEL_JOBS = {"job_replay_mode": "kernel"}
+
+
+def job_replay_runs(*argv, jobs, suffix=".json"):
+    return launched_runs(
+        "--kernel-replay-beta-enabled",
+        *argv,
+        jobs=jobs,
+        file_options=KERNEL_JOBS,
+        suffix=suffix,
+    )
+
+
+def rejected(*argv, jobs, file_options=KERNEL_JOBS, beta=True):
+    """True when rocprofv3 refuses the command line and input file before launching anything."""
+    argv = (("--kernel-replay-beta-enabled",) if beta else ()) + argv
+    try:
+        launched_runs(*argv, jobs=jobs, file_options=file_options)
+    except SystemExit as exc:
+        return exc.code != 0
+    return False
+
+
+def test_job_replay_runs_every_job_as_a_pass_of_one_run():
+    runs = job_replay_runs(
+        jobs=[
+            {"advanced_thread_trace": True, "att_target_cu": 1},
+            {"pmc": ["SQ_WAVES", "GRBM_COUNT"]},
+            {"pmc": ["SQ_INSTS_VALU"]},
+        ]
+    )
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.replay_mode == "kernel"
+    assert run.pmc == [["SQ_WAVES", "GRBM_COUNT"], ["SQ_INSTS_VALU"]]
+    assert run.advanced_thread_trace is True
+    assert run.att_target_cu == 1
+    assert run.kernel_replay_att_after_groups == 0
+    # One run writes one output directory, not a pass_N directory per job.
+    assert run.sub_directory is None
+
+
+def test_job_order_places_the_thread_trace_pass():
+    att = {"advanced_thread_trace": True}
+    a, b = {"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}
+    for jobs, after in (([att, a, b], 0), ([a, att, b], 1), ([a, b, att], 2)):
+        (run,) = job_replay_runs(jobs=jobs)
+        assert run.kernel_replay_att_after_groups == after, jobs
+        assert run.pmc == [["SQ_WAVES"], ["GRBM_COUNT"]], jobs
+
+
+def test_counter_only_job_replay():
+    (run,) = job_replay_runs(jobs=[{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}])
+    assert run.pmc == [["SQ_WAVES"], ["GRBM_COUNT"]]
+    assert not run.advanced_thread_trace
+    assert run.kernel_replay_att_after_groups is None
+
+
+def test_yaml_input_opts_in_the_same_way():
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        return
+    (run,) = job_replay_runs(
+        jobs=[{"pmc": ["SQ_WAVES"]}, {"advanced_thread_trace": True}], suffix=".yaml"
+    )
+    # A lone counter group is flattened to its counter list, as it is on the command line.
+    assert run.pmc == ["SQ_WAVES"]
+    assert run.kernel_replay_att_after_groups == 1
+
+
+def test_run_options_from_any_job_apply_to_the_run():
+    (run,) = job_replay_runs(
+        jobs=[
+            {"pmc": ["SQ_WAVES"], "kernel_include_regex": "gemm"},
+            {
+                "pmc": ["GRBM_COUNT"],
+                "output_format": ["json"],
+                "kernel_include_regex": "gemm",
+            },
+        ]
+    )
+    assert run.kernel_include_regex == "gemm"
+    assert run.output_format == ["json"]
+
+
+def test_the_beta_acknowledgement_may_come_from_a_job():
+    (run,) = launched_runs(
+        jobs=[
+            {"pmc": ["SQ_WAVES"], "kernel_replay_beta_enabled": True},
+            {"pmc": ["GRBM_COUNT"]},
+        ],
+        file_options=KERNEL_JOBS,
+    )
+    assert run.kernel_replay_beta_enabled is True
+
+
+def test_thread_trace_decoder_path_may_sit_on_any_job():
+    # att_library_path only says where the decoder is, so it is not tied to the thread trace job.
+    (run,) = job_replay_runs(
+        jobs=[
+            {"pmc": ["SQ_WAVES"], "att_library_path": ["/opt/x"]},
+            {"advanced_thread_trace": True},
+        ]
+    )
+    assert run.att_library_path == ["/opt/x"]
+
+
+def test_job_replay_rejects_jobs_that_disagree_on_a_run_option():
+    assert rejected(
+        jobs=[
+            {"pmc": ["SQ_WAVES"], "output_directory": "/tmp/a"},
+            {"pmc": ["GRBM_COUNT"], "output_directory": "/tmp/b"},
+        ]
+    )
+
+
+def test_job_replay_rejects_a_job_with_both_counters_and_thread_trace():
+    assert rejected(jobs=[{"pmc": ["SQ_WAVES"], "advanced_thread_trace": True}])
+
+
+def test_job_replay_rejects_a_job_that_collects_nothing():
+    assert rejected(jobs=[{"pmc": ["SQ_WAVES"]}, {"kernel_trace": True}])
+
+
+def test_job_replay_rejects_two_thread_trace_jobs():
+    assert rejected(
+        jobs=[
+            {"advanced_thread_trace": True},
+            {"pmc": ["SQ_WAVES"]},
+            {"advanced_thread_trace": True},
+        ]
+    )
+
+
+def test_job_replay_rejects_pmc_groups():
+    assert rejected(jobs=[{"pmc_groups": [["SQ_WAVES"], ["GRBM_COUNT"]]}])
+
+
+def test_job_replay_rejects_thread_trace_settings_on_a_counter_job():
+    assert rejected(
+        jobs=[{"pmc": ["SQ_WAVES"], "att_target_cu": 2}, {"advanced_thread_trace": True}]
+    )
+
+
+def test_job_replay_needs_a_counter_job():
+    assert rejected(jobs=[{"advanced_thread_trace": True}])
+
+
+def test_job_replay_rejects_pass_services_on_the_command_line():
+    jobs = [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}]
+    assert rejected("--pmc", "SQ_INSTS_VALU", jobs=jobs)
+    assert rejected("--att", jobs=jobs)
+
+
+def test_job_replay_rejects_application_replay():
+    jobs = [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}]
+    assert rejected("--replay-mode", "application", jobs=jobs)
+    assert rejected(jobs=[{"pmc": ["SQ_WAVES"], "replay_mode": "application"}])
+
+
+def test_job_replay_still_needs_the_beta_acknowledgement():
+    assert rejected(jobs=[{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}], beta=False)
+
+
+def test_job_replay_rejects_attach_mode_and_collection_periods():
+    jobs = [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}]
+    assert rejected("--pid", "1234", jobs=jobs)
+    assert rejected("--collection-period", "1:1:1", jobs=jobs)
+
+
+def test_unknown_job_replay_mode_is_rejected():
+    assert rejected(
+        jobs=[{"pmc": ["SQ_WAVES"]}], file_options={"job_replay_mode": "dispatch"}
+    )
+
+
+def test_job_replay_mode_application_is_the_default():
+    """Spelling out the default changes nothing: each job is still a run of its own."""
+    jobs = [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}]
+    explicit = launched_runs(jobs=jobs, file_options={"job_replay_mode": "application"})
+    assert [itr.pmc for itr in explicit] == [itr.pmc for itr in launched_runs(jobs=jobs)]
+    assert [itr.pmc for itr in explicit] == [["SQ_WAVES"], ["GRBM_COUNT"]]
+
+
+def test_schema_documents_the_job_replay_modes():
+    """The input-file schema is documentation only -- rocprofv3 does not validate against it -- so
+    nothing else would notice it drifting from what rocprofv3 accepts."""
+    path = os.environ.get("ROCPROFV3_INPUT_SCHEMA", default_schema_path())
+    with open(path, "r") as ifs:
+        schema = json.load(ifs)
+    mode = schema["properties"]["job_replay_mode"]
+    assert mode["enum"] == list(rocprofv3().JOB_REPLAY_MODES)
+    assert mode["default"] == "application"
+    job_options = schema["properties"]["jobs"]["items"]["properties"]
+    for option in ("pmc", "advanced_thread_trace", "kernel_replay_beta_enabled"):
+        assert option in job_options, option
+
+
+def test_files_without_job_replay_mode_keep_running_jobs_as_runs_under_replay():
+    """The opt-in is the file's: --replay-mode kernel alone must not fold jobs into passes."""
+    runs = launched_runs(
+        "--replay-mode",
+        "kernel",
+        "--kernel-replay-beta-enabled",
+        jobs=[{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+    )
+    assert [itr.pmc for itr in runs] == [["SQ_WAVES"], ["GRBM_COUNT"]]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -440,8 +669,14 @@ def main():
         default=os.environ.get("ROCPROFV3_SCRIPT", default_script_path()),
         help="path to rocprofv3.py",
     )
+    parser.add_argument(
+        "--schema",
+        default=os.environ.get("ROCPROFV3_INPUT_SCHEMA", default_schema_path()),
+        help="path to rocprofv3_input_schema.json",
+    )
     args = parser.parse_args()
     os.environ["ROCPROFV3_SCRIPT"] = args.script
+    os.environ["ROCPROFV3_INPUT_SCHEMA"] = args.schema
 
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     failures = []

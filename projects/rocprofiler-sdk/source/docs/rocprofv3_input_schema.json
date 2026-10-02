@@ -3,9 +3,15 @@
   "type": "object",
   "description": "Schema for the rocprofv3 JSON input",
   "properties": {
+      "job_replay_mode": {
+        "type": "string",
+        "enum": ["application", "kernel"],
+        "default": "application",
+        "description": "How the jobs are replayed. 'application' (the default) runs each job as its own run of the application. 'kernel' runs all jobs as the passes of a single kernel replay run, in job order: each job selects what its pass collects, either one counter group (pmc) or the dispatch thread trace (advanced_thread_trace, with its att_* settings), and every other option applies to the whole run, so jobs that set it must agree. Requires kernel replay acknowledgement (kernel_replay_beta_enabled, or --kernel-replay-beta-enabled)."
+      },
       "jobs": {
         "type": "array",
-        "description": "rocprofv3 input data per application run",
+        "description": "rocprofv3 input data per application run, or per kernel replay pass with job_replay_mode set to 'kernel'",
         "items": {
             "type" : "object",
              "description": "data for rocprofv3",
@@ -231,6 +237,47 @@
                     "spm": {
                          "type" : "array",
                          "description": "list of SPM counters to collect"
+                    },
+                    "replay_mode": {
+                         "type": "string",
+                         "enum": ["application", "kernel"],
+                         "description": "How multiple counter groups of this job are collected: 'application' re-runs the application per group, 'kernel' replays each dispatch once per group within one run (beta)"
+                    },
+                    "kernel_replay_beta_enabled": {
+                         "type": "boolean",
+                         "description": "Acknowledge that kernel replay is a beta feature"
+                    },
+                    "advanced_thread_trace": {
+                         "type": "boolean",
+                         "description": "Collect a dispatch thread trace (ATT). With job_replay_mode set to 'kernel', marks the job whose pass runs the thread trace; at most one job may set it"
+                    },
+                    "att_library_path": {
+                         "type": "array",
+                         "description": "Search path for the thread trace decoder library"
+                    },
+                    "att_target_cu": {
+                         "type": ["integer", "string"],
+                         "description": "Thread trace target compute unit (or WGP)"
+                    },
+                    "att_shader_engine_mask": {
+                         "type": ["integer", "string"],
+                         "description": "Bitmask of shader engines to trace"
+                    },
+                    "att_simd_select": {
+                         "type": ["integer", "string"],
+                         "description": "Bitmask of SIMDs to enable (gfx9) or SIMD ID (gfx10+)"
+                    },
+                    "att_buffer_size": {
+                         "type": ["integer", "string"],
+                         "description": "Thread trace buffer size"
+                    },
+                    "att_gpu_index": {
+                         "type": "string",
+                         "description": "Comma-separated GPU indices to trace"
+                    },
+                    "att_no_detail": {
+                         "type": "boolean",
+                         "description": "Collect occupancy data without instruction-level detail"
                     }
                  }
               }
