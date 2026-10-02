@@ -936,6 +936,13 @@ struct gmock_buffer_storage
     MOCK_METHOD(void, store_memory_allocation,
                 (const memory_allocation_sample_data_t& sample));
     MOCK_METHOD(void, store_scratch_memory, (const scratch_memory_sample_data_t& sample));
+    // Flattened view of externals::pmc_event_with_sample (declared after this struct).
+    // NOLINTNEXTLINE(readability-function-size)
+    MOCK_METHOD(void, store_pmc_event,
+                (std::size_t category_enum_id, std::string track_name,
+                 std::size_t timestamp_ns, std::string event_metadata,
+                 std::uint32_t device_id, std::uint8_t device_type,
+                 std::string pmc_info_name, double value));
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, write_timemory_bundle,
                 (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
@@ -1162,8 +1169,13 @@ struct externals
         std::optional<std::int64_t> system_tid;
     };
 
-    static void*       dlsym(const char* /*symbol_name*/) { return nullptr; }
-    static const char* dlerror() { return nullptr; }
+    // Tests set these to drive device_id_resolver::configure_comm_cu_device_function();
+    // the defaults model "symbol not found, no error text".
+    static inline void*       dlsym_result   = nullptr;
+    static inline const char* dlerror_result = nullptr;
+
+    static void*       dlsym(const char* /*symbol_name*/) { return dlsym_result; }
+    static const char* dlerror() { return dlerror_result; }
 
     struct region_sample
     {
@@ -1407,8 +1419,17 @@ struct externals
         // matching this domain family's behavior before the unification onto
         // get_buffer_storage().
         void store(const kfd_sample_t& /*sample*/) {}
-        // k_rccl's pmc_event_with_sample storage is likewise unverified -- no-op.
-        void store(pmc_event_with_sample&& /*sample*/) {}
+        void store(pmc_event_with_sample&& sample)
+        {
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_pmc_event(
+                    sample.category_enum_id, std::string{ sample.track_name },
+                    sample.timestamp_ns, std::string{ sample.event_metadata },
+                    sample.device_id, sample.device_type,
+                    std::string{ sample.pmc_info_name }, sample.value);
+            }
+        }
         void store(const region_sample& sample)
         {
             if(g_buffer_storage_mock)
