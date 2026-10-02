@@ -14,8 +14,7 @@ namespace rocprofiler_compute_tool
 {
 namespace
 {
-constexpr std::string_view kHeader = "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
-                                     "counter_id,counter_name,counter_value\n";
+constexpr std::string_view kHeader = "dispatch_id,counter_id,counter_name,counter_value\n";
 
 // The filename advertises gzip, so the writer must actually produce it.
 static_assert(CsvCountersWriter::kFileSuffix.size() >= compression::kGzipSuffix.size() &&
@@ -27,8 +26,7 @@ static_assert(CsvCountersWriter::kFileSuffix.size() >= compression::kGzipSuffix.
 // ostream keeps counter_value formatting the readers already parse.
 void write_row(std::ostream& out, const counter_info_record_t& record)
 {
-    out << record.dispatch_id << ',' << record.agent_id << ',' << record.kernel_id << ','
-        << record.LDS_memory_size << ',' << record.counter_id << ',' << record.counter_name << ','
+    out << record.dispatch_id << ',' << record.counter_id << ',' << record.counter_name << ','
         << record.counter_value;
 }
 }  // namespace

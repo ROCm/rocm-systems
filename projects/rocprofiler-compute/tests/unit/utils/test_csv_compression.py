@@ -127,9 +127,6 @@ def test_native_counter_csv_header_matches_the_reader():
 
     assert columns == [
         "dispatch_id",
-        "gpu_id",
-        "kernel_id",
-        "lds_per_workgroup",
         "counter_id",
         "counter_name",
         "counter_value",

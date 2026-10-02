@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -264,6 +265,24 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
     EXPECT_TRUE(args.record_callback_args != nullptr);
 }
 
+TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresKernelDispatchTracingForCompletions)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    const auto  dispatch = std::find_if(services.begin(),
+                                        services.end(),
+                                        [](const auto& service)
+                                        {
+                                           return service.kind ==
+                                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH;
+                                        });
+    ASSERT_NE(dispatch, services.end());
+    EXPECT_EQ(dispatch->operations,
+              std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE});
+    EXPECT_EQ(dispatch->callback_args, cfg->tool_data);
+}
+
 TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
@@ -323,6 +342,18 @@ TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_DoesNotConf
     ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_StillTracesKernelDispatches)
+{
+    m_input_parameters->set_requested_counters("");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    EXPECT_TRUE(std::any_of(services.begin(),
+                            services.end(),
+                            [](const auto& service)
+                            { return service.kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH; }));
 }
 
 TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCallback)
