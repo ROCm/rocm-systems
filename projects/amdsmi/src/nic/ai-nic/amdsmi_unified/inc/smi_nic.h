@@ -49,7 +49,7 @@ enum SmiNicCapability : uint32_t {
 
 /**
  * Board temperature sensors a NIC may expose. A vendor that lacks a given
- * sensor reports it as unsupported (sentinel) rather than fabricating a value.
+ * sensor reports it as unsupported (reserved value) rather than fabricating a value.
  */
 enum class NicTempSensor : uint8_t { Asic, Transceiver, Board };
 

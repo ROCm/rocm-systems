@@ -23,7 +23,7 @@ constexpr uint8_t kSmallItemEnd = 0x0f;  // End Tag
 // filler so callers see the bare value.
 std::optional<std::string> trimmed(const uint8_t* data, size_t len) {
   size_t end = len;
-  while (end > 0 && (data[end - 1] == ' ' || data[end - 1] == '\0')) {
+  while ((end > 0) && ((data[end - 1] == ' ') || (data[end - 1] == '\0'))) {
     --end;
   }
   if (end == 0) {
@@ -43,9 +43,9 @@ void parse_vpd_r(const std::vector<uint8_t>& image, size_t start, size_t end, Vp
       return;  // truncated keyword; stop rather than read past the block
     }
     const uint8_t* kdata = image.data() + j + 3;
-    if (k0 == 'P' && k1 == 'N') {
+    if ((k0 == 'P') && (k1 == 'N')) {
       out.part_number = trimmed(kdata, klen);
-    } else if (k0 == 'S' && k1 == 'N') {
+    } else if ((k0 == 'S') && (k1 == 'N')) {
       out.serial_number = trimmed(kdata, klen);
     }
     j += 3 + klen;
