@@ -1831,10 +1831,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
-  // copying only kLead packets instead of a full kPeriod. The GPU starts
-  // executing the lead while the CPU keeps copying the remaining
-  // packet+metadata payload, overlapping the bulk copy with GPU execution and
-  // cutting the one-time startup idle that grew with the 256B/packet metadata.
+  // copying only kLead packets instead of a full kPeriod, then double the chunk
+  // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
+  // copying the remaining packet+metadata payload. Doubling keeps each chunk's
+  // host work (copy plus per-packet profiling fixups) covered by the GPU executing
+  // the previous chunk; jumping from kLead straight to kPeriod lets the GPU drain
+  // the lead and idle until the full kPeriod chunk is published.
   constexpr size_t kLead = 8;
   auto* first_loc = reinterpret_cast<uint32_t*>(
       queueBase + (startIndex & queueMask) * kPacketSize);
@@ -2002,9 +2004,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   };
 
+  size_t chunk_size = kLead;
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
-    const size_t period = (chunkStart == 0) ? kLead : kPeriod;
-    const size_t chunkEnd  = std::min(chunkStart + period, numPackets);
+    const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
@@ -2124,6 +2126,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     chunkStart = chunkEnd;
+    chunk_size = std::min(chunk_size * 2, kPeriod);
   }
 
   hasPendingDispatch_ = true;
@@ -5325,7 +5328,10 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 
       int32_t releaseFlags = vcmd.getCommandEntryScope();
       if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
-        if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
+        // A barrier-value packet carries one dependency; a Barrier-AND carries five, so
+        // multi-event waits stay on Barrier-AND to remain a single packet.
+        if (settings.barrier_value_packet_ &&
+            (vcmd.profilingInfo().marker_ts_ || vcmd.eventWaitList().size() <= 1)) {
           dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
         } else {
           dispatchBarrierPacket(kNopPacketHeader, false);

@@ -1352,6 +1352,16 @@ class GraphExecSegmented : public GraphExecBase {
     // when every node packet in this batch is disabled, so the segment can still
     // emit its completion signal instead of losing it. nullptr when unused.
     uint8_t* fallbackBarrier = nullptr;
+    // Standalone single-dependency barrier reserved (at BuildSyncPlan) for a batch whose first
+    // packet carries the segment's one dependency in its ext-dispatch dep_signal. Spliced in
+    // front of the *filtered* dispatch buffer by rebuildFilteredLists when that first packet's
+    // node is disabled, so the segment still waits on its dependency. nullptr when unused.
+    uint8_t* fallbackDepBarrier = nullptr;
+    // Dispatch the first packet without the AQL barrier bit. Set by BuildSyncPlan for a segment
+    // queued behind an independent same-level segment on its stream that needs no wait packet:
+    // it has no remaining dependency, or its first kernel carries the one dependency in its
+    // ext-dispatch dep_signal. Later packets keep the barrier bit.
+    bool firstPacketUnordered = false;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
@@ -1377,6 +1387,8 @@ class GraphExecSegmented : public GraphExecBase {
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
+    // Clear the barrier bit on the first saved header when firstPacketUnordered is set.
+    void clearFirstBarrierBit(std::vector<uint32_t>& fullHeaders) const;
   };
 
   //! Structure linking packet batches to segments
@@ -1399,6 +1411,7 @@ class GraphExecSegmented : public GraphExecBase {
   struct SyncPlan {
     int num_segments = 0;   // total segment count (used for bounds checks)
     int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+    int num_unordered_segments = 0;  // segments whose first packet drops the barrier bit
 
     // Dense index into segment_hw_events for each segment.
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
