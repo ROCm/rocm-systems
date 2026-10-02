@@ -2658,12 +2658,14 @@ typedef struct {
 } amdsmi_process_info_t;
 
 /**
- * @brief Topology Nearest
+ * @brief Nearest accessible GPU handles.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
+  /** Number of handles stored in processor_list. Output only. */
   uint32_t count;
+  /** Fixed storage for up to AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP handles. */
   amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP];
   uint64_t reserved[15];
 } amdsmi_topology_nearest_t;
@@ -6893,20 +6895,21 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Once called topology_nearest_info will get populated with a list of
- *           all nearest devices for a given link_type. The list has a count of
- *           the number of devices found and their respective handles/identifiers.
+ *  @details Returns accessible peers matching link_type, excluding processor_handle.
+ *           If more peers match than fit in processor_list, only the nearest
+ *           AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP peers are stored.
+ *
+ *  @note Peers are ordered by ascending hop count, then ascending link weight.
+ *        Order among peers with equal hop count and link weight is unspecified.
  *
  *  @param[in] processor_handle The identifier of the given device.
  *
  *  @param[in] link_type The amdsmi_link_type_t level to search for nearest GPUs.
  *
- *  @param[in,out] topology_nearest_info
- *                 .count;
- *                   - When zero, set to the number of matching GPUs such that .device_list can be
- * malloc'd.
- *                   - When non-zero, .device_list will be filled with count number of
- * processor_handle. .device_list An array of processor_handle for GPUs found at level.
+ *  @param[out] topology_nearest_info Caller-provided structure with fixed processor_list
+ *              storage; no separate allocation is needed. On success, count is the
+ *              number of handles stored, regardless of its input value. Unused
+ *              processor_list entries are set to NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */

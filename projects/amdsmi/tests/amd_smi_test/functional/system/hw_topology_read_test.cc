@@ -96,7 +96,7 @@ void TestHWTopologyRead::Run(void) {
       for (uint32_t peer = 0; peer < nearest.count; ++peer) {
         SCOPED_TRACE(::testing::Message() << src << ":" << type << ":" << peer);
         uint64_t hops = 0, weight = 0;
-        amdsmi_link_type_t actual_type;
+        amdsmi_link_type_t actual_type = AMDSMI_LINK_TYPE_UNKNOWN;
         ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[src], nearest.processor_list[peer],
                                             &hops, &actual_type),
                   AMDSMI_STATUS_SUCCESS);
