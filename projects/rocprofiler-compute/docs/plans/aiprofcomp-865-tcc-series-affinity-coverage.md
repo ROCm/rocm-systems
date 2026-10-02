@@ -6,7 +6,6 @@
 **Related:**
 - [Single-pass packable plan](aiprofcomp-865-single-pass-packable-plan.md) (Phase 1 SPP)
 - [Phase 2 WEIGHTED_AVG design](aiprofcomp-865-phase2-weighted-avg-design.md) (**not** this policy)
-- [AQL / SQ slot ticket](aiprofcomp-865-aql4096-sdk-ticket.md) (SQ:8 context)
 - Evidence: `validation-artifacts/spp-health-261001-gfx942-500med/reports/delta_ge100_investigation.md`
 
 ---
