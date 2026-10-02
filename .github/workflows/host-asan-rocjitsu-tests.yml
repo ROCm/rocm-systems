@@ -68,6 +68,17 @@ jobs:
             build_tools
             cmake
 
+      - name: Trust checkout paths inside the job container
+        run: |
+          set -euo pipefail
+          # ARC mounts the checkout under /__w in this container, while the
+          # checkout action runs with the host path and a different owner.
+          # Register only these two repositories using their container paths.
+          git config --global --add safe.directory "$(pwd -P)"
+          git config --global --add safe.directory "$(cd TheRock && pwd -P)"
+          git rev-parse --verify HEAD
+          git -C TheRock rev-parse --verify HEAD
+
       - name: Fetch host-ASAN runtime and systems test artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
