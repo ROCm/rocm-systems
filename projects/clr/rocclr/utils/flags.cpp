@@ -149,8 +149,8 @@ bool Flag::init() {
     }
     // Enable async logging: honor explicit AMD_LOG_ASYNC, otherwise auto-enable
     // only when logging to a file (AMD_LOG_LEVEL_FILE is set).
-    bool useAsync = !flagIsDefault(AMD_LOG_ASYNC) ? AMD_LOG_ASYNC
-                                                  : !flagIsDefault(AMD_LOG_LEVEL_FILE);
+    bool useAsync =
+        !flagIsDefault(AMD_LOG_ASYNC) ? AMD_LOG_ASYNC : !flagIsDefault(AMD_LOG_LEVEL_FILE);
     if (useAsync) {
       EnableAsyncLogging(true);
     }
