@@ -38,6 +38,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
@@ -697,6 +699,66 @@ public:
   bool requires_serial_hot_hooks() const override { return true; }
 };
 
+class UnsubscribedHotHookPlugin final : public ExecutionPlugin {
+public:
+  UnsubscribedHotHookPlugin() : ExecutionPlugin("unsubscribed_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++cold_callbacks; }
+
+  uint32_t hot_callbacks = 0;
+  uint32_t cold_callbacks = 0;
+};
+
+class HotHookSubscriptionProbe final : public ExecutionPlugin {
+public:
+  HotHookSubscriptionProbe(std::string name, bool subscribe_on_dispatch,
+                           bool serial_hot_hooks = false)
+      : ExecutionPlugin(std::move(name)), subscribe_on_dispatch_(subscribe_on_dispatch),
+        serial_hot_hooks_(serial_hot_hooks) {}
+
+  bool requires_serial_hot_hooks() const override { return serial_hot_hooks_; }
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
+    ++predicate_queries;
+    return subscribed;
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    ++dispatch_callbacks;
+    subscribed = subscribe_on_dispatch_;
+    if (reenter_on_dispatch && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+    ++halt_callbacks;
+    if (unsubscribe_on_halt)
+      subscribed = false;
+    if (reenter_on_halt && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
+
+  void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
+
+  ExecutionPluginGroup *group = nullptr;
+  bool reenter_on_dispatch = false;
+  bool reenter_on_halt = false;
+  bool unsubscribe_on_halt = false;
+  bool subscribed = false;
+  mutable uint32_t predicate_queries = 0;
+  uint32_t dispatch_callbacks = 0;
+  uint32_t halt_callbacks = 0;
+  uint32_t hot_callbacks = 0;
+
+private:
+  bool subscribe_on_dispatch_ = false;
+  bool serial_hot_hooks_ = false;
+};
+
 class NoSgprReadPlugin final : public ExecutionPlugin {
 public:
   NoSgprReadPlugin() : ExecutionPlugin("no_sgpr_read") {}
@@ -705,6 +767,28 @@ public:
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override { ++callbacks; }
 
   uint32_t callbacks = 0;
+};
+
+class AsyncIssueInterestPlugin final : public ExecutionPlugin {
+public:
+  AsyncIssueInterestPlugin(std::string name, bool observes_issue, bool throws_on_issue = false)
+      : ExecutionPlugin(std::move(name)), observes_issue_(observes_issue),
+        throws_on_issue_(throws_on_issue) {}
+
+  bool supports_async_instructions() const override { return true; }
+  bool observes_async_instruction_issued() const override { return observes_issue_; }
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
+    ++callbacks;
+    if (throws_on_issue_)
+      throw std::runtime_error("injected async issue failure");
+  }
+
+  uint32_t callbacks = 0;
+
+private:
+  bool observes_issue_ = false;
+  bool throws_on_issue_ = false;
 };
 
 class OverlapProbe {
@@ -850,7 +934,8 @@ public:
     detector_ = std::make_unique<RaceDetector>(
         static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
         static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)),
-        [this](RaceViolation v) { violations.push_back(v); });
+        [this](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(wavefronts.front()->cu().arch()));
     wf_ = wavefronts.front();
     state_ = &detector_->getWaveRaceState(0);
   }
@@ -2394,6 +2479,47 @@ TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
   EXPECT_EQ(plugin_ptr->callbacks, 0u);
 }
 
+TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  Instruction instruction("v_wmma_test", nullptr);
+
+  ExecutionPluginGroup normal(PluginSinkConfig{});
+  auto first = std::make_unique<AsyncIssueInterestPlugin>("async_first", true);
+  auto *first_ptr = first.get();
+  auto skipped = std::make_unique<AsyncIssueInterestPlugin>("async_skipped", false);
+  auto *skipped_ptr = skipped.get();
+  auto last = std::make_unique<AsyncIssueInterestPlugin>("async_last", true);
+  auto *last_ptr = last.get();
+  ASSERT_TRUE(normal.add(std::move(first)));
+  ASSERT_TRUE(normal.add(std::move(skipped)));
+  ASSERT_TRUE(normal.add(std::move(last)));
+
+  normal.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave);
+  EXPECT_EQ(first_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_ptr->callbacks, 0u);
+  EXPECT_EQ(last_ptr->callbacks, 1u);
+
+  ExecutionPluginGroup exceptional(PluginSinkConfig{});
+  auto throwing = std::make_unique<AsyncIssueInterestPlugin>("async_throwing", true, true);
+  auto *throwing_ptr = throwing.get();
+  auto skipped_after_throw =
+      std::make_unique<AsyncIssueInterestPlugin>("async_skipped_after_throw", false);
+  auto *skipped_after_throw_ptr = skipped_after_throw.get();
+  auto continued = std::make_unique<AsyncIssueInterestPlugin>("async_continued", true);
+  auto *continued_ptr = continued.get();
+  ASSERT_TRUE(exceptional.add(std::move(throwing)));
+  ASSERT_TRUE(exceptional.add(std::move(skipped_after_throw)));
+  ASSERT_TRUE(exceptional.add(std::move(continued)));
+
+  EXPECT_THROW(exceptional.onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave),
+               std::runtime_error);
+  EXPECT_EQ(throwing_ptr->callbacks, 1u);
+  EXPECT_EQ(skipped_after_throw_ptr->callbacks, 0u);
+  EXPECT_EQ(continued_ptr->callbacks, 1u);
+}
+
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
@@ -2474,6 +2600,131 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
   EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<UnsubscribedHotHookPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+  group.onAmdgpuReadSgpr(nullptr, 0);
+
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+
+  group.onAmdgpuWorkgroupCompleted(1, 2);
+  EXPECT_EQ(plugin_ptr->cold_callbacks, 1u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+}
+
+TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
+  auto *subscribed_ptr = subscribed.get();
+  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+  auto *unsubscribed_ptr = unsubscribed.get();
+  ASSERT_TRUE(group.add(std::move(subscribed)));
+  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+  for (uint32_t i = 0; i != 8; ++i)
+    group.onAmdgpuReadSgpr(wave, i);
+
+  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+}
+
+TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin =
+      std::make_unique<HotHookSubscriptionProbe>("serial_unsubscribed_probe", false, true);
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+  group.onAmdgpuReadSgpr(wave, 0);
+
+  EXPECT_EQ(plugin_ptr->predicate_queries, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 0u);
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before);
+}
+
+TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("reentrant_dispatch_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->reenter_on_dispatch = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+
+  // The reentrant hook uses the original live-query path (aggregate + fanout),
+  // then dispatch publishes one cached decision for all subsequent hooks.
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
+}
+
+TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription) {
+  PluginFixture fixture(/*num_wf_slots=*/1);
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("halt_reuse_probe", true, true);
+  auto *plugin_ptr = plugin.get();
+  plugin_ptr->group = &group;
+  plugin_ptr->unsubscribe_on_halt = true;
+  plugin_ptr->reenter_on_halt = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  group.onAmdgpuReadSgpr(wave, 0);
+  ASSERT_EQ(plugin_ptr->hot_callbacks, 1u);
+  ASSERT_EQ(plugin_ptr->predicate_queries, 1u);
+
+  group.onAmdgpuWavefrontHalted(*wave);
+  EXPECT_EQ(plugin_ptr->halt_callbacks, 1u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u)
+      << "the halt callback observed the stale subscribed decision";
+  EXPECT_EQ(plugin_ptr->predicate_queries, 2u);
+
+  plugin_ptr->set_subscribe_on_dispatch(false);
+  plugin_ptr->reenter_on_dispatch = false;
+  group.onAmdgpuWavefrontDispatched(*wave);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  group.onAmdgpuReadSgpr(wave, 1);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 3u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 1u);
+
+  // reset() independently invalidates the decision while retaining its vector
+  // allocation for the next incarnation.
+  plugin_ptr->subscribed = true;
+  wave->reset();
+  group.onAmdgpuReadSgpr(wave, 2);
+  EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
+  EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
 }
 
 TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
@@ -2602,6 +2853,65 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     delete inst;
 
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1}, kPartialExecMask);
+  }
+}
+
+TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndExceptionFlags) {
+  const std::pair<rj_code_arch_t, uint32_t> targets[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kVMulF32Vop2},
+  };
+  constexpr uint64_t kExec = (1u << 1) | (1u << 7) | (1u << 21);
+  for (const auto &[arch, opcode] : targets) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    Wave32PluginFixture f(arch);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t value =
+          std::bit_cast<uint32_t>((kExec & (uint64_t{1} << lane)) ? 1.1f : 1e38f);
+      f.cu->write_vgpr(base, lane, value);
+      f.cu->write_vgpr(base + 1, lane, value);
+    }
+    f.cu->write_sgpr(wf->sgpr_alloc().base + 4, std::bit_cast<uint32_t>(1.1f));
+    auto decoder = Decoder::create(arch);
+    for (uint64_t exec : {uint64_t{0}, kExec}) {
+      // Exercise vector, SGPR, literal, and inline-constant sources.
+      for (uint32_t source : {256u, 4u, 255u, 240u}) {
+        SCOPED_TRACE(testing::Message() << "exec " << exec << " source " << source);
+        wf->set_exec(exec);
+        wf->set_trapsts(0);
+        uint32_t words[] = {vop2_encode(opcode, 2, 1, source), std::bit_cast<uint32_t>(1.1f)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        plugin->events.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
+        EXPECT_EQ(wf->trapsts() & 0x7fu, exec && source != 240 ? 1u << 5 : 0u);
+        std::map<uint32_t, uint64_t> reads;
+        for (const auto &event : vgpr_read_events(*plugin)) {
+          EXPECT_EQ(event.lane_mask & ~exec, 0u);
+          EXPECT_EQ(event.byte_mask, ExecutionPlugin::kFullByteMask);
+          reads[event.physical_reg - base] |= event.lane_mask;
+        }
+        std::map<uint32_t, uint64_t> expected;
+        if (exec) {
+          expected[1] = exec;
+          if (source == 256)
+            expected[0] = exec;
+        }
+        EXPECT_EQ(reads, expected);
+      }
+    }
   }
 }
 
@@ -5725,6 +6035,52 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    if (util::native<float>::size() != 16)
+      GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu.get();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 56; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0);
+    plugin->events.clear();
+
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                            amdgpu::ACC_FROM_VGPR,
+                                            /*c_modifier=*/0);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
+                          S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
+                          ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                         0xFFFF'FFFFu);
+    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
+                         0xFFFF'FFFFu);
+
+    size_t last_read = 0;
+    size_t first_write = plugin->events.size();
+    for (size_t i = 0; i < plugin->events.size(); ++i) {
+      if (plugin->events[i].kind == HookEvent::READ_VGPR)
+        last_read = i;
+      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+        first_write = std::min(first_write, i);
+    }
+    ASSERT_LT(last_read, first_write);
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -5885,7 +6241,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(ring.data(), &packet, sizeof(packet));
 
   constexpr uint32_t queue_id = 7;
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.address_space = address_space;
   queue.queue_id = queue_id;
   queue.process_id = process_id;
@@ -6398,8 +6754,9 @@ TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWork
 // -- Race trace tests --------------------------------------------------------
 
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/0x100, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/0x200,
@@ -6413,16 +6770,18 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
 }
 
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
   EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
 }
 
 TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR,
@@ -7051,6 +7410,92 @@ TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture
   EXPECT_EQ(access.flat_dds_lane_mask, 0u);
   EXPECT_TRUE(access.pre_routing_addresses.empty());
   EXPECT_EQ(access.addresses[0], kSharedBase + 0x20);
+}
+
+TEST(RoutedMemoryObservationTest, DecodedDirectLdsLoadsReportBroadcastMaskAndWidth) {
+  for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    PluginFixture fixture(1, arch, 32);
+    auto *plugin = fixture.attach_memory_observation_plugin();
+    auto *cu = fixture.cu();
+    // Seed the whole stream before the CU fills its instruction cache.
+    for (uint32_t i = 0; i < 10; ++i)
+      fixture.mem->write32(0x1000 + 4 * i, 0xce100006); // direct LDS load to v6
+    auto *wave = cu->dispatch_wf(0, 0x1000, 104, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_lds_base(4096);
+    wave->lds().write32(4096 + 16, 0x918293e4);
+    for (uint32_t type : {0u, 1u, 2u, 4u, 5u}) {
+      for (uint64_t mask : {uint64_t{0}, uint64_t{0x101}}) {
+        SCOPED_TRACE(testing::Message() << arch << ',' << type << ',' << mask);
+        const auto pc = wave->pc;
+        wave->set_exec(mask);
+        wave->set_m0((type << 16) | 16);
+        plugin->accesses.clear();
+        cu->step();
+        ASSERT_EQ(wave->pc, pc + 4);
+        ASSERT_EQ(plugin->accesses.size(), mask ? 1u : 0u);
+        EXPECT_EQ(wave->exec(), mask);
+        EXPECT_TRUE(wave->wait_counters().empty());
+        if (!mask)
+          continue;
+        const auto &access = plugin->accesses.front();
+        EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+        EXPECT_EQ(access.wait_counter, WaitCounterType::EXPCNT);
+        EXPECT_TRUE(access.is_load);
+        EXPECT_EQ(access.elements_per_lane, 1u);
+        EXPECT_EQ(access.element_size_bytes, type == 2 ? 4u : (type & 1 ? 2u : 1u));
+        EXPECT_EQ(access.architectural_exec_lane_mask, mask);
+        EXPECT_EQ(access.active_lane_mask, 0xf0fu);
+        EXPECT_EQ(access.valid_lane_mask, 0xf0fu);
+        EXPECT_EQ(access.request_lane_mask, 0xf0fu);
+        EXPECT_EQ(access.addresses[0], 4096u + 16);
+        EXPECT_EQ(access.addresses[11], 4096u + 16);
+      }
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
+  for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    for (uint32_t store_address : {16u, 20u}) {
+      SCOPED_TRACE(testing::Message() << arch << ',' << store_address);
+      PluginFixture fixture(2, arch, 32);
+      PluginSinkConfig sink_config;
+      auto &sink = sink_config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      auto *cu = fixture.cu();
+      auto *writer = cu->dispatch_wf(0, 0, 104, 256, 32);
+      auto *reader = cu->dispatch_wf(0, 0x1000, 104, 256, 32);
+      ASSERT_NE(writer, nullptr);
+      ASSERT_NE(reader, nullptr);
+      writer->set_exec(1);
+      reader->set_exec(1);
+      reader->set_m0((2u << 16) | 16);
+      std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+      auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+      state->wf_size = 32;
+      state->elem_size = 4;
+      state->num_elems = 1;
+      state->is_load = false;
+      state->exec_mask = state->lane_mask = 1;
+      state->per_lane_addr[0] = store_address;
+      TestMemoryInstruction store(std::move(state));
+      fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, store, *writer);
+      const uint32_t word = 0xce100006;
+      auto decoder = Decoder::create(cu->arch());
+      std::unique_ptr<Instruction> load(decode_valid(*decoder, &word));
+      ASSERT_NE(load, nullptr);
+      ASSERT_TRUE(load->is_memory_op());
+      ASSERT_TRUE(cu->execute_instruction(load.get(), *reader).succeeded());
+      ASSERT_NE(load->data(), nullptr);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *reader);
+      EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, store_address == 16);
+    }
+  }
 }
 
 TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormalized) {

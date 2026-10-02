@@ -199,6 +199,22 @@
         }
       ]
     },
+    "a_cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
 
     "cast_grh": {
       "extends": "cast_base",
@@ -403,6 +419,52 @@
           "name": "A18_SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_intranode": {
+      "extends": "gtest_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 on a single node: both ranks are in the LSA team, so one-sided put/wait must still work over the copy engine. NCCL_PARAM is cached per process, so the flag has to come from the environment.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_HostApi_RmaDisableIntraNodePutUsesCe",
+          "description": "NCCL_RMA_DISABLE=1 leaves intra-node put/wait working and the data correct.",
+          "test_filter": "HostApiTest.RmaDisableIntraNodePutUsesCe"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_proxy": {
+      "extends": "gtest_base",
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 across two nodes: the peer needs the RMA proxy, which the flag keeps down, so put and wait must fail with ncclInvalidUsage instead of hanging, on symmetric and non-symmetric windows.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_Sym",
+          "description": "Symmetric window: registration succeeds, cross-node put/wait return ncclInvalidUsage, and the communicator stays usable.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"
+        },
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_NonSym",
+          "description": "Non-symmetric window (NCCL_CUMEM_ENABLE=0): registration skips the proxy, cross-node put/wait return ncclInvalidUsage.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
         }
       ]
     },
@@ -618,6 +680,9 @@
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
+    { "config": "host_api_rma_disable_intranode", "enabled": true },
+    { "config": "host_api_rma_disable_proxy",     "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },

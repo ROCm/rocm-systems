@@ -1379,6 +1379,7 @@ def gen_vector_cvt_pk(
     opsel: str = '0u',
     dtype: str | None = None,
     is_vop3: bool = False,
+    has_abs: bool = False,
     fp8_format_select: str | None = None,
     arch_name: str = '',
 ) -> str:
@@ -1429,11 +1430,14 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<int16_t>(util::round_to_nearest_even(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));'
+                '      return static_cast<int16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0)));'
             )
             L.append('    };')
             L.append('    int16_t lo = cvt_i16(s0);')
@@ -1442,7 +1446,7 @@ def gen_vector_cvt_pk(
             L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<uint16_t>(util::round_to_nearest_even(std::clamp(f * 65535.0f, 0.0f, 65535.0f)));'
+                '      return static_cast<uint16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0)));'
             )
             L.append('    };')
             L.append('    uint16_t lo = cvt_u16(s0);')
@@ -1457,6 +1461,9 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
         L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(

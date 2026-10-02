@@ -8,6 +8,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+* Disable HRR capture feature
+
+### Resolved issues
+* A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 
 ## HIP 10.1.0 for ROCm 10.1.0
 
@@ -35,6 +39,8 @@ The HIP/HSA runtime now correctly releases allocated signal objects during strea
 
 ### Added
 * New HIP APIs
+    - GPUDirect RDMA: support for API parity with the corresponding CUDA API.
+      * `hipDeviceFlushGPUDirectRDMAWrites` blocks until GPUDirect RDMA writes issued by a third-party device, such as an RDMA-capable NIC, are visible to the requested scope. Capability is reported by the new device attributes `hipDeviceAttributeGPUDirectRDMASupported`, `hipDeviceAttributeGPUDirectRDMAFlushWritesOptions` and `hipDeviceAttributeGPUDirectRDMAWritesOrdering`, which are also mirrored in `hipDeviceProp_t`.
     - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
       * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.

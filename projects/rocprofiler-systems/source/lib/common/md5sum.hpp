@@ -56,7 +56,7 @@ private:
 template <typename Tp, typename... Args>
 md5sum::md5sum(Tp&& arg, Args&&... args)
 {
-    auto _update = [&](auto&& _val) {
+    auto const _update = [&](auto&& _val) {
         using value_type =
             std::remove_reference_t<std::remove_cv_t<std::decay_t<decltype(_val)>>>;
         static_assert(!std::is_pointer<value_type>::value,
@@ -334,8 +334,8 @@ md5sum::update(const unsigned char input[], size_type length)
     count[1] += (length >> 29);
 
     // number of bytes we need to fill in buffer
-    size_type firstpart = 64 - index;
-    size_type i         = 0;
+    size_type const firstpart = 64 - index;
+    size_type       i         = 0;
 
     // transform as many times as possible.
     if(length >= firstpart)
@@ -384,8 +384,8 @@ md5sum::finalize()
         encode(bits, count.data(), 8);
 
         // pad out to 56 mod 64.
-        size_type index  = count[0] / 8 % 64;
-        size_type padLen = (index < 56) ? (56 - index) : (120 - index);
+        size_type const index  = count[0] / 8 % 64;
+        size_type const padLen = (index < 56) ? (56 - index) : (120 - index);
         update(padding, padLen);
 
         // Append length (before padding)
