@@ -107,11 +107,11 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         if(const auto sequent_tid =
                Externals::get_thread_info_sequent_tid(record->thread_id))
         {
-            const auto name =
+            const auto bundle_name =
                 fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
                             dst_agent->logical_node_id);
 
-            Externals::write_timemory_bundle(name, *sequent_tid,
+            Externals::write_timemory_bundle(bundle_name, *sequent_tid,
                                              end_timestamp_ns - beg_timestamp_ns);
         }
     }
