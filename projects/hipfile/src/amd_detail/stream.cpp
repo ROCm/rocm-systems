@@ -139,33 +139,9 @@ Stream::nextSignalTarget()
     return ++signal_counter;
 }
 
-hipEvent_t
-Stream::acquireEvent()
-{
-    {
-        std::lock_guard<std::mutex> lock{event_mutex};
-        if (!event_pool.empty()) {
-            hipEvent_t event = event_pool.back();
-            event_pool.pop_back();
-            return event;
-        }
-    }
-    return Context<Hip>::get()->hipEventCreateWithFlags(hipEventDisableTiming);
-}
-
-void
-Stream::releaseEvent(hipEvent_t event)
-{
-    std::lock_guard<std::mutex> lock{event_mutex};
-    event_pool.push_back(event);
-}
-
 Stream::~Stream()
 {
     try {
-        for (hipEvent_t event : event_pool) {
-            Context<Hip>::get()->hipEventDestroy(event);
-        }
         if (signal_slot) {
             Context<Hip>::get()->hipFree(signal_slot);
         }
