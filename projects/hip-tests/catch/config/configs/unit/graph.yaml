@@ -412,6 +412,15 @@ graph:
   Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphChildMultiStream_ParentChildBoundarySync:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_SiblingChildren:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_NestedChild:
+    <<: *level_2
+    tags: [node, child, multistream]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_default
     tags: [query]
