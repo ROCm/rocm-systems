@@ -65,7 +65,6 @@ FULL_BUILD_PROJECTS = {
     "rocprofiler",
     "rocprofiler-register",
     "rocprofiler-sdk",
-    "rocprofiler-systems",
     "roctracer",
 }
 

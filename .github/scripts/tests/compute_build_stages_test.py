@@ -62,7 +62,6 @@ class ComputeBuildStagesTest(unittest.TestCase):
             "rocprofiler",
             "rocprofiler-register",
             "rocprofiler-sdk",
-            "rocprofiler-systems",
             "roctracer",
         ]
 
