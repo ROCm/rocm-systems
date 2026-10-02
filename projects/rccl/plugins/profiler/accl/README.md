@@ -111,18 +111,6 @@ python3 accl_report.py single --input /path/to/output/
 python3 accl_report.py compare --baseline /path/to/baseline/ --candidate /path/to/candidate/
 ```
 
-`--warmup N` removes the first `N` records independently for each input
-file/rank, collective, and message size. This matches rccl-tests, which runs
-warmups again at every size in a sweep while keeping one communicator-wide
-sequence number.
-
-This removes the initial per-size warmup batch in `rccl-tests/src/common.cu`
-(`TimeTest`). `BenchTime` subsequently records a sync collective for each
-enabled in-place/out-of-place pass and correctness-check calls. JSONL records
-do not identify those phases, so the report includes them; it is not a
-measured-iterations-only aggregate. Doubling `--warmup` would discard measured
-calls without correctly removing those later phases.
-
 The report classifies bottlenecks per message size (evaluated in this order):
 - **unknown** — zero wall time (degenerate record)
 - **gpu-compute (no proxy)** — kernel-only collective with no proxy ops
@@ -143,12 +131,22 @@ The report classifies bottlenecks per message size (evaluated in this order):
 From the repository root, run the host-only regression tests:
 
 ```bash
-python3 -m pytest -q projects/rccl/test/test_accl_report.py \
-  projects/rccl/test/test_accl_profiler_ci.py projects/rccl/test/test_plan_rccl_ci.py
+python3 -m pytest -q projects/rccl/test/test_accl_profiler_ci.py \
+  projects/rccl/test/test_plan_rccl_ci.py
 ```
 
 These exercise the planner, artifact discovery, rendered Bash preflight checks,
-JSONL validation, and failure summaries. They do not replace GPU qualification.
+JSONL validation, and report/summary integration. They also run as a separate
+CPU-only job in `rccl-host-unit-tests.yml`. They do not replace GPU qualification
+or establish the numerical correctness of the profiler's output.
+
+[PR #11784](https://github.com/ROCm/rocm-systems/pull/11784) owns the GitHub Actions
+integration: package/build, suite selection, Ruby execution, and diagnostic
+artifacts. [PR #11881](https://github.com/ROCm/rocm-systems/pull/11881) owns the
+profiler/report correctness changes, including warmup filtering. The CI runs
+the reporter shipped with its fetched artifact; report calculations are not
+reimplemented here. That correctness PR also identifies remaining KernelCh
+issues, so it must not be assumed to fix every AllGather coverage failure.
 
 To qualify a PR branch with a fresh gfx950 build and the two-node Ruby sweep:
 
@@ -169,5 +167,8 @@ The CI sweep uses five iterations and two initial warmups per size, with a
 dropped/leaked records, incomplete summaries, missing ranks or requested sizes,
 and report failures. AllGather/ReduceScatter descriptor bytes are per-rank
 contributions, not rccl-tests' aggregate buffer bytes. A successful process exit
-alone is not a passing profiler run. Keep `manifest.json`, the reports, preflight
-log, and raw JSONL artifacts as the qualification evidence.
+alone is not a passing output-validation run. Missing coverage remains a visible
+failure to hand off to profiler work, not a reason to duplicate fixes in the CI
+driver. Keep `manifest.json`, the reports, preflight log, and raw JSONL artifacts
+as the execution and output-validation evidence. Report timings remain subject
+to the correctness work above.

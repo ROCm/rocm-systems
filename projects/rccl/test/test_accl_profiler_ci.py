@@ -84,7 +84,9 @@ def _write_rank_file(
             "summary": {
                 "dropped_collectives": 0 if complete else 1,
                 "leaked_collectives": 0,
-                "pool_size": 256,
+                # The CI reader does not depend on the pool-size key. Use the
+                # reporter schema from #11881; the older reporter also reads it.
+                "coll_pool_size": 256,
                 "complete": complete,
             }
         }
