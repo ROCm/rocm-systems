@@ -4,8 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// ncclGinConnectOnce establishes NCCL_GIN_NCONNECTIONS comms in a loop. When a
-// later one fails, the comms already opened must be closed, not leaked.
+// ncclGinConnectOnce must close the comms it already opened when a later connect fails.
 
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
@@ -30,10 +29,7 @@ namespace RcclUnitTesting
 namespace
 {
 
-// The example plugin defaults to PROXY, which ncclGinPluginAssignToComm drops in
-// favour of the built-in proxy. GPI has no in-tree implementation, so claiming
-// it is what lets this plugin become the active backend. Taken from the enum so
-// a renumbering cannot leave the test quietly selecting some other backend.
+// External PROXY plugins lose to the built-in proxy; no in-tree backend claims GPI, so the plugin wins.
 constexpr int kGinTypeGpi = NCCL_NET_DEVICE_GIN_GPI;
 
 // Fail the second connect: the first has to have been opened, and released.
@@ -46,8 +42,7 @@ constexpr const char* kGinExamplePluginDir = RCCL_GIN_EXAMPLE_PLUGIN_DIR;
 constexpr const char* kGinExamplePluginDir = nullptr;
 #endif
 
-// The test binary is installed but the build tree is not, so look next to the
-// running executable first and fall back to the build-tree path for local runs.
+// Prefer the plugin installed next to this binary, else the build-tree copy.
 std::string ginExamplePluginPath()
 {
     char self[PATH_MAX];
@@ -104,8 +99,7 @@ protected:
 
     void SetUp() override
     {
-        // Both preconditions are reduced: a rank that skips alone leaves its peer
-        // blocked in the next collective until the suite is force-aborted.
+        // Skip on all ranks together: a rank skipping alone would hang its peer.
         const std::string plugin = ginExamplePluginPath();
         if(auto reason = mpiCoordinatedSkipReason(
                !fileExists(plugin),
@@ -124,10 +118,7 @@ protected:
             GTEST_SKIP() << reason;
         }
         counterPath_ = counter;
-        // /tmp is sticky, so a leftover owned by another user cannot be unlinked.
-        // The plugin's open() would then fail silently and readCounter would parse
-        // that file's numbers instead, letting the assertions pass on stale data
-        // even with the cleanup removed. Refuse to run rather than read it.
+        // A leftover we cannot remove (sticky /tmp) would feed stale counts to the assertions.
         remove(counterPath_.c_str());
         if(auto reason = mpiCoordinatedSkipReason(
                fileExists(counterPath_),
@@ -138,14 +129,10 @@ protected:
             GTEST_SKIP() << reason;
         }
 
-        // An absolute path, not "example": the loader dlopens the name verbatim
-        // first, and an LD_LIBRARY_PATH set from inside the process never reaches
-        // dlopen, since glibc resolves the search path at startup.
+        // Absolute path: an in-process LD_LIBRARY_PATH change never reaches dlopen.
         setenv("NCCL_GIN_PLUGIN", plugin.c_str(), 1);
         setenv("NCCL_GIN_ENABLE", "1", 1);
-        // cuMem auto-enables only on gfx1250 (rocmwrap.cc), and without it
-        // symmetricSupport is false and ncclGinConnectOnce never runs, so the
-        // test would skip on every other architecture unless the runner set it.
+        // Without cuMem there is no symmetric support, and ncclGinConnectOnce never runs.
         setenv("NCCL_CUMEM_ENABLE", "1", 1);
         setenv("NCCL_GIN_TYPE", std::to_string(kGinTypeGpi).c_str(), 1);
         setenv("RCCL_GIN_EXAMPLE_DEVICE_TYPE", std::to_string(kGinTypeGpi).c_str(), 1);
@@ -156,12 +143,10 @@ protected:
     }
 };
 
-// Regression for the leak fixed upstream in NCCL PR #2206: the failure path of
-// ncclGinConnectOnce must close the listen comm and every GIN comm it opened.
+// Regression for NVIDIA/nccl#2206.
 TEST_F(GinConnectLeakMPITest, FailedConnectReleasesOpenedComms)
 {
-    // GIN is only brought up when the LSA team is smaller than the communicator,
-    // so a single-node run would never reach ncclGinConnectOnce at all.
+    // GIN is set up only when the communicator spans more than one node.
     SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2,
                             /*max_processes=*/2,
                             /*require_power_of_two=*/false,
@@ -177,17 +162,12 @@ TEST_F(GinConnectLeakMPITest, FailedConnectReleasesOpenedComms)
     TEST_INFO("GIN example plugin: connect=%d closeColl=%d closeListen=%d (setupFailed=%d)",
               connects, closeColls, closeListens, setupFailed ? 1 : 0);
 
-    // Order matters for the diagnosis: setup failing is what the injection was
-    // for, so check that first. The counter assertions below only make sense once
-    // the plugin is known to have become the active backend and to have reached
-    // the injected failure; otherwise they would pass vacuously.
+    // Prove the plugin reached the injected failure, or the counts below would pass vacuously.
     ASSERT_MPI_TRUE(setupFailed);
     ASSERT_MPI_TRUE(haveCounters);
     ASSERT_MPI_EQ(kFailConnectAt, connects);
 
-    // The comms opened before the failure must have been closed, not leaked. The
-    // listen comm is closed once per successful connect and once more by the
-    // failure path, so an exact count is what distinguishes the two.
+    // The listen comm closes once per successful connect and once more on the failure path.
     ASSERT_MPI_EQ(kFailConnectAt - 1, closeColls);
     ASSERT_MPI_EQ(kFailConnectAt, closeListens);
 }

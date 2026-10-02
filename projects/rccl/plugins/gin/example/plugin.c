@@ -14,16 +14,7 @@
 
 #define __hidden __attribute__((visibility("hidden")))
 
-/* Fault-injection hooks, all inert unless the matching env var is set.
- *
- * RCCL_GIN_EXAMPLE_DEVICE_TYPE     report this netDeviceType instead of PROXY.
- *   ncclGinPluginAssignToComm skips external PROXY plugins in favour of the
- *   built-in proxy, so a test needing this plugin to become the active backend
- *   must claim a type no in-tree plugin implements.
- * RCCL_GIN_EXAMPLE_FAIL_CONNECT_AT fail the Nth connect() call (1-based).
- * RCCL_GIN_EXAMPLE_COUNTER_FILE    record close counts, so a test can prove the
- *   comms opened before the failure were released rather than leaked.
- */
+// Test hooks, inert unless set: RCCL_GIN_EXAMPLE_{DEVICE_TYPE,FAIL_CONNECT_AT,COUNTER_FILE}.
 static int ginEnvInt(const char* name, int fallback) {
   const char* v = getenv(name);
   return (v != NULL && *v != '\0') ? atoi(v) : fallback;
@@ -41,9 +32,7 @@ static int ginCloseListenCalls = 0;
 static void ginWriteCounters(void) {
   const char* path = getenv("RCCL_GIN_EXAMPLE_COUNTER_FILE");
   if (path == NULL || *path == '\0') return;
-  // O_NOFOLLOW, not fopen: the runner pins this to a fixed name in world-writable
-  // /tmp, where a pre-created symlink would otherwise silently redirect the write
-  // and leave the test reading someone else's numbers.
+  // O_NOFOLLOW: the file sits in world-writable /tmp, so never write through a planted symlink.
   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
   if (fd < 0) return;
   FILE* f = fdopen(fd, "w");
