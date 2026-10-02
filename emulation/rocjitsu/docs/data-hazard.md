@@ -88,6 +88,7 @@ hazards whose duplicate count was still unknown when they were first streamed.
 |---|---|---|
 | `report_path` | `""` | File to write the JSON hazard report to. Empty means output goes only to the sink. |
 | `verbose` | `false` | Report every occurrence instead of folding logically identical hazards into one entry with a `suppressed_occurrences` count. |
+| `global_memory_races` | `true` | Check global memory for cross-workgroup races. Set to `false` to limit detection to registers and LDS within a workgroup; wait-counter tracking for global loads and stores is unaffected. |
 
 ```json
 {
@@ -124,7 +125,8 @@ process exit. While a run is still going the sink is the only output.
   bytes and at least one writes. Sub-dword accesses that fall in the same
   four-byte shadow entry without sharing a byte do not race. Two atomics to one
   address are ordered by the hardware and do not race, but an ordinary access
-  racing an atomic is reported whichever of the two ran first.
+  racing an atomic is reported whichever of the two ran first. Turned off by
+  `global_memory_races: false`.
 
 Every report names the wait that would have prevented it, and the suggestion
 names the same resource the message names — a register hazard suggests waiting
@@ -142,15 +144,36 @@ event:
 2. **Wait** — an `s_wait_*` instruction. The engine retires entries from the
    named counter's FIFO down to the immediate's target depth.
 3. **Barrier** — closes the current LDS epoch for the workgroup. Accesses
-   recorded in the closed epoch are checked pairwise for cross-wave races and
-   then discarded. The epoch closes when the simulator resolves the barrier,
-   not when a wave reaches it: a wave that arrives early shares its epoch with
-   the waves still issuing pre-barrier accesses, so those races are compared.
+   recorded in the closed epoch are checked pairwise for cross-wave races. The
+   epoch closes when the simulator resolves the barrier, not when a wave
+   reaches it: a wave that arrives early shares its epoch with the waves still
+   issuing pre-barrier accesses, so those races are compared.
+
+   A barrier orders the waves' issue, not the completion of what each wave
+   already has in flight. An access its wave has not yet waited for when the
+   barrier resolves (for example a `ds_write` with no `s_wait_dscnt 0` before
+   `s_barrier`) is carried into the next epoch and compared with the other
+   waves' accesses there, until a later barrier finds it drained. Everything
+   else in the closed epoch is discarded.
+
+Within one wave, DS instructions reach the LDS in issue order, so a DS access is
+never reported against an earlier DS access from its own wave. LDS DMA and
+tensor DMA writes are not ordered with DS and are still checked.
 
 Pending operations are tracked at the granularity they are issued: registers as
 spans of consecutive registers, LDS and global memory as byte ranges. A
 multi-register load is one pending entry spanning every register it writes, so a
 read of any register in the span is caught.
+
+Vector registers are also tracked per lane. A VGPR holds one value per lane, and
+an access conflicts with a pending load only on lanes both have active: a load on
+the lanes taking an `if` cannot be raced by the `else` lanes writing or reading
+the same register. A load's lanes are EXEC at issue, including lanes a buffer
+bounds check dropped from the access, since those are zero-filled. Instructions
+that reach lanes outside EXEC (matrix ops, `v_writelane`, cross-lane and
+transpose DS ops) are compared on every lane. 16-bit halves of a register are not
+tracked separately: an access to either half conflicts with a load into the
+other.
 
 A tensor DMA into LDS names no address in its encoding: the LDS base, element
 size, tile dimensions, iteration stride and row padding all come from a

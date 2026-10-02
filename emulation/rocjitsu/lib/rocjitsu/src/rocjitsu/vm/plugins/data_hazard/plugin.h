@@ -16,6 +16,8 @@
 ///   - `report_path`: file to write the JSON hazard report to. Empty means the
 ///     summary is only written to the plugin sink.
 ///   - `verbose`: report every hazard occurrence instead of folding duplicates.
+///   - `global_memory_races`: check global memory for cross-workgroup races.
+///     Off narrows detection to registers and LDS within a workgroup.
 
 #pragma once
 
@@ -39,11 +41,11 @@
 #include <vector>
 
 namespace rocjitsu::amdgpu {
-struct VectorMemState;
+class VectorMemState;
 }
 
 namespace rocjitsu::amdgpu::tensor_dma_detail {
-struct TensorDmaDescriptor;
+class TensorDmaDescriptor;
 }
 
 namespace rocjitsu::plugins::data_hazard {
@@ -150,6 +152,8 @@ struct PluginConfig {
   std::string report_path;
   /// Retain every hazard occurrence rather than folding duplicates.
   bool verbose = false;
+  /// Check global memory accesses for cross-workgroup races.
+  bool global_memory_races = true;
 };
 
 class DataHazardPlugin : public ExecutionPlugin {
@@ -216,8 +220,10 @@ private:
   /// report written at process exit is not racing fresh detections.
   bool shutting_down() const { return shutting_down_.load(std::memory_order_acquire); }
 
-  void emit_source_reads(const InstructionView &view, const Instruction &inst);
-  void emit_destination_writes(const InstructionView &view, const Instruction &inst);
+  void emit_source_reads(const InstructionView &view, const Instruction &inst,
+                         const amdgpu::Wavefront &wf);
+  void emit_destination_writes(const InstructionView &view, const Instruction &inst,
+                               const amdgpu::Wavefront &wf);
   /// Routes the LDS a tensor DMA transfer touches, derived from the descriptor
   /// the transfer will execute from. @p reads_lds distinguishes a store
   /// streaming LDS out from a load streaming it in.

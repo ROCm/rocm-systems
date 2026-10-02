@@ -13,6 +13,9 @@
 #include <shared_mutex>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -81,6 +84,21 @@ std::string register_write_suggestion(const SimulatorInstructionFormatter *forma
 
 std::string lds_read_suggestion(const SimulatorInstructionFormatter *formatter, WaitCntType kind) {
   return wait_suggestion(formatter, kind, HazardAccessKind::Read, HazardResourceLabel::LdsAddress);
+}
+
+/// Suggestion for an LDS race across a barrier: the wave whose access was still
+/// outstanding has to drain @p kind before it. The frontend's wording names the
+/// target's wait ("Add <wait> before ..."), so its wait is reused from that.
+std::string barrier_drain_suggestion(const SimulatorInstructionFormatter *formatter,
+                                     WaitCntType kind, EntityId wave_id) {
+  const std::string sentence =
+      wait_suggestion(formatter, kind, HazardAccessKind::Write, HazardResourceLabel::LdsAddress);
+  static constexpr std::string_view kPrefix = "Add ";
+  const size_t before = sentence.find(" before ");
+  if (sentence.rfind(kPrefix, 0) != 0 || before == std::string::npos)
+    return sentence;
+  return "Add " + sentence.substr(kPrefix.size(), before - kPrefix.size()) + " in wave " +
+         std::to_string(wave_id) + " before the workgroup barrier";
 }
 
 std::string register_read_suggestion(const SimulatorInstructionFormatter *formatter,
@@ -396,6 +414,14 @@ void DataHazardEngine::set_diagnostic_handler(EngineDiagnosticHandler handler) {
   diagnostic_handler_ = std::move(handler);
 }
 
+void DataHazardEngine::set_global_memory_races(bool enabled) {
+  global_memory_races_.store(enabled, std::memory_order_relaxed);
+}
+
+bool DataHazardEngine::global_memory_races() const {
+  return global_memory_races_.load(std::memory_order_relaxed);
+}
+
 uint64_t DataHazardEngine::rejected_event_count() const {
   return rejected_events_.load(std::memory_order_relaxed);
 }
@@ -563,7 +589,7 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
   }
 
   if (!epoch_to_check.empty())
-    check_lds_epoch_for_races(epoch_key, epoch_to_check);
+    close_lds_epoch(epoch_key, std::move(epoch_to_check));
 }
 
 void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
@@ -604,7 +630,8 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
     break;
   case ResourceKind::GlobalMemory: {
     lock.unlock();
-    check_global_access_for_races(ctx, event);
+    if (global_memory_races())
+      check_global_access_for_races(ctx, event);
     return;
   }
   case ResourceKind::ScratchMemory:
@@ -922,7 +949,8 @@ void DataHazardEngine::handle_vector_access(
   if (event.is_read)
     check_vector_raw_hazards(wave, ctx, event, event.resource_kind, reg, count);
   if (event.is_write)
-    check_vector_war_waw_hazards(wave, ctx, event, event.resource_kind, reg, count);
+    check_vector_war_waw_hazards(wave, ctx, event, event.resource_kind, reg, count,
+                                 vector_write_wait, vector_write_also_waits_lds);
   track_vector_pending(wave, ctx, event, event.resource_kind, reg, count, vector_write_wait,
                        vector_write_also_waits_lds, vector_read_wait);
 }
@@ -937,6 +965,7 @@ void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
   const auto &pending_writes_ds =
       pending_registers(wave.core, regs.file, PendingRegisterSet::DsWrites);
   const EntityId current_id = event.instruction.instruction_id;
+  const uint64_t lanes = lanes_or_all(event.exec_mask);
 
   // These handlers walk register by register because the pending vmem and LDS
   // sides have to be consulted separately, but only the first register of a
@@ -956,9 +985,9 @@ void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
       break;
 
     const auto vmem_hazard = check_vector_hazard_info(
-        &wave.core, regs.file, PendingRegisterSet::Writes, read_reg, 1, current_id);
+        &wave.core, regs.file, PendingRegisterSet::Writes, read_reg, 1, current_id, lanes);
     const auto ds_hazard = check_vector_hazard_info(
-        &wave.core, regs.file, PendingRegisterSet::DsWrites, read_reg, 1, current_id);
+        &wave.core, regs.file, PendingRegisterSet::DsWrites, read_reg, 1, current_id, lanes);
 
     const PendingAsyncOp *vmem_pending = vmem_hazard.pending;
     const PendingAsyncOp *ds_pending = ds_hazard.pending;
@@ -1019,11 +1048,18 @@ void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
                                                     const EngineInstructionContext &ctx,
                                                     const ResourceAccessEvent &event,
                                                     ResourceKind resource_kind, uint32_t reg,
-                                                    uint32_t count) {
+                                                    uint32_t count, WaitCntType vector_write_wait,
+                                                    bool vector_write_also_waits_lds) {
   const VectorRegisterFileInfo regs = vector_register_file(resource_kind);
   const auto &pending_writes = pending_registers(wave.core, regs.file, PendingRegisterSet::Writes);
+  // DS loads return data in issue order, so a DS load cannot be overtaken by an
+  // earlier DS load into the same register. A flat load's global half, VMEM and
+  // VALU writes are not in that order and still race a pending DS load.
+  const bool is_ds_load_destination =
+      vector_write_wait == WaitCntType::LDS && !vector_write_also_waits_lds;
   const auto &pending_reads = pending_registers(wave.core, regs.file, PendingRegisterSet::Reads);
   const EntityId current_id = event.instruction.instruction_id;
+  const uint64_t lanes = lanes_or_all(event.exec_mask);
   const uint32_t last_access_reg = reg + count - 1;
   const auto reg_label = [&](const std::unordered_map<uint32_t, PendingAsyncOp> &pending_map,
                              uint32_t first, EntityId producer) {
@@ -1037,7 +1073,7 @@ void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
     if (written_reg > regs.max_index)
       break;
     const auto war_hazard = check_vector_hazard_info(
-        &wave.core, regs.file, PendingRegisterSet::Reads, written_reg, 1, current_id);
+        &wave.core, regs.file, PendingRegisterSet::Reads, written_reg, 1, current_id, lanes);
     if (!war_hazard.pending)
       continue;
 
@@ -1065,11 +1101,13 @@ void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
     // ordering hazard because the pending memory read can still write the
     // old value later.
     const auto waw_hazard =
-        check_vector_waw_hazard_info(&wave.core, regs.file, written_reg, 1, current_id);
+        check_vector_waw_hazard_info(&wave.core, regs.file, written_reg, 1, current_id, lanes);
     if (const auto *pending = waw_hazard.pending) {
       // A flat load's DScnt-side marker can remain after LOADcnt clears.
       // By itself it is not a separate destination-write hazard.
       if (pending->is_flat_ds)
+        continue;
+      if (is_ds_load_destination && pending->wait_type == WaitCntType::LDS)
         continue;
 
       if (claim_register_hazard(wave.core.reported_waw_hazards, wave.core.reported_waw_pairs,
@@ -1098,12 +1136,13 @@ void DataHazardEngine::track_vector_pending(
     return;
 
   const EntityId current_id = event.instruction.instruction_id;
+  const uint64_t lanes = lanes_or_all(event.exec_mask);
 
   if (event.is_read) {
     if (vector_read_wait == WaitCntType::NONE)
       return;
     track_pending_raw_isa(wave, ctx);
-    track_vector_read(&wave.core, file, current_id, ctx.pc, reg, count, vector_read_wait);
+    track_vector_read(&wave.core, file, current_id, ctx.pc, reg, count, vector_read_wait, lanes);
     return;
   }
 
@@ -1113,14 +1152,16 @@ void DataHazardEngine::track_vector_pending(
   track_pending_raw_isa(wave, ctx);
 
   if (vector_write_wait == WaitCntType::LDS) {
-    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/false);
+    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/false,
+                         lanes);
     return;
   }
 
-  track_vector_write(&wave.core, file, current_id, ctx.pc, reg, count, vector_write_wait);
+  track_vector_write(&wave.core, file, current_id, ctx.pc, reg, count, vector_write_wait, lanes);
 
   if (vector_write_also_waits_lds)
-    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/true);
+    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/true,
+                         lanes);
 }
 
 void DataHazardEngine::handle_scalar_access(EngineWaveState &wave,
@@ -1217,6 +1258,17 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
   const uint32_t size = event.size_bytes;
   const EntityId current_id = event.instruction.instruction_id;
 
+  // The LDS executes one wave's DS instructions in issue order, so a DS access
+  // cannot race an earlier DS access from its own wave, outstanding or not. What
+  // reaches LDS on another counter -- LDS DMA on LOADcnt, tensor DMA on
+  // TENSORcnt -- is unordered with DS and is still checked. Cross-wave races are
+  // the workgroup epoch's job and are unaffected.
+  const auto ordered_with = [](WaitCntType access_counter) {
+    return access_counter == WaitCntType::LDS ? WaitCntType::LDS : WaitCntType::NONE;
+  };
+  const WaitCntType read_counter =
+      event.hazards.read_wait != WaitCntType::NONE ? event.hazards.read_wait : WaitCntType::LDS;
+
   if (event.is_read) {
     auto report_overlap = [&](const PendingAsyncOp *pending, WaitCntType fallback_wait_type) {
       if (!pending)
@@ -1238,17 +1290,17 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
                      lds_read_suggestion(instruction_formatter(), wait_type));
     };
 
-    report_overlap(hazard_core::check_lds_read_hazard(&wave.core, address, size), WaitCntType::LDS);
+    report_overlap(
+        hazard_core::check_lds_read_hazard(&wave.core, address, size, ordered_with(read_counter)),
+        WaitCntType::LDS);
     report_overlap(hazard_core::check_tensor_lds_hazard(&wave.core, address, size),
                    WaitCntType::TENSOR);
 
     if (!event.is_write) {
       // A read outstanding on a counter of its own, as the LDS a tensor store
       // streams out is, retires with that counter rather than with DScnt.
-      const WaitCntType read_wait =
-          event.hazards.read_wait != WaitCntType::NONE ? event.hazards.read_wait : WaitCntType::LDS;
       track_pending_raw_isa(wave, ctx);
-      hazard_core::track_lds_read(&wave.core, current_id, ctx.pc, address, size, read_wait);
+      hazard_core::track_lds_read(&wave.core, current_id, ctx.pc, address, size, read_counter);
     }
   }
 
@@ -1277,7 +1329,8 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
   }
 
   if (event.is_write && !event.is_read && local_write_wait != WaitCntType::TENSOR) {
-    if (const auto *pending = hazard_core::check_lds_write_hazard(&wave.core, address, size)) {
+    if (const auto *pending = hazard_core::check_lds_write_hazard(&wave.core, address, size,
+                                                                  ordered_with(local_write_wait))) {
       hazard_core::LdsHazardKey key{pending->instruction_id, current_id};
       if (!wave.core.reported_lds_hazards.count(key)) {
         wave.core.reported_lds_hazards.insert(key);
@@ -1420,7 +1473,53 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
     workgroup->lds_epoch.clear();
   }
   if (!epoch.empty())
-    check_lds_epoch_for_races(key, epoch);
+    close_lds_epoch(key, std::move(epoch));
+}
+
+// A barrier orders the waves' issue, not the completion of what each already has
+// in flight: an LDS access still outstanding when the barrier resolves can land
+// after another wave's access past it. Such accesses are carried into the next
+// epoch and compared there, until a barrier finds them drained.
+void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
+                                       std::vector<EngineLdsAccessRecord> epoch) {
+  check_lds_epoch_for_races(key, epoch);
+
+  // Each wave's lock is taken on its own, never under the workgroup's:
+  // on_instruction takes them in the opposite order.
+  std::unordered_map<EntityId, std::unordered_map<EntityId, WaitCntType>> pending_by_wave;
+  for (const auto &record : epoch)
+    pending_by_wave.try_emplace(record.wave_id);
+  for (auto &[wave_id, pending] : pending_by_wave) {
+    auto wave = get_wave(EngineWaveKey{key.dispatch_id, key.cluster_id, key.workgroup_id, wave_id});
+    if (!wave)
+      continue;
+    std::lock_guard<util::Spinlock> lock(wave->mutex);
+    hazard_core::collect_pending_lds_ops(wave->core, pending);
+  }
+
+  std::vector<EngineLdsAccessRecord> carried;
+  for (auto &record : epoch) {
+    const auto &pending = pending_by_wave[record.wave_id];
+    const auto it = pending.find(record.instruction_id);
+    if (it == pending.end())
+      continue;
+    record.pending_at_barrier = it->second;
+    carried.push_back(record);
+  }
+  if (carried.empty())
+    return;
+
+  std::shared_ptr<EngineWorkgroupState> workgroup;
+  {
+    std::shared_lock<std::shared_mutex> lock(state_.mutex);
+    auto it = state_.workgroups.find(key);
+    if (it != state_.workgroups.end())
+      workgroup = it->second;
+  }
+  if (!workgroup)
+    return;
+  std::lock_guard<util::Spinlock> lock(workgroup->mutex);
+  workgroup->lds_epoch.insert(workgroup->lds_epoch.end(), carried.begin(), carried.end());
 }
 
 void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
@@ -1458,6 +1557,11 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
         continue;
       if (first.is_atomic && second.is_atomic)
         continue;
+      // Both were made before the barrier that carried them, and were compared
+      // in that epoch.
+      if (first.pending_at_barrier != WaitCntType::NONE &&
+          second.pending_at_barrier != WaitCntType::NONE)
+        continue;
 
       const EntityId wave_lo = std::min(first.wave_id, second.wave_id);
       const EntityId wave_hi = std::max(first.wave_id, second.wave_id);
@@ -1466,6 +1570,10 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       const auto &writer = first.is_write ? first : second;
       const auto &other = first.is_write ? second : first;
       const char *other_action = other.is_write ? "writes" : "reads";
+      const EngineLdsAccessRecord *carried = first.pending_at_barrier != WaitCntType::NONE ? &first
+                                             : second.pending_at_barrier != WaitCntType::NONE
+                                                 ? &second
+                                                 : nullptr;
 
       {
         const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
@@ -1480,7 +1588,18 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       msg << "LDS data race: Wave " << writer.wave_id << " writes LDS address 0x" << std::hex
           << writer.address << " (size " << std::dec << writer.size << ") and Wave "
           << other.wave_id << " " << other_action << " LDS address 0x" << std::hex << other.address
-          << " (size " << std::dec << other.size << ") " << kMessageSuffix;
+          << " (size " << std::dec << other.size << ") ";
+      if (carried) {
+        msg << "across a workgroup barrier: Wave " << carried->wave_id << "'s "
+            << (carried->is_write ? "write" : "read")
+            << " was still outstanding when the barrier resolved";
+      } else {
+        msg << kMessageSuffix;
+      }
+      const std::string suggestion =
+          carried ? barrier_drain_suggestion(instruction_formatter(), carried->pending_at_barrier,
+                                             carried->wave_id)
+                  : std::string(kSuggestion);
 
       EngineWarning warning;
       warning.finding.kind = HazardKind::LocalMemoryRace;
@@ -1505,9 +1624,9 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       warning.finding.source_instruction.pc = writer.pc;
       warning.finding.source_instruction.raw_isa = writer.raw_isa;
       warning.finding.message_template = msg.str();
-      warning.finding.suggestion_template = kSuggestion;
+      warning.finding.suggestion_template = suggestion;
       warning.message = msg.str();
-      warning.suggestion = kSuggestion;
+      warning.suggestion = suggestion;
       warning.source_raw_isa = writer.raw_isa;
       warning.source_pc = writer.pc;
       warning.has_source = true;

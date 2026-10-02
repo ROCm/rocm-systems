@@ -50,6 +50,7 @@ DataHazardEngine &reset_generic_engine(FakeFormatter &formatter) {
   engine.reset();
   engine.set_instruction_formatter(&formatter);
   engine.set_warning_sink(nullptr);
+  engine.set_global_memory_races(true);
   engine.on_dispatch_begin(1);
   return engine;
 }
@@ -1569,49 +1570,9 @@ TEST(GenericDataHazardEngineTest, DetectsVgprWawFromDsWriteAfterVmemWrite) {
   EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt 0 before writing this register");
 }
 
-TEST(GenericDataHazardEngineTest, DetectsVgprWawBetweenPureDsVectorDestinations) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-  engine.on_workgroup_begin(1, 0, 0);
-
-  ExecutionKey wave{1, 0, 0, 0};
-  engine.on_wave_begin(wave);
-
-  InstructionEvent first_ds_read;
-  first_ds_read.instruction = make_instruction(1, 0x100);
-  first_ds_read.hazards.vector_write_wait = WaitCntType::LDS;
-  engine.on_instruction(first_ds_read);
-
-  ResourceAccessEvent first_dest;
-  first_dest.instruction = first_ds_read.instruction;
-  first_dest.resource_kind = ResourceKind::VectorRegister;
-  first_dest.register_kind = RegisterKind::Vector;
-  first_dest.resource_index = 13;
-  first_dest.size_bytes = 4;
-  first_dest.is_write = true;
-  engine.on_resource_access(first_dest);
-
-  InstructionEvent second_ds_read;
-  second_ds_read.instruction = make_instruction(2, 0x104);
-  second_ds_read.hazards.vector_write_wait = WaitCntType::LDS;
-  engine.on_instruction(second_ds_read);
-
-  ResourceAccessEvent second_dest;
-  second_dest.instruction = second_ds_read.instruction;
-  second_dest.resource_kind = ResourceKind::VectorRegister;
-  second_dest.register_kind = RegisterKind::Vector;
-  second_dest.resource_index = 13;
-  second_dest.size_bytes = 4;
-  second_dest.is_write = true;
-  engine.on_resource_access(second_dest);
-
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("WAW hazard: VGPR v13"), std::string::npos);
-  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
-  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this register");
-}
-
+// The reader is a tensor store streaming the LDS out on TENSORcnt, which is
+// unordered with the DS write ahead of it. A DS read here would not race: see
+// SameWaveDsReadAfterDsWriteIsNotRaw.
 TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);
@@ -1635,7 +1596,6 @@ TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
 
   InstructionEvent read_inst;
   read_inst.instruction = make_instruction(2, 0x104);
-  read_inst.hazards.local_write_wait = WaitCntType::LDS;
   engine.on_instruction(read_inst);
 
   ResourceAccessEvent read_access;
@@ -1644,6 +1604,7 @@ TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
   read_access.address = 0x80;
   read_access.size_bytes = 4;
   read_access.is_read = true;
+  read_access.hazards.read_wait = WaitCntType::TENSOR;
   engine.on_resource_access(read_access);
 
   const auto warnings = engine.warning_snapshot();
@@ -1652,6 +1613,9 @@ TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
   EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before reading this LDS address");
 }
 
+// The writer is LDS DMA (a global load with an LDS destination, on LOADcnt),
+// which is unordered with the DS read ahead of it. A DS write here would not
+// race: see SameWaveDsWriteAfterDsReadIsNotWar.
 TEST(GenericDataHazardEngineTest, DetectsLdsWarHazardWithLdsAddressSuggestion) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);
@@ -1662,6 +1626,97 @@ TEST(GenericDataHazardEngineTest, DetectsLdsWarHazardWithLdsAddressSuggestion) {
 
   InstructionEvent read_inst;
   read_inst.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(2, 0x104);
+  write_inst.hazards.local_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAR hazard: LDS address 0x80"), std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this LDS address");
+}
+
+// The LDS executes one wave's DS instructions in issue order (GFX9 shader
+// programming guide, "Instruction Counters" and "Xnack-Replay"; MI400 guide
+// §4.3.7.2.3 and §4.3.7.2.4), so a DS access never races an earlier DS access
+// from its own wave, whatever DScnt says. Only a different type writing LDS --
+// LDS DMA on LOADcnt, tensor DMA on TENSORcnt -- is unordered with DS.
+//
+// Found by the race corpus: lds_war_pattern.wait002/wait004, lds_reduce.wait002,
+// trans_lds.wait002 and fa_barrier_epoch.wait002 remove the s_wait_dscnt (or
+// lgkmcnt) after a ds_write and report this RAW when the same lane reads its own
+// slot back.
+TEST(GenericDataHazardEngineTest, SameWaveDsReadAfterDsWriteIsNotRaw) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  // No s_wait_dscnt: the ds_write is still outstanding when the ds_read issues.
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x104);
+  read_inst.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// lds_war_pattern.wait003 and lds_reduce.wait003: a lane reads its own slot and
+// then overwrites it with no s_wait_dscnt between. The read is ahead of the write
+// in the LDS, so the write cannot clobber the value before it is read.
+TEST(GenericDataHazardEngineTest, SameWaveDsWriteAfterDsReadIsNotWar) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(1, 0x100);
+  read_inst.hazards.vector_write_wait = WaitCntType::LDS;
   engine.on_instruction(read_inst);
 
   ResourceAccessEvent read_access;
@@ -1685,10 +1740,101 @@ TEST(GenericDataHazardEngineTest, DetectsLdsWarHazardWithLdsAddressSuggestion) {
   write_access.is_write = true;
   engine.on_resource_access(write_access);
 
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// fa_barrier_epoch.wait005: two ds_load_u16 into v2 with no s_wait_dscnt between.
+// DS loads return in issue order, so the second load's data always lands last.
+// Unlike two VMEM loads, whose data may reach VGPRs out of order (MI400 guide
+// §2.4), this is not a WAW.
+TEST(GenericDataHazardEngineTest, SameWaveDsLoadsIntoOneVgprAreNotWaw) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  for (EntityId id : {EntityId{1}, EntityId{2}}) {
+    InstructionEvent ds_load;
+    ds_load.instruction = make_instruction(id, 0x100 + 4 * id);
+    ds_load.hazards.vector_write_wait = WaitCntType::LDS;
+    engine.on_instruction(ds_load);
+
+    ResourceAccessEvent dest;
+    dest.instruction = ds_load.instruction;
+    dest.resource_kind = ResourceKind::VectorRegister;
+    dest.register_kind = RegisterKind::Vector;
+    dest.resource_index = 2;
+    dest.size_bytes = 4;
+    dest.is_write = true;
+    engine.on_resource_access(dest);
+  }
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// tensor_lds.wait000 / tensor_lds_offset.wait000: a ds_store sentinel is still
+// outstanding when tensor_load_to_lds overwrites the same LDS. That WAW is real,
+// since tensor DMA is unordered with DS (MI400 guide §2.4). After
+// s_wait_tensorcnt, a ds_load of the same address is ordered behind the ds_store,
+// so it must not also be reported as a RAW against the store.
+TEST(GenericDataHazardEngineTest, DsLoadAfterTensorWaitIsNotRawAgainstOwnDsStore) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(2, 0x104);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x80;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  InstructionEvent tensor_wait;
+  tensor_wait.instruction = make_instruction(3, 0x108);
+  tensor_wait.wait_action.counters.push_back({WaitCntType::TENSOR, 0});
+  engine.on_instruction(tensor_wait);
+
+  InstructionEvent ds_load_inst;
+  ds_load_inst.instruction = make_instruction(4, 0x10c);
+  ds_load_inst.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_load_inst);
+
+  ResourceAccessEvent ds_load;
+  ds_load.instruction = ds_load_inst.instruction;
+  ds_load.resource_kind = ResourceKind::LocalMemory;
+  ds_load.address = 0x80;
+  ds_load.size_bytes = 4;
+  ds_load.is_read = true;
+  engine.on_resource_access(ds_load);
+
   const auto warnings = engine.warning_snapshot();
   ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("WAR hazard: LDS address 0x80"), std::string::npos);
-  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this LDS address");
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: LDS address 0x80"), std::string::npos);
 }
 
 TEST(GenericDataHazardEngineTest, DetectsVgprWawHazardWithWriteSuggestion) {
@@ -1999,6 +2145,53 @@ TEST(GenericDataHazardEngineTest, DetectsCrossWorkgroupGlobalRace) {
   EXPECT_TRUE(warnings[0].has_source);
   EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0xABCDEF01);
   EXPECT_EQ(warnings[0].source_raw_isa[0], 0xABCDEF01);
+}
+
+TEST(GenericDataHazardEngineTest, GlobalMemoryRacesOffSkipsCrossWorkgroupRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.set_global_memory_races(false);
+  EXPECT_FALSE(engine.global_memory_races());
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 1, 0};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.instruction.execution = writer_wave;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::GlobalMemory;
+  write_access.address = 0x1000;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x200);
+  read_inst.instruction.execution = reader_wave;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::GlobalMemory;
+  read_access.address = 0x1000;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+
+  // The setting outlives reset(), like the formatter and sink.
+  engine.reset();
+  EXPECT_FALSE(engine.global_memory_races());
+  engine.set_global_memory_races(true);
 }
 
 // Later readers must not displace every earlier one: whichever workgroup writes
@@ -3155,21 +3348,14 @@ TEST(GenericDataHazardEngineTest, LegacyLgkmWaitRetiresScalarAndLdsAsOneSequence
 
   EXPECT_TRUE(engine.warning_snapshot().empty());
 
-  InstructionEvent lds_read_inst;
-  lds_read_inst.instruction = make_instruction(5, 0x110);
-  engine.on_instruction(lds_read_inst);
-
-  ResourceAccessEvent lds_read;
-  lds_read.instruction = lds_read_inst.instruction;
-  lds_read.resource_kind = ResourceKind::LocalMemory;
-  lds_read.address = 0x180;
-  lds_read.size_bytes = 4;
-  lds_read.is_read = true;
-  engine.on_resource_access(lds_read);
-
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+  // lgkmcnt(1) left the newest operation, the LDS write, outstanding. It is read
+  // from the wave state rather than provoked with a DS read, which is ordered
+  // behind the write and would not race it.
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.lds_fifo.size(), 1u);
+  EXPECT_EQ(snapshot->core.lds_fifo.front().first, 0x180u);
+  EXPECT_EQ(snapshot->core.lds_fifo.front().second.wait_type, WaitCntType::LDS);
 }
 
 // A tensor store reads its LDS source until TENSORcnt drains, so overwriting
@@ -3675,6 +3861,18 @@ void race_one_epoch(DataHazardEngine &engine, EntityId write_id, uint64_t write_
   access(write_id, write_pc, writer_wave, true);
   access(read_id, read_pc, reader_wave, false);
 
+  // Drain both waves before the barrier, as compiled code does, so nothing is
+  // still outstanding to carry into the next epoch.
+  for (const auto &[wave, id] :
+       {std::pair{writer_wave, write_id}, std::pair{reader_wave, read_id}}) {
+    InstructionEvent wait;
+    wait.instruction = make_instruction(1000 + id, 0x3fc);
+    wait.instruction.execution = wave;
+    wait.wait_action.is_wait_instruction = true;
+    wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+    engine.on_instruction(wait);
+  }
+
   BarrierEvent barrier;
   barrier.wave = writer_wave;
   barrier.kind = BarrierKind::Workgroup;
@@ -3716,4 +3914,336 @@ TEST(GenericDataHazardEngineTest, SecondLdsRaceBetweenTheSameWavesIsStillReporte
   EXPECT_EQ(warnings[0].finding.instruction.pc, 0x340u);
   EXPECT_EQ(warnings[1].finding.source_instruction.pc, 0x400u);
   EXPECT_EQ(warnings[1].finding.instruction.pc, 0x440u);
+}
+
+namespace {
+
+/// Issue a DS read or write of LDS 0x80 from @p wave, set up the way the
+/// adapter reports ds_read and ds_write: the read's VGPR destination and the
+/// write's LDS data are both outstanding on DScnt.
+void ds_access(DataHazardEngine &engine, EntityId id, uint64_t pc, const ExecutionKey &wave,
+               bool is_write) {
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(id, pc);
+  instruction.instruction.execution = wave;
+  if (is_write)
+    instruction.hazards.local_write_wait = WaitCntType::LDS;
+  else
+    instruction.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(instruction);
+
+  ResourceAccessEvent event;
+  event.instruction = instruction.instruction;
+  event.resource_kind = ResourceKind::LocalMemory;
+  event.address = 0x80;
+  event.size_bytes = 4;
+  event.is_read = !is_write;
+  event.is_write = is_write;
+  engine.on_resource_access(event);
+}
+
+void close_lds_epoch(DataHazardEngine &engine, const ExecutionKey &wave) {
+  BarrierEvent barrier;
+  barrier.wave = wave;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+}
+
+} // namespace
+
+// The cross-wave counterpart of SameWaveDsWriteAfterDsReadIsNotWar. DS ordering
+// holds only within a wave, so a read in one wave and a write to the same LDS in
+// another, with no barrier between, race whichever comes first.
+TEST(GenericDataHazardEngineTest, CrossWaveDsWriteAfterDsReadRaces) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey reader_wave{1, 0, 0, 0};
+  const ExecutionKey writer_wave{1, 0, 0, 1};
+  engine.on_wave_begin(reader_wave);
+  engine.on_wave_begin(writer_wave);
+
+  ds_access(engine, 1, 0x300, reader_wave, /*is_write=*/false);
+  ds_access(engine, 2, 0x340, writer_wave, /*is_write=*/true);
+  close_lds_epoch(engine, reader_wave);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, 0x80u);
+}
+
+// The cross-wave counterpart of a same-wave pair of DS writes: two waves writing
+// the same LDS with no barrier between leave the final value up to timing.
+TEST(GenericDataHazardEngineTest, CrossWaveDsWritesToOneAddressRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey first_wave{1, 0, 0, 0};
+  const ExecutionKey second_wave{1, 0, 0, 1};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  ds_access(engine, 1, 0x300, first_wave, /*is_write=*/true);
+  ds_access(engine, 2, 0x340, second_wave, /*is_write=*/true);
+  close_lds_epoch(engine, first_wave);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, 0x80u);
+}
+
+// A barrier orders the waves' issue, not the completion of what each wave
+// already has in flight: between waves, LDS operations complete in no specific
+// order (MI400 guide §2.4), which is why the compiler drains DScnt before
+// s_barrier. An LDS access still outstanding when the barrier resolves can race
+// another wave's access after it.
+//
+// Found by the race corpus: lds_reduce.wait002, trans_lds.wait002 (gfx950 and
+// gfx1250) and fa_barrier_epoch.wait002 (gfx1250) remove the s_wait_dscnt /
+// lgkmcnt(0) before the barrier, and data_hazard reports no cross-wave race.
+namespace {
+
+/// Resolve a workgroup barrier the way the plugin reports it: once per wave,
+/// after every wave has arrived.
+void resolve_workgroup_barrier(DataHazardEngine &engine,
+                               std::initializer_list<ExecutionKey> waves) {
+  for (const ExecutionKey &wave : waves)
+    close_lds_epoch(engine, wave);
+}
+
+/// s_wait_dscnt 0 (or lgkmcnt(0)) on @p wave.
+void drain_dscnt(DataHazardEngine &engine, EntityId id, uint64_t pc, const ExecutionKey &wave) {
+  InstructionEvent wait;
+  wait.instruction = make_instruction(id, pc);
+  wait.instruction.execution = wave;
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+  engine.on_instruction(wait);
+}
+
+/// The one LDS race on 0x80 between instructions @p first and @p second,
+/// whichever of the two the engine names as the source.
+void expect_one_lds_race_between(const std::vector<EngineWarning> &warnings, EntityId first,
+                                 EntityId second) {
+  ASSERT_EQ(warnings.size(), 1u);
+  const auto &finding = warnings[0].finding;
+  EXPECT_EQ(finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(finding.address, 0x80u);
+  ASSERT_TRUE(finding.has_source_instruction);
+  const std::set<EntityId> pair{finding.source_instruction.instruction_id,
+                                finding.instruction.instruction_id};
+  EXPECT_EQ(pair, (std::set<EntityId>{first, second}));
+}
+
+} // namespace
+
+// The corpus misses: wave 0's ds_write is still outstanding at the barrier, and
+// wave 1 reads the location after it.
+TEST(GenericDataHazardEngineTest, CrossWaveReadAfterBarrierRacesAWriteStillPending) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  ds_access(engine, 1, 0x300, writer_wave, /*is_write=*/true);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  ds_access(engine, 2, 0x340, reader_wave, /*is_write=*/false);
+  engine.on_workgroup_end(1, 0, 0);
+
+  expect_one_lds_race_between(engine.warning_snapshot(), 1, 2);
+}
+
+// The same with a write after the barrier: wave 0's write can still land after
+// wave 1's.
+TEST(GenericDataHazardEngineTest, CrossWaveWriteAfterBarrierRacesAWriteStillPending) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey first_wave{1, 0, 0, 0};
+  const ExecutionKey second_wave{1, 0, 0, 1};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  ds_access(engine, 1, 0x300, first_wave, /*is_write=*/true);
+  resolve_workgroup_barrier(engine, {first_wave, second_wave});
+  ds_access(engine, 2, 0x340, second_wave, /*is_write=*/true);
+  engine.on_workgroup_end(1, 0, 0);
+
+  expect_one_lds_race_between(engine.warning_snapshot(), 1, 2);
+}
+
+// And with the outstanding access a read: wave 1's write after the barrier can
+// reach the LDS before wave 0's read of the old value does.
+TEST(GenericDataHazardEngineTest, CrossWaveWriteAfterBarrierRacesAReadStillPending) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey reader_wave{1, 0, 0, 0};
+  const ExecutionKey writer_wave{1, 0, 0, 1};
+  engine.on_wave_begin(reader_wave);
+  engine.on_wave_begin(writer_wave);
+
+  ds_access(engine, 1, 0x300, reader_wave, /*is_write=*/false);
+  resolve_workgroup_barrier(engine, {reader_wave, writer_wave});
+  ds_access(engine, 2, 0x340, writer_wave, /*is_write=*/true);
+  engine.on_workgroup_end(1, 0, 0);
+
+  expect_one_lds_race_between(engine.warning_snapshot(), 1, 2);
+}
+
+// The baselines of those mutants: the writer drains DScnt before the barrier, so
+// its write has landed before any wave gets past it. No race.
+TEST(GenericDataHazardEngineTest, CrossWaveReadAfterBarrierDoesNotRaceADrainedWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  ds_access(engine, 1, 0x300, writer_wave, /*is_write=*/true);
+  drain_dscnt(engine, 2, 0x304, writer_wave);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  ds_access(engine, 3, 0x340, reader_wave, /*is_write=*/false);
+  engine.on_workgroup_end(1, 0, 0);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A VGPR holds one value per lane, and an instruction touches only the lanes
+// active in EXEC when it runs. A pending load and a later access to the same
+// VGPR conflict only on lanes both have active: in an if/else that reuses a
+// register, a load on the "if" lanes cannot be raced by the "else" lanes.
+// An exec_mask of 0 means the frontend gave none, and is taken as every lane.
+namespace {
+
+/// One VGPR access to v@p reg on lanes @p exec. A load destination passes the
+/// counter it is outstanding on as @p write_wait; a store source as @p read_wait.
+void vgpr_access(DataHazardEngine &engine, EntityId id, uint64_t pc, uint32_t reg, uint64_t exec,
+                 bool is_write, WaitCntType write_wait = WaitCntType::NONE,
+                 WaitCntType read_wait = WaitCntType::NONE) {
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(id, pc);
+  instruction.hazards.vector_write_wait = write_wait;
+  instruction.hazards.vector_read_wait = read_wait;
+  engine.on_instruction(instruction);
+
+  ResourceAccessEvent access;
+  access.instruction = instruction.instruction;
+  access.resource_kind = ResourceKind::VectorRegister;
+  access.register_kind = RegisterKind::Vector;
+  access.resource_index = reg;
+  access.size_bytes = 4;
+  access.is_read = !is_write;
+  access.is_write = is_write;
+  access.exec_mask = exec;
+  engine.on_resource_access(access);
+}
+
+DataHazardEngine &begin_lane_test(FakeFormatter &formatter) {
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  return engine;
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, VgprReadOnDisjointLanesIsNotRaw) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0xF0, /*is_write=*/false);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, VgprWriteOnDisjointLanesIsNotWaw) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0xF0, /*is_write=*/true);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A write on other lanes leaves the load's own lanes outstanding, so a later
+// read on one of those lanes still races the load.
+TEST(GenericDataHazardEngineTest, LoadStaysPendingPastAWriteOnDisjointLanes) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0xF0, /*is_write=*/true);
+  vgpr_access(engine, 3, 0x108, 4, 0x01, /*is_write=*/false);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, VgprWriteOnDisjointLanesIsNotWarAgainstPendingSource) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/false, WaitCntType::NONE, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0xF0, /*is_write=*/true);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, VgprReadOnOverlappingLanesIsRaw) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0x18, /*is_write=*/false);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+}
+
+TEST(GenericDataHazardEngineTest, VgprWriteOnOverlappingLanesIsWaw) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0x18, /*is_write=*/true);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+}
+
+// A frontend that reports no lanes on either side is treated as touching every
+// lane, which is how every access was compared before lanes were tracked.
+TEST(GenericDataHazardEngineTest, VgprAccessWithoutLanesConflictsWithEveryLane) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+
+  vgpr_access(engine, 1, 0x100, 4, 0x0F, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 2, 0x104, 4, 0, /*is_write=*/false);
+  vgpr_access(engine, 3, 0x108, 5, 0, /*is_write=*/true, WaitCntType::VMEM);
+  vgpr_access(engine, 4, 0x10c, 5, 0xF0, /*is_write=*/false);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[1].finding.kind, HazardKind::RAW);
 }

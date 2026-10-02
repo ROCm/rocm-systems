@@ -132,6 +132,12 @@ those threads, so they must be thread-safe too.
 together by the frontend, not the engine — the engine emits every finding. If
 you want folding, do it in your sink.
 
+**Global memory races can be turned off.** `set_global_memory_races(false)`
+stops `GlobalMemory` accesses from being checked for cross-workgroup races. The
+counter slot a store reports through `memory_op_wait` is still tracked, so
+register and LDS findings do not change. The setting is on by default and
+survives `reset()`.
+
 **Reset between runs.** `reset()` drops all wave, workgroup and epoch state
 without disturbing the installed formatter, sink or diagnostic handler.
 

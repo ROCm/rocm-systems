@@ -71,6 +71,15 @@ constexpr uint32_t bytes_to_dwords(uint32_t bytes) {
 // API boundary.
 using EntityId = uint64_t;
 
+/// Every lane of a wave. A VGPR holds one value per lane, and an access with no
+/// lane mask is taken to touch all of them.
+constexpr uint64_t ALL_LANES = ~uint64_t{0};
+
+/// The lanes an event's exec_mask names; 0 means the frontend gave none.
+constexpr uint64_t lanes_or_all(uint64_t exec_mask) {
+  return exec_mask != 0 ? exec_mask : ALL_LANES;
+}
+
 struct PendingAsyncOp {
   EntityId instruction_id = 0;
   uint64_t pc = 0;
@@ -80,6 +89,10 @@ struct PendingAsyncOp {
   // a LOADcnt-side entry in pending_vgpr_writes). When the LOADcnt side is
   // cleared, this DScnt-only pending is safe and should not fire a RAW.
   bool is_flat_ds = false;
+  // Lanes of a vector register the operation writes or reads. Another access
+  // conflicts with it only on a lane both have active. ALL_LANES for scalar
+  // registers, LDS and anything a frontend reported without lanes.
+  uint64_t lane_mask = ALL_LANES;
   // NOTE: raw_isa is intentionally omitted here. Raw instruction bytes are
   // frontend/reporting metadata, not hazard detection state.
 };

@@ -30,16 +30,21 @@ struct PendingRegisterHazard {
 
 inline uint32_t bytes_for_dwords(uint32_t size_dwords) { return size_dwords * BYTES_PER_DWORD; }
 
+/// @param lanes Lanes the access touches; a pending op on none of them cannot
+///              conflict with it.
 inline PendingRegisterHazard
 find_pending_register_hazard(const std::unordered_map<uint32_t, PendingAsyncOp> &pending,
                              uint32_t first_reg, uint32_t size_dwords,
-                             EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
+                             EntityId current_instruction_id = NO_INSTRUCTION_FILTER,
+                             uint64_t lanes = ALL_LANES) {
   for (uint32_t i = 0; i < size_dwords; ++i) {
     const uint32_t reg = first_reg + i;
     auto it = pending.find(reg);
     if (it == pending.end())
       continue;
     if (it->second.instruction_id == current_instruction_id)
+      continue;
+    if ((it->second.lane_mask & lanes) == 0)
       continue;
     return {reg, &it->second};
   }
@@ -176,25 +181,25 @@ pending_register_fifo(WaveState &wave, VectorRegisterFile file, PendingRegisterS
 inline PendingRegisterHazard
 check_vector_hazard_info(const WaveState *wave, VectorRegisterFile file, PendingRegisterSet set,
                          uint32_t index, uint32_t size_dwords,
-                         EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
+                         EntityId current_instruction_id = NO_INSTRUCTION_FILTER,
+                         uint64_t lanes = ALL_LANES) {
   if (!wave)
     return {};
   return find_pending_register_hazard(pending_registers(*wave, file, set), index, size_dwords,
-                                      current_instruction_id);
+                                      current_instruction_id, lanes);
 }
 
 /// A destination stays unsafe while either counter side of a flat load is
 /// outstanding, so a WAW check spans both write sets.
-inline PendingRegisterHazard
-check_vector_waw_hazard_info(const WaveState *wave, VectorRegisterFile file, uint32_t index,
-                             uint32_t size_dwords,
-                             EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
+inline PendingRegisterHazard check_vector_waw_hazard_info(
+    const WaveState *wave, VectorRegisterFile file, uint32_t index, uint32_t size_dwords,
+    EntityId current_instruction_id = NO_INSTRUCTION_FILTER, uint64_t lanes = ALL_LANES) {
   const auto hazard = check_vector_hazard_info(wave, file, PendingRegisterSet::Writes, index,
-                                               size_dwords, current_instruction_id);
+                                               size_dwords, current_instruction_id, lanes);
   if (hazard.pending)
     return hazard;
   return check_vector_hazard_info(wave, file, PendingRegisterSet::DsWrites, index, size_dwords,
-                                  current_instruction_id);
+                                  current_instruction_id, lanes);
 }
 
 inline PendingRegisterHazard
@@ -224,9 +229,12 @@ check_sgpr_waw_hazard(const WaveState *wave, uint32_t sgpr_index, uint32_t size_
   return check_sgpr_waw_hazard_info(wave, sgpr_index, size_dwords, current_instruction_id).pending;
 }
 
+/// @param ordered_with Counter the read is outstanding on, when it retires in
+///                     issue order; see find_overlapping_pending_op.
 inline const PendingAsyncOp *check_lds_read_hazard(const WaveState *wave, uint32_t address,
-                                                   uint32_t size_bytes) {
-  return find_pending_lds_write(wave, address, size_bytes);
+                                                   uint32_t size_bytes,
+                                                   WaitCntType ordered_with = WaitCntType::NONE) {
+  return find_pending_lds_write(wave, address, size_bytes, ordered_with);
 }
 
 inline const PendingAsyncOp *check_tensor_lds_hazard(const WaveState *wave, uint32_t address,
@@ -235,8 +243,19 @@ inline const PendingAsyncOp *check_tensor_lds_hazard(const WaveState *wave, uint
 }
 
 inline const PendingAsyncOp *check_lds_write_hazard(const WaveState *wave, uint32_t address,
-                                                    uint32_t size_bytes) {
-  return find_pending_lds_read(wave, address, size_bytes);
+                                                    uint32_t size_bytes,
+                                                    WaitCntType ordered_with = WaitCntType::NONE) {
+  return find_pending_lds_read(wave, address, size_bytes, ordered_with);
+}
+
+/// Every instruction with an LDS access still outstanding on @p wave -- DS,
+/// LDS DMA or tensor DMA, read or write -- with the counter it waits on.
+inline void collect_pending_lds_ops(const WaveState &wave,
+                                    std::unordered_map<EntityId, WaitCntType> &pending) {
+  for (const auto *fifo : {&wave.lds_fifo, &wave.lds_read_fifo, &wave.tensor_lds_fifo}) {
+    for (const auto &[address, op] : *fifo)
+      pending.emplace(op.instruction_id, op.wait_type);
+  }
 }
 
 template <typename Fn> inline void for_each_pending_op(const WaveState *wave, Fn visit) {
@@ -311,41 +330,49 @@ inline void track_pending_registers(WaveState *wave, VectorRegisterFile file,
     const uint32_t reg = first_reg + i;
     if (reg > max_index)
       break;
-    pending[reg] = op;
-    fifo.push_back({reg, op});
+    // One entry per register: a newer op on other lanes must not drop lanes an
+    // older one is still writing, so it inherits them. That attributes those
+    // lanes to the newer op, but keeps them checked until it drains.
+    PendingAsyncOp entry = op;
+    if (auto it = pending.find(reg); it != pending.end())
+      entry.lane_mask |= it->second.lane_mask;
+    pending[reg] = entry;
+    fifo.push_back({reg, entry});
   }
 }
 
 inline void track_vector_write(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
                                uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
-                               WaitCntType wait_type) {
+                               WaitCntType wait_type, uint64_t lanes = ALL_LANES) {
   if (wait_type == WaitCntType::NONE)
     return;
 
   // An LDS-guarded destination is outstanding on the DScnt side only.
   const PendingRegisterSet set =
       wait_type == WaitCntType::LDS ? PendingRegisterSet::DsWrites : PendingRegisterSet::Writes;
-  track_pending_registers(
-      wave, file, set, first_reg, size_dwords,
-      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords)));
+  PendingAsyncOp op = make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords));
+  op.lane_mask = lanes;
+  track_pending_registers(wave, file, set, first_reg, size_dwords, op);
 }
 
 inline void track_vector_flat_ds(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
                                  uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
-                                 bool is_flat_ds = true) {
-  track_pending_registers(wave, file, PendingRegisterSet::DsWrites, first_reg, size_dwords,
-                          make_pending_op(instruction_id, pc, WaitCntType::LDS,
-                                          bytes_for_dwords(size_dwords), is_flat_ds));
+                                 bool is_flat_ds = true, uint64_t lanes = ALL_LANES) {
+  PendingAsyncOp op = make_pending_op(instruction_id, pc, WaitCntType::LDS,
+                                      bytes_for_dwords(size_dwords), is_flat_ds);
+  op.lane_mask = lanes;
+  track_pending_registers(wave, file, PendingRegisterSet::DsWrites, first_reg, size_dwords, op);
 }
 
 inline void track_vector_read(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
                               uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
-                              WaitCntType wait_type = WaitCntType::STORE) {
+                              WaitCntType wait_type = WaitCntType::STORE,
+                              uint64_t lanes = ALL_LANES) {
   if (wait_type == WaitCntType::NONE)
     return;
-  track_pending_registers(
-      wave, file, PendingRegisterSet::Reads, first_reg, size_dwords,
-      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords)));
+  PendingAsyncOp op = make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords));
+  op.lane_mask = lanes;
+  track_pending_registers(wave, file, PendingRegisterSet::Reads, first_reg, size_dwords, op);
 }
 
 inline void track_sgpr_write(WaveState *wave, EntityId instruction_id, uint64_t pc,

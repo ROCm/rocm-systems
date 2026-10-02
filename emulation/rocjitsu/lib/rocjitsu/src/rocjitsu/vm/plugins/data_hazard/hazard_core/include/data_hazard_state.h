@@ -77,6 +77,9 @@ struct EngineLdsAccessRecord {
   bool is_write = false;
   bool is_atomic = false;
   std::array<uint32_t, 4> raw_isa{};
+  /// The counter this access was still outstanding on when an earlier barrier
+  /// resolved, which carried it into this epoch; NONE for an access made in it.
+  WaitCntType pending_at_barrier = WaitCntType::NONE;
 };
 
 struct EngineInstructionContext {

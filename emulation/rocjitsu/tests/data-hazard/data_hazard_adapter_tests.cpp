@@ -55,6 +55,7 @@ struct AdapterHarness {
     engine.reset();
     engine.set_instruction_formatter(&formatter);
     engine.set_warning_sink(nullptr);
+    engine.set_global_memory_races(true);
     adapter.reset();
     adapter.on_dispatch_begin(wave.dispatch_id);
     adapter.on_workgroup_begin(wave);
@@ -339,6 +340,90 @@ TEST(DataHazardAdapterTest, GlobalLoadRouteTracksVectorDestinationForRawHazards)
   EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0xCAFE0001u);
 }
 
+// A load's destination is written on every lane EXEC had at issue. Lanes a
+// buffer bounds check dropped from the access (exec_mask) are still zero-filled,
+// so they stay pending too; lanes outside EXEC are never written.
+TEST(DataHazardAdapterTest, LoadDestinationLanesAreIssueExecNotBoundsMask) {
+  AdapterHarness h;
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView load;
+  load.instruction = h.instruction(1, 0x100);
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 4;
+  load.address = 0x2000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  load.exec_mask = 0x07;          // lane 3 out of bounds
+  load.register_lane_mask = 0x0F; // EXEC at issue
+  h.adapter.on_memory_route(load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+  dh::RegisterAccessView other_lanes;
+  other_lanes.instruction = h.instruction(2, 0x104);
+  other_lanes.register_class = dh::RegisterClass::Vector;
+  other_lanes.physical_reg = 4;
+  other_lanes.size_bytes = 4;
+  other_lanes.is_read = true;
+  other_lanes.lane_mask = 0xF0;
+  h.adapter.on_register_access(other_lanes);
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+
+  h.adapter.on_instruction(h.instruction(3, 0x108));
+  dh::RegisterAccessView zero_filled_lane = other_lanes;
+  zero_filled_lane.instruction = h.instruction(3, 0x108);
+  zero_filled_lane.lane_mask = 0x08;
+  h.adapter.on_register_access(zero_filled_lane);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.instruction.instruction_id, 3u);
+}
+
+// The divergent if/else shape: a load on the "if" lanes and a write to the same
+// VGPR on the "else" lanes do not conflict; a write on an "if" lane does.
+TEST(DataHazardAdapterTest, RegisterWriteLanesReachTheEngine) {
+  AdapterHarness h;
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView load;
+  load.instruction = h.instruction(1, 0x100);
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 4;
+  load.address = 0x2000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  load.exec_mask = 0x0F;
+  load.register_lane_mask = 0x0F;
+  h.adapter.on_memory_route(load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+  dh::RegisterAccessView else_write;
+  else_write.instruction = h.instruction(2, 0x104);
+  else_write.register_class = dh::RegisterClass::Vector;
+  else_write.physical_reg = 4;
+  else_write.size_bytes = 4;
+  else_write.is_write = true;
+  else_write.lane_mask = 0xF0;
+  h.adapter.on_register_access(else_write);
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+
+  h.adapter.on_instruction(h.instruction(3, 0x108));
+  dh::RegisterAccessView if_write = else_write;
+  if_write.instruction = h.instruction(3, 0x108);
+  if_write.lane_mask = 0x01;
+  h.adapter.on_register_access(if_write);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+}
+
 TEST(DataHazardAdapterTest, GlobalStoreRouteDoesNotTrackVectorSourceForWarHazards) {
   AdapterHarness h;
 
@@ -474,6 +559,108 @@ TEST(DataHazardAdapterTest, RouteWithNoActiveLanesAddressesNothing) {
   EXPECT_EQ(api.resources[0].hazards.memory_op_wait, WaitCntType::STORE);
   EXPECT_FALSE(api.resources[0].is_write);
   EXPECT_FALSE(api.resources[0].is_read);
+}
+
+TEST(DataHazardAdapterTest, GlobalMemoryRacesOffDropsOnlyGlobalAddresses) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  adapter.set_global_memory_races(false);
+  ExecutionKey const wave{1, 0, 0, 0};
+
+  dh::InstructionView instruction;
+  instruction.execution = wave;
+  instruction.instruction_id = 1;
+  instruction.pc = 0x100;
+  adapter.on_instruction(instruction);
+
+  dh::MemoryRouteView store;
+  store.instruction = instruction;
+  store.resource_kind = ResourceKind::GlobalMemory;
+  store.register_class = dh::RegisterClass::Vector;
+  store.per_lane_addresses = {0x7100, 0x7200};
+  store.size_bytes = 4;
+  store.is_store = true;
+  store.exec_mask = 0x3;
+  adapter.on_memory_route(store);
+
+  // The counter slot stays; the per-lane writes only fed the race check.
+  ASSERT_EQ(api.resources.size(), 1u);
+  EXPECT_EQ(api.resources[0].hazards.memory_op_wait, WaitCntType::STORE);
+  EXPECT_FALSE(api.resources[0].is_write);
+
+  dh::MemoryRouteView load;
+  load.instruction = instruction;
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 12;
+  load.address = 0x4000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  adapter.on_memory_route(load);
+
+  // The load's destination register is still tracked.
+  ASSERT_EQ(api.resources.size(), 2u);
+  EXPECT_EQ(api.resources[1].resource_kind, ResourceKind::VectorRegister);
+  EXPECT_EQ(api.resources[1].resource_index, 12u);
+
+  // Scratch is not part of the race check, so the option leaves it alone.
+  dh::MemoryRouteView scratch = store;
+  scratch.resource_kind = ResourceKind::ScratchMemory;
+  adapter.on_memory_route(scratch);
+  ASSERT_EQ(api.resources.size(), 5u);
+  EXPECT_EQ(api.resources[3].resource_kind, ResourceKind::ScratchMemory);
+  EXPECT_EQ(api.resources[3].address, 0x7100u);
+  EXPECT_EQ(api.resources[4].address, 0x7200u);
+}
+
+// A store sharing the load counter still holds an older load back with global
+// races off: s_waitcnt vmcnt(1) after load, store drains the load.
+TEST(DataHazardAdapterTest, GlobalMemoryRacesOffKeepsStoreCounterSlot) {
+  AdapterHarness h;
+  h.engine.set_global_memory_races(false);
+  h.adapter.set_global_memory_races(false);
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView load;
+  load.instruction = h.instruction(1, 0x100);
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 4;
+  load.address = 0x2000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  h.adapter.on_memory_route(load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+
+  dh::MemoryRouteView store;
+  store.instruction = h.instruction(2, 0x104);
+  store.resource_kind = ResourceKind::GlobalMemory;
+  store.register_class = dh::RegisterClass::Vector;
+  store.address = 0x3000;
+  store.size_bytes = 4;
+  store.is_store = true;
+  store.store_wait = WaitCntType::VMEM;
+  h.adapter.on_memory_route(store);
+
+  dh::InstructionView wait = h.instruction(3, 0x108);
+  wait.wait.kind = dh::WaitKind::Waitcnt;
+  wait.wait.count = 1;
+  h.adapter.on_instruction(wait);
+
+  h.adapter.on_instruction(h.instruction(4, 0x10c));
+
+  dh::RegisterAccessView read;
+  read.instruction = h.instruction(4, 0x10c);
+  read.register_class = dh::RegisterClass::Vector;
+  read.physical_reg = 4;
+  read.size_bytes = 4;
+  read.is_read = true;
+  h.adapter.on_register_access(read);
+
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+  h.engine.set_global_memory_races(true);
 }
 
 TEST(DataHazardAdapterTest, RouteWithoutLanesKeepsItsSingleAddress) {
@@ -1204,14 +1391,21 @@ TEST(DataHazardAdapterTest, LocalRouteEmitsLdsAccessAndVectorDestinationEvents) 
   read_vgpr.is_read = true;
   h.adapter.on_register_access(read_vgpr);
 
+  // The DS load is ordered behind the DS store in the LDS, so only reading its
+  // destination register before s_wait_dscnt is a hazard.
   const auto warnings = h.engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 2u);
+  ASSERT_EQ(warnings.size(), 1u);
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
-  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::LocalMemory);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::VectorRegister);
   EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
-  EXPECT_EQ(warnings[1].finding.kind, HazardKind::RAW);
-  EXPECT_EQ(warnings[1].finding.resource_kind, ResourceKind::VectorRegister);
-  EXPECT_EQ(warnings[1].finding.required_wait, WaitCntType::LDS);
+
+  // Both LDS accesses still reach the engine, outstanding on DScnt.
+  const auto snapshot = h.engine.wave_snapshot(h.wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.lds_fifo.size(), 1u);
+  EXPECT_EQ(snapshot->core.lds_fifo.front().first, 0x80u);
+  ASSERT_EQ(snapshot->core.lds_read_fifo.size(), 1u);
+  EXPECT_EQ(snapshot->core.lds_read_fifo.front().first, 0x80u);
 }
 
 TEST(DataHazardAdapterTest, LocalRouteWithDirectLocalFlagEmitsOneLocalMemoryEvent) {
@@ -1257,25 +1451,15 @@ TEST(DataHazardAdapterTest, LocalPerLaneRouteFeedsSpecificLdsRegion) {
   lds_write.per_lane_addresses = {0, 4, 8, 12};
   h.adapter.on_memory_route(lds_write);
 
-  h.adapter.on_instruction(h.instruction(2, 0x104));
-
-  dh::MemoryRouteView disjoint_read;
-  disjoint_read.instruction = h.instruction(2, 0x104);
-  disjoint_read.resource_kind = ResourceKind::LocalMemory;
-  disjoint_read.address = 16;
-  disjoint_read.size_bytes = 4;
-  disjoint_read.is_load = true;
-  h.adapter.on_memory_route(disjoint_read);
-
-  dh::MemoryRouteView overlapping_read = disjoint_read;
-  overlapping_read.address = 8;
-  h.adapter.on_memory_route(overlapping_read);
-
-  const auto warnings = h.engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
-  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::LocalMemory);
-  EXPECT_EQ(warnings[0].finding.address, 8u);
+  // Each active lane's write is tracked at its own address. Read from the wave
+  // state: a DS read is ordered behind these writes and would not race them.
+  const auto snapshot = h.engine.wave_snapshot(h.wave);
+  ASSERT_TRUE(snapshot.has_value());
+  std::vector<uint32_t> addresses;
+  for (const auto &[address, op] : snapshot->core.lds_fifo)
+    addresses.push_back(address);
+  EXPECT_EQ(addresses, (std::vector<uint32_t>{0, 4, 8, 12}));
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
 }
 
 TEST(DataHazardAdapterTest, GlobalToLdsRouteTracksVmemGuardedLocalWrite) {
@@ -1968,6 +2152,54 @@ TEST(DataHazardAdapterTest, EarlyBarrierWaitKeepsLaterWaveInSameLdsEpoch) {
   ASSERT_FALSE(warnings.empty());
   EXPECT_EQ(warnings.back().finding.kind, HazardKind::LocalMemoryRace);
   EXPECT_EQ(warnings.back().finding.address, 0x100u);
+}
+
+// A ds_store still outstanding when the barrier resolves can land after another
+// wave reads past the barrier: the barrier orders issue, not completion. This is
+// the race corpus's lds_reduce.wait002 / trans_lds.wait002 shape, driven through
+// the callbacks the plugin makes.
+TEST(DataHazardAdapterTest, StoreStillPendingAtBarrierRacesReadAfterIt) {
+  AdapterHarness h;
+  ExecutionKey reader_wave = h.wave;
+  reader_wave.wave_id = 1;
+  h.adapter.on_wave_begin(reader_wave);
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView write;
+  write.instruction = h.instruction(1, 0x100);
+  write.resource_kind = ResourceKind::LocalMemory;
+  write.address = 0x100;
+  write.size_bytes = 4;
+  write.is_store = true;
+  h.adapter.on_memory_route(write);
+
+  // No s_wait_dscnt before the barrier. It resolves once both waves arrive.
+  h.adapter.on_workgroup_barrier(h.wave);
+  h.adapter.on_workgroup_barrier(reader_wave);
+
+  dh::InstructionView read_inst;
+  read_inst.execution = reader_wave;
+  read_inst.instruction_id = 2;
+  read_inst.pc = 0x104;
+  h.adapter.on_instruction(read_inst);
+
+  dh::MemoryRouteView read;
+  read.instruction = read_inst;
+  read.resource_kind = ResourceKind::LocalMemory;
+  read.register_class = dh::RegisterClass::Vector;
+  read.register_base = 4;
+  read.address = 0x100;
+  read.size_bytes = 4;
+  read.is_load = true;
+  h.adapter.on_memory_route(read);
+
+  h.adapter.on_workgroup_end(h.wave);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, 0x100u);
 }
 
 TEST(DataHazardAdapterTest, LocalAtomicBarrierClearsLdsPendingOps) {

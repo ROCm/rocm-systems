@@ -28,6 +28,13 @@ public:
   void set_warning_sink(const HazardWarningSink *sink);
   void set_diagnostic_handler(EngineDiagnosticHandler handler);
 
+  /// Whether global memory accesses are checked for cross-workgroup races. On
+  /// by default, and kept across reset(). Turning it off leaves register, LDS
+  /// and wait-counter tracking untouched, including the counter slot a global
+  /// store occupies, so only GlobalMemoryRace findings disappear.
+  void set_global_memory_races(bool enabled);
+  bool global_memory_races() const;
+
   /// Number of events dropped as malformed since the last reset().
   uint64_t rejected_event_count() const;
 
@@ -74,7 +81,8 @@ private:
                                 uint32_t reg, uint32_t count);
   void check_vector_war_waw_hazards(EngineWaveState &wave, const EngineInstructionContext &ctx,
                                     const ResourceAccessEvent &event, ResourceKind resource_kind,
-                                    uint32_t reg, uint32_t count);
+                                    uint32_t reg, uint32_t count, WaitCntType vector_write_wait,
+                                    bool vector_write_also_waits_lds);
   void track_vector_pending(EngineWaveState &wave, const EngineInstructionContext &ctx,
                             const ResourceAccessEvent &event, ResourceKind resource_kind,
                             uint32_t reg, uint32_t count, WaitCntType vector_write_wait,
@@ -86,6 +94,7 @@ private:
   void check_global_access_for_races(const EngineInstructionContext &ctx,
                                      const ResourceAccessEvent &event);
   void flush_workgroup_epoch(const EngineWorkgroupKey &key);
+  void close_lds_epoch(const EngineWorkgroupKey &key, std::vector<EngineLdsAccessRecord> epoch);
   void check_lds_epoch_for_races(const EngineWorkgroupKey &key,
                                  const std::vector<EngineLdsAccessRecord> &epoch);
   void emit_warning(const EngineWarning &warning);
@@ -99,6 +108,7 @@ private:
   const HazardWarningSink *warning_sink_ = nullptr;
   EngineDiagnosticHandler diagnostic_handler_;
   mutable std::atomic<uint64_t> rejected_events_{0};
+  std::atomic<bool> global_memory_races_{true};
   EngineState state_;
 };
 

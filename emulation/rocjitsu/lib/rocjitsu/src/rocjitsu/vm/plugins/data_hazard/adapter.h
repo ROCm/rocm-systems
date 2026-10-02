@@ -88,6 +88,8 @@ struct RegisterAccessView {
   uint32_t size_bytes = hazard_core::BYTES_PER_DWORD;
   bool is_read = false;
   bool is_write = false;
+  /// Lanes of a vector register the access touches; 0 means every lane.
+  uint64_t lane_mask = 0;
 };
 
 struct MemoryRouteView {
@@ -125,6 +127,10 @@ struct MemoryRouteView {
   /// then addresses nothing. Left empty by routes with no lane dimension, such
   /// as scalar memory and tensor DMA, whose single address always counts.
   std::optional<uint64_t> exec_mask;
+  /// Lanes a vector register destination is written on: EXEC at issue, which
+  /// can be wider than exec_mask, since lanes a bounds check rejects are still
+  /// zero-filled. 0 means every lane.
+  uint64_t register_lane_mask = 0;
 };
 
 /// @brief Translates rocJitsu-shaped views into ::hazard_core engine events.
@@ -137,6 +143,11 @@ public:
   explicit DataHazardAdapter(hazard_core::DataHazardSimulatorApi &engine);
 
   void reset();
+
+  /// Whether global memory routes send their addresses to the engine. Those
+  /// addresses only feed the cross-workgroup race check, so with it off the
+  /// adapter skips building them. Set before the first event; kept across reset().
+  void set_global_memory_races(bool enabled) { global_memory_races_ = enabled; }
 
   void on_dispatch_begin(hazard_core::EntityId dispatch_id);
   void on_dispatch_end(hazard_core::EntityId dispatch_id);
@@ -162,6 +173,7 @@ private:
   void erase_dispatch(hazard_core::EntityId dispatch_id);
 
   hazard_core::DataHazardSimulatorApi &api_;
+  bool global_memory_races_ = true;
   std::mutex mutex_;
   hazard_core::EntityId next_instruction_id_ = 1ull << 63;
   std::unordered_map<hazard_core::ExecutionKey, hazard_core::InstructionDescriptor,

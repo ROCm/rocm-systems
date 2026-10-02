@@ -17,7 +17,8 @@ namespace {
 /// `"plugins": { "data_hazard": { ... } }`, and the defaults it fills in.
 constexpr char kConfigSchema[] = R"({
   "report_path": {"type": "string", "default": ""},
-  "verbose": {"type": "boolean", "default": false}
+  "verbose": {"type": "boolean", "default": false},
+  "global_memory_races": {"type": "boolean", "default": true}
 })";
 
 } // namespace

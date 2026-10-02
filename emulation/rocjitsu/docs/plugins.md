@@ -44,6 +44,7 @@ the message and suggested fix.
 |---|---|---|
 | `report_path` | `""` | File to write the JSON hazard report to. Empty means output goes only to the sink. |
 | `verbose` | `false` | Report every occurrence instead of folding logically identical hazards into one entry with a `suppressed_occurrences` count. |
+| `global_memory_races` | `true` | Check global memory for cross-workgroup races. Set to `false` to limit detection to registers and LDS within a workgroup; wait-counter tracking for global loads and stores is unaffected. |
 
 The engine is also built as a standalone `libdata_hazard_core.so` with default
 visibility for consumers outside this tree that drive it directly. Disable it

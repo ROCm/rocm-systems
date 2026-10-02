@@ -109,6 +109,30 @@ bool is_vector_register_class(RegisterClass reg_class) {
   return reg_class == RegisterClass::Vector || reg_class == RegisterClass::AccumVector;
 }
 
+/// Lanes of its vector operands an instruction touches, as far as its decoded
+/// operands can say: EXEC, except where the instruction reaches lanes EXEC does
+/// not cover. Those report 0, every lane, so they are compared as before lanes
+/// were tracked. Reads of a non-memory instruction also arrive through
+/// onAmdgpuReadVgprLanes with the lanes actually read, DPP neighbours included.
+uint64_t operand_lanes(const Instruction &inst, const amdgpu::Wavefront &wf, bool is_write) {
+  const std::string_view mnemonic = inst.mnemonic();
+  // Matrix ops do not use EXEC.
+  if (inst.is_mfma() || starts_with(mnemonic, "v_mfma") || starts_with(mnemonic, "v_smfmac") ||
+      starts_with(mnemonic, "v_wmma") || starts_with(mnemonic, "v_swmmac"))
+    return 0;
+  // v_writelane writes the lane it names whether or not EXEC covers it.
+  if (is_write && starts_with(mnemonic, "v_writelane"))
+    return 0;
+  // Cross-lane LDS ops read other lanes' data, and DS transpose loads use an
+  // all-lanes mask.
+  if (!is_write && starts_with(mnemonic, "ds_") &&
+      (mnemonic.find("permute") != std::string_view::npos ||
+       mnemonic.find("swizzle") != std::string_view::npos ||
+       mnemonic.find("_tr") != std::string_view::npos))
+    return 0;
+  return wf.exec();
+}
+
 /// Hazard tracking is per logical register, but callbacks report physical file
 /// indices, so subtract the wave's allocation base.
 uint32_t logical_vgpr_base(const amdgpu::Wavefront &wf, uint32_t physical_reg) {
@@ -395,6 +419,9 @@ PluginConfig parse_config(const char *config_json) {
   auto verbose_value = map["verbose"];
   if (verbose_value.IsBool())
     config.verbose = verbose_value.AsBool();
+  auto global_races_value = map["global_memory_races"];
+  if (global_races_value.IsBool())
+    config.global_memory_races = global_races_value.AsBool();
   return config;
 }
 
@@ -449,6 +476,8 @@ DataHazardPlugin::DataHazardPlugin(const char *config_json)
       collector_(config_.verbose), warning_sink_(collector_, &formatter_), adapter_(engine_) {
   engine_.set_instruction_formatter(&formatter_);
   engine_.set_warning_sink(&warning_sink_);
+  engine_.set_global_memory_races(config_.global_memory_races);
+  adapter_.set_global_memory_races(config_.global_memory_races);
   engine_.set_diagnostic_handler(
       [](const std::string &message) { util::Logger::warn("data_hazard: ", message); });
   // Stream findings as they are made. The JSON report and the summary are only
@@ -596,7 +625,7 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
     state->is_memory_op = is_memory_op;
   }
 
-  emit_source_reads(view, inst);
+  emit_source_reads(view, inst, wf);
   if (inst.mnemonic() == "tensor_load_to_lds")
     emit_tensor_lds_access(view, inst, wf, /*reads_lds=*/false);
   else if (inst.mnemonic() == "tensor_store_from_lds")
@@ -604,7 +633,7 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
   // Destination writes of memory instructions are emitted when the access is
   // routed, where the wait counter that guards them is known.
   if (!is_memory_op)
-    emit_destination_writes(view, inst);
+    emit_destination_writes(view, inst, wf);
 }
 
 void DataHazardPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
@@ -687,6 +716,9 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
   // An empty result is the answer for a wave that accesses nothing, not a
   // missing mask, so it is passed through rather than replaced by EXEC.
   route.exec_mask = vmem->lane_mask;
+  // The destination register is written on every lane EXEC had at issue: lanes
+  // a bounds check dropped from the access are zero-filled, not left alone.
+  route.register_lane_mask = vmem->exec_mask;
   route.is_flat = starts_with(inst.mnemonic(), "flat_");
   route.store_wait = make_store_wait(vmem->wait_counter_type);
 
@@ -730,7 +762,7 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
 }
 
 void DataHazardPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                             uint64_t /*lane_mask*/, uint8_t /*byte_mask*/) {
+                                             uint64_t lane_mask, uint8_t /*byte_mask*/) {
   if (shutting_down())
     return;
   const DataHazardWavefrontState *state = wave_state(wf);
@@ -743,6 +775,7 @@ void DataHazardPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32
   access.physical_reg = logical_vgpr_base(*wf, physical_reg);
   access.size_bytes = kBytesPerDword;
   access.is_read = true;
+  access.lane_mask = lane_mask;
   adapter_.on_register_access(access);
 }
 
@@ -834,7 +867,8 @@ void DataHazardPlugin::emit_tensor_lds_access(const InstructionView &view, const
   }
 }
 
-void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Instruction &inst) {
+void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Instruction &inst,
+                                         const amdgpu::Wavefront &wf) {
   auto register_key = [](const auto &ref) {
     return (static_cast<uint64_t>(ref.index) << 8) | static_cast<uint64_t>(ref.width) |
            (static_cast<uint64_t>(ref.cls) << 32);
@@ -888,12 +922,14 @@ void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Inst
     access.physical_reg = ref->index;
     access.size_bytes = std::max<uint32_t>(1, ref->width) * kBytesPerDword;
     access.is_read = true;
+    if (is_vector_register_class(reg_class))
+      access.lane_mask = operand_lanes(inst, wf, /*is_write=*/false);
     adapter_.on_register_access(access);
   }
 }
 
-void DataHazardPlugin::emit_destination_writes(const InstructionView &view,
-                                               const Instruction &inst) {
+void DataHazardPlugin::emit_destination_writes(const InstructionView &view, const Instruction &inst,
+                                               const amdgpu::Wavefront &wf) {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
@@ -911,6 +947,8 @@ void DataHazardPlugin::emit_destination_writes(const InstructionView &view,
     access.physical_reg = ref->index;
     access.size_bytes = std::max<uint32_t>(1, ref->width) * kBytesPerDword;
     access.is_write = true;
+    if (is_vector_register_class(reg_class))
+      access.lane_mask = operand_lanes(inst, wf, /*is_write=*/true);
     adapter_.on_register_access(access);
   }
 }

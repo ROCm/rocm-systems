@@ -242,14 +242,21 @@ inline bool ranges_overlap(uint32_t address, uint32_t size, uint32_t other_addre
 
 /// Find the first entry in an address-keyed FIFO whose range overlaps [address, address + size).
 ///
-/// @param fifo    FIFO of (address, pending op) entries
-/// @param address Start address of the access
-/// @param size    Size of the access in bytes
+/// @param fifo         FIFO of (address, pending op) entries
+/// @param address      Start address of the access
+/// @param size         Size of the access in bytes
+/// @param ordered_with Counter the access itself is outstanding on when that
+///                     counter retires in issue order, or NONE. Pending ops on
+///                     it are ahead of the access in the same pipeline and
+///                     cannot race it, so they are passed over.
 /// @return Pointer to the first overlapping pending op, or nullptr if none
 inline const PendingAsyncOp *
 find_overlapping_pending_op(const std::deque<std::pair<uint32_t, PendingAsyncOp>> &fifo,
-                            uint32_t address, uint32_t size) {
+                            uint32_t address, uint32_t size,
+                            WaitCntType ordered_with = WaitCntType::NONE) {
   for (const auto &entry : fifo) {
+    if (ordered_with != WaitCntType::NONE && entry.second.wait_type == ordered_with)
+      continue;
     if (ranges_overlap(address, size, entry.first, entry.second.size))
       return &entry.second;
   }
@@ -261,17 +268,20 @@ find_overlapping_pending_op(const std::deque<std::pair<uint32_t, PendingAsyncOp>
 /// @param wave    Pointer to wave state (may be null)
 /// @param address Start address of the LDS access
 /// @param size    Size of the LDS access in bytes
+/// @param ordered_with See find_overlapping_pending_op.
 /// @return Pointer to the first overlapping pending op, or nullptr if none
 inline const PendingAsyncOp *find_pending_lds_write(const WaveState *wave, uint32_t address,
-                                                    uint32_t size) {
+                                                    uint32_t size,
+                                                    WaitCntType ordered_with = WaitCntType::NONE) {
   if (!wave)
     return nullptr;
-  return find_overlapping_pending_op(wave->lds_fifo, address, size);
+  return find_overlapping_pending_op(wave->lds_fifo, address, size, ordered_with);
 }
 
 inline const PendingAsyncOp *find_pending_lds_write(WaveState *wave, uint32_t address,
-                                                    uint32_t size) {
-  return find_pending_lds_write(static_cast<const WaveState *>(wave), address, size);
+                                                    uint32_t size,
+                                                    WaitCntType ordered_with = WaitCntType::NONE) {
+  return find_pending_lds_write(static_cast<const WaveState *>(wave), address, size, ordered_with);
 }
 
 /// Find a pending tensor LDS write (TENSORcnt-tracked) that overlaps the given address range.
@@ -300,15 +310,16 @@ inline const PendingAsyncOp *find_pending_tensor_lds_write(WaveState *wave, uint
 /// @param size    Size of the LDS access in bytes
 /// @return Pointer to the first overlapping pending op, or nullptr if none
 inline const PendingAsyncOp *find_pending_lds_read(const WaveState *wave, uint32_t address,
-                                                   uint32_t size) {
+                                                   uint32_t size,
+                                                   WaitCntType ordered_with = WaitCntType::NONE) {
   if (!wave)
     return nullptr;
-  return find_overlapping_pending_op(wave->lds_read_fifo, address, size);
+  return find_overlapping_pending_op(wave->lds_read_fifo, address, size, ordered_with);
 }
 
-inline const PendingAsyncOp *find_pending_lds_read(WaveState *wave, uint32_t address,
-                                                   uint32_t size) {
-  return find_pending_lds_read(static_cast<const WaveState *>(wave), address, size);
+inline const PendingAsyncOp *find_pending_lds_read(WaveState *wave, uint32_t address, uint32_t size,
+                                                   WaitCntType ordered_with = WaitCntType::NONE) {
+  return find_pending_lds_read(static_cast<const WaveState *>(wave), address, size, ordered_with);
 }
 
 /// Clear pending operations from the specified counter's FIFO, implementing
