@@ -385,7 +385,18 @@ uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
                                                   .sdst = static_cast<uint8_t>(sdst)})[0];
 }
 
-TEST(RegisterSetAnalysis, WordIterationRangeOperationsMatchModelAtBoundaries) {
+// Exercise the scalar fallback even when the production type uses AVX2.
+template <typename Set> class RegisterSetTyped : public testing::Test {};
+#if defined(__AVX2__)
+using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::StandardUint64>,
+                                        RegisterSetT<RegisterSetWordType::Avx2M256>>;
+#else
+using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::StandardUint64>>;
+#endif
+TYPED_TEST_SUITE(RegisterSetTyped, RegisterSetTypes);
+
+TYPED_TEST(RegisterSetTyped, WordIterationRangeOperationsMatchModelAtBoundaries) {
+  using RegisterSet = TypeParam;
   constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
   constexpr std::array capacities{REGISTER_SET_MAX_SGPRS, REGISTER_SET_MAX_VGPRS,
                                   REGISTER_SET_MAX_ACC_VGPRS};
@@ -442,29 +453,31 @@ TEST(RegisterSetAnalysis, WordIterationRangeOperationsMatchModelAtBoundaries) {
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationSingleBitHelpersPreserveOtherBits) {
-  using namespace register_set_detail;
-  const Word fullWord = word_all_bits();
-  for (unsigned bitIndex = 0; bitIndex < kWordBits; ++bitIndex) {
+TYPED_TEST(RegisterSetTyped, WordIterationSingleBitHelpersPreserveOtherBits) {
+  using Word = typename TypeParam::WordType;
+  using Ops = register_set_detail::WordArrayOps<TypeParam::kWordType>;
+  const Word fullWord = Ops::word_all_bits();
+  for (unsigned bitIndex = 0; bitIndex < Ops::kWordBits; ++bitIndex) {
     SCOPED_TRACE(bitIndex);
     Word singleBit{};
     Word allOtherBits = fullWord;
-    word_set_bit(singleBit, bitIndex);
-    word_set_bit(singleBit, bitIndex); // Setting twice is idempotent.
-    word_reset_bit(allOtherBits, bitIndex);
-    word_reset_bit(allOtherBits, bitIndex);
-    for (unsigned testBit = 0; testBit < kWordBits; ++testBit) {
-      EXPECT_EQ(word_test_bit(singleBit, testBit), testBit == bitIndex);
-      EXPECT_EQ(word_test_bit(allOtherBits, testBit), testBit != bitIndex);
+    Ops::word_set_bit(singleBit, bitIndex);
+    Ops::word_set_bit(singleBit, bitIndex); // Setting twice is idempotent.
+    Ops::word_reset_bit(allOtherBits, bitIndex);
+    Ops::word_reset_bit(allOtherBits, bitIndex);
+    for (unsigned testBit = 0; testBit < Ops::kWordBits; ++testBit) {
+      EXPECT_EQ(Ops::word_test_bit(singleBit, testBit), testBit == bitIndex);
+      EXPECT_EQ(Ops::word_test_bit(allOtherBits, testBit), testBit != bitIndex);
     }
-    word_reset_bit(singleBit, bitIndex);
-    word_set_bit(allOtherBits, bitIndex);
-    EXPECT_TRUE(word_none(singleBit));
-    EXPECT_TRUE(word_equal(allOtherBits, fullWord));
+    Ops::word_reset_bit(singleBit, bitIndex);
+    Ops::word_set_bit(allOtherBits, bitIndex);
+    EXPECT_TRUE(Ops::word_none(singleBit));
+    EXPECT_TRUE(Ops::word_equal(allOtherBits, fullWord));
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationCoversEveryBytePattern) {
+TYPED_TEST(RegisterSetTyped, WordIterationCoversEveryBytePattern) {
+  using RegisterSet = TypeParam;
   for (uint16_t base : {0, 8, 56, 64, 120, 128, 240, 248, 256, 504, 1016}) {
     for (unsigned pattern = 0; pattern < 256; ++pattern) {
       SCOPED_TRACE(base);
@@ -484,7 +497,8 @@ TEST(RegisterSetAnalysis, WordIterationCoversEveryBytePattern) {
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationObservesEditsWithinAndBetweenBatches) {
+TYPED_TEST(RegisterSetTyped, WordIterationObservesEditsWithinAndBetweenBatches) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   const auto add = [&](uint16_t index) { set.expand({RegClass::VGPR, index, 1}); };
   const auto remove = [&](uint16_t index) { set.erase({RegClass::VGPR, index, 1}); };
@@ -542,7 +556,8 @@ TEST(RegisterSetAnalysis, WordIterationObservesEditsWithinAndBetweenBatches) {
   EXPECT_EQ(visited, (std::vector<uint16_t>{0, 2, 6, 7, 10, 17, 30, 63, 64, 254, 255, 257}));
 }
 
-TEST(RegisterSetAnalysis, WordIterationHandlesEditsAtEveryPositionInFullBatches) {
+TYPED_TEST(RegisterSetTyped, WordIterationHandlesEditsAtEveryPositionInFullBatches) {
+  using RegisterSet = TypeParam;
   for (unsigned trigger = 0; trigger < 8; ++trigger) {
     SCOPED_TRACE(trigger);
     RegisterSet set;
@@ -567,7 +582,8 @@ TEST(RegisterSetAnalysis, WordIterationHandlesEditsAtEveryPositionInFullBatches)
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationHandlesEditsAtEveryPositionInFullLanes) {
+TYPED_TEST(RegisterSetTyped, WordIterationHandlesEditsAtEveryPositionInFullLanes) {
+  using RegisterSet = TypeParam;
   for (unsigned trigger = 0; trigger < 64; ++trigger) {
     SCOPED_TRACE(trigger);
     RegisterSet set;
@@ -592,7 +608,8 @@ TEST(RegisterSetAnalysis, WordIterationHandlesEditsAtEveryPositionInFullLanes) {
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationMatchesBitsetModelAcrossMutationsAndAlgebra) {
+TYPED_TEST(RegisterSetTyped, WordIterationMatchesBitsetModelAcrossMutationsAndAlgebra) {
+  using RegisterSet = TypeParam;
   constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
   constexpr std::array capacities{REGISTER_SET_MAX_SGPRS, REGISTER_SET_MAX_VGPRS,
                                   REGISTER_SET_MAX_ACC_VGPRS};
@@ -664,7 +681,8 @@ TEST(RegisterSetAnalysis, WordIterationMatchesBitsetModelAcrossMutationsAndAlgeb
   }
 }
 
-TEST(RegisterSetAnalysis, WordIterationHandlesFullWordsAndPartialClassTails) {
+TYPED_TEST(RegisterSetTyped, WordIterationHandlesFullWordsAndPartialClassTails) {
+  using RegisterSet = TypeParam;
   constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
   constexpr std::array capacities{REGISTER_SET_MAX_SGPRS, REGISTER_SET_MAX_VGPRS,
                                   REGISTER_SET_MAX_ACC_VGPRS};
@@ -689,7 +707,8 @@ TEST(RegisterSetAnalysis, WordIterationHandlesFullWordsAndPartialClassTails) {
   EXPECT_TRUE(set.contains({RegClass::EXEC, 0, 1}));
 }
 
-TEST(RegisterSetAnalysis, WordIterationPreservesForwardCallbackEdits) {
+TYPED_TEST(RegisterSetTyped, WordIterationPreservesForwardCallbackEdits) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   for (uint16_t index : {0, 1, 63, 64, 1023})
     set.expand({RegClass::VGPR, index, 1});
@@ -707,7 +726,8 @@ TEST(RegisterSetAnalysis, WordIterationPreservesForwardCallbackEdits) {
   EXPECT_EQ(visited, (std::vector<uint16_t>{0, 2, 63, 65, 1023}));
 }
 
-TEST(RegisterSetAnalysis, WordIterationAlternatesUnchangedAndEditedMembership) {
+TYPED_TEST(RegisterSetTyped, WordIterationAlternatesUnchangedAndEditedMembership) {
+  using RegisterSet = TypeParam;
   // Compare against the original forward scan, including edits to the current
   // and earlier bits, new members in gaps, and changes at word boundaries.
   for (auto cls : {RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR}) {
@@ -753,7 +773,8 @@ TEST(RegisterSetAnalysis, WordIterationAlternatesUnchangedAndEditedMembership) {
   }
 }
 
-TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
+TYPED_TEST(RegisterSetTyped, KeepsRegisterClassesSeparate) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::SGPR, 4, 1});
 
@@ -762,7 +783,8 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
 }
 
-TEST(RegisterSetAnalysis, IntersectsIsTheAnyOfCounterpartToContains) {
+TYPED_TEST(RegisterSetTyped, IntersectsIsTheAnyOfCounterpartToContains) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::SGPR, 4, 1});
 
@@ -779,7 +801,8 @@ TEST(RegisterSetAnalysis, IntersectsIsTheAnyOfCounterpartToContains) {
   EXPECT_FALSE(set.intersects({RegClass::SGPR, 5, 4}));
 }
 
-TEST(RegisterSetAnalysis, IntersectsKeepsRegisterClassesSeparate) {
+TYPED_TEST(RegisterSetTyped, IntersectsKeepsRegisterClassesSeparate) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::SGPR, 0, 1});
 
@@ -788,7 +811,8 @@ TEST(RegisterSetAnalysis, IntersectsKeepsRegisterClassesSeparate) {
   EXPECT_FALSE(set.intersects({RegClass::ACC_VGPR, 0, 1}));
 }
 
-TEST(RegisterSetAnalysis, IntersectsAnswersFalseForUntrackedClasses) {
+TYPED_TEST(RegisterSetTyped, IntersectsAnswersFalseForUntrackedClasses) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::SGPR, 0, 1});
 
@@ -798,7 +822,8 @@ TEST(RegisterSetAnalysis, IntersectsAnswersFalseForUntrackedClasses) {
   EXPECT_FALSE(set.intersects({RegClass::VCC, 0, 1}));
 }
 
-TEST(RegisterSetAnalysis, IntersectsToleratesRunsPastTheTrackedRange) {
+TYPED_TEST(RegisterSetTyped, IntersectsToleratesRunsPastTheTrackedRange) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::SGPR, 0, 1});
 
@@ -809,7 +834,8 @@ TEST(RegisterSetAnalysis, IntersectsToleratesRunsPastTheTrackedRange) {
       {RegClass::SGPR, static_cast<uint16_t>(REGISTER_SET_ALLOCATABLE_SGPRS + 8), 4}));
 }
 
-TEST(RegisterSetAnalysis, TracksGfx1250HighBankVectorRegisters) {
+TYPED_TEST(RegisterSetTyped, TracksGfx1250HighBankVectorRegisters) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::VGPR, 768, 2});
 
@@ -938,7 +964,8 @@ TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
   }
 }
 
-TEST(RegisterSetAnalysis, SpecialClassesAreHeldButCarryNoOrdinaryLanes) {
+TYPED_TEST(RegisterSetTyped, SpecialClassesAreHeldButCarryNoOrdinaryLanes) {
+  using RegisterSet = TypeParam;
   RegisterSet set;
   set.expand({RegClass::EXEC, 0, 2});
   set.expand({RegClass::SCC, 0, 1});
@@ -998,7 +1025,7 @@ TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
 // Collect a set's special members in ascending RegClass order, so a test can
 // assert the *exact* set of special registers an instruction reads or writes,
 // not just membership.
-std::vector<RegClass> specials_in(const RegisterSet &set) {
+template <typename Set> std::vector<RegClass> specials_in(const Set &set) {
   std::vector<RegClass> classes;
   set.for_each_special([&](RegClass c) { classes.push_back(c); });
   return classes;
@@ -1028,7 +1055,8 @@ TEST(RegisterSetSpecial, ClassifiesSpecialVersusOrdinaryClasses) {
 // TTMP is a known register class that this set deliberately does not track:
 // no bitset, no special-mask bit. Adding one never makes the set non-empty and
 // never reports the register as present, and removal paths are safe no-ops.
-TEST(RegisterSetSpecial, TtmpIsUntracked) {
+TYPED_TEST(RegisterSetTyped, TtmpIsUntracked) {
+  using RegisterSet = TypeParam;
   RegisterSet s;
   s.expand({RegClass::TTMP, 0, 1});
   EXPECT_FALSE(s.contains({RegClass::TTMP, 0, 1}));
@@ -1041,7 +1069,8 @@ TEST(RegisterSetSpecial, TtmpIsUntracked) {
   EXPECT_TRUE(s.none());
 }
 
-TEST(RegisterSetSpecial, OrdinaryAndSpecialInsertionCoexist) {
+TYPED_TEST(RegisterSetTyped, OrdinaryAndSpecialInsertionCoexist) {
+  using RegisterSet = TypeParam;
   RegisterSet s;
   s.expand({RegClass::SGPR, 4, 2});
   s.expand({RegClass::EXEC, 0, 1});
@@ -1057,7 +1086,8 @@ TEST(RegisterSetSpecial, OrdinaryAndSpecialInsertionCoexist) {
   EXPECT_EQ(specials_in(s), special_regs({RegClass::EXEC, RegClass::VCC}));
 }
 
-TEST(RegisterSetSpecial, SpecialMembershipIgnoresIndexAndWidth) {
+TYPED_TEST(RegisterSetTyped, SpecialMembershipIgnoresIndexAndWidth) {
+  using RegisterSet = TypeParam;
   // Special classes are singletons: any index/width refers to the same member.
   RegisterSet s;
   s.expand({RegClass::EXEC, 42, 8});
@@ -1070,7 +1100,8 @@ TEST(RegisterSetSpecial, SpecialMembershipIgnoresIndexAndWidth) {
   EXPECT_TRUE(s.none());
 }
 
-TEST(RegisterSetSpecial, FullIterationEmitsCanonicalSpecialRefs) {
+TYPED_TEST(RegisterSetTyped, FullIterationEmitsCanonicalSpecialRefs) {
+  using RegisterSet = TypeParam;
   RegisterSet s;
   s.expand({RegClass::VGPR, 1, 1});
   s.expand({RegClass::PC, 5, 2});
@@ -1089,7 +1120,8 @@ TEST(RegisterSetSpecial, FullIterationEmitsCanonicalSpecialRefs) {
   EXPECT_EQ(ordinary, (std::vector<RegisterRef>{{RegClass::VGPR, 1, 1}}));
 }
 
-TEST(RegisterSetSpecial, OrdinaryOnlyDropsSpecialMembers) {
+TYPED_TEST(RegisterSetTyped, OrdinaryOnlyDropsSpecialMembers) {
+  using RegisterSet = TypeParam;
   RegisterSet s;
   s.expand({RegClass::SGPR, 3, 1});
   s.expand({RegClass::SCC, 0, 1});
@@ -1101,7 +1133,8 @@ TEST(RegisterSetSpecial, OrdinaryOnlyDropsSpecialMembers) {
   EXPECT_TRUE(s.has_specials()); // source unchanged
 }
 
-TEST(RegisterSetSpecial, SetAlgebraSpansOrdinaryAndSpecial) {
+TYPED_TEST(RegisterSetTyped, SetAlgebraSpansOrdinaryAndSpecial) {
+  using RegisterSet = TypeParam;
   RegisterSet a;
   a.expand({RegClass::SGPR, 0, 1});
   a.expand({RegClass::EXEC, 0, 1});
@@ -1130,7 +1163,8 @@ TEST(RegisterSetSpecial, SetAlgebraSpansOrdinaryAndSpecial) {
   EXPECT_EQ(cleared.ordinary_size(), 2u); // clear_class(special) leaves ordinary intact
 }
 
-TEST(RegisterSetSpecial, EqualityDistinguishesSpecialMembership) {
+TYPED_TEST(RegisterSetTyped, EqualityDistinguishesSpecialMembership) {
+  using RegisterSet = TypeParam;
   RegisterSet a;
   a.expand({RegClass::SGPR, 0, 1});
   RegisterSet b = a;
@@ -1139,7 +1173,8 @@ TEST(RegisterSetSpecial, EqualityDistinguishesSpecialMembership) {
   EXPECT_NE(a, b); // the special mask participates in equality
 }
 
-TEST(RegisterSetSpecial, HighValuedSpecialMaskBitsRoundTrip) {
+TYPED_TEST(RegisterSetTyped, HighValuedSpecialMaskBitsRoundTrip) {
+  using RegisterSet = TypeParam;
   // FLAT_SCRATCH and PC are the highest RegClass values, where a mask-width bug
   // would first surface.
   RegisterSet s;
