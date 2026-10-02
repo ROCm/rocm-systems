@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
 #include <cstdint>
 #include <utility>
@@ -24,7 +24,7 @@ template <typename Fmt, typename Op, typename... Vs>
 constexpr auto apply(const SourceModifiers &source, const output_modifier::Policy &output,
                      const Op &operation, Vs... values) {
   const auto result = [&]<std::size_t... I>(std::index_sequence<I...>) {
-    return operation(comparison::modify<Fmt>(values, I, source.abs, source.neg)...);
+    return operation(source_modifier::apply<Fmt>(values, I, source.abs, source.neg)...);
   }(std::index_sequence_for<Vs...>{});
   return output_modifier::apply<Fmt>(result, output);
 }

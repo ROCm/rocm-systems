@@ -35,4 +35,10 @@ using F16 = Format<uint32_t, 5, 10>;
 using F32 = Format<uint32_t, 8, 23>;
 using F64 = Format<uint64_t, 11, 52>;
 
+/// @brief Whether V is the format's lane type or a SIMD vector of it.
+template <typename Fmt, typename V>
+inline constexpr bool is_lane_v = std::is_same_v<V, typename Fmt::Lane> || requires {
+  requires std::is_same_v<typename V::value_type, typename Fmt::Lane>;
+};
+
 } // namespace rocjitsu::amdgpu::fp_format

@@ -32,6 +32,7 @@
 /// encoding and do not use these stages.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
 #include <cstdint>
 #include <functional>
@@ -57,12 +58,6 @@ template <typename Op, bool Negated = false> struct Relation {
 };
 
 namespace detail {
-
-/// @brief Whether V is the format's lane type or a SIMD vector of it.
-template <typename Fmt, typename V>
-inline constexpr bool is_lane_v = std::is_same_v<V, typename Fmt::Lane> || requires {
-  requires std::is_same_v<typename V::value_type, typename Fmt::Lane>;
-};
 
 /// @brief `when_true` where `take` holds, else `when_false`, for a scalar or SIMD lane.
 /// @details Both candidates are evaluated; a SIMD mask selects independently per lane.
@@ -120,28 +115,10 @@ using Neq = Relation<std::equal_to<>, true>;
 using Nlt = Relation<std::less<>, true>;
 using T = Relation<detail::Never, true>;
 
-/// @brief Stage 1: apply VOP3 or DPP source modifiers to one source.
-template <typename Fmt, typename V> constexpr V modify(V bits, bool absolute, bool negate) {
-  static_assert(detail::is_lane_v<Fmt, V>);
-  if (absolute)
-    bits = bits & Fmt::kMagnitude;
-  if (negate)
-    bits = bits ^ Fmt::kSign;
-  return bits;
-}
-
-/// @brief Stage 1 for source `index` of a VOP3 instruction.
-/// @param abs VOP3 ABS field; bit i applies to source i.
-/// @param neg VOP3 NEG field, with the same bit assignment.
-template <typename Fmt, typename V>
-constexpr V modify(V bits, unsigned index, uint32_t abs, uint32_t neg) {
-  return modify<Fmt>(bits, ((abs >> index) & 1u) != 0, ((neg >> index) & 1u) != 0);
-}
-
 /// @brief Stage 2: flush a subnormal source to a zero of the same sign.
 /// @details NaN, infinity, zero and normal encodings pass through unchanged.
 template <typename Fmt, typename V> constexpr V flush_input(V bits, const Policy &policy) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   if (!policy.flush_inputs)
     return bits;
   return bits & (~detail::below_normal<Fmt>(bits) | Fmt::kSign);
@@ -154,7 +131,7 @@ template <typename Fmt, typename V> constexpr V prepare(V bits, const Policy &po
 
 /// @brief Whether a source encoding is NaN.
 template <typename Fmt, typename V> constexpr auto is_nan(V bits) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   return (bits & Fmt::kMagnitude) > Fmt::kInfinity;
 }
 
@@ -162,7 +139,7 @@ template <typename Fmt, typename V> constexpr auto is_nan(V bits) {
 /// @details A positive encoding sets the sign bit; a negative one inverts every
 /// bit of the format, reversing magnitude order.
 template <typename Fmt, typename V> constexpr V total_order_key(V bits) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   bits = bits & Fmt::kBits;
   const V negative = typename Fmt::Lane{0} - (bits >> (Fmt::kWidth - 1));
   return bits ^ ((negative & Fmt::kBits) | Fmt::kSign);
@@ -171,7 +148,7 @@ template <typename Fmt, typename V> constexpr V total_order_key(V bits) {
 /// @brief Stage 3: map a non-NaN encoding to a key that orders like its value.
 /// @details Both zeros map to the same key.
 template <typename Fmt, typename V> constexpr V order_key(V bits) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   bits = bits & Fmt::kBits;
   return total_order_key<Fmt>(bits & detail::nonzero<Fmt>(bits));
 }
@@ -180,7 +157,7 @@ template <typename Fmt, typename V> constexpr V order_key(V bits) {
 /// @returns bool for scalar lanes, or the key comparison's mask for SIMD lanes.
 template <typename Fmt, typename Rel, typename V>
 constexpr auto evaluate(V a, V b, const Policy &policy) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   a = prepare<Fmt>(a, policy);
   b = prepare<Fmt>(b, policy);
   const auto ordered = !(is_nan<Fmt>(a) || is_nan<Fmt>(b));
@@ -196,7 +173,8 @@ constexpr auto evaluate(V a, V b, const Policy &policy) {
 /// @param neg VOP3 NEG field, with the same bit assignment.
 template <typename Fmt, typename Rel, typename V>
 constexpr auto evaluate(V a, V b, uint32_t abs, uint32_t neg, const Policy &policy) {
-  return evaluate<Fmt, Rel>(modify<Fmt>(a, 0, abs, neg), modify<Fmt>(b, 1, abs, neg), policy);
+  return evaluate<Fmt, Rel>(source_modifier::apply<Fmt>(a, 0, abs, neg),
+                            source_modifier::apply<Fmt>(b, 1, abs, neg), policy);
 }
 
 } // namespace rocjitsu::amdgpu::comparison
