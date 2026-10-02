@@ -557,30 +557,28 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   // owns one XCD's engines, so the mesh a whole MI300X supports does not fit. KFD also does not
   // report how many queues ROCr already holds, so an exhausted budget can only be predicted for
   // gross over-subscription and must additionally be recognised when queue creation fails.
-  auto reportBudget = [&](uint32_t usedEng, uint32_t used) {
+  // The budget is counted across all engines, not per engine. A rejected engine-pinned create
+  // retries as a generic queue and reports engine 0, so on a partition every queue charges the
+  // same key; a per-engine cap would then refuse at numSdmaQueuesPerEngine_ while the partition
+  // really offers numSdmaEnginesTotal_ times that, which is the figure this message quotes. The
+  // total is an upper bound, so an uneven distribution is still caught by KFD's own NO_MEMORY.
+  const uint32_t queueBudget = numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_;
+  auto reportBudget = [&](uint32_t used) {
     LOG_ERROR(
-        "anvil: SDMA queue budget exhausted on engine %u: %u queue(s) taken by this process + %d "
-        "requested, limit %u per engine (%u engines: host=%u xgmi=%u). This partition has %u SDMA "
-        "queues in total and ROCm holds some of them, so it cannot cover this peer count at %d "
-        "channel(s) per peer. Use fewer ranks per node, fewer channels, or a coarser partition mode "
-        "(DPX/SPX).",
-        usedEng, used, numChannels, numSdmaQueuesPerEngine_, numSdmaEnginesTotal_, numSdmaEngines_,
-        numSdmaXgmiEngines_, numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_, numChannels);
+        "anvil: SDMA queue budget exhausted: %u queue(s) taken by this process + %d requested, "
+        "limit %u (%u engines: host=%u xgmi=%u, %u queues per engine). ROCm already holds some of "
+        "them, so this partition cannot cover this peer count at %d channel(s) per peer. Use fewer "
+        "ranks per node, fewer channels, or a coarser partition mode (DPX/SPX).",
+        used, numChannels, queueBudget, numSdmaEnginesTotal_, numSdmaEngines_, numSdmaXgmiEngines_,
+        numSdmaQueuesPerEngine_, numChannels);
   };
 
-  // The charged engine is not known until create returns: a rejected pin retries as a generic
-  // queue and records engine 0. Checking the requested id here would disagree with the increment
-  // below, so the limit is applied to queue->engineId() after a successful create. KFD's own
-  // NO_MEMORY is the backstop when ROCr already holds queues this process did not count.
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
   auto rollback = [&]() {
     while (vec.size() > already) {
       SdmaQueue* q = vec.back().get();
-      if (q != nullptr && q->valid()) {
-        auto it = queuesUsedPerEngine_.find(q->engineId());
-        if (it != queuesUsedPerEngine_.end() && it->second > 0) it->second -= 1;
-      }
+      if (q != nullptr && q->valid() && queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
       vec.pop_back();
     }
   };
@@ -588,20 +586,19 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   for (int c = 0; c < numChannels; ++c) {
     SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
     if (queue == nullptr) {
-      if (numSdmaQueuesPerEngine_ > 0 && lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
-        reportBudget(engineId, queuesUsedPerEngine_[engineId]);
+      if (queueBudget > 0 && lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
+        reportBudget(queuesUsedTotal_);
       }
       rollback();
       return false;
     }
-    const uint32_t charged = queue->engineId();
-    const uint32_t used = queuesUsedPerEngine_[charged];
+    const uint32_t used = queuesUsedTotal_;
     // Count before the limit check so rollback, which decrements every valid queue it pops, cannot
     // subtract a queue this connect never charged.
-    queuesUsedPerEngine_[charged] += 1;
+    queuesUsedTotal_ += 1;
     const uint32_t stillNeeded = static_cast<uint32_t>(numChannels - c);
-    if (numSdmaQueuesPerEngine_ > 0 && used + stillNeeded > numSdmaQueuesPerEngine_) {
-      reportBudget(charged, used);
+    if (queueBudget > 0 && used + stillNeeded > queueBudget) {
+      reportBudget(used);
       rollback();
       return false;
     }
@@ -612,7 +609,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
 void AnvilLib::disconnect() {
   // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
   sdma_channels_.clear();
-  queuesUsedPerEngine_.clear();
+  queuesUsedTotal_ = 0;
   LOG_TRACE("SDMA: Disconnected all queues");
 }
 

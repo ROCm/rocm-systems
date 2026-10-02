@@ -1244,8 +1244,11 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     // "invalid argument". Probe for a VMM allocation first and fall back to legacy IPC only for
     // buffers that really came from cudaMalloc. Only POSIX_FILE_DESCRIPTOR exports the raw handle
     // through the owner's proxy (same as p2p.cc); a FABRIC build needs the full 64-byte descriptor.
-    // The retained handle covers one segment. A looped range larger than that segment is not
-    // published with it; the export falls through to legacy IPC instead.
+    // ExchangeEntry carries one handle and one size, so a window that spans more than one VMM
+    // segment cannot be described by it. That case is refused below rather than approximated:
+    // legacy IPC is not a fallback for it either, because cudaIpcGetMemHandle would export only
+    // the first segment while userOffset + userSize still runs past it, which every importing peer
+    // rejects at the bound check below.
     exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
         CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
@@ -1257,12 +1260,10 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
       const bool rangeOk =
           ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
       if (rangeOk && rangeSize > retainedSize) {
-        WARN("windowRegisterNonSym: looped cuMem range %zu exceeds retained segment %zu; "
-             "falling back to legacy IPC",
-             rangeSize, retainedSize);
-        CUCHECKIGNORE(cuMemRelease(localCuMemHandle));
-        haveLocalCuMemHandle = false;
-        localCuMemHandle = 0;
+        WARN("windowRegisterNonSym: window at %p size=%zu spans multiple VMM segments (range %zu > "
+             "segment %zu); this path publishes a single allocation handle and cannot describe it",
+             userPtr, userSize, rangeSize, retainedSize);
+        goto fail;
       } else {
         exportCuMem = true;
         if (rangeOk) {
