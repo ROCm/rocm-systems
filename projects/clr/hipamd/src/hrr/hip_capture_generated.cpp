@@ -55,6 +55,7 @@ extern HipDispatchTable         g_real_table;
 extern HipDispatchTable         g_cap_table;
 extern std::atomic<bool>        g_installed;
 extern std::atomic<bool>        g_table_built;
+extern std::atomic<bool>        g_cap_table_ready;
 extern HipCompilerDispatchTable g_real_compiler_table;
 extern std::atomic<bool>        g_compiler_installed;
 
@@ -7969,12 +7970,15 @@ extern hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim
 extern void** capture___hipRegisterFatBinary(const void* data);
 extern void capture___hipUnregisterFatBinary(void** modules);
 
-void hip_capture_build_table() {
+void hip_capture_build_table(const HipDispatchTable* live) {
   // Guard: safe to call only once. A second call after shims are installed
   // would snapshot shim ptrs into g_real_table, causing infinite recursion.
   if (g_table_built.exchange(true)) return;
-  // Snapshot the live real table; copy all slots as pass-through base
-  g_real_table = *hip::GetHipDispatchTable();
+  // Snapshot the live real table; copy all slots as pass-through base.
+  // The early install passes the table directly because it runs inside the
+  // initialiser of the function-local static GetHipDispatchTable() returns,
+  // so calling that here would re-enter it.
+  g_real_table = live ? *live : *hip::GetHipDispatchTable();
   g_cap_table  = g_real_table;
 
   // Override every runtime slot with its capture shim
@@ -8523,6 +8527,11 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
+
+  // Publish only now that every slot is populated. hip_capture_install()
+  // refuses to copy the table until this is set, so a caller that returned
+  // on the guard above cannot memcpy a zeroed table over the live one.
+  g_cap_table_ready.store(true, std::memory_order_release);
 }
 
 void hip_capture_build_compiler_table() {

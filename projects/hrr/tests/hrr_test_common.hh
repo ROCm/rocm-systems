@@ -41,6 +41,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <system_error>
 #include <string>
 #include <utility>
 #include <vector>
@@ -56,10 +57,14 @@
 #define HRR_TEST_CASE(name) TEST_CASE(#name, "[hrr]")
 
 // HRR_HIP_CHECK replaces the hip-tests HIP error check: fail the current Catch2 test if a HIP call
-// does not return hipSuccess, reporting the error code and string.
+// does not return hipSuccess, reporting the error code and string. hipErrorNoDevice skips the case
+// only when no device is visible at all; a device lost mid-case still fails.
 #define HRR_HIP_CHECK(expr)                                                     \
   do {                                                                          \
     hipError_t _hrr_err = (expr);                                              \
+    if (_hrr_err == hipErrorNoDevice && !hrr_gpu_available()) {                \
+      HRR_SKIP_CASE("no ROCm-capable device is detected");                     \
+    }                                                                          \
     INFO("HIP call failed: " #expr);                                           \
     INFO("hipError_t: " << static_cast<int>(_hrr_err));                        \
     INFO("hipGetErrorString: " << hipGetErrorString(_hrr_err));                \
@@ -68,11 +73,33 @@
 
 // HRR_SKIP replaces the hip-tests skip macro: emit a warning describing why the current
 // case is being skipped and return early.
+//
+// This is the macro for the hidden [.][hrr-direct] workloads. It deliberately
+// does NOT use Catch2's SKIP(): the workloads are spawned as subprocesses and
+// observe_workload treats any non-zero exit as a genuine failure, but a Catch2
+// run whose only selected case skips exits 4. Gating a workload with SKIP()
+// would therefore turn "this host has one GPU" into a tier failure.
 #define HRR_SKIP(message)                                                       \
   do {                                                                          \
     WARN(message);                                                             \
     return;                                                                    \
   } while (0)
+
+// HRR_SKIP_CASE is the equivalent for a visible test case, where the exit code
+// is Catch2's own and a real skip is what reporters should see. Using it keeps
+// a tier that could not run from being indistinguishable, in a JUnit report or
+// a --summary, from one that ran and passed.
+#define HRR_SKIP_CASE(message) SKIP(message)
+
+inline bool hrr_gpu_available() {
+  int count = 0;
+  return hipGetDeviceCount(&count) == hipSuccess && count > 0;
+}
+
+inline void hrr_skip_without_gpu() {
+  if (!hrr_gpu_available())
+    HRR_SKIP_CASE("no ROCm-capable device is detected");
+}
 
 // ---------------------------------------------------------------------------
 // Shared capture/replay helpers.
@@ -187,6 +214,32 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 }
 
 // ---------------------------------------------------------------------------
+// Helper: path to hrr-playback, for the spawns below.
+//
+// When hrr-playback was built in tree CMake bakes its absolute path in, which
+// is correct for an in-tree run but wrong wherever the build is used somewhere
+// else: CI builds once and unpacks the artifact on test machines whose
+// workspace root differs, and there every playback spawn dies in execvp.
+// Prefer the baked path, then look for the same binary beside this process's
+// own image, and otherwise hand SpawnProc the bare name so it resolves from
+// PATH as the HRR_BUILD_PLAYBACK=OFF build already relies on.
+// ---------------------------------------------------------------------------
+inline std::string hrr_playback_exe() {
+  std::error_code ec;
+  if (fs::exists(HRR_PLAYBACK_EXE, ec)) return HRR_PLAYBACK_EXE;
+#ifndef _WIN32
+  const fs::path name = fs::path(HRR_PLAYBACK_EXE).filename();
+  // <build>/playback/hrr-playback, reached from <build>/tests/<suite>/<exe>.
+  for (fs::path dir = fs::read_symlink("/proc/self/exe", ec).parent_path();
+       !dir.empty() && dir != dir.root_path(); dir = dir.parent_path()) {
+    const fs::path candidate = dir / "playback" / name;
+    if (fs::exists(candidate, ec)) return candidate.string();
+  }
+#endif
+  return fs::path(HRR_PLAYBACK_EXE).filename().string();
+}
+
+// ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
 //   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
@@ -197,7 +250,7 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 inline void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -237,6 +290,63 @@ inline void hrr_run_playback(const fs::path& cap_path,
 
 #if defined(HRR_TEST_EXE)
 // ---------------------------------------------------------------------------
+// Helper: path to this test binary, for the spawns below.
+//
+// CMake bakes HRR_TEST_EXE in as an absolute path into the build tree, which is
+// correct for a normal in-tree run but wrong wherever the binary is used
+// somewhere else: CI builds once and unpacks the artifact on test machines
+// whose workspace root differs, and there every spawn dies in execvp. Prefer
+// the baked path and fall back to this process's own image, which is the same
+// binary the macro was naming.
+// ---------------------------------------------------------------------------
+inline std::string hrr_test_exe() {
+  std::error_code ec;
+  if (fs::exists(HRR_TEST_EXE, ec)) return HRR_TEST_EXE;
+#ifndef _WIN32
+  const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+  if (!ec && !self.empty()) return self.string();
+#endif
+  return HRR_TEST_EXE;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: run one hidden [.][hrr-direct] workload in a child of this same test
+// binary, with capture directed at `cap_path`, and REQUIRE a clean exit.
+//
+// The child is a whole Catch2 process. Left on the parent's stdout it prints
+// its own run banner -- "Filters: ...", "Randomness seeded to: ...", the
+// divider and the totals line -- once per spawn, and the suite spawns a
+// workload for each of its ~70 hidden cases. That, not the number of test
+// cases, is where the integration suite's wall of output came from; the unit
+// suite stays readable only because every spawn it makes is already captured.
+//
+// So capture the child's stdout and stderr and hand the transcript to INFO,
+// which Catch2 holds and prints only if an assertion in this scope fails. A
+// passing run says nothing at all; a failing one still carries the complete
+// child output next to the exit code, which is the diagnostic that matters.
+//
+// The merged stream is returned for the callers that parse a marker out of it.
+// ---------------------------------------------------------------------------
+inline std::string hrr_spawn_direct(const std::string& direct_case,
+                                    const fs::path& cap_path,
+                                    const char* what = "Capture") {
+  hrr_skip_without_gpu();
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
+                            /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+  // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
+  // SpawnProc replaces PATH entirely, so we reconstruct the full value.
+  set_proc_search_path(proc);
+  const int ret = proc.run("\"" + direct_case + "\"");
+  std::string out = proc.getOutput();
+  INFO(what << " subprocess (" << direct_case << ") exit code: " << ret
+            << "\n--- child output ---\n"
+            << out << "--- end child output ---");
+  REQUIRE(ret == 0);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: shared roundtrip body — capture → verify archive → playback.
 //
 // min_events:  minimum number of events expected in events.bin.  Every workload
@@ -251,11 +361,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
                               const fs::path& cap_path,
                               size_t min_events = 5,
                               bool require_d2h = true) {
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE);
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  hrr_spawn_direct(direct_case, cap_path);
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -293,11 +399,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
                                size_t min_events = 5) {
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE);
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  hrr_spawn_direct(direct_case, cap_path);
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -313,7 +415,7 @@ inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,
     const std::vector<std::pair<std::string, std::string>>& env,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   std::string path_arg = hrr_quote_path(cap_path);
@@ -323,7 +425,7 @@ inline std::pair<int, std::string> hrr_playback_env(
 
 inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
                                                     const std::string& extra_args) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = cap_path.string();
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -368,7 +470,7 @@ inline std::pair<int, std::string> hrr_playback_merged(
     const fs::path& cap_path,
     const std::string& extra_args = "",
     const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
                       /*capture_stderr=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
@@ -396,7 +498,7 @@ inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout
 inline std::pair<int, std::string> hrr_playback_watchdog(
     const fs::path& cap_path, int timeout_seconds,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);

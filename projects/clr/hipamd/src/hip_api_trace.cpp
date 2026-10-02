@@ -8,6 +8,7 @@
 #include <hip/amd_detail/hip_api_trace.hpp>
 
 #include "hip_internal.hpp"
+#include "hrr/hip_capture.h"
 
 #include <atomic>
 #include <cstdint>
@@ -1528,6 +1529,12 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
   ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
+
+  // HRR in-tree capture — no-op unless HIP_HRR_CAPTURE_OUTPUT is set. Every slot
+  // above now holds its real function pointer and no caller can have loaded one
+  // yet, which makes this the only place the process's first HIP call can still
+  // be routed through a capture shim.
+  hip_capture_install_early(ptrDispatchTable);
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
