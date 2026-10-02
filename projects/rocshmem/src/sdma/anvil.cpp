@@ -223,10 +223,15 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     }
   }
 
-  // Keep the pinned failure when the retry also fails so connect() can still recognise NO_MEMORY.
-  createStatus_ = (queueStatus != HSAKMT_STATUS_SUCCESS && pinnedStatus != HSAKMT_STATUS_SUCCESS)
-                      ? pinnedStatus
-                      : queueStatus;
+  // A generic retry can return NO_MEMORY after the pinned create returned INVALID_PARAMETER.
+  // Keeping only the pinned status would hide the budget failure from connect().
+  if (queueStatus == HSAKMT_STATUS_SUCCESS) {
+    createStatus_ = HSAKMT_STATUS_SUCCESS;
+  } else if (pinnedStatus == HSAKMT_STATUS_NO_MEMORY || queueStatus == HSAKMT_STATUS_NO_MEMORY) {
+    createStatus_ = HSAKMT_STATUS_NO_MEMORY;
+  } else {
+    createStatus_ = pinnedStatus;
+  }
 
   if (queueStatus != HSAKMT_STATUS_SUCCESS) {
     const std::string srcBus = getBusId(localDeviceId);
@@ -569,13 +574,10 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
         numSdmaXgmiEngines_, numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_, numChannels);
   };
 
-  const uint32_t used = queuesUsedPerEngine_[engineId];
-  if (numSdmaQueuesPerEngine_ > 0 &&
-      used + static_cast<uint32_t>(numChannels) > numSdmaQueuesPerEngine_) {
-    reportBudget(engineId, used);
-    return false;
-  }
-
+  // The charged engine is not known until create returns: a rejected pin retries as a generic
+  // queue and records engine 0. Checking the requested id here would disagree with the increment
+  // below, so the limit is applied to queue->engineId() after a successful create. KFD's own
+  // NO_MEMORY is the backstop when ROCr already holds queues this process did not count.
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
   auto rollback = [&]() {
@@ -599,7 +601,17 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
       rollback();
       return false;
     }
-    queuesUsedPerEngine_[queue->engineId()] += 1;
+    const uint32_t charged = queue->engineId();
+    const uint32_t used = queuesUsedPerEngine_[charged];
+    // Count before the limit check so rollback, which decrements every valid queue it pops, cannot
+    // subtract a queue this connect never charged.
+    queuesUsedPerEngine_[charged] += 1;
+    const uint32_t stillNeeded = static_cast<uint32_t>(numChannels - c);
+    if (numSdmaQueuesPerEngine_ > 0 && used + stillNeeded > numSdmaQueuesPerEngine_) {
+      reportBudget(charged, used);
+      rollback();
+      return false;
+    }
   }
   return true;
 }
@@ -632,16 +644,39 @@ AnvilLib& AnvilLib::getInstance() {
   return *instance;
 }
 
+// PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
+// function digit, so an unreadable id is not treated as function 0. The physical BDF is rewritten
+// only in that case; a bad tail is left unchanged.
+struct PciFunctionBus {
+  std::string busId;
+  std::string physBusId;
+  int function;
+};
+
+static PciFunctionBus pciFunctionBus(const std::string& busId) {
+  PciFunctionBus loc;
+  loc.busId = busId;
+  loc.physBusId = busId;
+  loc.function = -1;
+  if (busId.empty()) return loc;
+  const char c = busId.back();
+  if (c >= '0' && c <= '7') {
+    loc.function = c - '0';
+    loc.physBusId.back() = '0';
+  }
+  return loc;
+}
+
 int AnvilLib::getOamId(int deviceId) {
   // xgmi_physical_id is a property of the physical GPU. A CPX/DPX partition is a HIP alias at PCI
   // function .1-.7 of that GPU and has no sysfs node of its own, so read the physical function
   // whenever the partition's own BDF is absent. Returns -1 when neither is readable.
-  const std::string busId = getBusId(deviceId);
-  std::string physBusId = busId;
-  if (!physBusId.empty()) physBusId.back() = '0';
-
-  for (const std::string& candidate : {busId, physBusId}) {
-    std::ifstream file("/sys/bus/pci/devices/" + candidate + "/xgmi_physical_id");
+  const PciFunctionBus loc = pciFunctionBus(getBusId(deviceId));
+  const std::string* candidates[2] = {&loc.busId, &loc.physBusId};
+  const int nCandidates = loc.physBusId == loc.busId ? 1 : 2;
+  for (int i = 0; i < nCandidates; ++i) {
+    if (candidates[i]->empty()) continue;
+    std::ifstream file("/sys/bus/pci/devices/" + *candidates[i] + "/xgmi_physical_id");
     int xgmi_physical_id = 0;
     if (file.is_open() && (file >> xgmi_physical_id)) return xgmi_physical_id;
   }
@@ -652,19 +687,10 @@ int AnvilLib::getOamId(int deviceId) {
   LOG_ERROR(
       "anvil: no xGMI physical id for %s or %s device=%d pair=%d->%d preferredQueried=%d "
       "preferredStatus=%#x preferredMask=0x%x preferredEngine=%d hostEng=%u xgmiEng=%u total=%u",
-      busId.c_str(), physBusId.c_str(), deviceId, lastSrcDeviceId_, lastDstDeviceId_,
+      loc.busId.c_str(), loc.physBusId.c_str(), deviceId, lastSrcDeviceId_, lastDstDeviceId_,
       lastPreferredQueried_ ? 1 : 0, static_cast<unsigned>(lastPreferredStatus_), lastPreferredMask_,
       preferredEngine, numSdmaEngines_, numSdmaXgmiEngines_, numSdmaEnginesTotal_);
   return -1;
-}
-
-// PCI function digit of a BDF like "0000:0c:00.2". Matches how RCCL keeps the partition index
-// alongside the masked physical BDF (init.cc fillInfo).
-static int pciFunctionFromBusId(const std::string& busId) {
-  if (busId.empty()) return 0;
-  const char c = busId.back();
-  if (c >= '0' && c <= '7') return c - '0';
-  return 0;
 }
 
 int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
@@ -681,20 +707,36 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
   // Use even engines only (MI300X xGMI SDMA layout).
   int engineId = oamEngine * 2;
 
-  if (numSdmaEnginesTotal_ > 0 &&
-      static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_) {
-    // Both the map and the doubling assume the 14 xGMI SDMA engines of an unpartitioned MI300X. A
-    // partition owns fewer engines (CPX: 2 host engines, 0 xGMI), so fold the undoubled map value
-    // into the range this node reports. Folding the doubled value would be wrong: it is always
-    // even, so it would collapse every peer onto engine 0. The physical-function BDF fallback also
-    // gives every CPX partition of one GPU the same OAM id, so same-device peers hit the map
-    // diagonal (0); fold the PCI function in so they land on distinct engines.
-    const int srcFn = pciFunctionFromBusId(getBusId(srcDeviceId));
-    const int dstFn = pciFunctionFromBusId(getBusId(dstDeviceId));
-    const int folded =
-        (oamEngine + srcFn + dstFn) % static_cast<int>(numSdmaEnginesTotal_);
-    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u, using engine %d (oam=%d srcFn=%d dstFn=%d)",
-             engineId, numSdmaEnginesTotal_, folded, oamEngine, srcFn, dstFn);
+  // The map and the doubling assume the 14 xGMI SDMA engines of an unpartitioned MI300X. A
+  // partition owns fewer engines (CPX: 2 host, 0 xGMI). Same-device peers share an OAM id, so they
+  // hit the diagonal (oamEngine 0) and engineId 0 is in range. The fold has to run there too, not
+  // only when the doubled id is past the engine count.
+  //
+  // (srcFn + dstFn) rather than dstFn alone: with 2 engines the two split a mixed-parity mesh the
+  // same way, but once the node has more than 2 engines the sum still separates pairs that share a
+  // destination function. Two engines cannot give 8 partitions distinct ids.
+  const bool partition = numSdmaXgmiEngines_ == 0 && numSdmaEnginesTotal_ > 0;
+  const bool outOfRange =
+      numSdmaEnginesTotal_ > 0 && static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_;
+  if (partition || outOfRange) {
+    const PciFunctionBus srcPci = pciFunctionBus(getBusId(srcDeviceId));
+    const PciFunctionBus dstPci = pciFunctionBus(getBusId(dstDeviceId));
+    // An unreadable tail adds 0 and therefore collides with function 0. The warning logs the raw
+    // BDF so that case is not silent.
+    const int srcFn = srcPci.function < 0 ? 0 : srcPci.function;
+    const int dstFn = dstPci.function < 0 ? 0 : dstPci.function;
+    const int folded = (oamEngine + srcFn + dstFn) % static_cast<int>(numSdmaEnginesTotal_);
+    if (srcPci.function < 0 || dstPci.function < 0) {
+      LOG_WARN("anvil: PCI function unreadable src=%s dst=%s, using engine %d (oam=%d)",
+               srcPci.busId.c_str(), dstPci.busId.c_str(), folded, oamEngine);
+    } else if (partition) {
+      LOG_INFO("anvil: partition engine %d (oam=%d srcFn=%d dstFn=%d total=%u)", folded, oamEngine,
+               srcFn, dstFn, numSdmaEnginesTotal_);
+    } else {
+      LOG_WARN(
+          "anvil: legacy OAM-map engine %d >= total %u, using engine %d (oam=%d srcFn=%d dstFn=%d)",
+          engineId, numSdmaEnginesTotal_, folded, oamEngine, srcFn, dstFn);
+    }
     engineId = folded;
   }
   return engineId;

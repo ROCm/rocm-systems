@@ -1210,6 +1210,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
   // Held until every peer has imported, which the post-mapping barrier below establishes.
   CUmemGenericAllocationHandle localCuMemHandle = 0;
   bool haveLocalCuMemHandle = false;
+  bool exportCuMem = false;
 
   win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
   if (win == nullptr) goto fail;
@@ -1237,26 +1238,43 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     if (peers == nullptr) goto fail;
 
     ExchangeEntry* mine = &peers[teamSelf];
+    // Zero both arms. The one this rank does not fill must not be read back as a handle.
+    memset(mine, 0, sizeof(*mine));
     // GIN requires NCCL_CUMEM_ENABLE=1, and cudaIpcGetMemHandle rejects a cuMem/VMM allocation with
     // "invalid argument". Probe for a VMM allocation first and fall back to legacy IPC only for
     // buffers that really came from cudaMalloc. Only POSIX_FILE_DESCRIPTOR exports the raw handle
     // through the owner's proxy (same as p2p.cc); a FABRIC build needs the full 64-byte descriptor.
+    // The retained handle covers one segment. A looped range larger than that segment is not
+    // published with it; the export falls through to legacy IPC instead.
+    exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
         CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
                                           reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
       haveLocalCuMemHandle = true;
-      mine->isCuMem = 1;
-      memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
-      // cuMemGetAddressRange returns one VMM segment; publish the looped total so a multi-segment
-      // window maps the whole reservation on the importer.
+      const size_t retainedSize = allocSize;
       CUdeviceptr rangeBase = 0;
       size_t rangeSize = 0;
-      if (ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess) {
-        allocBase = rangeBase;
-        allocSize = rangeSize;
-        userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
+      const bool rangeOk =
+          ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
+      if (rangeOk && rangeSize > retainedSize) {
+        WARN("windowRegisterNonSym: looped cuMem range %zu exceeds retained segment %zu; "
+             "falling back to legacy IPC",
+             rangeSize, retainedSize);
+        CUCHECKIGNORE(cuMemRelease(localCuMemHandle));
+        haveLocalCuMemHandle = false;
+        localCuMemHandle = 0;
+      } else {
+        exportCuMem = true;
+        if (rangeOk) {
+          allocBase = rangeBase;
+          allocSize = rangeSize;
+          userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
+        }
+        mine->isCuMem = 1;
+        memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
       }
-    } else {
+    }
+    if (!exportCuMem) {
       cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
       if (cerr != cudaSuccess) {
         WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));
@@ -1299,8 +1317,11 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
         }
       } else {
         void* peerBase = nullptr;
-        if (peers[r].userOffset + peers[r].userSize > peers[r].allocSize) {
-          WARN("windowRegisterNonSym: peer %d userOffset=%zu + userSize=%zu exceeds allocSize=%zu", r,
+        // userOffset + userSize wraps when the offset is near SIZE_MAX and would accept a range
+        // that does not fit. Compare each side against what remains in the allocation.
+        if (peers[r].userOffset > peers[r].allocSize ||
+            peers[r].userSize > peers[r].allocSize - peers[r].userOffset) {
+          WARN("windowRegisterNonSym: peer %d userOffset=%zu userSize=%zu exceeds allocSize=%zu", r,
                peers[r].userOffset, peers[r].userSize, peers[r].allocSize);
           goto fail;
         }

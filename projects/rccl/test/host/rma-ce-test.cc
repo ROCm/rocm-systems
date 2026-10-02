@@ -234,8 +234,10 @@ protected:
           for (int r = 0; r < size; r++) {
             e[r].hostHash = (r == self) ? peerInfo_[kRank].hostHash : 500 + r;
             e[r].pidHash = (r == self) ? peerInfo_[kRank].pidHash : 600 + r;
-            e[r].userOffset = static_cast<size_t>(r) * kWinSlots * sizeof(uint64_t);
             e[r].userSize = kWinSlots * sizeof(uint64_t);
+            e[r].userOffset = static_cast<size_t>(r) * e[r].userSize;
+            e[r].allocSize = static_cast<size_t>(size) * e[r].userSize;
+            e[r].isCuMem = 0;
           }
           return ncclSuccess;
         };

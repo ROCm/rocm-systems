@@ -3331,6 +3331,8 @@ protected:
         e[r].pidHash = (r == self || r == sameProcRank) ? peers[0].pidHash : 600 + r;
         e[r].userOffset = 64 * r;
         e[r].userSize = 4096;
+        e[r].allocSize = 8192;  // covers userOffset + userSize for this team
+        e[r].isCuMem = 0;
       }
       return ncclSuccess;
     };
@@ -3374,6 +3376,54 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
   ncclDevrWindow* win = comm->devrState.winSorted[0].win;
   EXPECT_EQ(win->ipcPeerPtrs[1], nullptr);
   EXPECT_EQ(win->ipcPeerPtrsAllocBase[1], nullptr);
+}
+
+// Branch: a peer exported a cuMem handle and this rank has cuMem disabled. The
+// import must fail rather than feed those bytes to the legacy IPC opener.
+// ncclCuMemEnable() is stubbed to 0 for this suite.
+TEST_F(WindowRegisterNonSymIpcTest, CuMemPeerWhileDisabled_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [this](void*, int*, int self, int size, void* buf, int) {
+                      auto* e = static_cast<ExchangeEntry*>(buf);
+                      for (int r = 0; r < size; r++) {
+                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+                        e[r].userOffset = 0;
+                        e[r].userSize = 4096;
+                        e[r].allocSize = 4096;
+                        e[r].isCuMem = r == self ? 0 : 1;
+                      }
+                      return ncclSuccess;
+                    });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: a peer's user range does not fit in the allocation it published.
+// The offset is near SIZE_MAX so userOffset + userSize would wrap and the old
+// sum comparison would accept it.
+TEST_F(WindowRegisterNonSymIpcTest, UserRangeExceedsAlloc_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [this](void*, int*, int self, int size, void* buf, int) {
+                      auto* e = static_cast<ExchangeEntry*>(buf);
+                      for (int r = 0; r < size; r++) {
+                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+                        e[r].userOffset = r == self ? 0 : static_cast<size_t>(-1) - 16;
+                        e[r].userSize = r == self ? 4096 : 64;
+                        e[r].allocSize = 4096;
+                        e[r].isCuMem = 0;
+                      }
+                      return ncclSuccess;
+                    });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 // Branch: the address-range lookup fails, so the exchange never happens.
