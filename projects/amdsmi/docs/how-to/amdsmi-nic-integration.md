@@ -314,6 +314,7 @@ typedef struct {
     char     part_number[AMDSMI_MAX_STRING_LENGTH];
     char     serial_number[AMDSMI_MAX_STRING_LENGTH];
     char     vendor_name[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t  type;        // an amdsmi_nic_type_t value
     uint32_t capability;
 } amdsmi_nic_asic_info_t;
 ```
@@ -326,6 +327,20 @@ typedef struct {
 - `revision`: `/sys/bus/pci/devices/<BDF>/revision`
 - `product_name`, `part_number`, `serial_number`: VPD data, parsed from `/sys/bus/pci/devices/<BDF>/vpd` when present. When the device exposes no sysfs VPD entry, `product_name` and `part_number` are reported as unavailable; `serial_number` falls back to the devlink board serial (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) and is reported as unavailable only when that is also absent. The devlink `DEVLINK_ATTR_INFO_SERIAL_NUMBER` attribute is deliberately *not* used; it is a MAC-derived EUI, not the physical board serial.
 - `capability`: bitmask of `amdsmi_nic_capability_bits_t`: `AMDSMI_NIC_CAP_FWCTL` (firmware-control management function, e.g. Pensando/POLLARA) and `AMDSMI_NIC_CAP_NETDEV` (host network port(s) present). Derived from the discovered device, not sysfs.
+- ``type``: an ``amdsmi_nic_type_t`` value, derived from the discovered device, not sysfs. It is a ``uint8_t`` and not the enum so it fits the alignment padding before ``capability``: ``sizeof(amdsmi_nic_asic_info_t)`` and every other offset are unchanged.
+
+### NIC type
+
+```c
+typedef enum {
+    AMDSMI_NIC_TYPE_UNKNOWN = 0,  // the type could not be determined
+    AMDSMI_NIC_TYPE_AINIC   = 1,  // AMD Pensando AINIC
+    AMDSMI_NIC_TYPE_UALOE   = 2,  // UALoE accelerator-fabric endpoint
+    AMDSMI_NIC_TYPE_OTHER   = 3,  // any other vendor
+} amdsmi_nic_type_t;
+```
+
+``MODE`` is not a reliable way to tell the kinds apart: a Pensando card whose ports were not found is ``fwctl-only`` too. Use the type. For ``AMDSMI_NIC_TYPE_OTHER`` the vendor name identifies the device.
 
 ### NIC bus information
 
@@ -609,6 +624,11 @@ amdsmi_status_t amdsmi_get_nic_asic_info(
     amdsmi_processor_handle processor_handle,
     amdsmi_nic_asic_info_t *info);
 
+// NIC Type (the same value as the type field of amdsmi_nic_asic_info_t)
+amdsmi_status_t amdsmi_get_nic_type(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_nic_type_t *type);
+
 // NIC Bus Information
 amdsmi_status_t amdsmi_get_nic_bus_info(
     amdsmi_processor_handle processor_handle,
@@ -769,6 +789,11 @@ when a NIC is selected with `-N/--nic`. `amd-smi metric --nic` reports NIC
 telemetry (temperature, health, port-split) and `amd-smi firmware --nic` reports
 NIC firmware versions. The selector works only when you initialize NIC discovery
 (see [Initialization flags](#initialization-flags)).
+
+``amd-smi list --nic`` and ``amd-smi metric --nic`` print a ``TYPE`` line for each NIC: ``AINIC``,
+``UALoE``, or the vendor name for any other NIC (``N/A`` if the type is unknown). In ``metric --nic``
+it is the first field of each block, so the all-``N/A`` block of a UALoE endpoint, which has no
+telemetry source, is not mistaken for a failure.
 
 ### Per-port NIC statistics with `metric --nic --port`
 

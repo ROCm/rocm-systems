@@ -227,6 +227,7 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   std::snprintf(info->serial_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
                 serial.empty() ? "N/A" : serial.c_str());
 
+  info->type = static_cast<uint8_t>(nic->kind());
   info->capability = nic->capabilities();
 
   return SMI_NIC_STATUS_SUCCESS;
