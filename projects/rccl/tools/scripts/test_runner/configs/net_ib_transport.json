@@ -622,6 +622,44 @@
       ]
     },
 
+    "cast_wqe_lat": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_WQE_LATENCY_THRESHOLD_NS": "1000"
+      },
+      "tests": [
+        {
+          "name": "Cast_WqeLatMonNonSharingStampComplete",
+          "description": "Non-sharing post-to-poll latency stamp/complete round trip: per-QP count/percentile ladder internally consistent, aggregate count equals signaled sends",
+          "test_filter": "NetIbMPITest.WqeLatMonNonSharingStampComplete"
+        },
+        {
+          "name": "Cast_WqeLatMonNoSpuriousCompletionBeforePoll",
+          "description": "latMon only advances on an actual poll/test() call, never merely from elapsed wall-clock time past the threshold; delayed poll then records exactly one completion flagged slow",
+          "test_filter": "NetIbMPITest.WqeLatMonNoSpuriousCompletionBeforePoll"
+        }
+      ]
+    },
+
+    "cast_wqe_lat_qp_sharing": {
+      "extends": "cast_wqe_lat",
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_IB_QP_SHARING_ENABLE": "1",
+        "RCCL_IB_COMM_NGROUPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_WqeLatMonQpSharingPerCommIsolation",
+          "description": "Two logical comms forced into QP-sharing group 0: each comm's latMon count reflects only its own traffic, no cross-comm contamination; sequential teardown of both comms must not crash",
+          "test_filter": "NetIbMPITest.WqeLatMonQpSharingPerCommIsolation"
+        }
+      ]
+    },
+
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
@@ -1467,6 +1505,18 @@
       "name": "NET IB - CAST Stress (QPS=2)",
       "description": "5000 sends on 2 concurrent connections + large-size split-path stress (1MB/4MB/16MB × 20): RTT timer fires mid-run, consistency invariants verified",
       "config": "cast_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WQE Latency Monitor",
+      "description": "AICOMRCCL-2013 post-to-poll latency monitor ported into net_ib_cast: stamp/complete round trip and no-spurious-completion-before-poll",
+      "config": "cast_wqe_lat",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WQE Latency Monitor (QP sharing)",
+      "description": "AICOMRCCL-2013 latency monitor per-comm isolation under QP sharing (RCCL_IB_COMM_NGROUPS=1)",
+      "config": "cast_wqe_lat_qp_sharing",
       "enabled": true
     },
     {

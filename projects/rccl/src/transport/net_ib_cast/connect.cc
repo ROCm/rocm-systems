@@ -1184,6 +1184,7 @@ static ncclResult_t IbCastQpSharingSenderSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       comm->base.qps[q].qp = slot->qp;
       comm->base.qps[q].devIndex = slot->devIndex;
+      IbCastWqeLatMonInit(&comm->base.qps[q].latMon);
       comm->base.activeQps[q] = &comm->base.qps[q];
 
       // Populate metadata with shared QP info
@@ -2039,6 +2040,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       rComm->base.qps[q].qp = recvSlot->qp;
       rComm->base.qps[q].devIndex = recvSlot->devIndex;
+      IbCastWqeLatMonInit(&rComm->base.qps[q].latMon);
       // remDevIdx is normally set by IbCastReceiverQpsCreateToRts, which is
       // skipped for secondary comms; set it here or CTS rkey selection is wrong.
       rComm->base.qps[q].remDevIdx = remMeta->qpInfo[q].devIndex;

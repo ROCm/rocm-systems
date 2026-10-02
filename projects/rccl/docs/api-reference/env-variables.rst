@@ -343,10 +343,14 @@ in the following table.
     * - | ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
         | Enables per-queue-pair CPU-side WQE post-to-poll latency monitoring
           for the IB transports (``net_ib`` and ``net_ib_cast``). When set
-          above ``0``, each queue pair tracks post-to-completion latency with
-          running mean/stddev/max and P50/P90/P99/P99.9 percentile estimates,
-          and completions that exceed the threshold are counted separately
-          and rate-limit-logged as potential stalls.
+          above ``0``, each queue pair tracks the elapsed time from
+          ``ibv_post_send`` to the CPU polling its CQE (not hardware
+          completion time), with running mean/stddev/max and
+          P50/P90/P99/P99.9 percentile estimates, and polls that exceed the
+          threshold are counted separately and rate-limit-logged as potential
+          stalls. Each queue pair samples one outstanding signaled WQE at a
+          time, so the aggregates reflect this per-QP sampling rather than
+          every WQE's hardware completion.
       - | Integer value, nanoseconds (default: ``0``, disabled)
 
     * - | ``NCCL_IB_WQE_LATENCY_REPORT``

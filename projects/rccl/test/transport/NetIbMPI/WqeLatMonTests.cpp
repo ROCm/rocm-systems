@@ -104,15 +104,15 @@ TEST_F(NetIbMPITest, WqeLatMonNonSharingStampComplete) {
         ASSERT_GT(state.nqps, 0);
 
         // The WRR scheduler (mandatory for cast tests, see CAST_ENV_CHECK_OR_SKIP)
-        // fans every logical send out across all nqps QPs of the connection, so
-        // each QP sees one physical signaled WQE -- and one counted completion --
-        // per logical send.
+        // picks one effective QP per small (below-split-threshold) logical send
+        // -- IbCastQpSchedGetEffectiveTxNqps caps the fan-out to 1 QP in that
+        // case -- so completions land on whichever QP(s) WRR selected across the
+        // kNSends sends, not uniformly on every QP of the connection. Only the
+        // aggregate count across all QPs is deterministic.
         uint64_t totalCount = 0;
         for (int i = 0; i < state.nqps; i++) {
             const auto& qp = state.qps[i];
             totalCount += qp.count;
-            EXPECT_EQ(qp.count, static_cast<uint64_t>(kNSends))
-                << "qp " << qp.qpNum << ": expected one completion per signaled send";
             if (qp.count == 0) continue;
             EXPECT_LE(qp.p50Ns, qp.p90Ns) << "qp " << qp.qpNum << ": p50 > p90";
             EXPECT_LE(qp.p90Ns, qp.p99Ns) << "qp " << qp.qpNum << ": p90 > p99";
@@ -121,8 +121,8 @@ TEST_F(NetIbMPITest, WqeLatMonNonSharingStampComplete) {
             EXPECT_GE(qp.meanNs, 0.0);
             EXPECT_GE(qp.stddevNs, 0.0);
         }
-        EXPECT_EQ(totalCount, static_cast<uint64_t>(kNSends) * static_cast<uint64_t>(state.nqps))
-            << "latMon must record exactly one completion per signaled send, per QP";
+        EXPECT_EQ(totalCount, static_cast<uint64_t>(kNSends))
+            << "latMon must record exactly one completion per signaled send, summed across QPs";
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -239,12 +239,14 @@ TEST_F(NetIbMPITest, WqeLatMonQpSharingPerCommIsolation) {
         uint64_t total1 = 0, total2 = 0;
         for (int i = 0; i < st1.nqps; i++) total1 += st1.qps[i].count;
         for (int i = 0; i < st2.nqps; i++) total2 += st2.qps[i].count;
-        // WRR fans each logical send across all nqps QPs of its own comm (see
-        // WqeLatMonNonSharingStampComplete); isolation means comm1's total only
-        // reflects comm1's own fan-out, not comm2's.
-        EXPECT_EQ(total1, static_cast<uint64_t>(kNSends) * static_cast<uint64_t>(st1.nqps))
+        // Unlike the NonSharing tests, the WRR scheduler does not cap fan-out
+        // to one effective QP here: enabling QP sharing unconditionally force-
+        // disables the scheduler (see IbCastInit, init.cc), so every logical
+        // send still fans out across all st{1,2}.nqps physical QPs. Isolation
+        // means comm1's total only reflects comm1's own sends, not comm2's.
+        EXPECT_EQ(total1, static_cast<uint64_t>(kNSends) * st1.nqps)
             << "comm1 latMon count must reflect only comm1's own sends";
-        EXPECT_EQ(total2, static_cast<uint64_t>(kNSends) * static_cast<uint64_t>(st2.nqps))
+        EXPECT_EQ(total2, static_cast<uint64_t>(kNSends) * st2.nqps)
             << "comm2 latMon count must reflect only comm2's own sends";
     }
 
@@ -344,12 +346,13 @@ TEST_F(NetIbMPITest, WqeLatMonNoSpuriousCompletionBeforePoll) {
             afterCount += after.qps[i].count;
             afterSlow  += after.qps[i].slowCount;
         }
-        // WRR fans the one logical send across all nqps QPs (see
-        // WqeLatMonNonSharingStampComplete), so one completion is recorded per QP.
-        EXPECT_EQ(afterCount, baselineCount + static_cast<uint64_t>(before.nqps))
-            << "exactly one completion per QP must be recorded once the delayed poll runs";
-        EXPECT_GE(afterSlow, baselineSlow + static_cast<uint64_t>(before.nqps))
-            << "the deliberately-delayed send must be classified as exceeding the latency threshold on every QP";
+        // WRR picks one effective QP for this single small logical send (see
+        // WqeLatMonNonSharingStampComplete), so exactly one completion is
+        // recorded, on whichever QP WRR selected.
+        EXPECT_EQ(afterCount, baselineCount + 1)
+            << "exactly one completion must be recorded once the delayed poll runs";
+        EXPECT_GE(afterSlow, baselineSlow + 1)
+            << "the deliberately-delayed send must be classified as exceeding the latency threshold";
     } else {
         void*  bufs[1]    = {recvBuf};
         size_t sizes[1]   = {kMsgSz};
