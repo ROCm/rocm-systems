@@ -735,6 +735,7 @@ int main() {
           pen_fwctl.capabilities() == SMI_NIC_CAP_FWCTL);
     check("pensando fwctl-only capabilities lacks NETDEV",
           (pen_fwctl.capabilities() & SMI_NIC_CAP_NETDEV) == 0);
+    check("pensando card kind is AINIC", pen_fwctl.kind() == SMI_NIC_KIND_AINIC);
 
     // A card whose pds_core function discovery never found cannot be driven
     // over fwctl, so claiming the bit would misreport what the row can do.
@@ -742,6 +743,10 @@ int main() {
                                NicProduct::AINIC);
     check("pensando without a mgmt function lacks FWCTL",
           (pen_no_mgmt.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
+    // Portless and without a mgmt function it looks like MODE: unknown, yet it is
+    // still an AINIC; only a fabric endpoint is UALoE.
+    check("pensando without ports or a mgmt function is still AINIC",
+          pen_no_mgmt.kind() == SMI_NIC_KIND_AINIC);
 
     SmiNicPensando pen_netdev("", "0000:a1:00.0", NicType::PCIBridge, "", "", NicVendor::AMD,
                               NicProduct::AINIC);
@@ -760,9 +765,11 @@ int main() {
     bcm.add_nic_port(SmiNicPort("bnxt0", "0000:e1:00.0", "", ""));
     check("broadcom capabilities == NETDEV", bcm.capabilities() == SMI_NIC_CAP_NETDEV);
     check("broadcom capabilities lacks FWCTL", (bcm.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
+    check("broadcom kind is OTHER", bcm.kind() == SMI_NIC_KIND_OTHER);
 
     SmiNic bare("", "0000:00:00.0");
     check("portless non-fwctl capabilities == 0", bare.capabilities() == 0);
+    check("a NIC of unknown vendor and product is OTHER", bare.kind() == SMI_NIC_KIND_OTHER);
 
     // A fabric endpoint has no host port, so the ifoe.cmd.N nodes are the only
     // thing separating MODE: fwctl-only from MODE: unknown on the row.
@@ -780,10 +787,12 @@ int main() {
 
     SmiNicIfoe ifoe("0001:01:00.1", with_cmd.string());
     check("ifoe endpoint capabilities == FWCTL", ifoe.capabilities() == SMI_NIC_CAP_FWCTL);
+    check("ifoe endpoint kind is UALOE", ifoe.kind() == SMI_NIC_KIND_UALOE);
 
     SmiNicIfoe ifoe_no_cmd("0002:01:00.1", without_cmd.string());
     check("ifoe endpoint without a command node lacks FWCTL",
           (ifoe_no_cmd.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
+    check("ifoe endpoint kind does not depend on FWCTL", ifoe_no_cmd.kind() == SMI_NIC_KIND_UALOE);
 
     SmiNicIfoe ifoe_no_path("0003:01:00.1", "");
     check("ifoe endpoint with no sysfs path lacks FWCTL",

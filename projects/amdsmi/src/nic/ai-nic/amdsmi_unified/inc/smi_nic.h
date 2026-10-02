@@ -47,6 +47,15 @@ enum SmiNicCapability : uint32_t {
   SMI_NIC_CAP_NETDEV = 1u << 1,  // exposes host network port(s)
 };
 
+// Which kind of NIC this is. Mirrors the public amdsmi_nic_type_t; the values MUST
+// stay in sync with it.
+enum SmiNicKind : uint8_t {
+  SMI_NIC_KIND_UNKNOWN = 0,
+  SMI_NIC_KIND_AINIC = 1,  // AMD Pensando AINIC
+  SMI_NIC_KIND_UALOE = 2,  // UALoE accelerator-fabric endpoint (the ifoe driver)
+  SMI_NIC_KIND_OTHER = 3,  // any other vendor
+};
+
 /**
  * Board temperature sensors a NIC may expose. A vendor that lacks a given
  * sensor reports it as unsupported (reserved value) rather than fabricating a value.
@@ -167,6 +176,7 @@ class SmiNic {
   NicType type() const;
   NicVendor vendor() const;
   NicProduct product() const;
+  SmiNicKind kind() const;
   const std::string port_type() const;
   const std::string& sysfs_class_path() const;
   const std::string& sysfs_bus_path() const;

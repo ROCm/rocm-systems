@@ -48,6 +48,8 @@ def _load_metric():
     wrapper_stub.AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0
     wrapper_stub.AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
     interface_stub.amdsmi_wrapper = wrapper_stub
+    # metric_nic reads the NIC type label; tests that care override it.
+    interface_stub.amdsmi_get_nic_type_label = mock.Mock(return_value="AINIC")
     amdsmi_stub.amdsmi_interface = interface_stub
 
     with mock.patch.dict(
