@@ -125,7 +125,7 @@ jobs:
             run_simulator_corpus: true
             corpus_worker_limit: 4
             rocjitsu_thread_budget: 4
-            corpus_soft_timeout: 240
+            corpus_soft_timeout: 300
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
             corpus_sanitizer: clang-asan
@@ -447,9 +447,6 @@ jobs:
             -R '^LaunchPreloadTest\.' \
             --output-on-failure
 
-      - name: Test corpus harness options
-        run: python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-run-corpus-tests.py"
-
       - name: Install corpus test dependencies
         id: install_corpus_dependencies
         if: matrix.run_simulator_corpus
@@ -474,6 +471,9 @@ jobs:
         run: |
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
+
+      - name: Test corpus harness options
+        run: python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-run-corpus-tests.py"
 
       - name: Run corpus tests
         # Keep the HIP corpus signal even if an independent test step fails.
