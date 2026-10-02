@@ -2640,6 +2640,9 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p bw_bitmask selects no settable bandwidth
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  *
  */
 rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
@@ -4024,13 +4027,15 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  * to 1 to enable and 0 to disable that level.
  *
  * Only settable DPM levels can be enabled. Bits outside the settable range are
- * ignored, and the remaining in-range bits are still applied (matching driver
- * behavior). The deep-sleep frequency (see ::rsmi_frequencies_t::has_deep_sleep)
+ * dropped before the request is sent, so an out-of-range level is never
+ * requested; the remaining in-range bits are still applied. The deep-sleep
+ * frequency (see ::rsmi_frequencies_t::has_deep_sleep)
  * is not settable, so when it is present the settable level count is
  * ::rsmi_frequencies_t::num_supported minus one. Without a deep-sleep
  * frequency, all ::rsmi_frequencies_t::num_supported levels (0 to
  * num_supported - 1) are settable. The call returns ::RSMI_STATUS_INVALID_ARGS
- * if no bit selects a settable level.
+ * if @p freq_bitmask selects no settable level, or ::RSMI_STATUS_UNEXPECTED_DATA
+ * if the device reports zero settable levels for @p clk_type.
  *
  * This call sets the performance level to ::RSMI_DEV_PERF_LEVEL_MANUAL. Set it
  * back to ::RSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
@@ -4047,6 +4052,12 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p clk_type is not a valid ::rsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::RSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than RSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  *
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_type,

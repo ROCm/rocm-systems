@@ -4076,7 +4076,13 @@ amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle proces
  *  ::amdsmi_frequencies_t::num_supported (of ::amdsmi_pcie_bandwidth_t) bits of
  *  this mask are relevant.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p bw_bitmask selects no settable bandwidth
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  */
 amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              uint64_t bw_bitmask);
@@ -5451,13 +5457,15 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *  enable and 0 to disable that level.
  *
  *  Only settable DPM levels can be enabled. Bits outside the settable range are
- *  ignored, and the remaining in-range bits are still applied (matching driver
- *  behavior). The deep-sleep frequency (see ::amdsmi_frequencies_t::has_deep_sleep)
+ *  dropped before the request is sent, so an out-of-range level is never
+ *  requested; the remaining in-range bits are still applied. The deep-sleep
+ *  frequency (see ::amdsmi_frequencies_t::has_deep_sleep)
  *  is not settable, so when it is present the settable level count is
  *  ::amdsmi_frequencies_t::num_supported minus one. Without a deep-sleep
  *  frequency, all ::amdsmi_frequencies_t::num_supported levels (0 to
- *  num_supported - 1) are settable. The call returns ::AMDSMI_STATUS_INVAL if no
- *  bit selects a settable level.
+ *  num_supported - 1) are settable. The call returns ::AMDSMI_STATUS_INVAL if
+ *  @p freq_bitmask selects no settable level, or ::AMDSMI_STATUS_UNEXPECTED_DATA
+ *  if the device reports zero settable levels for @p clk_type.
  *
  *  This call sets the performance level to ::AMDSMI_DEV_PERF_LEVEL_MANUAL. Set it
  *  back to ::AMDSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
@@ -5472,7 +5480,16 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
  *  level are ignored. See notes above on settable levels.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p clk_type is not a valid ::amdsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than AMDSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  */
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
