@@ -5,10 +5,23 @@
 # shared rocjitsu test manifest remains independent of ConSan's growth.
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_rj_consan_independent_workgroups_witness_regex
+    "ConSan conflict [^\n]*workgroup=\\(0,0,0\\)"
+)
+set(_rj_consan_independent_workgroups_witness_regex_file
+    "${CMAKE_CURRENT_BINARY_DIR}/consan-independent-workgroups-witness-regex.txt"
+)
+file(
+    WRITE "${_rj_consan_independent_workgroups_witness_regex_file}"
+    "${_rj_consan_independent_workgroups_witness_regex}"
+)
 add_test(
     NAME ConSanCheckedRunnerUnitTest
     COMMAND
         ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
+        --witness-regex-file
+        "${_rj_consan_independent_workgroups_witness_regex_file}"
+        --ctest-directory "${CMAKE_BINARY_DIR}"
 )
 
 set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
@@ -978,6 +991,7 @@ function(rj_add_consan_device_conformance_cases)
         "Reduction|reduction|ConSanDeviceReductionTest"
         "SharedHelperOwners|shared_helper_owners|ConSanDeviceSharedHelperOwnersTest"
         "IndependentWorkgroups|independent_workgroups|ConSanDeviceIndependentWorkgroupsTest"
+        "IndependentWorkgroupsWitness|independent_workgroups|ConSanDeviceIndependentWorkgroupsWitnessTest|default-only"
         "RepeatedDispatchIdentity|repeated_dispatch_identity|ConSanDeviceRepeatedDispatchIdentityTest"
         "CrossKernelDispatchIdentity|cross_kernel_dispatch_identity|ConSanDeviceCrossKernelDispatchIdentityTest|default-only"
         "GraphReplay|graph_replay|ConSanDeviceGraphReplayTest"
@@ -1281,7 +1295,10 @@ function(rj_add_consan_device_conformance_cases)
                 if(
                     NOT (
                         _mode_value STREQUAL "default"
-                        AND _workload_name STREQUAL "TwoQueueDispatchIdentity"
+                        AND (
+                            _workload_name STREQUAL "TwoQueueDispatchIdentity"
+                            OR _workload_name STREQUAL "IndependentWorkgroups"
+                        )
                     )
                 )
                     list(
@@ -1305,6 +1322,12 @@ function(rj_add_consan_device_conformance_cases)
                     APPEND _incorrect_pass_regex_args
                     PASS_REGEX
                     "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
+                )
+            elseif(_workload_name STREQUAL "IndependentWorkgroupsWitness")
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX
+                    "${_rj_consan_independent_workgroups_witness_regex}"
                 )
             endif()
 

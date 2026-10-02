@@ -31,25 +31,22 @@ __global__ __launch_bounds__(128) void independent_workgroups_for_consan(DeviceS
   asm volatile(RJ_CONSAN_DEVICE_CAVE ::: "memory");
 }
 
-void run_independent_workgroups(bool synchronize) {
-  constexpr uint32_t kGridX = 2;
-  constexpr uint32_t kGridY = 2;
-  constexpr uint32_t kGridZ = 2;
-  constexpr uint32_t kWorkgroups = kGridX * kGridY * kGridZ;
+void run_independent_workgroups(uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, bool synchronize) {
   const uint32_t wave_size = consan_device_test::active_wave_size();
   const uint32_t thread_count = 2u * wave_size;
+  const uint32_t workgroup_count = grid_x * grid_y * grid_z;
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  independent_workgroups_for_consan<<<dim3(kGridX, kGridY, kGridZ), thread_count>>>(device_state);
+  independent_workgroups_for_consan<<<dim3(grid_x, grid_y, grid_z), thread_count>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
   HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_state));
-  for (uint32_t group = 0; group < kWorkgroups; ++group) {
+  for (uint32_t group = 0; group < workgroup_count; ++group) {
     for (uint32_t tid = 0; tid < thread_count; ++tid)
       EXPECT_EQ(state.control[group * thread_count + tid], 0x73000000u + group * 256u + tid)
           << "group=" << group << " thread=" << tid;
@@ -60,8 +57,22 @@ void run_independent_workgroups(bool synchronize) {
   }
 }
 
-TEST(ConSanDeviceIndependentWorkgroupsTest, Correct) { run_independent_workgroups(true); }
+TEST(ConSanDeviceIndependentWorkgroupsTest, Correct) {
+  run_independent_workgroups(/*grid_x=*/2u, /*grid_y=*/2u, /*grid_z=*/2u, /*synchronize=*/true);
+}
 
-TEST(ConSanDeviceIndependentWorkgroupsTest, Incorrect) { run_independent_workgroups(false); }
+TEST(ConSanDeviceIndependentWorkgroupsTest, Incorrect) {
+  run_independent_workgroups(/*grid_x=*/2u, /*grid_y=*/2u, /*grid_z=*/2u, /*synchronize=*/false);
+}
+
+// Keep this suite separate so a diagnostic from the multidimensional identity
+// cases cannot satisfy the single-workgroup witness's checked-output contract.
+TEST(ConSanDeviceIndependentWorkgroupsWitnessTest, Correct) {
+  run_independent_workgroups(/*grid_x=*/1u, /*grid_y=*/1u, /*grid_z=*/1u, /*synchronize=*/true);
+}
+
+TEST(ConSanDeviceIndependentWorkgroupsWitnessTest, Incorrect) {
+  run_independent_workgroups(/*grid_x=*/1u, /*grid_y=*/1u, /*grid_z=*/1u, /*synchronize=*/false);
+}
 
 } // namespace
