@@ -46,8 +46,6 @@
 #include "suites/performance/memory_async_copy_numa.h"
 
 #if ENABLE_COPY_NUMA
-#include <hwloc.h>
-#include <hwloc/linux-libnuma.h>
 #include <numa.h>
 
 #include <vector>
@@ -87,62 +85,33 @@ MemoryAsyncCopyNUMA::~MemoryAsyncCopyNUMA(void) {
 }
 
 void MemoryAsyncCopyNUMA::Run(void) {
-  int ret;
   TestBase::Run();
 
-  hwloc_bitmap_t cpu_bind_set = nullptr;
-  char *a;
+  const int cpu_node = static_cast<int>(cpu_numa_node_id());
+  ASSERT_NE(cpu_node, static_cast<int>(kUnknownNumaNode));
 
-  // Bind CPU
-  cpu_bind_set = hwloc_bitmap_alloc();
-
-  hwloc_cpuset_from_nodeset(topology_, cpu_bind_set, cpu_hwl_numa_nodeset_);
-
-  ASSERT_FALSE((bool)hwloc_bitmap_iszero(cpu_bind_set));
-
-  if (hwloc_bitmap_isfull(cpu_bind_set)) {
-    std::cout <<
-     "All cpus associated with NUMA node. No hwloc cpu binding will be done."
-                                                                 << std::endl;
-  } else {
-    hwloc_bitmap_t cpu_bind_set_chk = nullptr;
-    cpu_bind_set_chk = hwloc_bitmap_alloc();
-
-    hwloc_bitmap_singlify(cpu_bind_set);
-    ret = hwloc_set_cpubind(topology_, cpu_bind_set, HWLOC_CPUBIND_PROCESS);
-    ASSERT_TRUE(ret == 0 &&
-          "hwloc: cpubind not supported or cannot be enforced. Check errno.");
-
-    hwloc_get_cpubind(topology_, cpu_bind_set_chk, 0);
-
-    if (verbosity() >= VERBOSE_STANDARD) {
-      hwloc_bitmap_asprintf(&a, cpu_bind_set);
-      printf("write hwloc cpubind mask: %s\n", a);
-      hwloc_bitmap_asprintf(&a, cpu_bind_set_chk);
-      printf("read hwloc cpubind mask: %s\n", a);
-    }
-    ASSERT_TRUE(hwloc_bitmap_isequal(cpu_bind_set, cpu_bind_set_chk) &&
-                                              "Unexpected hwloc cpubind set");
-    hwloc_bitmap_free(cpu_bind_set_chk);
-
-    // Bind Memory
-#if ENABLE_COPY_NUMA_MEMBIND_NODESET
-    ret = hwloc_set_membind_nodeset(topology_, cpu_hwl_numa_nodeset_,
-                                     HWLOC_MEMBIND_BIND, 0);
-    ASSERT_TRUE(ret == 0 &&
-          "hwloc: membind not supported or cannot be enforced. Check errno.");
-#else
-    if (verbosity() >= VERBOSE_STANDARD) {
-      std::cout << "hwloc: membind nodeset not available in linked libhwloc; skipping."
-                << std::endl;
-    }
-#endif
+  if (numa_available() < 0) {
+    FAIL() << "libnuma is not available on this system";
+    return;
   }
+
+  if (numa_run_on_node(cpu_node) != 0) {
+    FAIL() << "numa_run_on_node() failed for node " << cpu_node;
+    return;
+  }
+
+#if ENABLE_COPY_NUMA_MEMBIND_NODESET
+  numa_set_preferred(cpu_node);
+#else
+  if (verbosity() >= VERBOSE_STANDARD) {
+    std::cout << "numa: membind not enabled; skipping numa_set_preferred()."
+              << std::endl;
+  }
+#endif
+
   for (Transaction t : tran_) {
     RunBenchmarkWithVerification(&t);
   }
-
-  hwloc_bitmap_free(cpu_bind_set);
 }
 
 void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
@@ -163,10 +132,9 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
   // Allocate resources...
   void *locked_mem;
 
-  // We are relying a previous call to hwloc_set_membind_nodeset() to set
-  // policy
-  void *local_alloc = hwloc_alloc(topology_, size);
-  ASSERT_TRUE(local_alloc != nullptr && "hwloc_alloc_membind() failed");
+  // We are relying on a previous call to numa_set_preferred() to set policy.
+  void *local_alloc = numa_alloc_onnode(size, cpu_numa_node_id());
+  ASSERT_TRUE(local_alloc != nullptr && "numa_alloc_onnode() failed");
   hsa_agent_t gpu_agent = ((t->type == H2D || t->type == H2DRemote) ?
                                                        dst_agent : src_agent);
 
@@ -224,8 +192,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
     }
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-    // numa_free(local_alloc, size);
-    hwloc_free(topology_, local_alloc, size);
+    numa_free(local_alloc, size);
     err = hsa_amd_memory_pool_free(host_ptr_src);
     ASSERT_EQ(HSA_STATUS_SUCCESS, err);
     err = hsa_amd_memory_pool_free(host_ptr_dst);

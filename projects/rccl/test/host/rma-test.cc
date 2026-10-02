@@ -1817,6 +1817,52 @@ TEST_F(RmaProxyReadyTest, ConnectOnceFails_Propagates) {
   EXPECT_TRUE(log_.entries.empty());
 }
 
+// NCCL_RMA_DISABLE left the proxy down on purpose. Connecting now would be a
+// comm-wide all-gather reached from one rank's launch, which hangs, so the gate
+// refuses without attempting it.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_FailsWithoutConnecting) {
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// ...on the WaitSignal side as well, which the receiving rank reaches.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_WaitSignalFailsWithoutConnecting) {
+  args_.func = ncclFuncWaitSignal;
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// The flag leaves CE work alone: a plan with only LSA peers never reaches the
+// gate, so it still launches.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_CeOnlyPlanStillLaunches) {
+  args_.nRmaTasksProxy = 0;
+  args_.nRmaTasksCe = 1;
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
+  EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
+}
+
 // No proxy work means the gate is skipped entirely, so a disconnected proxy is
 // irrelevant to a CE-only plan.
 TEST_F(RmaProxyReadyTest, CeOnlyPlanSkipsTheGate) {
