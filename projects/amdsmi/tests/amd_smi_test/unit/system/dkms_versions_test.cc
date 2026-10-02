@@ -5,8 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 
 #include "amd_smi/impl/amd_smi_utils.h"
@@ -26,9 +28,11 @@ constexpr auto kKernelSymlinkPrefix = "kernel-";
 class DkmsTreeFixture {
  public:
   DkmsTreeFixture() {
-    base_ = fs::temp_directory_path() / "amdsmi_dkms_versions_test";
-    auto err_code = std::error_code{};
-    fs::remove_all(base_, err_code);
+    auto base_template = (fs::temp_directory_path() / "amdsmi_dkms_versions_test_XXXXXX").string();
+    if (mkdtemp(base_template.data()) == nullptr) {
+      throw std::runtime_error{"mkdtemp failed for the DKMS test tree"};
+    }
+    base_ = base_template;
     dkms_root_ = base_ / "dkms";
     source_tree_prefix_ = (base_ / "usr_src/amdgpu-").string();
     fs::create_directories(dkms_root_);
