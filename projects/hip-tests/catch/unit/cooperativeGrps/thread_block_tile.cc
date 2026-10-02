@@ -468,7 +468,8 @@ __global__ void block_tile_sync_check(T* global_data, unsigned int* wait_modifie
 
 template <bool global_memory, typename T, size_t tile_size> void BlockTileSyncTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
-    const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
+    const auto randomized_run_count =
+        GENERATE_COPY(range(0, isQuickLevel() ? 1 : cmd_options.cg_iterations));
     INFO("Run number: " << randomized_run_count + 1);
     auto blocks = GenerateBlockDimensions();
     auto threads = GenerateThreadDimensions();

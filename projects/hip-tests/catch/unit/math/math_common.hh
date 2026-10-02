@@ -208,8 +208,9 @@ inline size_t GetMaxAllowedDeviceMemoryUsage() {
 inline double GetTestReductionFactor() { return cmd_options.reduction_factor * 0.01; }
 
 inline uint64_t GetTestIterationCount() {
-  return static_cast<uint64_t>(
-      std::ceil(cmd_options.accuracy_iterations * GetTestReductionFactor()));
+  const uint64_t base =
+      isQuickLevel() ? 1000000ULL : cmd_options.accuracy_iterations;
+  return static_cast<uint64_t>(std::ceil(base * GetTestReductionFactor()));
 }
 
 template <typename T, typename... Ts> using kernel_sig = void (*)(T*, const size_t, Ts*...);
