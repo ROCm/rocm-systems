@@ -17,6 +17,27 @@ from utils.utils_common import (
 from utils.utils_profile import pc_sampling_unit
 
 
+def _resolve_attach_tool_path(tool_path: str, attach_pid: str) -> str:
+    """Resolve a tool library path for use in ROCPROF_ATTACH_TOOL_LIBRARY.
+
+    rocattach validates absolute paths by checking whether they exist under
+    /proc/<pid>/root/<path>. If the target process runs in a different mount
+    namespace that path may not exist, causing attach to fail. In that case
+    fall back to the bare filename and let the target's dynamic linker resolve
+    it via its own LD_LIBRARY_PATH. Custom absolute paths that are visible in
+    the target's namespace are preserved as-is.
+    """
+    absolute_path = Path(tool_path)
+    proc_root_path = Path(f"/proc/{attach_pid}/root") / str(absolute_path).lstrip("/")
+    if proc_root_path.exists():
+        return str(absolute_path)
+    console_debug(
+        f"Tool library {tool_path} not visible in target process mount namespace "
+        f"({proc_root_path} does not exist), falling back to basename for dlopen."
+    )
+    return absolute_path.name
+
+
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
     """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
 
@@ -89,11 +110,15 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.attach_pid:
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
-            # Use basenames so rocattach skips the /proc/<pid>/root/<path> mount
-            # namespace check and lets the target process resolve them via dlopen.
-            attach_tools = [Path(args.rocprofiler_sdk_tool_path).name]
+            attach_tools = [
+                _resolve_attach_tool_path(
+                    args.rocprofiler_sdk_tool_path, args.attach_pid
+                )
+            ]
             if native_tool_path:
-                attach_tools.append(Path(native_tool_path).name)
+                attach_tools.append(
+                    _resolve_attach_tool_path(native_tool_path, args.attach_pid)
+                )
             options.update({
                 "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(attach_tools),
             })
