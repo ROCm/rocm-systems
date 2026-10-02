@@ -1277,10 +1277,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     ### Building parsers ###
     @staticmethod
-    def _guard_gtt_gpu_conflict(
-        parser, gtt_flags=("--gtt", "-G"), reason="--gtt is a system-wide setting, not per-GPU"
-    ):
-        """Override *parser*.error() so that combining any of *gtt_flags* with
+    def _guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G")):
+        """Override *parser*.error() so that combining any GTT flag with
         --gpu / -g produces a clear mutual-exclusion message instead of
         the confusing "expected at least one argument" from --gpu. Only
         argparse's missing-value diagnostic is replaced."""
@@ -1296,7 +1294,8 @@ class AMDSMIParser(argparse.ArgumentParser):
             ):
                 flag_str = "/".join(gtt_flags)
                 _original_error(
-                    f"argument {flag_str}: not allowed with argument --gpu/-g ({reason})"
+                    f"argument {flag_str}: not allowed with argument --gpu/-g "
+                    "(--gtt is a system-wide setting, not per-GPU)"
                 )
             _original_error(message)
 
@@ -2670,8 +2669,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 )
 
             # Node power limit is enabled on guest (1VF), maintain order
-            max_node_power_limit = self.helpers.get_max_node_power_limit()
-            set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
+            set_node_power_limit_help = "Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU."
             set_value_exclusive_group.add_argument(
                 "-n",
                 "--node-power-limit",
@@ -2890,15 +2888,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
-        # Improve the --gpu error message if combined with --node-power-limit;
-        # actual rejection happens at runtime in set_value.py, since these two
-        # flags sit in separate argparse groups and argparse itself never
-        # raises for this combination.
-        self._guard_gtt_gpu_conflict(
-            set_value_parser,
-            gtt_flags=("--node-power-limit", "-n"),
-            reason="--node-power-limit is a node-wide setting, not per-GPU",
-        )
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)

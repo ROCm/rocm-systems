@@ -1,23 +1,18 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Hardware-free unit tests for the NPM (Node Power Management) helpers in
-// rocm_smi_npm.cc: set_npm_board_limit() and get_npm_node_power().
-//
-// These functions take an arbitrary board_path string and operate on plain
-// files underneath it (they do not require /sys or any specific sysfs
-// layout), so we exercise them against a real temporary directory created
-// via std::filesystem instead of mocking /sys. This mirrors the existing
-// (unexercised prior to this change) get_npm_board_limit()/
-// get_npm_board_status() logic in the same translation unit, all of which
-// share the same "board_path directory + single-value file" convention.
+// Hardware-free unit tests for the NPM board helpers in rocm_smi_npm.cc, run
+// against a temp directory standing in for the sysfs board/ directory.
 
 #include "rocm_smi/rocm_smi_npm.h"
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -26,19 +21,20 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// RAII helper: creates a unique temp directory for the duration of a test
-// and removes it (recursively) on destruction.
+// RAII helper: creates a private (0700) temp directory and removes it on destruction.
 class TempBoardDir {
  public:
   TempBoardDir() {
-    path_ = fs::temp_directory_path() /
-            fs::path("amdsmi_npm_test_" +
-                     std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" +
-                     std::to_string(reinterpret_cast<uintptr_t>(this)));
-    fs::create_directories(path_);
+    std::string tmpl = (fs::temp_directory_path() / "amdsmi_npm_test_XXXXXX").string();
+    if (::mkdtemp(tmpl.data()) == nullptr) {
+      ADD_FAILURE() << "mkdtemp failed: " << std::strerror(errno);
+      return;
+    }
+    path_ = tmpl;
   }
 
   ~TempBoardDir() {
+    if (path_.empty()) return;
     std::error_code ec;
     fs::remove_all(path_, ec);
   }
@@ -72,9 +68,8 @@ TEST(GpuUnit, SetNpmBoardLimitEmptyPathIsInvalidArgs) {
 }
 
 TEST(GpuUnit, SetNpmBoardLimitMissingBoardDirIsNotSupported) {
-  fs::path missing = fs::temp_directory_path() / "amdsmi_npm_test_definitely_missing_dir_xyz";
-  std::error_code ec;
-  fs::remove_all(missing, ec);  // ensure it really doesn't exist
+  TempBoardDir parent;
+  fs::path missing = parent.path() / "missing";
 
   EXPECT_EQ(amd::smi::set_npm_board_limit(missing.string(), 100), RSMI_STATUS_NOT_SUPPORTED);
 }
@@ -126,9 +121,8 @@ TEST(GpuUnit, GetNpmNodePowerEmptyPathIsInvalidArgs) {
 }
 
 TEST(GpuUnit, GetNpmNodePowerMissingBoardDirIsNotSupported) {
-  fs::path missing = fs::temp_directory_path() / "amdsmi_npm_test_definitely_missing_dir_pwr";
-  std::error_code ec;
-  fs::remove_all(missing, ec);
+  TempBoardDir parent;
+  fs::path missing = parent.path() / "missing";
 
   uint64_t power = 0;
   EXPECT_EQ(amd::smi::get_npm_node_power(missing.string(), &power), RSMI_STATUS_NOT_SUPPORTED);
@@ -176,9 +170,8 @@ TEST(GpuUnit, GetNpmBoardMaxLimitEmptyPathIsInvalidArgs) {
 }
 
 TEST(GpuUnit, GetNpmBoardMaxLimitMissingBoardDirIsNotSupported) {
-  fs::path missing = fs::temp_directory_path() / "amdsmi_npm_test_definitely_missing_dir_max";
-  std::error_code ec;
-  fs::remove_all(missing, ec);
+  TempBoardDir parent;
+  fs::path missing = parent.path() / "missing";
 
   uint64_t limit = 0;
   EXPECT_EQ(amd::smi::get_npm_board_max_limit(missing.string(), &limit), RSMI_STATUS_NOT_SUPPORTED);
@@ -208,4 +201,93 @@ TEST(GpuUnit, GetNpmBoardMaxLimitNonNumericContentsIsUnexpectedData) {
   uint64_t limit = 0;
   EXPECT_EQ(amd::smi::get_npm_board_max_limit(board.path().string(), &limit),
             RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, GetNpmBoardMaxLimitLeadingSpaceParses) {
+  TempBoardDir board;
+  board.WriteFile("max_node_power_limit", " 6400");
+
+  uint64_t limit = 0;
+  EXPECT_EQ(amd::smi::get_npm_board_max_limit(board.path().string(), &limit), RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(limit, 6400u);
+}
+
+// ---------------------------------------------------------------------
+// validate_npm_board_limit()
+// ---------------------------------------------------------------------
+
+TEST(GpuUnit, ValidateNpmBoardLimitEnabledInRangeIsSuccess) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250), RSMI_STATUS_SUCCESS);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitAtMaxIsSuccess) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 6400), RSMI_STATUS_SUCCESS);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitDisabledIsInvalidArgs) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "disabled");
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250),
+            RSMI_STATUS_INVALID_ARGS);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitMissingStatusIsNotSupported) {
+  TempBoardDir board;
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250),
+            RSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitMissingMaxIsNotSupported) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250),
+            RSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitNegativeMaxIsUnexpectedData) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "-1");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250),
+            RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitU64MaxIsUnexpectedData) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "18446744073709551615");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 250),
+            RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitZeroIsInvalidArgs) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 0), RSMI_STATUS_INVALID_ARGS);
+}
+
+TEST(GpuUnit, ValidateNpmBoardLimitOverMaxIsInvalidArgs) {
+  TempBoardDir board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+
+  EXPECT_EQ(amd::smi::validate_npm_board_limit(board.path().string(), 6401),
+            RSMI_STATUS_INVALID_ARGS);
 }

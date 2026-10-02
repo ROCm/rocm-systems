@@ -3098,43 +3098,19 @@ finally:
 
 ### amdsmi_set_npm_limit
 
-Description: Set the NPM (Node Power Management) power limit for the node
-associated with `node_handle` by writing to the board's
-`cur_node_power_limit` sysfs interface.
-
-This function rejects the request with `AmdSmiLibraryException`
-(`AMDSMI_STATUS_INVAL`) if NPM is disabled on the node
-(`amdsmi_get_npm_info()`'s `status` == `AMDSMI_NPM_STATUS_DISABLED`), since
-writing `board/cur_node_power_limit` while NPM is disabled has no defined
-effect. It also validates `limit` against the platform max bound
-(`amdsmi_get_npm_info()`'s `max_node_power_limit`, sourced from
-`board/max_node_power_limit`) internally before ever issuing the write,
-raising `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0`
-or greater than that bound. If the platform max bound itself cannot be read
-(e.g. the sysfs interface is missing or returns unexpected data), this
-function fails closed and raises that underlying error rather than silently
-allowing an unbounded `limit` through. The amd-smi CLI's
-`set --node-power-limit` additionally performs the same checks itself ahead
-of calling this function, purely to fail fast and present a friendlier,
-earlier user-facing error message; it is not the only validation and is not
-required for correctness.
+Description: Sets the NPM (Node Power Management) power limit, in watts, for the
+node associated with `node_handle`. Requires root. The library rejects the
+request without writing if NPM is disabled or `limit` exceeds
+`max_node_power_limit` from `amdsmi_get_npm_info`.
 
 Input parameters:
 
 * `node_handle` node handle obtained from `amdsmi_get_node_handle`
-* `limit` new NPM power limit value to request (units match the
-  `board/cur_node_power_limit` sysfs interface). Must satisfy
-  `0 < limit <= UINT64_MAX`; out-of-range values raise
-  `AmdSmiParameterException` rather than silently wrapping modulo 2**64 the
-  way a raw `ctypes.c_uint64()` conversion would. Values that pass this local
-  bound check but are `0` or exceed the platform max are rejected by the
-  underlying library call instead (see Exceptions below)
+* `limit` new node power limit in watts. Must be an `int` (not `bool`) in
+  `1..2**64-1`; otherwise `AmdSmiParameterException` is raised before the
+  library is called (for example, for a `limit` of `0`)
 
-Output: None. This function raises an exception if the call did not succeed
-(e.g. `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0` or
-exceeds the platform max bound, `AMDSMI_STATUS_NOT_SUPPORTED` if the sysfs
-interface is unavailable, or `AMDSMI_STATUS_NO_PERM` if the write was
-rejected)
+Output: None
 
 Exceptions that can be thrown by `amdsmi_set_npm_limit` function:
 
@@ -3143,12 +3119,13 @@ Exceptions that can be thrown by `amdsmi_set_npm_limit` function:
 
 #### Possible Library Exceptions
 
-- `AMDSMI_STATUS_INVAL` - Invalid parameters, including when `limit` is `0`
-  or exceeds the platform max bound (or when that bound itself cannot be
-  read)
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied (e.g. the write was rejected by
-  the driver for this guest context)
+- `AMDSMI_STATUS_INVAL` - Invalid parameters, NPM is disabled, or `limit`
+  exceeds `max_node_power_limit`
+- `AMDSMI_STATUS_NO_PERM` - Not root, or the driver rejected the write (for
+  example, from a guest that is not permitted to set it)
+- `AMDSMI_STATUS_NOT_SUPPORTED` - NPM sysfs interface is missing
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - NPM sysfs content is unparsable or the
+  platform max is unavailable
 
 Example:
 
