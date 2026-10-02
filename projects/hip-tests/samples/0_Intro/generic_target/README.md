@@ -27,7 +27,7 @@ $ cd ~/hip/samples/0_Intro/genericTarget
 
 /opt/rocm/bin/hipcc ../square.cpp ../../../../catch/hipTestMain/hip_test_features.cc -I../../../common -I../../../../catch/include --offload-arch=gfx9-generic --offload-arch=gfx9-4-generic --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic -mcode-object-version=6 -w -o squareGenericTarget
 
-/opt/rocm/bin/hipcc ../square1.cpp ../../../../catch/hipTestMain/hip_test_features.cc -I../../../common -I../../../../catch/include --offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic -mcode-object-version=6 -w -o squareGenericTargetWithFeatures
+/opt/rocm/bin/hipcc ../square1.cpp ../../../../catch/hipTestMain/hip_test_features.cc -I../../../common -I../../../../catch/include --offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:sramecc+:xnack+ --offload-arch=gfx9-4-generic:sramecc-:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic -mcode-object-version=6 -w -o squareGenericTargetWithFeatures
 
 /opt/rocm/bin/hipcc ../saxpy.cpp ../../../../catch/hipTestMain/hip_test_features.cc -I../../../common -I../../../../catch/include -o saxpyGenericTarget
 ```
