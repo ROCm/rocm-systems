@@ -628,6 +628,54 @@ protected:
   uint32_t base_ = 0;
 };
 
+TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuads) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP() << "Direct LDS loads start with RDNA3";
+  // Physical GFX1100/1201: M0 addresses one DWORD; any active lane enables
+  // all four writes in its quad. Preserve the workgroup allocation offset.
+  wave_->set_lds_base(4096);
+  wave_->lds().write32(16, 0xfacefeed);
+  wave_->lds().write32(4096 + 16, 0x918293e4);
+  const std::array<uint32_t, 5> types{0, 1, 2, 4, 5};
+  const std::array<uint32_t, 5> values{0xe4, 0x93e4, 0x918293e4, 0xffffffe4, 0xffff93e4};
+  for (uint32_t i = 0; i < types.size(); ++i) {
+    for (uint64_t mask :
+         {uint64_t{0}, uint64_t{0x81810101}, uint64_t{1} << (wave_->wf_size() - 1)}) {
+      SCOPED_TRACE(testing::Message() << types[i] << ',' << mask);
+      wave_->set_exec(mask);
+      wave_->set_m0((types[i] << 16) | 16);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        compute_unit_->write_vgpr(base_ + 6, lane, 0xdeadbeef);
+      std::array<uint32_t, 1> words;
+      if (gfx12)
+        words = rdna4::build_vdsdir(1, {.vdst = 6});
+      else
+        words = rdna3::build_ldsdir(1, {.vdst = 6});
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
+      ASSERT_FALSE(wave_->instruction_execution_failed());
+      ASSERT_TRUE(instruction->is_memory_op());
+      if (mask) {
+        ASSERT_NE(instruction->data(), nullptr);
+        amdgpu::LocalMemPipeline pipeline;
+        pipeline.issue(instruction.release(), *wave_);
+      } else {
+        EXPECT_EQ(instruction->data(), nullptr);
+      }
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, lane),
+                  mask & (uint64_t{15} << (lane & ~3u)) ? values[i] : 0xdeadbeefu)
+            << lane;
+      EXPECT_EQ(wave_->exec(), mask);
+      EXPECT_TRUE(wave_->wait_counters().empty());
+    }
+  }
+  EXPECT_EQ(wave_->lds().read32(16), 0xfacefeedu);
+}
+
 TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
   for (uint16_t opcode : {uint16_t{21}, ds_add_return_opcode()}) {
     for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
@@ -648,7 +696,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
   EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() ? 0u : 1u);
   EXPECT_EQ(execute_ds(18, 0, 0x80000000, 0, 0xf0), 0x80000000u);
   EXPECT_EQ(execute_ds(19, 0x80000000, 0, 0, 0xf0), 0u);
-  EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00002u);
+  EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00004u);
   EXPECT_EQ(execute_ds(21, 0x7f800000, 0xff800000, 0, 0), 0xffc00000u);
   EXPECT_EQ(execute_ds(21, 0xff800000, 0x7f800000, 0, 0), 0xffc00000u);
   for (uint16_t opcode : {18, 19}) {
@@ -932,6 +980,11 @@ TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
     GTEST_SKIP() << "No F32 atomic add on this ISA";
   for (bool buffer : {false, true}) {
     for (uint32_t mode : {0u, 0xffu}) {
+      // Physical RDNA3 L2 chooses memory's NaN; RDNA4 chooses the operand.
+      for (uint32_t old_nan : {0x7f800002u, 0x7fc00002u})
+        for (uint32_t source_nan : {0xff800004u, 0xffc00004u})
+          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan, mode),
+                    (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? source_nan : old_nan) | 0x400000u);
       EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() ? 2u : 0u);
       EXPECT_EQ(execute_memory(buffer, 0x00800001, 0x80800000, mode), 1u);
       for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {

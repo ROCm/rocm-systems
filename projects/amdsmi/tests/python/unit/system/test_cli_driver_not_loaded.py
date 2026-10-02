@@ -192,32 +192,36 @@ class TestCliDriverNotLoaded(unittest.TestCase):
             with self.subTest(command=command):
                 exc = self._parse_error(command)
                 self.assertIsInstance(exc, self.exceptions.AmdSmiGpuDriverNotLoadedException)
-                self.assertEqual(exc.value, -12)
+                self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED))
                 message = str(exc)
                 self.assertIn(f"Command '{command}' requires the amdgpu driver", message)
                 self.assertIn("sudo modprobe amdgpu", message)
 
     def test_driver_not_loaded_json_and_csv_are_well_formed(self) -> None:
         payload = json.loads(str(self._parse_error("list", output_format="json")))
-        self.assertEqual(payload["code"], -12)
+        self.assertEqual(
+            payload["code"], int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED)
+        )
         self.assertIn("sudo modprobe amdgpu", payload["error"])
 
         rows = list(csv.reader(io.StringIO(str(self._parse_error("list", output_format="csv")))))
-        self.assertEqual(rows[0], ["error", "code"])
-        self.assertEqual(len(rows[1]), 2, rows[1])
-        self.assertEqual(rows[1][1].strip(), "-12")
+        self.assertEqual(rows[0], ["error", "code", "error_type"])
+        self.assertEqual(len(rows[1]), 3, rows[1])
+        self.assertEqual(
+            rows[1][1].strip(), str(int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED))
+        )
 
     def test_host_without_amd_gpu_still_reports_not_supported(self) -> None:
         # e.g. a CPU-only host: loading amdgpu would not enable GPU subcommands.
         exc = self._parse_error("list", gpu_present=False)
         self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-        self.assertEqual(exc.value, -7)
+        self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED))
 
     def test_platform_unsupported_command_still_reports_not_supported(self) -> None:
         # profile is Windows-hypervisor only, so loading amdgpu would not enable it.
         exc = self._parse_error("profile")
         self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-        self.assertEqual(exc.value, -7)
+        self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED))
 
     def test_platform_gate_before_amdgpu_keeps_not_supported(self) -> None:
         # A platform check skips these parsers before their amdgpu gate runs, so they
@@ -229,7 +233,9 @@ class TestCliDriverNotLoaded(unittest.TestCase):
             with self.subTest(command=command):
                 exc = self._parse_error(command, **platform)
                 self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-                self.assertEqual(exc.value, -7)
+                self.assertEqual(
+                    exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED)
+                )
 
 
 class TestAmdGpuPresence(unittest.TestCase):
