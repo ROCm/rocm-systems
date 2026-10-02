@@ -757,6 +757,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
+  comm->hierarchicalEligible = false;
+  comm->hierarchicalLazyCalls = 0;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
@@ -3050,23 +3052,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       if (!compactRanks) {
         INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
-        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-        // honor user input if user explicitly disables PAT
-        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
-        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
-        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-        comm->forcePatEnable = false;
-        // inherit PXN disable from parent comm
-        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
-        comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+        comm->hierarchicalEligible = true;
+        // Hierarchical ReduceScatter has no lazy trigger.
+        if (rcclParamHierarchicalLazyInit() == 1 && rcclParamHierarchicalReduceScatter() != 1) {
+          INFO(NCCL_INIT, "Hierarchical collectives: deferring sub-communicator setup to the first eligible AllGather");
+        } else {
+          NCCLCHECKGOTO(rcclEnsureHierarchicalComms(comm), res, fail);
+        }
       }
     }
   }
@@ -3136,6 +3128,47 @@ fail:
   } else { \
     INFO(NCCL_ENV, "Comm config " fieldStr " set to " format, config->field); \
   }
+
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) {
+  if (comm->hierarchicalTempBuffer != nullptr) return ncclSuccess;
+  const size_t size = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                     rcclParamHierarchicalReduceScatter() == 1);
+  return ncclCudaMalloc(&comm->hierarchicalTempBuffer, size, comm->memManager);
+}
+
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) {
+  if (comm->hierarchicalCommsInitialized || !comm->hierarchicalEligible) return ncclSuccess;
+
+  ncclResult_t res = ncclSuccess;
+  const int parentBlocking = comm->config.blocking;
+  int node_id = comm->rankToNode[comm->rank];
+  int local_rank = comm->rankToLocalRank[comm->rank];
+  const char* patEnableEnv = nullptr;
+  bool userDisabledPat = false;
+
+  // A non-blocking split can return before the child exists, so split synchronously.
+  comm->config.blocking = 1;
+  NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, exit);
+  // honor user input if user explicitly disables PAT
+  patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+  userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+  comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
+  NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, exit);
+  comm->forcePatEnable = false;
+  // inherit PXN disable from parent comm
+  comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+  NCCLCHECKGOTO(rcclReserveHierarchicalTempBuffer(comm), res, exit);
+  comm->hierarchicalCommsInitialized = true;
+  INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+       comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+
+exit:
+  comm->config.blocking = parentBlocking;
+  comm->forcePatEnable = false;
+  // Never retried: a failed split can leave peers mid-exchange on the parent's bootstrap.
+  if (res != ncclSuccess) comm->hierarchicalEligible = false;
+  return res;
+}
 
 static ncclResult_t envConfigOverride(ncclComm_t comm) {
   ncclResult_t ret = ncclSuccess;
