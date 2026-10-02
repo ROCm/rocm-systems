@@ -485,6 +485,11 @@
           "name": "NetIB_MultiSeg_HostAndDeviceSingleSegmentRegression",
           "description": "Regression: plain host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) registrations still transfer through the unchanged single-region path",
           "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression"
+        },
+        {
+          "name": "NetIB_MultiSeg_MultiRecvMixesSingleAndMultiSegmentHandles",
+          "description": "One multi-recv mixing a single-segment handle with a boundary-crossing multi-segment one, in both orders, so per-entry side-table selection diverges within one WR chain",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiRecvMixesSingleAndMultiSegmentHandles"
         }
       ]
     },
@@ -516,6 +521,11 @@
           "name": "NetIB_MultiSeg_MultiRecvFlushTouchesEveryHandle",
           "description": "A multi-recv mixing two composite handles must fence every non-zero entry, not only the last receive",
           "test_filter": "NetIbMultiSegmentMPITest.MultiRecvFlushTouchesEveryHandle"
+        },
+        {
+          "name": "NetIB_MultiSeg_FlushMixedSingleAndMultiSegmentHandles",
+          "description": "iflush over a multi-recv mixing single- and multi-segment handles takes the per-segment chain in both orders, including a single-segment final entry",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiRecvMixesSingleAndMultiSegmentHandles"
         }
       ]
     },
