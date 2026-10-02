@@ -178,7 +178,10 @@ rollback_started_agents(std::vector<rocprofiler::SPM::spm_agent_callback_data>& 
 
         cb_data.packet->kfd_stop();
         counters::counter_collection_ptl_enable(ag->get_rocp_agent());
-        counters::counter_collection_device_unlock(ag->get_rocp_agent());
+        if(counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_unlock(ag->get_rocp_agent());
+        }
 
         if(hsa::use_ondemand_queue())
         {
@@ -318,7 +321,10 @@ spm_start_agent_ctx(const context::context* ctx)
         {
             callback_data.packet.reset();
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
-            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+            if(counters::counter_collection_has_device_lock())
+            {
+                counters::counter_collection_device_unlock(agent->get_rocp_agent());
+            }
             if(hsa::use_ondemand_queue())
             {
                 agent->destroy_device_counting_service_queue();
@@ -446,7 +452,10 @@ spm_stop_agent_ctx(const context::context* ctx)
         callback_data.packet->kfd_stop();
 
         counters::counter_collection_ptl_enable(agent->get_rocp_agent());
-        counters::counter_collection_device_unlock(agent->get_rocp_agent());
+        if(counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+        }
 
         if(hsa::use_ondemand_queue())
         {
