@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed dispatch IDs not always following kernel launch order.
+
 ### Upcoming changes
 
 ### Known issues

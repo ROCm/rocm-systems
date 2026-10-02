@@ -2865,3 +2865,24 @@ def test_assign_native_ids_numbers_dispatches_across_processes():
     # Same kernel in both processes, so one kernel id.
     assert numbered["Kernel_ID"].tolist() == [0, 0]
     assert numbered.columns.tolist() == COUNTER_RESULTS_COLUMNS
+
+
+def test_assign_native_ids_numbers_dispatches_in_launch_order():
+    # Rows arrive in completion order, and dispatch ids restart in each process.
+    counter_set = pd.concat(
+        [
+            join_native_counters(
+                native_counters((dispatch_id, "SQ_WAVES", pid + dispatch_id)),
+                native_dispatches(dispatch_id, start=pid * 10),
+                native_symbols(),
+                pid=pid,
+            )
+            for pid, dispatch_id in ((200, 1), (100, 2), (100, 1), (200, 2))
+        ],
+        ignore_index=True,
+    )
+
+    numbered = assign_native_ids(counter_set)
+
+    assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
+    assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
