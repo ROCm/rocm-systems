@@ -197,10 +197,13 @@ void VMulDx9ZeroF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx12,
-                                        rj_arith_v_mul_dx9_zero_f32_w64_gfx12,
-                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+      !amdgpu::hwfloat::try_execute_qualified_dx9_mul_f32_vop2(*this, wf)) {
+    amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx12,
+                                          rj_arith_v_mul_dx9_zero_f32_w64_gfx12,
+                                          wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                          /*rdna3=*/false, /*compatibility_mul=*/false);
+  }
 }
 
 RJ_NOINLINE void VMulDx9ZeroF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -223,10 +226,13 @@ RJ_NOINLINE void VMulDx9ZeroF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx12,
-                                        rj_arith_v_mul_dx9_zero_f32_w64_gfx12,
-                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+      !amdgpu::hwfloat::try_execute_qualified_dx9_mul_f32_vop2(*this, wf)) {
+    amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_dx9_zero_f32_w32_gfx12,
+                                          rj_arith_v_mul_dx9_zero_f32_w64_gfx12,
+                                          wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                          /*rdna3=*/false, /*compatibility_mul=*/false);
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -235,10 +241,15 @@ void VMulF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx12,
-                                        rj_arith_v_mul_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
-                                        vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/true);
+  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY &&
+      amdgpu::hwfloat::detail::has_qualified_mul_f32_vop2_policy(*this, wf)) {
+    amdgpu::execute_v_mul_f32_vop2(*this, wf);
+  } else {
+    amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx12,
+                                          rj_arith_v_mul_f32_w64_gfx12, wf.cu().arithmetic_flags(),
+                                          0, vdst, src0, vsrc1,
+                                          /*rdna3=*/false, /*compatibility_mul=*/true);
+  }
 }
 
 RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -261,10 +272,15 @@ RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx12,
-                                        rj_arith_v_mul_f32_w64_gfx12, wf.cu().arithmetic_flags(), 0,
-                                        vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/true);
+  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY &&
+      amdgpu::hwfloat::detail::has_qualified_mul_f32_vop2_policy(*this, wf)) {
+    amdgpu::execute_v_mul_f32_vop2(*this, wf);
+  } else {
+    amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx12,
+                                          rj_arith_v_mul_f32_w64_gfx12, wf.cu().arithmetic_flags(),
+                                          0, vdst, src0, vsrc1,
+                                          /*rdna3=*/false, /*compatibility_mul=*/true);
+  }
   dpp_write_mask_scope_.restore();
 }
 

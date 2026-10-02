@@ -48,7 +48,7 @@ _EXPECTED_TRANS_SIMD_TEMPLATES = {
     'v_rsq_f16_vop3',
     'v_sqrt_f16_vop3',
 }
-# COS and the legacy EXP/LOG forms have no specialized SIMD probe.
+# These operations have no native floating-point probe. COS has an integer batch.
 _SCALAR_ONLY_FLUSH_NEAREST_F32_OPS = {
     'V_COS_F32',
     'V_EXP_LEGACY_F32',
@@ -232,8 +232,13 @@ def test_simd_flush_nearest_f32_forces_output_flush(instruction: str):
 
 
 @pytest.mark.parametrize('instruction', sorted(_SCALAR_ONLY_FLUSH_NEAREST_F32_OPS))
-def test_scalar_only_flush_nearest_f32_has_no_specialized_simd_probe(instruction: str):
-    assert simd_probe_line(f'{instruction.lower()}_vop3') is None
+def test_flush_nearest_f32_has_no_native_float_probe(instruction: str):
+    assert (
+        simd_probe_line(
+            f'{instruction.lower()}_vop3', include_integer_transcendentals=False
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize('instruction', sorted(FLUSH_NEAREST_F32_OPS))

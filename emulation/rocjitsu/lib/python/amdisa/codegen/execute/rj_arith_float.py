@@ -869,6 +869,26 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
         f'      {dst[0]}, {src[0]}, {src[1]},',
         f'      {controls});',
     ]
+    # Preserve measured multiply results and status in compatibility mode.
+    # Other targets, operand forms and explicit policies stay on rj-arith.
+    form = 'vop3' if is_vop3 else 'vop2'
+    semantics = '(wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+    if mnemonic == 'V_MUL_F32':
+        lines = [
+            f'  if ({semantics} == RJ_ARITH_SEMANTICS_COMPATIBILITY &&',
+            f'      amdgpu::hwfloat::detail::has_qualified_mul_f32_{form}_policy(*this, wf)) {{',
+            f'    amdgpu::execute_v_mul_f32_{form}(*this, wf);',
+            '  } else {',
+            *('  ' + line for line in lines),
+            '  }',
+        ]
+    elif mnemonic == 'V_MUL_DX9_ZERO_F32':
+        lines = [
+            f'  if ({semantics} != RJ_ARITH_SEMANTICS_COMPATIBILITY ||',
+            f'      !amdgpu::hwfloat::try_execute_qualified_dx9_mul_f32_{form}(*this, wf)) {{',
+            *('  ' + line for line in lines),
+            '  }',
+        ]
     return '\n'.join(lines)
 
 

@@ -18,7 +18,7 @@ from rj_arith_headers import public_headers
 
 
 @pytest.mark.parametrize('arch,count', [('rdna3', 30), ('rdna4', 34)])
-def test_generated_binary_float_methods_have_no_legacy_bypass(arch, count):
+def test_generated_binary_float_methods_preserve_arithmetic_policy(arch, count):
     root = (
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
@@ -37,6 +37,23 @@ def test_generated_binary_float_methods_have_no_legacy_bypass(arch, count):
             body = source[match.end() : end - 1]
             if 'arith::execute_float_binary32' not in body:
                 continue
+            body = ' '.join(body.split())
+            semantics = '(wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+            if match[1] == 'VMulF32' + encoding.capitalize():
+                guard = (
+                    f'if ({semantics} == RJ_ARITH_SEMANTICS_COMPATIBILITY && '
+                    f'amdgpu::hwfloat::detail::has_qualified_mul_f32_{encoding}_policy(*this, wf)) {{ '
+                    f'amdgpu::execute_v_mul_f32_{encoding}(*this, wf); }} else {{'
+                )
+                assert body.count(guard) == 1
+                body = body.replace(guard, '')
+            elif match[1] == 'VMulDx9ZeroF32' + encoding.capitalize():
+                guard = (
+                    f'if ({semantics} != RJ_ARITH_SEMANTICS_COMPATIBILITY || '
+                    f'!amdgpu::hwfloat::try_execute_qualified_dx9_mul_f32_{encoding}(*this, wf)) {{'
+                )
+                assert body.count(guard) == 1
+                body = body.replace(guard, '')
             assert 'RJ_SIMD' not in body, match[1]
             assert 'try_execute_' not in body, match[1]
             assert 'amdgpu::execute_v_' not in body, match[1]

@@ -468,6 +468,8 @@ add_executable(
     buffer_format_test.cpp
     image_access_test.cpp
     image_addressing_test.cpp
+    hwfloat_mul_f32_test.cpp
+    hwfloat_mul_f32_execution_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -555,6 +557,8 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
+    reciprocal_simd_test.cpp
+    transcendental_simd_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
     cbranch_fork_join_test.cpp
