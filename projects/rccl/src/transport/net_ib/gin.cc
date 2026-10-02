@@ -751,6 +751,11 @@ reconcile:
       ret = ncclInvalidUsage;
       goto fail;
     }
+    if (!ncclRmaSegOffTableValid(registrations[r].segOff, nSeg)) {
+      WARN("NET/IB/RMA: buffer %p segment offsets from rank %d are not ordered from 0", data, r);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
   }
 
   // Reconcile allocation failures too, before entering the VA/rkey gathers.
