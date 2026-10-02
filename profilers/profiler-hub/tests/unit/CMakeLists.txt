@@ -64,6 +64,7 @@ endif()
 
 gtest_discover_tests(
     profiler-hub_unit_tests
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     PROPERTIES LABELS "unit"
 )
