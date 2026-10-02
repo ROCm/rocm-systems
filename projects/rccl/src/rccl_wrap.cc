@@ -1240,6 +1240,17 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
     return false;
   }
 
+  // Staged CE still addresses every peer by LSA rank, so it needs the same
+  // runtime and topology as registered CE; only the window checks differ.
+  if (!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, datatype)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: CE is not supported by this driver");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: LSA team does not span the comm");
+    return false;
+  }
+
   return true;
 }
 

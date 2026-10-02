@@ -2861,6 +2861,23 @@
         }
       ]
     },
+    "ce_allreduce_spanning_lsa": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_SpanningLsa_ForcedUnregistered",
+          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+          "test_filter": "CeAllReduceSpanningLsaTest.*"
+        }
+      ]
+    },
     "ce_allreduce_lsa_guard_multinode": {
       "extends": "ce_base",
       "num_ranks": 4,
