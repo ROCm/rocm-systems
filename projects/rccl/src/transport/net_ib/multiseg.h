@@ -95,26 +95,13 @@ static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* seg
   return -1;
 }
 
-// MR index for a 0-byte RDMA_WRITE at addr. Inclusive start; the exclusive end
-// of the last segment still uses that last MR.
-static inline int ncclIbSegmentIndexForZeroLength(int nSegments, const uintptr_t* segStart, const size_t* segLen,
-                                                  uintptr_t addr) {
-  int s = ncclIbSegmentIndexForRange(nSegments, segStart, segLen, addr, 0);
-  if (s >= 0) return s;
-  if (nSegments < 1 || segStart == NULL || segLen == NULL) return -1;
-  uintptr_t end = segStart[nSegments - 1] + segLen[nSegments - 1];
-  return addr == end ? nSegments - 1 : -1;
-}
-
-// True iff the segment layout is "uniform": every interior segment has the same
-// size as segment 0, and the trailing segment is no larger. This keeps every
-// segment boundary at a multiple of the segment size, so step-aligned transfers
-// (stepSize <= segmentSize) never straddle a boundary. Registration declines
-// non-uniform layouts and falls back to staging buffers.
+// True iff every interior segment equals the largest segment. The first and
+// last may be shorter, since registration can clip a physical allocation at
+// either end, so any two-segment layout passes (e.g. [6 MiB][2 MiB]).
+// Registration declines other layouts and falls back to staging buffers. This
+// is a layout policy only: sends split at every boundary on both sides.
 static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   if (nSegments <= 1) return true;
-  // Stride is the largest segment. Interior segments must equal it; the first
-  // and last may be shorter when registration clips a physical allocation.
   size_t stride = 0;
   for (int s = 0; s < nSegments; s++) {
     if (segLen[s] > stride) stride = segLen[s];
@@ -166,11 +153,12 @@ static inline int ncclIbSegmentsOverlappingRange(int nSegments, const uintptr_t*
 // ---------------------------------------------------------------------------
 // Wire-protocol segment splitting.
 //
-// A single logical transfer maps offset o -> localBase+o on the sender and
-// remoteBase+o on the receiver. The two sides may have *different* physical
-// segment layouts (independent VMM allocations), so a contiguous logical range
-// can straddle a boundary on either side. ncclIbSplitTransfer decomposes the
-// range [off, off+len) into slices that each stay within one local AND one
+// A single logical transfer maps byte o -> localOff+o on the sender and
+// remoteOff+o on the receiver, each relative to its own registration. The two
+// sides may have *different* physical segment layouts (independent VMM
+// allocations), so a contiguous logical range can straddle a boundary on either
+// side. ncclIbSplitTransferAtOffsets decomposes the range into slices that each
+// stay within one local AND one
 // remote segment, resolving the per-slice local/remote VA. This is the classic
 // analogue of RMA's ncclRmaBuildSegmentedWrs and is kept dependency-free so the
 // boundary math is unit-testable on the host.
@@ -194,6 +182,14 @@ static inline int ncclIbSegmentForOffset(int nSeg, const uint64_t* segOff, uint6
     if (off >= segOff[s] && off < segOff[s + 1]) return s;
   }
   return -1;
+}
+
+// Segment whose rkey a 0-byte RDMA_WRITE at `off` uses. Inclusive start; the
+// exclusive end of the last segment still uses the last segment.
+static inline int ncclIbSegmentForZeroLengthOffset(int nSeg, const uint64_t* segOff, uint64_t off) {
+  int s = ncclIbSegmentForOffset(nSeg, segOff, off);
+  if (s < 0 && nSeg > 0 && off == segOff[nSeg]) s = nSeg - 1;
+  return s;
 }
 
 // Decompose local [localOff, localOff+len) and remote
@@ -233,15 +229,6 @@ static inline int ncclIbSplitTransferAtOffsets(int nLocal, const uint64_t* local
     rem -= sliceLen;
   }
   return n;
-}
-
-// Common case where the local and remote request begin at the same logical
-// offset within their registrations.
-static inline int ncclIbSplitTransfer(int nLocal, const uint64_t* localSegVA, const uint64_t* localSegOff, int nRemote,
-                                      const uint64_t* remoteSegVA, const uint64_t* remoteSegOff, uint64_t off,
-                                      uint64_t len, struct ncclIbSegSlice* out, int maxSlices) {
-  return ncclIbSplitTransferAtOffsets(nLocal, localSegVA, localSegOff, nRemote, remoteSegVA, remoteSegOff, off, off,
-                                      len, out, maxSlices);
 }
 
 // Host VMM can report base 0; subtracting then wraps the remaining length.
