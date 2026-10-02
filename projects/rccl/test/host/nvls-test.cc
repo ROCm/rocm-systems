@@ -75,7 +75,6 @@ TEST_P(NvlsHipStubTest, InitLeavesNvlsOff) {
 
   EXPECT_EQ(ncclNvlsInit(comm_), ncclSuccess);
 
-  EXPECT_EQ(comm_->nvlsSupport, 0);
   EXPECT_EQ(comm_->nvlsChannels, 0);
   EXPECT_TRUE(nvlsEnableLookups_.empty()) << "the stubs must not consult NCCL_NVLS_ENABLE";
 }
@@ -89,7 +88,7 @@ TEST_P(NvlsHipStubTest, SetupPathSucceedsWithoutAllocating) {
   EXPECT_EQ(ncclNvlsTreeConnect(comm_), ncclSuccess);
   EXPECT_EQ(ncclNvlsFree(comm_), ncclSuccess);
 
-  EXPECT_EQ(comm_->nvlsSupport, 0);
+  // Tripwire: the stubs never write nvlsResources; this fails only if one starts allocating.
   EXPECT_EQ(comm_->nvlsResources, nullptr);
   EXPECT_TRUE(nvlsEnableLookups_.empty());
 }

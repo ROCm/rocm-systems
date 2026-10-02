@@ -3330,7 +3330,7 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*coll_net.*|.*tuning/nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
             ".*gensrc.*|.*rccl-tests.*"
         )
 

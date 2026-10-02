@@ -406,9 +406,6 @@ namespace RcclUnitTesting
 
     int numDevices;
     HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
 
     std::vector<ncclComm_t> comms(numDevices);
     ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), numDevices, nullptr));
@@ -428,8 +425,10 @@ namespace RcclUnitTesting
     }
 
     ASSERT_EQ(ncclSuccess, ncclGroupStart());
-    for (int rank = 0; rank < numDevices; rank++)
-      ASSERT_EQ(ncclSuccess, ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+    for (int rank = 0; rank < numDevices; rank++) {
+      ASSERT_EQ(ncclSuccess,
+                ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+    }
     ASSERT_EQ(ncclSuccess, ncclGroupEnd());
 
     int const expected = numDevices * (numDevices + 1) / 2;
@@ -459,9 +458,11 @@ namespace RcclUnitTesting
     log << logFile.rdbuf();
     std::remove(logPath.c_str());
     EXPECT_NE(log.str().find("Init COMPLETE"), std::string::npos) << "log did not capture communicator init";
-    // NCCL's multicast bind failure: a WARN that fails initialization.
+    // Tripwires: both strings exist only in nvls.cc's `#if CUDART_VERSION >= 12010` branch, which
+    // RCCL does not compile today. They fail only if a future change enables that branch.
+    // NCCL's multicast bind failure, a WARN that fails initialization:
     EXPECT_EQ(log.str().find("Failed to bind NVLink SHARP"), std::string::npos);
-    // Printed by NCCL's NVLS init whenever NCCL_NVLS_ENABLE is nonzero.
+    // Printed by NCCL's NVLS init whenever NCCL_NVLS_ENABLE is nonzero:
     EXPECT_EQ(log.str().find("NVLS multicast support is"), std::string::npos);
   }
 
@@ -471,6 +472,14 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, NvlsEnable_NoEffect)
   {
+    // Gated here rather than inside the isolated body: RUN_ISOLATED_TESTS ends in
+    // EXPECT_TRUE(), so a GTEST_SKIP() in the child is reported as a pass by the parent.
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
     using Config = ProcessIsolatedTestRunner::TestConfig;
     std::string const logPrefix = "/tmp/rccl_nvls_enable_" + std::to_string(getpid()) + "_";
     auto nvlsEnableIs = [&logPrefix](const char* value) {

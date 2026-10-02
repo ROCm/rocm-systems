@@ -1846,6 +1846,9 @@ NCCL_NVLS_ENABLE
 Enable the use of NVLink SHARP (NVLS). NVLink SHARP is available in third-generation NVSwitch systems (NVLink4) with Hopper and later GPU architectures, allowing collectives such as ``ncclAllReduce`` to be offloaded to the NVSwitch domain.
 The default value is 2.
 
+In RCCL, this variable has no effect. RCCL does not implement NVLink SHARP, so no value allocates NVLink SHARP
+resources, and communicator initialization never fails because of them. The values below describe NCCL.
+
 Values accepted
 ^^^^^^^^^^^^^^^
 0: Disable the use of NVLink SHARP. No NVLink SHARP resources will be allocated.
