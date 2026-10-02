@@ -27,15 +27,18 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/registration/attach.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
 
 TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
 {
-    auto registration_attach_fixture_name = fmt::format("$ORIGIN/../lib/{}", ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE);
+    auto registration_attach_fixture_name =
+        fmt::format("$ORIGIN/../lib/{}", ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE);
     auto* handle = dlopen(registration_attach_fixture_name.c_str(), RTLD_LAZY | RTLD_LOCAL);
-    ASSERT_NE(handle, nullptr) << fmt::format("failed to dlopen {} :: {}, registration_attach_fixture_name, dlerror());
+    ASSERT_NE(handle, nullptr) << fmt::format(
+        "failed to dlopen {} :: {}", registration_attach_fixture_name, dlerror());
     auto close_handle = rocprofiler::common::scope_destructor{[handle]() { dlclose(handle); }};
 
     auto configure         = rocprofiler_configure_func_t{};
