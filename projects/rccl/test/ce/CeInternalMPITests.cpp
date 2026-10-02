@@ -691,7 +691,7 @@ TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
 // count. CE init is not a precondition (it never happens on these comms).
 // ===========================================================================
 
-class CeAllReduceLsaGuardTest : public MPITestBase
+class CeAllReduceLsaTestBase : public MPITestBase
 {
 protected:
     ncclComm* comm_ = nullptr;
@@ -707,12 +707,6 @@ protected:
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         comm_ = static_cast<ncclComm*>(getActiveCommunicator());
         ASSERT_NE(comm_, nullptr);
-
-        // The LSA size is comm-wide (NCCL_LSA_TEAM_SIZE and node layout), so
-        // every rank takes the same branch.
-        if(ncclDevrIsOneLsaTeam(comm_))
-            GTEST_SKIP() << "One LSA team spans the comm; run on 2+ nodes or set "
-                            "NCCL_LSA_TEAM_SIZE below the rank count";
     }
 
     void TearDown() override
@@ -763,6 +757,36 @@ protected:
     // 256 MiB total gives every shard several chunks, so totalSteps > 1 and the
     // persistent reduce kernel would be queued before Phase 1.
     static constexpr size_t kPipelinedBytes = 256ull * 1024 * 1024;
+};
+
+class CeAllReduceLsaGuardTest : public CeAllReduceLsaTestBase
+{
+protected:
+    void SetUp() override
+    {
+        CeAllReduceLsaTestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        // The LSA size is comm-wide (NCCL_LSA_TEAM_SIZE and node layout), so
+        // every rank takes the same branch.
+        if(ncclDevrIsOneLsaTeam(comm_))
+            GTEST_SKIP() << "One LSA team spans the comm; run on 2+ nodes or set "
+                            "NCCL_LSA_TEAM_SIZE below the rank count";
+    }
+};
+
+// The positive side of the guard: one node, one LSA team spanning the comm.
+class CeAllReduceSpanningLsaTest : public CeAllReduceLsaTestBase
+{
+protected:
+    void SetUp() override
+    {
+        CeAllReduceLsaTestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        if(!ncclDevrIsOneLsaTeam(comm_))
+            GTEST_SKIP() << "LSA team does not span the comm; run on one node without NCCL_LSA_TEAM_SIZE";
+    }
 };
 
 // LSA-01: a direct ncclCeAllReduce on a comm whose LSA team does not span it
@@ -862,6 +886,44 @@ TEST_F(CeAllReduceLsaGuardTest, PublicAllReduceNeverSelectsCe)
         }
     }
     EXPECT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "a CE AllReduce ran and allocated staging";
+}
+
+// LSA-04: on a spanning LSA team, forced CE on plain buffers is selected before
+// staging exists, allocates it, and every call returns the correct sum.
+TEST_F(CeAllReduceSpanningLsaTest, ForcedUnregisteredAllReduceUsesCe)
+{
+    using namespace RCCLTestGuards;
+    if(!isCeAllReduceDispatchConfigured() ||
+       MPIHelpers::getEnvParam("RCCL_FORCE_CE_ALLREDUCE", 0) != 1)
+        GTEST_SKIP() << "Needs the forced CE AllReduce env: NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, "
+                        "NCCL_CUMEM_ENABLE=1, RCCL_CE_ALLREDUCE=1, RCCL_FORCE_CE_ALLREDUCE=1";
+    ASSERT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "staging must not exist before the first CE AllReduce";
+
+    for(size_t bytes : {kSingleStepBytes, size_t(8) * 1024 * 1024})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+
+        for(int call = 0; call < 2; ++call)
+        {
+            SCOPED_TRACE(testing::Message() << "call " << call);
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(ceAllReduceSelected(send, recv, count)))
+                << "selector does not report CE AllReduce on a spanning LSA team";
+            ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count)));
+            EXPECT_NE(comm_->ceColl.ceARTmpBuf, nullptr) << "the CE AllReduce did not allocate staging";
+        }
+    }
 }
 
 // ===========================================================================
