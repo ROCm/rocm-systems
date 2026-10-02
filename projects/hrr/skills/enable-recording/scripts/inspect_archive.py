@@ -254,12 +254,17 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         # A damaged manifest is reported, not raised on: any field can be any
         # JSON value, and `"event_count": "100"` crashed the first comparison.
         # bool is an int to Python, so it is excluded from the counts. The
-        # writer never writes null, so an explicit null is damage as well.
+        # writer never writes null, so an explicit null is damage as well. Every
+        # integer it writes is a count or a pid, so a negative one is damage too:
+        # `"event_count": -1` read as zero would call a recorded stream empty.
         def typed(source: dict, key: str, kind: type):
             if key not in source:
                 return None
             value = source[key]
             if isinstance(value, kind) and (kind is bool or not isinstance(value, bool)):
+                if kind is int and value < 0:
+                    proc.manifest_bad_fields.append(f"{key}: {value}")
+                    return None
                 return value
             proc.manifest_bad_fields.append(f"{key}: {type(value).__name__}")
             return None
@@ -506,7 +511,7 @@ def inspect(
     for proc in report.processes:
         if proc.manifest_bad_fields:
             report.warnings.append(
-                f"{proc.path.name}: manifest.json has fields missing or of the wrong type "
+                f"{proc.path.name}: manifest.json has fields missing, of the wrong type or out of range "
                 f"({', '.join(proc.manifest_bad_fields)}), read as unknown"
             )
         if proc.manifest_error:

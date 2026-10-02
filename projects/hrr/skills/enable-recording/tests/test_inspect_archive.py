@@ -273,6 +273,24 @@ def test_manifest_fields_of_the_wrong_type_are_unknown_not_fatal(tmp_path):
     assert "state: unknown (manifest damaged)" in rendered
 
 
+def test_a_negative_count_is_damaged_not_zero(tmp_path):
+    """`"event_count": -1` passed the type check, `recorded` came out false and
+    the verdict read empty although the events file holds a stream.
+    """
+    pid_dir = make_process(tmp_path, 60)
+    (pid_dir / "manifest.json").write_text(json.dumps({
+        "pid": 60, "complete": True, "event_count": -1, "blob_count": -3,
+    }))
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    proc = report.processes[0]
+    assert (proc.event_count, proc.blob_count) == (None, None)
+    assert report.recorded_processes, "the events are still there"
+    warning = next(w for w in report.warnings if "out of range" in w)
+    assert "event_count: -1" in warning and "blob_count: -3" in warning
+
+
 @pytest.mark.parametrize("content", ["{}", '{"pid": 58}'])
 def test_an_empty_or_partial_manifest_is_damaged_not_missing(tmp_path, content):
     """`{}` was skipped as if the file did not exist, and the process read as
@@ -1350,6 +1368,22 @@ def test_an_output_directory_that_exists_is_checked_itself(tmp_path):
 
     # Not there yet: capture creates it inside its parent, so the parent counts.
     assert f"filesystem: fs-of:{tmp_path}," in _output_path_log(tmp_path / "run.hrr")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root passes every permission check")
+def test_an_output_directory_without_search_permission_is_refused(tmp_path):
+    """Creating `pid-*/` takes search permission as well as write, so a
+    directory with only `-w` passed preflight and the run recorded nothing.
+    """
+    out = tmp_path / "captures"
+    out.mkdir()
+    out.chmod(0o600)
+    try:
+        assert f"error: not writable (needs write and search permission): {out}" in (
+            _output_path_log(out)
+        )
+    finally:
+        out.chmod(0o700)
 
 
 def test_an_output_path_that_is_not_a_directory_is_refused(tmp_path):

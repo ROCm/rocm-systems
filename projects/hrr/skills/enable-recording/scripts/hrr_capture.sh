@@ -447,7 +447,8 @@ check_output_path() {
     mkdir -p "$parent" 2>/dev/null || fail "cannot create $parent"
     probe="$parent"
   fi
-  [[ -w "$probe" ]] || fail "not writable: $probe"
+  # Creating entries in a directory takes search permission as well as write.
+  [[ -w "$probe" && -x "$probe" ]] || fail "not writable (needs write and search permission): $probe"
 
   # The filesystem of the output path itself, resolved through its own mount
   # rather than its parent's. With `-v /host/captures:/data/captures` the
