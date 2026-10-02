@@ -6,9 +6,12 @@
 
 #include "stream.h"
 
+#include <memory>
 #include <mutex>
 
 namespace hipFile {
+
+class AsyncOp;
 
 class MStream : public IStream {
 public:
@@ -22,7 +25,11 @@ public:
     MOCK_METHOD(bool, canUseStreamWaitValue, (), (const, override));
     MOCK_METHOD(hipStream_t, copyStream, (), (const, override));
     MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));
+    MOCK_METHOD(uint64_t *, dispatchSlot, (), (const, override));
     MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
+    MOCK_METHOD(bool, pushPending, (std::shared_ptr<AsyncOp> op), (override));
+    MOCK_METHOD(std::shared_ptr<AsyncOp>, popPending, (), (override));
+    MOCK_METHOD(void, unpushPending, (), (override));
 };
 
 }

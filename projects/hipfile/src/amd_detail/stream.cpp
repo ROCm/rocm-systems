@@ -25,7 +25,8 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
       page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, can_use_stream_wait_value{false},
-      copy_stream{nullptr}, signal_slot{nullptr}, signal_counter{0}
+      copy_stream{nullptr}, signal_slot{nullptr}, dispatch_slot{nullptr}, signal_counter{0},
+      drainer_active{false}
 
 {
     if ((flags & HIPFILE_STREAM_FLAGS_MASK) != flags) {
@@ -43,6 +44,9 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
         signal_slot = static_cast<uint64_t *>(
             Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
         std::atomic_ref<uint64_t>{*signal_slot}.store(0, std::memory_order_release);
+        dispatch_slot = static_cast<uint64_t *>(
+            Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
+        std::atomic_ref<uint64_t>{*dispatch_slot}.store(0, std::memory_order_release);
     }
 }
 
@@ -133,6 +137,49 @@ Stream::signalSlot() const
     return signal_slot;
 }
 
+uint64_t *
+Stream::dispatchSlot() const
+{
+    return dispatch_slot;
+}
+
+bool
+Stream::pushPending(std::shared_ptr<AsyncOp> op)
+{
+    std::lock_guard<std::mutex> lock{drain_mutex};
+    pending.push_back(std::move(op));
+    if (!drainer_active) {
+        drainer_active = true;
+        return true;
+    }
+    return false;
+}
+
+std::shared_ptr<AsyncOp>
+Stream::popPending()
+{
+    std::lock_guard<std::mutex> lock{drain_mutex};
+    if (pending.empty()) {
+        drainer_active = false;
+        return nullptr;
+    }
+    auto op = std::move(pending.front());
+    pending.pop_front();
+    return op;
+}
+
+void
+Stream::unpushPending()
+{
+    std::lock_guard<std::mutex> lock{drain_mutex};
+    if (!pending.empty()) {
+        pending.pop_back();
+    }
+    if (pending.empty()) {
+        drainer_active = false;
+    }
+}
+
 uint64_t
 Stream::nextSignalTarget()
 {
@@ -144,6 +191,9 @@ Stream::~Stream()
     try {
         if (signal_slot) {
             Context<Hip>::get()->hipFree(signal_slot);
+        }
+        if (dispatch_slot) {
+            Context<Hip>::get()->hipFree(dispatch_slot);
         }
         if (copy_stream) {
             Context<Hip>::get()->hipStreamDestroy(copy_stream);

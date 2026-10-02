@@ -64,6 +64,8 @@ struct Hip {
     virtual void        hipStreamDestroy(hipStream_t stream) const;
     virtual void     hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
                                           uint64_t mask) const;
+    virtual void     hipStreamWriteValue64(hipStream_t stream, void *ptr, uint64_t value,
+                                           unsigned int flags) const;
     virtual void    *hipHostMalloc(size_t size, unsigned int flags) const;
     virtual void     hipHostFree(void *ptr) const;
     virtual void    *hipExtMallocWithFlags(size_t size, unsigned int flags) const;

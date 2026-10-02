@@ -3,14 +3,17 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "async.h"
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
+#include "io.h"
 #include "mconfiguration.h"
 #include "mhip.h"
 #include "msys.h"
 #include "stream.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -128,6 +131,7 @@ TEST_F(HipFileStream, owns_copy_stream_and_signal_slot)
     auto stream = stream_map.getStream(nonnull_stream);
     ASSERT_EQ(stream->copyStream(), reinterpret_cast<hipStream_t>(0xC0C0));
     ASSERT_EQ(stream->signalSlot(), &g_stream_signal_slot_storage);
+    ASSERT_EQ(stream->dispatchSlot(), &g_stream_signal_slot_storage);
 }
 
 TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
@@ -138,7 +142,51 @@ TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
     stream_map.registerStream(nonnull_stream, 0);
     auto stream = stream_map.getStream(nonnull_stream);
     ASSERT_EQ(stream->signalSlot(), nullptr);
+    ASSERT_EQ(stream->dispatchSlot(), nullptr);
     ASSERT_NE(stream->copyStream(), nullptr);
+}
+
+TEST_F(HipFileStream, pending_fifo_tracks_drainer_activation)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto    stream        = stream_map.getStream(nonnull_stream);
+    size_t  size          = 0;
+    hoff_t  file_offset   = 0;
+    hoff_t  buffer_offset = 0;
+    ssize_t bytes         = 0;
+    auto    op1 = std::make_shared<AsyncOp>(IoType::Read, nullptr, nullptr, stream, &size, &file_offset,
+                                            &buffer_offset, &bytes);
+    auto    op2 = std::make_shared<AsyncOp>(IoType::Read, nullptr, nullptr, stream, &size, &file_offset,
+                                            &buffer_offset, &bytes);
+
+    ASSERT_TRUE(stream->pushPending(op1));
+    ASSERT_FALSE(stream->pushPending(op2));
+    ASSERT_EQ(stream->popPending(), op1);
+    ASSERT_EQ(stream->popPending(), op2);
+    ASSERT_EQ(stream->popPending(), nullptr);
+    ASSERT_TRUE(stream->pushPending(op1));
+    ASSERT_EQ(stream->popPending(), op1);
+    ASSERT_EQ(stream->popPending(), nullptr);
+}
+
+TEST_F(HipFileStream, unpush_pending_removes_last_and_deactivates)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto    stream        = stream_map.getStream(nonnull_stream);
+    size_t  size          = 0;
+    hoff_t  file_offset   = 0;
+    hoff_t  buffer_offset = 0;
+    ssize_t bytes         = 0;
+    auto    op = std::make_shared<AsyncOp>(IoType::Read, nullptr, nullptr, stream, &size, &file_offset,
+                                           &buffer_offset, &bytes);
+
+    ASSERT_TRUE(stream->pushPending(op));
+    stream->unpushPending();
+    ASSERT_TRUE(stream->pushPending(op));
+    ASSERT_EQ(stream->popPending(), op);
+    ASSERT_EQ(stream->popPending(), nullptr);
 }
 
 TEST_F(HipFileStream, next_signal_target_increments_monotonically)

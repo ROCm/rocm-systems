@@ -96,6 +96,12 @@ Hip::hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigne
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
 }
 
+void
+Hip::hipStreamWriteValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWriteValue64(stream, ptr, value, flags));
+}
+
 void *
 Hip::hipHostMalloc(size_t size, unsigned int flags) const
 {

@@ -67,7 +67,7 @@ public:
 
     virtual void addOp(std::shared_ptr<AsyncOp> op);
     virtual void completeOp(AsyncOp *op);
-    virtual void submitIo(AsyncOp *op);
+    virtual void spawnDrain(std::shared_ptr<IStream> stream);
 
 private:
     void                                                 completion_thread();
@@ -89,5 +89,4 @@ void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr
 
 extern "C" {
 void async_run_inline(void *userargs);
-void async_dispatch(void *userargs);
 }

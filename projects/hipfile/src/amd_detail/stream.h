@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
@@ -13,6 +14,8 @@
 template <typename T> class PassKey;
 
 namespace hipFile {
+
+class AsyncOp;
 
 class IStream {
 public:
@@ -28,7 +31,12 @@ public:
     virtual bool                         canUseStreamWaitValue() const = 0;
     virtual hipStream_t                  copyStream() const            = 0;
     virtual uint64_t                    *signalSlot() const            = 0;
+    virtual uint64_t                    *dispatchSlot() const          = 0;
     virtual uint64_t                     nextSignalTarget()            = 0;
+
+    virtual bool                     pushPending(std::shared_ptr<AsyncOp> op) = 0;
+    virtual std::shared_ptr<AsyncOp> popPending()                             = 0;
+    virtual void                     unpushPending()                          = 0;
 };
 
 class StreamMap;
@@ -47,7 +55,12 @@ public:
     virtual bool                         canUseStreamWaitValue() const override;
     virtual hipStream_t                  copyStream() const override;
     virtual uint64_t                    *signalSlot() const override;
+    virtual uint64_t                    *dispatchSlot() const override;
     virtual uint64_t                     nextSignalTarget() override;
+
+    virtual bool                     pushPending(std::shared_ptr<AsyncOp> op) override;
+    virtual std::shared_ptr<AsyncOp> popPending() override;
+    virtual void                     unpushPending() override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -68,7 +81,12 @@ private:
 
     hipStream_t copy_stream;
     uint64_t   *signal_slot;
+    uint64_t   *dispatch_slot;
     uint64_t    signal_counter;
+
+    std::mutex                           drain_mutex;
+    std::deque<std::shared_ptr<AsyncOp>> pending;
+    bool                                 drainer_active;
 };
 
 class StreamMap {
