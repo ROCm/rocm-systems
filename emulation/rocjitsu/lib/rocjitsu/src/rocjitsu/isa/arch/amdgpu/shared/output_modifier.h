@@ -12,10 +12,9 @@
 /// The decision tables below describe the rules when each stage is enabled.
 ///
 /// gfx1201 captures of every min/max instruction match these rules bit for
-/// bit, in F16, F32 and F64, under every MODE setting probed. Those captures
-/// use only round to nearest even and round toward zero; overflow under the two
-/// directed-to-infinity modes follows the ISA rounding definition and has not
-/// been measured. CDNA5 callers use the same rules without hardware
+/// bit, in F16, F32 and F64, under every MODE setting probed. OMOD overflow
+/// was checked for both signs under all four rounding modes, with FP16_OVFL
+/// disabled and enabled. CDNA5 callers use the same rules without hardware
 /// verification.
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
