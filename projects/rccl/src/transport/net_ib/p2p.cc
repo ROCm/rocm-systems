@@ -794,6 +794,8 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   if (postSide) {
     memset(&wrSide, 0, sizeof(wrSide));
     memset(&sgeSide, 0, sizeof(sgeSide));
+    // Flushed unsignaled WRs still complete on error; resiliency maps wr_id to a slot.
+    wrSide.wr_id = wr.wr_id;
     wrSide.wr.rdma.remote_addr =
       comm->remSegLayout.addr + (uint64_t)slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSegLayout);
     wrSide.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
