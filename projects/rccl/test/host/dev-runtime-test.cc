@@ -3446,6 +3446,28 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
   EXPECT_EQ(reg.calls, 0);
 }
 
+// Branch: NCCL_RMA_DISABLE turns the proxy off, so neither the connect nor the
+// MR happens even with host RMA and remote ranks -- the same outcome the
+// symmetric path gets from ncclRmaProxyEnabled.
+TEST_F(WindowRegisterNonSymIpcTest, HostRmaButRmaDisabled_SkipsConnectAndMr) {
+  comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_EQ(reg.calls, 0);
+}
+
 // Branch: the MR registration fails.
 TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
   comm->hostRmaSupport = true;

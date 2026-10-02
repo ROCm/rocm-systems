@@ -28,6 +28,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added Memory Bandwidth Analysis for gfx950 under `--experimental --membw-analysis`. Profile with the flag to collect block 30 counters; analyze detects the data automatically and annotates active GL1/GL2/EA stall bottlenecks on the memory chart with a guidance panel.
 
+* Added the rocprof-compute Agent Skills and the documentation they link to to the install under `share/rocprofiler-compute/`, with an `install-skills.sh` script that installs or removes them for Claude Code, Codex, or Cursor. `rocprof-compute --help` shows where to find them.
+
 ### Changed
 
 * Dispatch IDs now start at 1 instead of 0.

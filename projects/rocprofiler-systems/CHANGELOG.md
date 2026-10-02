@@ -18,6 +18,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Perfetto trace output now defaults to the `.pftrace` extension instead of
   `.proto`, and `--output-format pftrace` is the canonical token for
   requesting it (`proto` is kept as a permanent backward-compatible alias).
+- Remove oneTBB as a Dyninst dependency by replacing TBB concurrent containers
+  with C++ standard library equivalents; the bundled oneTBB submodule and the
+  `ROCPROFSYS_BUILD_TBB` CMake option are removed.
 
 ### Resolved issues
 
@@ -27,6 +30,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   now restricted to its two documented, supported values (realtime,
   cputime), and an invalid value now fails cleanly at startup instead of
   aborting mid-run.
+- Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
+  Timemory commit: [ROCm/timemory@8fefbca](https://github.com/ROCm/timemory/commit/8fefbca)
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
