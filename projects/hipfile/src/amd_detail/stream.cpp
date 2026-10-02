@@ -150,7 +150,7 @@ Stream::acquireEvent()
             return event;
         }
     }
-    return Context<Hip>::get()->hipEventCreateWithFlags(hipEventDisableTiming);
+    return Context<Hip>::get()->hipEventCreateWithFlags(hipEventDisableTiming | hipEventBlockingSync);
 }
 
 void

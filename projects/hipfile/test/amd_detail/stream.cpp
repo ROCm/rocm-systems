@@ -162,7 +162,7 @@ TEST_F(HipFileStream, acquire_event_creates_with_timing_disabled_then_reuses_aft
     auto stream = stream_map.getStream(nonnull_stream);
 
     auto fake_event = reinterpret_cast<hipEvent_t>(0xE0E0);
-    EXPECT_CALL(mhip, hipEventCreateWithFlags(hipEventDisableTiming))
+    EXPECT_CALL(mhip, hipEventCreateWithFlags(hipEventDisableTiming | hipEventBlockingSync))
         .Times(1)
         .WillOnce(::testing::Return(fake_event));
 

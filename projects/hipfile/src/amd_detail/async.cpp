@@ -72,7 +72,7 @@ signalOffloadComplete(AsyncOp *op)
 void
 AsyncMonitor::submitDrainer(std::shared_ptr<IStream> stream)
 {
-    task_group->run([stream = std::move(stream)]() { drainStream(stream); });
+    task_group->run([drain_stream = std::move(stream)]() { drainStream(drain_stream); });
 }
 
 void
