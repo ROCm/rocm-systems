@@ -14169,33 +14169,27 @@ inline void execute_v_max3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_v_max3_num_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Max3Num>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Max3Num>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Max3Num>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Max3Num>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -14502,8 +14496,8 @@ inline void execute_v_max_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_max_num_f32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                wf.fp_denorm_mode_f32())](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [compare_policy = amdgpu::comparison::Policy::make(
+                                               wf.fp_denorm_mode_f32())](auto a, auto b) {
     return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>(compare_policy,
                                                                                      a, b);
   });
@@ -14523,40 +14517,34 @@ inline void execute_v_max_num_f32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_max_num_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                   wf.fp_denorm_mode_f32())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>(compare_policy,
-                                                                                     a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaxNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max_num_f64_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64([compare_policy = amdgpu::comparison::Policy::make(
+                                              wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
     return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MaxNum>(compare_policy,
                                                                                      a, b);
   });
@@ -14576,39 +14564,26 @@ inline void execute_v_max_num_f64_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_max_num_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MaxNum>(compare_policy,
-                                                                                     a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::comparison::F64,
+      amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::MaxNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::bit_cast<double>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MaxNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::MaxNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
@@ -14675,137 +14650,106 @@ inline void execute_v_max_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_maximum3_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Maximum3>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Maximum3>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Maximum3>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Maximum3>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_maximum_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                   wf.fp_denorm_mode_f32())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Maximum>(
-        compare_policy, a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Maximum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Maximum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Maximum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_maximum_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::Maximum>(
-        compare_policy, a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::comparison::F64,
+      amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::Maximum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::bit_cast<double>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::Maximum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::Maximum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_maximumminimum_f32_vop3([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaximumMinimum>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaximumMinimum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaximumMinimum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaximumMinimum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -14877,33 +14821,27 @@ inline void execute_v_maxmin_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_maxmin_num_f32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxMinNum>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaxMinNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MaxMinNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MaxMinNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -15120,28 +15058,27 @@ inline void execute_v_med3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_v_med3_num_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Med3Num>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Med3Num>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Med3Num>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -15346,33 +15283,27 @@ inline void execute_v_min3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_v_min3_num_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Min3Num>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Min3Num>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Min3Num>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Min3Num>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -15679,8 +15610,8 @@ inline void execute_v_min_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_min_num_f32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                wf.fp_denorm_mode_f32())](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [compare_policy = amdgpu::comparison::Policy::make(
+                                               wf.fp_denorm_mode_f32())](auto a, auto b) {
     return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinNum>(compare_policy,
                                                                                      a, b);
   });
@@ -15700,40 +15631,34 @@ inline void execute_v_min_num_f32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_min_num_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                   wf.fp_denorm_mode_f32())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinNum>(compare_policy,
-                                                                                     a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min_num_f64_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64([compare_policy = amdgpu::comparison::Policy::make(
+                                              wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
     return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MinNum>(compare_policy,
                                                                                      a, b);
   });
@@ -15753,39 +15678,26 @@ inline void execute_v_min_num_f64_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_min_num_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MinNum>(compare_policy,
-                                                                                     a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::comparison::F64,
+      amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::MinNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::bit_cast<double>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::MinNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::MinNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
@@ -15852,137 +15764,106 @@ inline void execute_v_min_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_minimum3_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Minimum3>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Minimum3>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Minimum3>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Minimum3>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_minimum_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [compare_policy = amdgpu::comparison::Policy::make(
-                                                   wf.fp_denorm_mode_f32())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Minimum>(
-        compare_policy, a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Minimum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::Minimum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::Minimum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_minimum_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([compare_policy = amdgpu::comparison::Policy::make(
-                                          wf.fp_denorm_mode_f16_f64())](auto a, auto b) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::Minimum>(
-        compare_policy, a, b);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::comparison::F64,
+      amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::Minimum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::bit_cast<double>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F64, amdgpu::minmax::Minimum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F64, amdgpu::minmax::Minimum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_minimummaximum_f32_vop3([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinimumMaximum>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinimumMaximum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinimumMaximum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinimumMaximum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -16054,33 +15935,27 @@ inline void execute_v_minmax_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_minmax_num_f32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([compare_policy = amdgpu::comparison::Policy::make(
-                                           wf.fp_denorm_mode_f32())](auto a, auto b, auto c) {
-    return amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinMaxNum>(
-        compare_policy, a, b, c);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::comparison::F32,
+      amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinMaxNum>{
+          amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::comparison::F32>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(
-                amdgpu::minmax::evaluate<amdgpu::comparison::F32, amdgpu::minmax::MinMaxNum>(
-                    amdgpu::minmax::Modifiers{inst.inst_.abs, inst.inst_.neg}, compare_policy,
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
-                    amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::comparison::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::Operation<amdgpu::comparison::F32, amdgpu::minmax::MinMaxNum>{
+                compare_policy},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 

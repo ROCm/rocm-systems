@@ -237,9 +237,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
     ),
     # IEEE-2019 *_NUM forms use the same selection rules as the scalar path.
-    # VOP3 forms also use these entries: F32 takes floating lanes, F16 raw bits.
-    'v_max_num_f32_vop2': ('float32_t', float_minmax.simd_functor('f32', 'max_num')),
-    'v_min_num_f32_vop2': ('float32_t', float_minmax.simd_functor('f32', 'min_num')),
+    # float_minmax.simd_probe routes every other min/max form, VOP3 included.
     'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
     'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
@@ -970,12 +968,10 @@ SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
 # binary forms: scalar bodies read src0/vsrc1 as read_lane64, no abs/neg/omod/
-# clamp. Min/max use the same minmax.h helper as the scalar path.
+# clamp. Min/max read raw encodings instead; see float_minmax.simd_probe.
 SIMD_VOP2_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop2': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop2': '[](auto a, auto b) { return a * b; }',
-    'v_max_num_f64_vop2': float_minmax.simd_functor('f64', 'max_num'),
-    'v_min_num_f64_vop2': float_minmax.simd_functor('f64', 'min_num'),
 }
 
 
@@ -1924,26 +1920,12 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 # tie (matching the f32 finding) — accepted divergences, with the A/B test
 # skipping NaN-input and zero-tie lanes (same convention as v_max_f32 / v_min_f32
 # in SIMD_VOP2_BINARY).
-# VOP3-only f32 binary ops (no VOP2 twin, so not reachable via the _vop3
-# auto-route). Per-source abs/neg + result omod/clamp applied by the f32 binary
-# glue; the functor sees already-modified native<float> args. Currently the
-# IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered) forms.
-SIMD_VOP3_BINARY_FP32: dict[str, str] = {
-    'v_maximum_f32_vop3': float_minmax.simd_functor('f32', 'maximum'),
-    'v_minimum_f32_vop3': float_minmax.simd_functor('f32', 'minimum'),
-}
-
+# The IEEE-2019 min/max forms read raw encodings; see float_minmax.simd_probe.
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
     'v_max_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
     'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
-    # IEEE-2019 *_NUM forms prefer a number over a single NaN.
-    'v_max_num_f64_vop3': float_minmax.simd_functor('f64', 'max_num'),
-    'v_min_num_f64_vop3': float_minmax.simd_functor('f64', 'min_num'),
-    # IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered).
-    'v_maximum_f64_vop3': float_minmax.simd_functor('f64', 'maximum'),
-    'v_minimum_f64_vop3': float_minmax.simd_functor('f64', 'minimum'),
 }
 
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
@@ -2086,16 +2068,6 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
     'v_minmax_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
-    # IEEE-2019 *_NUM forms compose two binary selections in minmax.h.
-    'v_max3_num_f32_vop3': float_minmax.simd_functor('f32', 'max3_num'),
-    'v_min3_num_f32_vop3': float_minmax.simd_functor('f32', 'min3_num'),
-    'v_minmax_num_f32_vop3': float_minmax.simd_functor('f32', 'minmax_num'),
-    'v_maxmin_num_f32_vop3': float_minmax.simd_functor('f32', 'maxmin_num'),
-    # NaN-propagating forms use the same compositions with a different NaN rule.
-    'v_maximum3_f32_vop3': float_minmax.simd_functor('f32', 'maximum3'),
-    'v_minimum3_f32_vop3': float_minmax.simd_functor('f32', 'minimum3'),
-    'v_maximumminimum_f32_vop3': float_minmax.simd_functor('f32', 'maximumminimum'),
-    'v_minimummaximum_f32_vop3': float_minmax.simd_functor('f32', 'minimummaximum'),
     # Cube applies OMOD itself; false leaves only CLAMP to the operand glue.
     **{
         f'v_{op}_f32_vop3': (
@@ -2125,24 +2097,6 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_med3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
     'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
-    # WidenedF16 keeps F16 input-flush rules after the SIMD helper widens to F32.
-    'v_max3_num_f16_vop3': float_minmax.simd_functor('f16', 'max3_num', 'widened_f16'),
-    'v_min3_num_f16_vop3': float_minmax.simd_functor('f16', 'min3_num', 'widened_f16'),
-    'v_minmax_num_f16_vop3': float_minmax.simd_functor(
-        'f16', 'minmax_num', 'widened_f16'
-    ),
-    'v_maxmin_num_f16_vop3': float_minmax.simd_functor(
-        'f16', 'maxmin_num', 'widened_f16'
-    ),
-    # NaN-propagating forms use the same widened representation.
-    'v_maximum3_f16_vop3': float_minmax.simd_functor('f16', 'maximum3', 'widened_f16'),
-    'v_minimum3_f16_vop3': float_minmax.simd_functor('f16', 'minimum3', 'widened_f16'),
-    'v_maximumminimum_f16_vop3': float_minmax.simd_functor(
-        'f16', 'maximumminimum', 'widened_f16'
-    ),
-    'v_minimummaximum_f16_vop3': float_minmax.simd_functor(
-        'f16', 'minimummaximum', 'widened_f16'
-    ),
     'v_div_fixup_f16_vop3': (
         '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
     ),
@@ -2693,6 +2647,9 @@ def _simd_probe_line(
     result_writer: str | None = None,
 ) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
+    minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
+    if minmax_probe is not None:
+        return minmax_probe
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -3000,11 +2957,6 @@ def _simd_probe_line(
         if template_name in _PACKED_NORMALIZED_VOP3:
             cpp_op = _modified_conversion_op(cpp_op, bits=32)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
-    # VOP3-only f32 binary (no VOP2 twin): IEEE maximum/minimum. Per-source
-    # abs/neg + result omod/clamp applied by the f32 binary glue.
-    spec3binf32 = SIMD_VOP3_BINARY_FP32.get(template_name)
-    if spec3binf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, {spec3binf32});'
     # VOP3 f64 binary (add/mul/max/min). Per-source abs/neg + result omod/clamp
     # in the f64 domain.
     spec3binf64 = SIMD_VOP3_BINARY_FP64.get(template_name)

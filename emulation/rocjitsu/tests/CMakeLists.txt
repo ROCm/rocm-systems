@@ -605,6 +605,7 @@ add_executable(
     transcendental_test.cpp
     comparison_test.cpp
     minmax_test.cpp
+    output_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
