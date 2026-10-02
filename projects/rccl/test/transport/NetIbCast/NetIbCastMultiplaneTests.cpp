@@ -99,7 +99,26 @@ TEST(NetIbCastMultiplane, GidToStringAllZeros) {
 }
 
 // =====================================================================
-// 2. IbCastMultiplaneEnabled  (init-time global)
+// 2. Full XML load + PIP GID resolution
+//
+// We reset the module state, write a small XML, load it, then verify
+// GID lookups.  The reset + reload cycle is safe in a single-threaded
+// test process.
+// =====================================================================
+
+class MultiplaneLoadTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    ncclIbCastTestMultiplaneReset();
+  }
+  void TearDown() override {
+    unsetenv("RCCL_MULTIPLANE_MAP_FILE");
+    ncclIbCastTestMultiplaneReset();
+  }
+};
+
+// =====================================================================
+// 2a. IbCastMultiplaneEnabled  (init-time global)
 //
 // IbCastMultiplaneEnable is set once at RCCL init in init.cc.  In tests
 // we simulate this by setting the global directly and verifying that
@@ -119,25 +138,6 @@ TEST_F(MultiplaneLoadTest, DisabledByDefault) {
   ASSERT_EQ(IbCastMultiplaneEnabled(&enabled), ncclSuccess);
   EXPECT_FALSE(enabled);
 }
-
-// =====================================================================
-// 3. Full XML load + PIP GID resolution
-//
-// We reset the module state, write a small XML, load it, then verify
-// GID lookups.  The reset + reload cycle is safe in a single-threaded
-// test process.
-// =====================================================================
-
-class MultiplaneLoadTest : public ::testing::Test {
-protected:
-  void SetUp() override {
-    ncclIbCastTestMultiplaneReset();
-  }
-  void TearDown() override {
-    unsetenv("RCCL_MULTIPLANE_MAP_FILE");
-    ncclIbCastTestMultiplaneReset();
-  }
-};
 
 // Minimal 2-host, 1-interface-each XML (IPv4 PIPs).
 static const char* kMinimalXml =

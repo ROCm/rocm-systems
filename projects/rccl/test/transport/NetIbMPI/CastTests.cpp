@@ -2001,11 +2001,19 @@ TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Two-step gate: multiplane must be configured AND the NIC must advertise
+    // PUEC support via sysfs puec_nports.  Use MPI_Allreduce so all ranks
+    // agree on skip/run — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
     bool multiplaneOn = false;
     ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
-    if (!multiplaneOn) {
-        GTEST_SKIP() << "Multiplane not enabled; "
-                        "smoke test requires AINIC + RCCL_MULTIPLANE_MAP_FILE";
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support "
+                        "(puec_nports > 0)";
     }
 
     void* listenComm = nullptr;
@@ -2052,8 +2060,12 @@ TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
 
     bool multiplaneOn = false;
     ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
-    if (!multiplaneOn) {
-        GTEST_SKIP() << "Multiplane not enabled";
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support";
     }
 
     void* listenComm = nullptr;
@@ -2105,12 +2117,15 @@ TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
-    // Use the same check the library uses — IbCastMultiplaneEnabled reads
-    // the init-time global that accounts for AINIC detection and ncclGetEnv
-    // (which includes .rccl.conf and the env plugin, not just getenv).
+    // This test validates the disabled (no-multiplane) path.  Use MPI_Allreduce
+    // so all ranks agree — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
     bool multiplaneOn = false;
     ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
-    if (multiplaneOn) {
+    int localSkip = multiplaneOn ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
         GTEST_SKIP() << "Multiplane is enabled; this test validates "
                         "the disabled (no-multiplane) path";
     }
