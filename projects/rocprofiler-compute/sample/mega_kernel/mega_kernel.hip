@@ -139,6 +139,16 @@
 // Architecture Detection Macros
 // ============================================================================
 
+// MI100 (CDNA1) — limited feature set; advanced MFMA/atomics paths often bypass
+#if defined(__gfx908__)
+#define ARCH_MI100 1
+#define ARCH_NAME "MI100 (gfx908/CDNA1)"
+#define HAS_HW_FP64_ATOMICS 0
+#define HAS_FP8 0
+#define HAS_ASYNC_LDS 0
+#define HAS_TDM 0
+#endif
+
 // MI250/MI200 series (CDNA2)
 #if defined(__gfx90a__)
 #define ARCH_MI250 1
@@ -1746,7 +1756,8 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     if (surf_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
         float store_val = (float)tid + 1000.0f;
-        surf1Dwrite(store_val, surf_obj, idx);
+        // surf1Dwrite x coordinate is a byte offset.
+        surf1Dwrite(store_val, surf_obj, idx * (int)sizeof(float));
         tex_store_passed = true;
     }
 #endif
@@ -3711,14 +3722,15 @@ extern "C" __global__ void mega_kernel(
     // 8. Transcendental Functions
     test_transcendental(results, lane_id);
 
-    // 9. Memory Operations (guard with active flag to avoid out-of-bounds access)
+    // 9 / 9.5 Memory ops: run VMEM first on output_buffer as scratch so it does
+    // not clobber input_buffer. Then test_global_memory writes the host-side
+    // verify pattern (out[i] = in[i]*2+1). Under rocprof multi-pass collection
+    // some PMC sets previously left stale output (e.g. index 512 == 199) when
+    // VMEM mutated input after the verify store.
     if (active) {
+        test_vmem_operations(output_buffer, results, lane_id, tid, buffer_size, tex_obj,
+                             surf_obj);
         test_global_memory(input_buffer, output_buffer, results, lane_id, tid);
-    }
-
-    // 9.5. VMEM (Vector Memory) Comprehensive Tests
-    if (active) {
-        test_vmem_operations(input_buffer, results, lane_id, tid, buffer_size, tex_obj, surf_obj);
     }
     __syncthreads();
 
