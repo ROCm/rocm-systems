@@ -111,8 +111,7 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 } // namespace
 
 KfdDriver::KfdDriver(std::string devnode_name)
-    : core::Driver(core::DriverType::KFD, std::move(devnode_name)),
-      owner_pid_(os::GetProcessId()) {}
+    : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
 hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
   if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
@@ -130,12 +129,6 @@ hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
   if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
   topology_snapshot_acquired_ = false;
-  // Inherited across a fork: give up the claim without calling the thunk. Only
-  // the DXG hsaKmtReleaseSystemProperties() refuses a child on its own, and
-  // only until the child reopens; the KFD one would go on to destroy process
-  // apertures and doorbells this process never built.
-  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
-
   return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                                : HSA_STATUS_ERROR;
 }
@@ -144,18 +137,10 @@ hsa_status_t KfdDriver::DisableRuntime() {
   if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
 
   runtime_enabled_ = false;
-  // Inherited across a fork, as above. hsaKmtRuntimeDisable() has no fork
-  // check at all: it would issue AMDKFD_IOC_RUNTIME_ENABLE with the disable
-  // mask on a descriptor this process inherited rather than opened, against an
-  // enable the parent owns.
-  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
-
   const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
   return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
                                                                               : HSA_STATUS_ERROR;
 }
-
-bool KfdDriver::InheritedAcrossFork() const { return os::GetProcessId() != owner_pid_; }
 
 hsa_status_t KfdDriver::Init() {
   // Own one snapshot from before the debug probe through BuildTopology().
@@ -208,9 +193,7 @@ hsa_status_t KfdDriver::ShutDown() {
   };
 
   // Every stage runs even if an earlier one fails: stopping at the first error
-  // would strand the references the remaining stages give back. Each stage
-  // tests InheritedAcrossFork() for itself, so a forked child runs the same
-  // three stages and this function needs no special case.
+  // would strand the references the remaining stages give back.
   record("disable runtime", DisableRuntime());
   record("release topology snapshot", ReleaseTopologySnapshot());
   record("close KFD", Close());
@@ -248,15 +231,6 @@ hsa_status_t KfdDriver::Open() {
 // not also lose the runtime enable and the topology snapshot. ShutDown() is
 // the method that gives back everything.
 hsa_status_t KfdDriver::Close() {
-  // In a forked child the open reference belongs to the parent, so give up the
-  // claim without calling the thunk. Neither hsaKmtCloseKFD() tests for a fork
-  // of its own: the native one in libhsakmt/src/openclose.c decrements the
-  // count it inherited and runs the last-close teardown -
-  // hsakmt_fmm_clear_all_aperture() and the inherited fd - over process state
-  // this one never built, and the DXG one in libhsakmt/src/dxg/openclose.cpp
-  // shuts DXCore down under whichever session dxg_open_count currently names.
-  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
-
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                 : HSA_STATUS_ERROR;
 }
