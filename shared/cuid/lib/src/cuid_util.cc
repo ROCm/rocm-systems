@@ -21,40 +21,8 @@
 #include <sstream>
 #include <vector>
 
+#include "rocm/sha2/sha256.h"
 #include "smbios_util.h"
-
-// Overridable at build time the same way AMDCUID_CONFIG_DIR is, so packaging
-// can move the store without a source change.
-#ifndef AMDCUID_RECORD_DIR
-#define AMDCUID_RECORD_DIR "/var/lib/amdcuid"
-#endif
-
-const std::string& CuidUtilities::record_dir() {
-  static const std::string dir = []() -> std::string {
-    // Unprivileged callers only: an ordinary user redirecting its own store is
-    // how a test, or a caller on a node where no refresh has run, gets one at
-    // all. Letting the environment steer where a root-privileged refresh writes
-    // primary CUIDs and hardware fingerprints reopens the /tmp problem.
-    if (geteuid() != 0) {
-      // getenv races only against setenv, which this library never calls.
-      // NOLINTNEXTLINE(concurrency-mt-unsafe)
-      const char* env_dir = std::getenv("AMDCUID_RECORD_DIR");
-      if (env_dir && env_dir[0]) return env_dir;
-    }
-    return AMDCUID_RECORD_DIR;
-  }();
-  return dir;
-}
-
-const std::string& CuidUtilities::cuid_file() {
-  static const std::string path = record_dir() + "/cuid";
-  return path;
-}
-
-const std::string& CuidUtilities::priv_cuid_file() {
-  static const std::string path = record_dir() + "/priv_cuid";
-  return path;
-}
 
 const char* Logger::LogLevelName(LogLevel level) const {
   switch (level) {
@@ -134,8 +102,13 @@ amdcuid_status_t CuidUtilities::read_driver_cuid_from_path(const std::string& pa
   close(fd);
 
   if (n < 0) {
-    // A sysfs show() handler can fail per-read; EACCES cannot appear here, so
-    // this is a read error, not the privilege case above.
+    // amdgpu checks CAP_SYS_ADMIN in show(), not at open(), so root without the
+    // capability (a default container) opens cuid_primary and is refused here.
+    if (read_err == EPERM || read_err == EACCES) {
+      LOG(DEBUG, "driver CUID attribute "
+                     << path << " not readable: " << CuidUtilities::errno_string(read_err));
+      return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     LOG(WARN, "failed to read " << path << ": " << CuidUtilities::errno_string(read_err));
     return AMDCUID_STATUS_FILE_ERROR;
   }
@@ -318,22 +291,17 @@ std::string CuidUtilities::real_dev_path_from_fd(int fd) {
   if (fstat(fd, &st) != 0) {
     return "";
   }
+  if (!S_ISCHR(st.st_mode) && !S_ISBLK(st.st_mode)) return "";
   dev_t dev = st.st_rdev;
   uint32_t major_num = major(dev);
   uint32_t minor_num = minor(dev);
 
-  // Construct sysfs path from char device numbers first
-  std::string sys_path =
-      "/sys/dev/char/" + std::to_string(major_num) + ":" + std::to_string(minor_num);
+  const std::string sys_path =
+      std::string(S_ISCHR(st.st_mode) ? "/sys/dev/char/" : "/sys/dev/block/") +
+      std::to_string(major_num) + ":" + std::to_string(minor_num);
   char buf[PATH_MAX];
   if (realpath(sys_path.c_str(), buf) != nullptr) {
     return std::string(buf) + "/device";
-  } else {
-    // attempt to find as a block device now
-    sys_path = "/sys/dev/block/" + std::to_string(major_num) + ":" + std::to_string(minor_num);
-    if (realpath(sys_path.c_str(), buf) != nullptr) {
-      return std::string(buf) + "/device";
-    }
   }
   // If all fails, return empty string
   return "";
@@ -461,12 +429,11 @@ uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
 
 }  // anonymous namespace
 
-uint16_t CuidUtilities::get_gpu_vf_id(const std::string& device_path) {
-  // Determine if the GPU is an SR-IOV Virtual Function (VF) and return its
-  // 1-based VF index as the unit_id. Returns 0 for bare metal, PF,
-  // passthrough, or when VF detection is unavailable.
+CuidUtilities::VfIdentity CuidUtilities::get_gpu_vf_identity(const std::string& device_path) {
+  VfIdentity id;
+
   int render_minor = extract_render_minor(device_path);
-  if (render_minor < 0) return 0;
+  if (render_minor < 0) return id;
 
   std::string dev_node = "/dev/dri/renderD" + std::to_string(render_minor);
 
@@ -474,21 +441,26 @@ uint16_t CuidUtilities::get_gpu_vf_id(const std::string& device_path) {
   if (fd < 0) {
     // Fall back to read-only if we lack write permission
     fd = open(dev_node.c_str(), O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return 0;
+    if (fd < 0) return id;
   }
 
-  bool is_vf = is_gpu_vf_mode(fd);
+  id.is_vf = is_gpu_vf_mode(fd);
   close(fd);
 
-  if (!is_vf) return 0;
+  if (!id.is_vf) return id;
 
-  // VF detected via ioctl. Try to determine VF index from sysfs.
-  uint16_t vf_index = get_vf_index_from_sysfs(device_path);
-  if (vf_index > 0) return vf_index;
+  // physfn is visible, so we know which share of the card this is. The index is
+  // 1-based, leaving 0 to mean the card as a whole -- the same encoding a
+  // spatial partition uses, so a device and its first sub-unit never collide.
+  const uint16_t vf_index = get_vf_index_from_sysfs(device_path);
+  if (vf_index > 0) {
+    id.index_known = true;
+    id.unit_id = vf_index;
+  }
 
-  // Could not determine VF index (e.g. inside a guest VM where physfn
-  // is not visible). Fall back to 0 per specification.
-  return 0;
+  // Otherwise index_known stays false: a VF we cannot name, which is what a
+  // guest sees, and whose caller must not fall back to the card's serial.
+  return id;
 }
 
 uint32_t CuidUtilities::routing_id_from_bdf(const std::string& bdf) {
@@ -510,93 +482,120 @@ int hex_value(char c) {
   return -1;
 }
 
-// 32 hex characters out of one of the machine-identity files, as 16 octets.
-bool read_machine_id_from(const char* path, uint8_t out[16]) {
-  std::string line;
-  std::ifstream machine_id_file(path);
-  if (!machine_id_file.is_open()) return false;
-  std::getline(machine_id_file, line);
-  if (line.size() < 32) return false;
+}  // namespace
 
+// The machine identity that keys the auxiliary serial.
+//
+// False when this host has none, which is not a degraded-but-usable case:
+// without it the input reduces to format, routing ID, vendor/device/revision
+// and component type, all properties of the hardware model and its slot, so
+// two identically-configured hosts would emit the same auxiliary CUID for
+// different physical parts.
+//
+// /var/lib/dbus/machine-id is the older location and the only one populated on
+// some distributions and in containers where /etc/machine-id was never written.
+// An /etc/machine-id that exists is authoritative even when it is not valid:
+// empty, "uninitialized" or all zero is an image whose identity is not yet
+// set, and a D-Bus ID beside it came with the image.
+bool CuidUtilities::read_machine_id(const std::string& path, const std::string& fallback,
+                                    uint8_t out[16]) {
+  std::memset(out, 0, 16);
+  struct stat st{};
+  const bool absent = stat(path.c_str(), &st) != 0 && errno == ENOENT;
+  std::ifstream machine_id_file(absent ? fallback : path);
+  std::string line;
+  if (machine_id_file.is_open() && std::getline(machine_id_file, line) &&
+      parse_machine_id(line, out))
+    return true;
+  std::memset(out, 0, 16);
+  return false;
+}
+
+bool CuidUtilities::parse_machine_id(const std::string& line, uint8_t out[16]) {
+  if (line.size() != 32) return false;
+  uint8_t any = 0;
   for (size_t i = 0; i < 16; ++i) {
     const int hi = hex_value(line[2 * i]);
     const int lo = hex_value(line[(2 * i) + 1]);
     if (hi < 0 || lo < 0) return false;
     out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    any |= out[i];
   }
-  return true;
+  return any != 0;
 }
 
-// The 128-bit Machine ID field of the auxiliary input.
-//
-// False when this host has no machine identity, which is not a
-// degraded-but-usable case: with the field zero the input reduces to format,
-// routing ID, vendor/device/revision and component type, all properties of the
-// hardware model and its slot, so two identically-configured hosts would emit
-// the same auxiliary CUID for different physical parts.
-//
-// /var/lib/dbus/machine-id is the older location and the only one populated on
-// some distributions and in containers where /etc/machine-id was never written.
-bool read_machine_id(uint8_t out[16]) {
-  std::memset(out, 0, 16);
-  static const char* const kPaths[] = {"/etc/machine-id", "/var/lib/dbus/machine-id"};
-  for (const char* path : kPaths) {
-    if (read_machine_id_from(path, out)) return true;
-    std::memset(out, 0, 16);
-  }
-  return false;
-}
-
-}  // namespace
-
-void CuidUtilities::pack_auxiliary_input(const AuxiliaryInput& input, const uint8_t machine_id[16],
-                                         uint8_t structure[32]) {
+void CuidUtilities::pack_auxiliary_input(const AuxiliaryInput& input, uint8_t structure[32]) {
   // Pack the 256-bit structure LSB-first into 32 octets. See AuxiliaryInput in
   // cuid_util.h for the field positions.
   std::memset(structure, 0, 32);
-  structure[0] = input.format & 0xFF;               // bits 0:15
-  structure[1] = (input.format >> 8) & 0xFF;        //
-  std::memcpy(&structure[2], machine_id, 16);       // bits 16:143
-  structure[18] = input.routing_id & 0xFF;          // bits 144:175
-  structure[19] = (input.routing_id >> 8) & 0xFF;   //
-  structure[20] = (input.routing_id >> 16) & 0xFF;  //
-  structure[21] = (input.routing_id >> 24) & 0xFF;  //
-  structure[22] = input.revision_id;                // bits 176:183
-  structure[23] = input.device_id & 0xFF;           // bits 184:199
-  structure[24] = (input.device_id >> 8) & 0xFF;    //
-  structure[25] = input.vendor_id & 0xFF;           // bits 200:215
-  structure[26] = (input.vendor_id >> 8) & 0xFF;    //
-  structure[27] = input.component_type & 0x0F;      // bits 216:219
+  structure[0] = static_cast<uint8_t>(input.format & 0xFF);               // bits 0:15
+  structure[1] = static_cast<uint8_t>((input.format >> 8) & 0xFF);        //
+  structure[18] = static_cast<uint8_t>(input.routing_id & 0xFF);          // bits 144:175
+  structure[19] = static_cast<uint8_t>((input.routing_id >> 8) & 0xFF);   //
+  structure[20] = static_cast<uint8_t>((input.routing_id >> 16) & 0xFF);  //
+  structure[21] = static_cast<uint8_t>((input.routing_id >> 24) & 0xFF);  //
+  structure[22] = input.revision_id;                                      // bits 176:183
+  structure[23] = static_cast<uint8_t>(input.device_id & 0xFF);           // bits 184:199
+  structure[24] = static_cast<uint8_t>((input.device_id >> 8) & 0xFF);    //
+  structure[25] = static_cast<uint8_t>(input.vendor_id & 0xFF);           // bits 200:215
+  structure[26] = static_cast<uint8_t>((input.vendor_id >> 8) & 0xFF);    //
+  structure[27] = input.component_type & 0x0F;                            // bits 216:219
   // structure[27] high nibble and structure[28..31] are the reserved field.
 }
 
-amdcuid_status_t CuidUtilities::make_fallback_fingerprint(const AuxiliaryInput& input,
-                                                          uint64_t& fingerprint) {
+void CuidUtilities::temporary_key(const uint8_t machine_id[16], uint8_t out[32]) {
+  rocm::sha2::hmac_sha256(machine_id, 16, reinterpret_cast<const uint8_t*>(kTemporaryKeyLabel),
+                          sizeof(kTemporaryKeyLabel) - 1, out);
+}
+
+amdcuid_status_t CuidUtilities::temporary_key(uint8_t out[32]) {
   uint8_t machine_id[16];
-  if (!read_machine_id(machine_id)) {
+  if (!read_machine_id("/etc/machine-id", "/var/lib/dbus/machine-id", machine_id)) {
     LOG(WARN,
         "No machine identity (/etc/machine-id, /var/lib/dbus/machine-id): refusing to "
         "emit an auxiliary CUID, which would collide with every identically-configured host");
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   }
-  return make_fallback_fingerprint(input, machine_id, fingerprint);
+  temporary_key(machine_id, out);
+  rocm::sha2::secure_zero(machine_id, sizeof(machine_id));
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+namespace {
+
+uint64_t auxiliary_serial(const CuidUtilities::AuxiliaryInput& input, const uint8_t k_app[32]) {
+  uint8_t structure[32];
+  CuidUtilities::pack_auxiliary_input(input, structure);
+  uint8_t digest[32];
+  rocm::sha2::hmac_sha256(k_app, 32, structure, sizeof(structure), digest);
+
+  // First 8 octets, little-endian.
+  uint64_t serial = 0;
+  for (size_t i = 0; i < sizeof(serial); ++i) {
+    serial |= static_cast<uint64_t>(digest[i]) << (8 * i);
+  }
+  return serial;
+}
+
+}  // namespace
+
+amdcuid_status_t CuidUtilities::make_fallback_fingerprint(const AuxiliaryInput& input,
+                                                          uint64_t& fingerprint) {
+  uint8_t k_app[32];
+  const amdcuid_status_t status = temporary_key(k_app);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  fingerprint = auxiliary_serial(input, k_app);
+  rocm::sha2::secure_zero(k_app, sizeof(k_app));
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t CuidUtilities::make_fallback_fingerprint(const AuxiliaryInput& input,
                                                           const uint8_t machine_id[16],
                                                           uint64_t& fingerprint) {
-  uint8_t structure[32];
-  pack_auxiliary_input(input, machine_id, structure);
-
-  uint8_t digest[32];
-  const amdcuid_status_t status = sha256_unkeyed(structure, sizeof(structure), digest);
-  if (status != AMDCUID_STATUS_SUCCESS) return status;
-
-  // First 8 octets, little-endian.
-  fingerprint = 0;
-  for (size_t i = 0; i < sizeof(fingerprint); ++i) {
-    fingerprint |= static_cast<uint64_t>(digest[i]) << (8 * i);
-  }
+  uint8_t k_app[32];
+  temporary_key(machine_id, k_app);
+  fingerprint = auxiliary_serial(input, k_app);
+  rocm::sha2::secure_zero(k_app, sizeof(k_app));
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -615,7 +614,7 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
       hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->raw_bits),
                                  sizeof(primary_id->raw_bits), hash, &hash_len));
   if (status != AMDCUID_STATUS_SUCCESS) {
-    std::cerr << "Error generating HMAC" << std::endl;
+    LOG(ERROR, "Error generating HMAC: " << amdcuid_status_to_string(status));
     return status;
   }
 
@@ -666,11 +665,19 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, ui
                                                       uint16_t vendor_id,
                                                       amdcuid_device_type_t device_type,
                                                       amdcuid_primary_id* primary_id, bool temp) {
+  if (!primary_id) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // Refused rather than masked into the field; see kMaxUnitId.
+  if (unit_id > kMaxUnitId) {
+    LOG(ERROR, "UnitID " << unit_id << " exceeds the 13-bit field (max " << kMaxUnitId << ")");
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
   const uint8_t type_bits = static_cast<uint8_t>(device_type) & 0x0F;
   // Build 122-bit value in little-endian order
   uint8_t id_bits[16] = {0};  // 128 bits total (122 bits + 6 bits padding)
 
-  uint8_t unit_id_part1 = unit_id & 0xFF;
+  uint8_t unit_id_part1 = static_cast<uint8_t>(unit_id & 0xFF);
   uint8_t unit_id_part2 = (unit_id >> 8) & 0x1F;
 
   // Bits 0-63: Serial number (8 bytes)
@@ -684,12 +691,12 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, ui
 
   // Bits 80-95: DeviceID (2 bytes); These format changes are necessary to make
   // the final ID little Endian, as specified in the design
-  id_bits[10] = device_id & 0xFF;
-  id_bits[11] = (device_id >> 8) & 0xFF;
+  id_bits[10] = static_cast<uint8_t>(device_id & 0xFF);
+  id_bits[11] = static_cast<uint8_t>((device_id >> 8) & 0xFF);
 
   // Bits 96-111: VendorID (2 bytes)
-  id_bits[12] = vendor_id & 0xFF;
-  id_bits[13] = (vendor_id >> 8) & 0xFF;
+  id_bits[12] = static_cast<uint8_t>(vendor_id & 0xFF);
+  id_bits[13] = static_cast<uint8_t>((vendor_id >> 8) & 0xFF);
 
   // Bits 112-116: UnitID part 2 (5 bits) + Bit 117: Auxiliary Value Identifier
   // (1 bit) + Bits 118-121: Component Type (4 bits), which straddles the octet
@@ -729,17 +736,26 @@ void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16
   out_raw_bits[5] = id->bytes[5];
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4);
-  out_raw_bits[7] = ((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2);
+  out_raw_bits[6] =
+      static_cast<uint8_t>(((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4));
+  out_raw_bits[7] =
+      static_cast<uint8_t>(((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2));
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  out_raw_bits[8] = ((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2);
-  out_raw_bits[9] = ((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2);
-  out_raw_bits[10] = ((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2);
-  out_raw_bits[11] = ((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2);
-  out_raw_bits[12] = ((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2);
-  out_raw_bits[13] = ((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2);
-  out_raw_bits[14] = ((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2);
+  out_raw_bits[8] =
+      static_cast<uint8_t>(((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2));
+  out_raw_bits[9] =
+      static_cast<uint8_t>(((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2));
+  out_raw_bits[10] =
+      static_cast<uint8_t>(((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2));
+  out_raw_bits[11] =
+      static_cast<uint8_t>(((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2));
+  out_raw_bits[12] =
+      static_cast<uint8_t>(((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2));
+  out_raw_bits[13] =
+      static_cast<uint8_t>(((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2));
+  out_raw_bits[14] =
+      static_cast<uint8_t>(((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2));
   // The last two rendered bits are payload 120:121 (the Component Type's high
   // two bits), which live in the low bits of raw[15]. Payload 122:127 are
   // padding and are not carried in the rendered value at all.
@@ -762,21 +778,21 @@ void CuidUtilities::add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t* id
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
   id->bytes[6] = ((raw_bits[6] & 0xF0) >> 4) | 0x80;  // Version 8 in upper 4 bits
-  id->bytes[7] = ((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4);
+  id->bytes[7] = static_cast<uint8_t>(((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4));
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  id->bytes[8] = 0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6;
+  id->bytes[8] = static_cast<uint8_t>(0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6);
   // everything past here is now shifted by 6 bits
-  id->bytes[9] = ((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6);
-  id->bytes[10] = ((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6);
-  id->bytes[11] = ((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6);
-  id->bytes[12] = ((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6);
-  id->bytes[13] = ((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6);
-  id->bytes[14] = ((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6);
+  id->bytes[9] = static_cast<uint8_t>(((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6));
+  id->bytes[10] = static_cast<uint8_t>(((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6));
+  id->bytes[11] = static_cast<uint8_t>(((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6));
+  id->bytes[12] = static_cast<uint8_t>(((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6));
+  id->bytes[13] = static_cast<uint8_t>(((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6));
+  id->bytes[14] = static_cast<uint8_t>(((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6));
   // The final octet takes payload 120:121 (the Component Type's high two bits)
   // from the low bits of raw[15]. What falls off the end is payload 122:127,
   // always zero padding, so the framing preserves payload 0:121 exactly.
-  id->bytes[15] = ((raw_bits[14] & 0x3F) << 2) | (raw_bits[15] & 0x03);
+  id->bytes[15] = static_cast<uint8_t>(((raw_bits[14] & 0x3F) << 2) | (raw_bits[15] & 0x03));
 }
 
 std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t* id) {
@@ -804,8 +820,8 @@ amdcuid_status_t CuidUtilities::uuid_string_to_uint8(const std::string& uuid_str
   std::string hex_str;
   for (char c : uuid_str) {
     if (c != '-') {
-      if (!isxdigit(c)) {
-        std::cerr << "Invalid UUID format: non-hex character found" << std::endl;
+      if (!isxdigit(static_cast<unsigned char>(c))) {
+        LOG(DEBUG, "Invalid UUID format: non-hex character found");
         return AMDCUID_STATUS_INVALID_ARGUMENT;
       }
       hex_str += c;
@@ -814,8 +830,7 @@ amdcuid_status_t CuidUtilities::uuid_string_to_uint8(const std::string& uuid_str
 
   // UUID should be 128 bits = 32 hex characters
   if (hex_str.length() != 32) {
-    std::cerr << "Invalid UUID length: expected 32 hex digits, got " << hex_str.length()
-              << std::endl;
+    LOG(DEBUG, "Invalid UUID length: expected 32 hex digits, got " << hex_str.length());
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 

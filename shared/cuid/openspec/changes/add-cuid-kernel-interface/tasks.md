@@ -1,5 +1,5 @@
-Work already landed on `dgalants/cuid-refactor` is checked, with the commit that
-did it. Everything unchecked is outstanding.
+Work already landed in the kernel tree is checked, with the commit that did
+it. Everything unchecked is outstanding.
 
 ## 1. CUID core: packing and framing
 
@@ -23,7 +23,7 @@ did it. Everything unchecked is outstanding.
 
 ## 2. Derivation and seed
 
-- [x] 2.1 Derive the secondary payload as
+- [x] 2.1 Compute the derived payload as
       `HMAC-SHA256(key = seed, message = the 16 primary octets)` using the
       synchronous `hmac_sha256_usingrawkey()`, so the path cannot fail (D5).
       `41978841be6d`
@@ -63,12 +63,12 @@ did it. Everything unchecked is outstanding.
 - [x] 4.2 `cuid_primary`: mode `0400`, `capable(CAP_SYS_ADMIN)` checked in the
       handler, `-EPERM` otherwise, emitted as `%pUb` with a newline (D7).
       `41978841be6d`
-- [x] 4.3 `cuid_secondary`: mode `0444`, no privilege check, copy under the lock
+- [x] 4.3 `cuid_derived`: mode `0444`, no privilege check, copy under the lock
       and format outside it. `41978841be6d`
 - [x] 4.4 `cuid_seed`: mode `0600`, `CAP_SYS_ADMIN` on both show and store, raw
       bytes both directions, `-EINVAL` for any length other than 32 bytes,
       recompute the derived value before the write returns (D8). `41978841be6d`
-- [x] 4.5 Log the primary-to-secondary association with `dev_info()` at bind and
+- [x] 4.5 Log the primary-to-derived association with `dev_info()` at bind and
       on every re-key (D9). `41978841be6d`
 - [x] 4.6 Zero the seed on teardown and on the init failure path.
       `41978841be6d`
@@ -96,25 +96,27 @@ did it. Everything unchecked is outstanding.
 
 ## 7. Verification
 
-_Done. `cuid_kat` covers the format with no hardware; `cuid_sysfs_test.sh`
-covers the interface and needs root and a publishing device. Both are in
-`tools/testing/selftests/amdgpu`. Runtime numbers are from two Radeon Pro W6800s
-at `0000:03:00.0` and `0000:63:00.0`._
+_Done. `cuid_kat` covered the format with no hardware; `cuid_sysfs_test.sh`
+covered the interface and needed root and a publishing device. Both were in
+`tools/testing/selftests/amdgpu`; that directory has since been removed and the
+kernel keeps only a KUnit known-answer test in amdgpu over a subset of the
+vectors. Runtime numbers are from two Radeon Pro W6800s at `0000:03:00.0` and
+`0000:63:00.0`._
 
 - [x] 7.1 Regenerate the known-answer vectors for the final format and check the
       round-trip (payload to UUIDv8 to payload) for each.
 - [x] 7.2 Re-run cross-layer verification on two GPUs. `cuid_primary` reads P-1
-      and P-2, `cuid_secondary` reads D-1, and writing the 32-octet key `00..1f`
+      and P-2, `cuid_derived` reads D-1, and writing the 32-octet key `00..1f`
       gives D-2: the same four values the library computes independently in
       `cuidtstUnprivileged.ConformanceVectors`.
 - [x] 7.3 Add a vector exercising a component type above 3 (NPU), so a regression
       on payload bits 120:121 fails a test. `T-NPU` in `cuid_vectors.txt`, plus a
       generator assertion that all sixteen types render distinctly.
 - [x] 7.4 Test the permission matrix. Modes are 0400/0444/0600; an unprivileged
-      read of `cuid_primary` is refused and of `cuid_secondary` allowed; writes
+      read of `cuid_primary` is refused and of `cuid_derived` allowed; writes
       of 1, 16, 24, 31, 33 and 64 bytes are all rejected with the derived value
       unchanged; 32 bytes is accepted and round-trips.
-- [x] 7.5 Confirm a read of `cuid_secondary` concurrent with a seed write always
+- [x] 7.5 Confirm a read of `cuid_derived` concurrent with a seed write always
       returns a well-formed UUID from one seed or the other. 3840 reads against
       400 concurrent re-keys; none torn.
 - [x] 7.6 Confirm the seed reverts to the default across a module reload and that
@@ -145,16 +147,18 @@ at `0000:03:00.0` and `0000:63:00.0`._
 
 ## 9. Follow-ups, explicitly not in this change
 
-- [x] 9.1 Shared cross-layer KAT wired into both trees' CI. `cuid_kat` checks
+- [x] 9.1 Shared cross-layer KAT wired into both trees' CI. `cuid_kat` checked
       `cuid_vectors.txt` against functions lifted verbatim from
       `amdgpu_cuid.c`, the library asserts it in
       `cuidtstUnprivileged.ConformanceVectors`, and the drift check runs in
-      `cuid-workflow.yml`.
+      `cuid-workflow.yml`. `cuid_kat` was later replaced by a KUnit test in
+      amdgpu over a subset of the vectors; the library's table is the source
+      of truth.
 - [ ] 9.2 Node-wide seed scope (T4) and one keyed context re-deriving every
       registered device on write.
 - [ ] 9.3 Seed persistence in a UEFI variable, once GUID, name and attributes
       are agreed with AINIC and NPU (T5).
-- [ ] 9.4 `AMDGPU_INFO_PRIMARY_CUID` / `AMDGPU_INFO_SECONDARY_CUID` IOCTLs (T7).
+- [ ] 9.4 `AMDGPU_INFO_PRIMARY_CUID` / `AMDGPU_INFO_DERIVED_CUID` IOCTLs (T7).
 - [ ] 9.5 Per-partition / XCP `unit_id`, and the SMBIOS/ACPI short-circuit for
       the Platform and CPU component types.
 - [ ] 9.6 Extract the core into a standalone `amd_cuid.ko`, resolving MIT versus

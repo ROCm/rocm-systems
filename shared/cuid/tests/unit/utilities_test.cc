@@ -4,8 +4,12 @@
 #include "unit/utilities_test.h"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <string>
 
 #include "src/cuid_util.h"
 #include "src/hmac.h"
@@ -165,4 +169,55 @@ TEST(cuidtstUnprivileged, DeframingAnAdoptedUuidWouldLoseBits) {
 
   // Not a round trip: this is why the adopted path must not de-frame.
   EXPECT_NE(0, std::memcmp(id.bytes, reframed.bytes, sizeof(id.bytes)));
+}
+
+// A machine-id is 32 hex digits and never all zero (machine-id(5)). Anything
+// else, including the all-zero ID of an unfinished image and systemd's
+// "uninitialized" placeholder, is no machine-id rather than a K_app every
+// such clone would share.
+TEST(cuidtstUnprivileged, MachineIdMustBeWellFormedAndNonZero) {
+  uint8_t id[16];
+  ASSERT_TRUE(CuidUtilities::parse_machine_id("0123456789abcdef0123456789ABCDEF", id));
+  EXPECT_EQ(id[0], 0x01);
+  EXPECT_EQ(id[15], 0xEF);
+  for (const char* bad :
+       {"00000000000000000000000000000000", "uninitialized", "0123456789abcdef0123456789abcdef0",
+        "0123456789abcdef0123456789abcde", "0123456789abcdef0123456789abcdef garbage",
+        "0123456789abcdef0123456789abcdeg", ""}) {
+    EXPECT_FALSE(CuidUtilities::parse_machine_id(bad, id)) << '"' << bad << '"';
+  }
+}
+
+// /var/lib/dbus/machine-id stands in only for an /etc/machine-id that does not
+// exist. One that exists but is empty, "uninitialized" or all zero belongs to
+// an image whose identity is not set yet, and a D-Bus ID shipped beside it is
+// shared by every clone of that image.
+TEST(cuidtstUnprivileged, InvalidEtcMachineIdIsNotReplacedByDbus) {
+  char tmpl[] = "/tmp/cuid_machine_id_XXXXXX";
+  const char* dir = mkdtemp(tmpl);
+  ASSERT_NE(dir, nullptr);
+  const std::string etc = std::string(dir) + "/etc-machine-id";
+  const std::string dbus = std::string(dir) + "/dbus-machine-id";
+  const auto write = [](const std::string& path, const char* text) {
+    std::ofstream(path, std::ios::trunc) << text;
+  };
+  uint8_t id[16];
+
+  write(dbus, "fedcba9876543210fedcba9876543210\n");
+  EXPECT_TRUE(CuidUtilities::read_machine_id(etc, dbus, id)) << "no /etc/machine-id";
+  EXPECT_EQ(id[0], 0xFE);
+
+  write(etc, "0123456789abcdef0123456789abcdef\n");
+  EXPECT_TRUE(CuidUtilities::read_machine_id(etc, dbus, id));
+  EXPECT_EQ(id[0], 0x01);
+
+  for (const char* invalid : {"", "uninitialized\n", "00000000000000000000000000000000\n"}) {
+    write(etc, invalid);
+    EXPECT_FALSE(CuidUtilities::read_machine_id(etc, dbus, id)) << '"' << invalid << '"';
+  }
+
+  unlink(etc.c_str());
+  unlink(dbus.c_str());
+  EXPECT_FALSE(CuidUtilities::read_machine_id(etc, dbus, id));
+  rmdir(dir);
 }

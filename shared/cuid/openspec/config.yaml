@@ -10,7 +10,7 @@ context: |
   use Conventional Commits: type(cuid): description.
 
   What is built: amdcuid_static (aliased amdcuid::amdcuid) from
-  shared/cuid/lib, an amdcuid CLI tool, and a daemon. AMD SMI links the
+  shared/cuid/lib; there is no standalone CLI tool. AMD SMI links the
   library through find_package(amdcuid CONFIG QUIET) and exposes the identity
   through its own API and CLI. That integration is specified in
   changes/integrate-cuid-into-amdsmi and lands in projects/amdsmi.

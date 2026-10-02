@@ -45,8 +45,9 @@ implement all of it. The kernel change's tasks 8.2, 8.3 and 8.4 are blocked on i
   padded.
 - **State that the PCIe Device Serial Number is used in configuration-space
   order**, little-endian, unswapped, read from `dsn_cap_offset + 4`.
-- **State that a CPU's auxiliary Routing ID field is zero**, since a CPU has no
-  Bus/Device/Function of its own.
+- **State that a CPU's auxiliary Routing ID field is its physical package ID**,
+  since a CPU has no Bus/Device/Function of its own and its UnitID is zero on
+  every socket.
 - **Renumber the device-type enumeration in S3** onto the on-wire values, and
   add NPU, which S3 does not list.
 - **Retire S4** and repoint S3's fallback reference at S1.

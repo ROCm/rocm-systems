@@ -20,8 +20,7 @@
 # Scope every hook to this project, the way shared/cuid's config does.
 # Without this, a commit touching two projects hands these hooks the other
 # project's files as well. That is not hypothetical: it reformats
-# shared/cuid/tests/vectors/cuid_vectors.py, which has to stay byte-identical
-# to the copy in the kernel tree for the conformance vectors to mean anything.
+# shared/cuid/tests/vectors/cuid_vectors.py.
 # pre-commit ANDs this with each hook's own `files`, so the per-hook patterns
 # below still apply on top of it.
 files: '^projects/amdsmi/'

@@ -34,6 +34,12 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiXgmiInfoT, AmdsmiNpsCapsT, AmdsmiNpsCapsTNpsFlags
 };
 
+// Re-export the CUID types
+pub use crate::amdsmi_wrapper::{
+    AmdsmiCuidComponentT, AmdsmiCuidComponentTypeT, AmdsmiCuidInfoT, AmdsmiCuidSourceT,
+    AMDSMI_GPU_CUID_SIZE,
+};
+
 //Re-export all the union type
 pub use crate::amdsmi_wrapper::AmdsmiBdfT;
 
@@ -166,3 +172,9 @@ impl_cstr_getters!(AmdsmiProcInfoT, name, container_name);
 
 // Implement the getters for the C string fields in AmdsmiDpmPolicyEntryT
 impl_cstr_getters!(AmdsmiDpmPolicyEntryT, policy_description);
+
+// Implement the getters for the C string fields in AmdsmiCuidInfoT
+impl_cstr_getters!(AmdsmiCuidInfoT, primary, derived);
+
+// Implement the getters for the C string fields in AmdsmiCuidComponentT
+impl_cstr_getters!(AmdsmiCuidComponentT, bdf, device_path);

@@ -25,6 +25,8 @@
 
 #include "test_base.h"
 
+extern "C" int amdcuid_test_device_type_is_valid_c(unsigned value);
+
 // Checks the library against tests/vectors/cuid_vectors.txt, the shared
 // cross-layer conformance vectors. See tests/vectors/cuid_vectors.py.
 class TestVectors : public TestBase {

@@ -62,8 +62,6 @@ Creates or updates `.claude/project-map.md` — a single source of truth for the
 
 | File | Risk |
 |------|------|
-| `cli/amdcuid_tool.cc` | CLI behavior regressions, output format |
-| `daemon/amdcuid_daemon.cc` | Daemon stability, API surface |
 | `lib/src/cuid.cc` | Core C library — correctness |
 | `lib/include/amd_cuid.h` | Public API — cascades everywhere |
 | `CMakeLists.txt` | Build system, packaging, install targets |
@@ -72,7 +70,7 @@ Creates or updates `.claude/project-map.md` — a single source of truth for the
 
 Changes to the public C API must propagate through all layers:
 
-`lib/include/amd_cuid.h` → `lib/src/cuid.cc` → `cli/amdcuid_tool.cc` → `daemon/amdcuid_daemon.cc` → `docs/`
+`lib/include/amd_cuid.h` → `lib/src/cuid.cc` → `example/main.cc` → `docs/`
 
 
 ## When to Regenerate

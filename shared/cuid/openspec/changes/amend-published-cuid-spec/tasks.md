@@ -1,4 +1,4 @@
-No code. Every item is an edit to a Confluence page, and every one is already
+No code. Every item is an edit to the published specification, and every one is already
 implemented in both trees, which is what makes them safe. The exact replacement
 text for each S1 item is in `specs/cuid/` beside this file.
 
@@ -24,7 +24,8 @@ text for each S1 item is in `specs/cuid/` beside this file.
       derivation *style*, stated explicitly not to describe the version nibble.
 - [ ] 2.4 Delete the `amd.com` namespace string and the namespace form, which
       have no meaning once the auxiliary value is a normal UUIDv8.
-- [ ] 2.5 State that a CPU's auxiliary Routing ID field is zero.
+- [ ] 2.5 State that a CPU's auxiliary Routing ID field is its physical package
+      ID.
 - [ ] 2.6 Widen the auxiliary Component Type row from `2/3/4` to the full
       on-wire numbering.
 

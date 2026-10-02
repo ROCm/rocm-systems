@@ -6223,6 +6223,121 @@ pub fn amdsmi_get_link_topology_nearest(
     Ok(topology_nearest_info)
 }
 
+/// Retrieves the CUID of the GPU or GPU partition with the specified processor handle.
+///
+/// The derived CUID names the component without disclosing its serial and is the value to
+/// record. The primary CUID is empty unless the caller is root. A temporary CUID has
+/// `auxiliary` set; do not record it alongside canonical CUIDs.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the CUID is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiCuidInfoT>` - Returns `Ok(AmdsmiCuidInfoT)` containing the [`AmdsmiCuidInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     match amdsmi_get_gpu_cuid_info(processor_handle) {
+///         Ok(info) => println!(
+///             "CUID: {} source: {:?} temporary: {}",
+///             info.derived(),
+///             info.source,
+///             info.auxiliary != 0
+///         ),
+///         Err(e) => panic!("Failed to get the CUID: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_cuid_info` call fails.
+pub fn amdsmi_get_gpu_cuid_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiCuidInfoT> {
+    let mut info = MaybeUninit::<AmdsmiCuidInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cuid_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Lists every component on the node that has a CUID.
+///
+/// Covers the platform, each CPU package, each AMD GPU or GPU partition, each NPU and each NIC
+/// function, ordered by component type, then BDF, then device path. No processor handle is
+/// needed, so components amd-smi does not manage are included.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiCuidComponentT>>` - Returns `Ok(Vec<AmdsmiCuidComponentT>)` containing the list of [`AmdsmiCuidComponentT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     match amdsmi_get_cuid_components() {
+///         Ok(components) => {
+///             for component in components {
+///                 println!(
+///                     "{:?} {} {}",
+///                     component.info.component_type,
+///                     component.bdf(),
+///                     component.info.derived()
+///                 );
+///             }
+///         }
+///         Err(e) => println!("Failed to list the CUID components: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_cuid_components` call fails.
+pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
+    loop {
+        let mut count: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_cuid_components(
+            &mut count,
+            null_mut()
+        ));
+
+        let mut components = Vec::<AmdsmiCuidComponentT>::with_capacity(count as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_cuid_components(&mut count, components.as_mut_ptr())
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                unsafe { components.set_len(count as usize) };
+                return Ok(components);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize => continue,
+            _ => return Err(status),
+        }
+    }
+}
+
 /// A macro to get all the GPU processor handles directly.
 ///
 /// This macro retrieves all the GPU processor handles by first getting the socket handles

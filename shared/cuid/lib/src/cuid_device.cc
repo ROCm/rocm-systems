@@ -3,29 +3,12 @@
 
 #include "cuid_device.h"
 
-#include <dirent.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include <algorithm>
-#include <cctype>
-#include <cerrno>
-#include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <mutex>
-#include <sstream>
-#include <vector>
 
-#include "cuid_cpu.h"
-#include "cuid_file.h"
-#include "cuid_gpu.h"
-#include "cuid_nic.h"
-#include "cuid_npu.h"
-#include "cuid_platform.h"
 #include "cuid_util.h"
+#include "rocm/sha2/sha256.h"
 
 namespace cuid {
 
@@ -44,13 +27,11 @@ void get_hash_from_raw(uint8_t raw_bytes[16], uint8_t out_hash[14]) {
 
 }  // namespace cuid
 
-namespace {
-
-void build_derived_id_from_file_entry(const CuidFileEntry& entry, amdcuid_derived_id& id) {
-  id.UUIDv8_representation = entry.derived_cuid;
-  CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-  cuid::get_hash_from_raw(id.raw_bits, id.hash);
+cuid::DeviceRoute cuid::device_route(const CuidDeviceEntry& entry) {
+  return {entry.device_type, entry.bdf, entry.device_node};
 }
+
+namespace {
 
 // Is this id an auxiliary (temporary) identifier?
 //
@@ -75,8 +56,8 @@ bool id_is_auxiliary(const IdT& id) {
 
 }  // namespace
 
-amdcuid_status_t CuidDevice::read_driver_published(const std::string& attribute, amdcuid_id_t& out,
-                                                   uint8_t raw_bits[16]) const {
+amdcuid_status_t CuidDevice::driver_attribute_path(const std::string& attribute,
+                                                   std::string& path) const {
   std::string bdf;
   if (this->get_bdf(bdf) != AMDCUID_STATUS_SUCCESS || bdf.empty()) {
     // No BDF: a CPU, the platform, or a GIM-only device that sysfs does not
@@ -84,8 +65,19 @@ amdcuid_status_t CuidDevice::read_driver_published(const std::string& attribute,
     return AMDCUID_STATUS_UNSUPPORTED;
   }
 
+  path = "/sys/bus/pci/devices/" + bdf + "/" + attribute;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidDevice::read_driver_published(const std::string& attribute, amdcuid_id_t& out,
+                                                   uint8_t raw_bits[16]) const {
+  std::string path;
+  if (this->driver_attribute_path(attribute, path) != AMDCUID_STATUS_SUCCESS) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
+
   amdcuid_id_t published = {};
-  const amdcuid_status_t status = CuidUtilities::read_driver_cuid(bdf, attribute, &published);
+  const amdcuid_status_t status = CuidUtilities::read_driver_cuid_from_path(path, &published);
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       out = published;
@@ -101,6 +93,16 @@ amdcuid_status_t CuidDevice::read_driver_published(const std::string& attribute,
 }
 
 amdcuid_status_t CuidDevice::driver_primary_cuid(amdcuid_primary_id& id) const {
+  // cuid_unit_id is what says the driver publishes a CUID here. A
+  // cuid_primary without it comes from a driver with another interface, whose
+  // identity this library cannot complete, so the device is treated as
+  // unpublished.
+  std::string unit_id_path;
+  if (driver_attribute_path(CuidUtilities::kDriverUnitIdAttribute, unit_id_path) !=
+          AMDCUID_STATUS_SUCCESS ||
+      access(unit_id_path.c_str(), F_OK) != 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
   amdcuid_primary_id published = {};
   const amdcuid_status_t drv = read_driver_published(
       CuidUtilities::kDriverPrimaryAttribute, published.UUIDv8_representation, published.raw_bits);
@@ -111,144 +113,50 @@ amdcuid_status_t CuidDevice::driver_primary_cuid(amdcuid_primary_id& id) const {
 }
 
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
-  // cuid_secondary is 0444, so this stage answers for an unprivileged caller
-  // even where cuid_primary does not: an ordinary user must get the kernel's
-  // value rather than falling through and deriving a competing one.
-  {
-    amdcuid_derived_id published = {};
-    const amdcuid_status_t drv =
-        read_driver_published(CuidUtilities::kDriverSecondaryAttribute,
-                              published.UUIDv8_representation, published.raw_bits);
-    if (drv == AMDCUID_STATUS_SUCCESS) {
-      cuid::get_hash_from_raw(published.raw_bits, published.hash);
-      id = published;
-      return AMDCUID_STATUS_SUCCESS;
-    }
-    if (drv != AMDCUID_STATUS_UNSUPPORTED) {
-      return drv;
-    }
-  }
+  // A key-gated component takes its auxiliary identity outright when no key
+  // is available.
+  const bool key_available = hmac && hmac->is_valid();
+  const bool force_auxiliary = key_gated_identity() && !key_available;
 
-  // attempt to find the derived CUID in file first
-  CuidFile derived_file(CuidUtilities::cuid_file(), false);
-  amdcuid_status_t status = derived_file.load();
-
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    amdcuid_device_type_t type = this->type();
-    // there's only 1 platform entry, so handle that case first
-    switch (type) {
-      case AMDCUID_DEVICE_TYPE_PLATFORM: {
-        // for platform, just return the first entry found
-        CuidFileEntry entry;
-        status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-          build_derived_id_from_file_entry(entry, id);
-          return AMDCUID_STATUS_SUCCESS;
-        }
-      } break;
-      case AMDCUID_DEVICE_TYPE_GPU: {
-        // search by render node
-        const auto& info = static_cast<const CuidGpu*>(this)->get_info();
-        CuidFileEntry entry;
-        status = derived_file.find_by_device_node(info.render_node, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-          build_derived_id_from_file_entry(entry, id);
-          return AMDCUID_STATUS_SUCCESS;
-        }
-      } break;
-      case AMDCUID_DEVICE_TYPE_CPU: {
-        const auto* cpu = static_cast<const CuidCpu*>(this);
-        // Try device_node first - unique per logical CPU on SMT systems
-        std::string device_path;
-        if (cpu->get_device_path(device_path) == AMDCUID_STATUS_SUCCESS && !device_path.empty()) {
-          CuidFileEntry entry;
-          status = derived_file.find_by_device_node(device_path, entry);
-          if (status == AMDCUID_STATUS_SUCCESS) {
-            build_derived_id_from_file_entry(entry, id);
-            return AMDCUID_STATUS_SUCCESS;
-          }
-        }
-        const auto& info = cpu->get_info();
-        CuidFileEntry entry;
-        status = derived_file.find_by_package_id(info.header.fields.cpu.physical_id, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-          build_derived_id_from_file_entry(entry, id);
-          return AMDCUID_STATUS_SUCCESS;
-        }
-      } break;
-      case AMDCUID_DEVICE_TYPE_NIC: {
-        // search by device node
-        const auto& info = static_cast<const CuidNic*>(this)->get_info();
-        CuidFileEntry entry;
-        status = derived_file.find_by_device_node(info.network_interface, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-          build_derived_id_from_file_entry(entry, id);
-          return AMDCUID_STATUS_SUCCESS;
-        }
-      } break;
-      case AMDCUID_DEVICE_TYPE_NPU: {
-        // search by accel node
-        const auto& info = static_cast<const CuidNpu*>(this)->get_info();
-        CuidFileEntry entry;
-        status = derived_file.find_by_device_node(info.accel_node, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-          build_derived_id_from_file_entry(entry, id);
-          return AMDCUID_STATUS_SUCCESS;
-        }
-      } break;
-      // No other Component Type has a device class here yet, so there is no
-      // record entry to look up; the derivation below answers for them.
-      default:
-        break;
-    }
-  }
-
-  // Nothing published, nothing recorded: derive. That needs a primary, and
-  // without one there is no derived CUID to be had. Do not substitute a zeroed
-  // payload with the auxiliary bit set: it holds no per-device input, so every
-  // component whose primary lookup failed would HMAC the same zero octets with
-  // the fixed public temporary key and collide on one identifier. The kernel
-  // takes the same position (amdgpu_cuid.c): with no serial it publishes
-  // nothing. A device class that can build an auxiliary identifier does so
-  // inside its own get_primary_cuid().
+  // Derive. That needs a primary, and without one there is no derived CUID to
+  // be had. Do not substitute a zeroed payload with the auxiliary bit set: it
+  // holds no per-device input, so every component on this host whose primary
+  // lookup failed would collide on one identifier. The kernel takes the same
+  // position (amdgpu_cuid.c): with no serial it publishes nothing. A device
+  // class that can build an auxiliary identifier does so inside its own
+  // get_primary_cuid()/get_auxiliary_primary_cuid().
   amdcuid_primary_id primary = {};
-  status = get_primary_cuid(primary);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
+  amdcuid_status_t status =
+      force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    // An auxiliary primary is derived with the machine-id application key
+    // rather than the node key; id_is_auxiliary() reads the marker only where
+    // it means something.
+    if (id_is_auxiliary(primary)) {
+      uint8_t k_app[key_length];
+      status = CuidUtilities::temporary_key(k_app);
+      if (status == AMDCUID_STATUS_SUCCESS) {
+        cuid_hmac temp_hmac(k_app);
+        status = CuidUtilities::generate_derived_cuid(&primary, &id, &temp_hmac);
+      }
+      rocm::sha2::secure_zero(k_app, sizeof(k_app));
+    } else {
+      status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac);
+    }
   }
-
-  // An auxiliary primary is derived with the fixed public temporary key rather
-  // than the node key; id_is_auxiliary() reads the marker only where it
-  // means something.
-  if (id_is_auxiliary(primary)) {
-    // Same operand order as every other derivation: the key is the constant,
-    // the message is the 16 auxiliary primary octets. Do not swap them to
-    // protect the machine ID in the primary. HMAC with a public key is a keyed
-    // hash whose preimage resistance covers the message either way, and
-    // generate_derived_cuid() reads bit 117 out of whatever it is handed as the
-    // primary, so a fixed constant there leaves the derived value unmarked.
-    cuid_hmac temp_hmac(kTemporaryKey, kTemporaryKeyLen);
-    status = temp_hmac.set_hmac_algorithm("SHA256");
-    if (status != AMDCUID_STATUS_SUCCESS) return status;
-    status = CuidUtilities::generate_derived_cuid(&primary, &id, &temp_hmac);
-  } else {
-    status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac);
-  }
-
+  last_source_ = status == AMDCUID_STATUS_SUCCESS ? AMDCUID_SOURCE_LIBRARY : AMDCUID_SOURCE_UNKNOWN;
   return status;
 }
 
-amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp) const {
+amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp, cuid_hmac* hmac) const {
   if (!is_temp) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
-  amdcuid_derived_id derived = {};
-  amdcuid_status_t status = get_derived_cuid(derived);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
-
-  *is_temp = id_is_auxiliary(derived);
-
+  const bool force_auxiliary = key_gated_identity() && !(hmac && hmac->is_valid());
+  amdcuid_primary_id primary = {};
+  const amdcuid_status_t status =
+      force_auxiliary ? get_auxiliary_primary_cuid(primary) : get_primary_cuid(primary);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  *is_temp = id_is_auxiliary(primary);
   return AMDCUID_STATUS_SUCCESS;
 }
