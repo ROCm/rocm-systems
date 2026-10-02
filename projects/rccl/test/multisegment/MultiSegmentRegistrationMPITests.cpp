@@ -558,16 +558,4 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
     ASSERT_MPI_NE(rc, ncclSuccess);
 }
 
-// Elastic registration is on, so the window registers. CE still rejects it.
-// The GPU window is the control: CE must select that one.
-TEST_F(UBR_MultiSegment, CE_Elastic_Gating)
-{
-    runCeElasticGating(/*hierarchical=*/false);
-}
-
-TEST_F(UBR_MultiSegment, CE_Elastic_HierarchicalGating)
-{
-    runCeElasticGating(/*hierarchical=*/true);
-}
-
 #endif // MPI_TESTS_ENABLED

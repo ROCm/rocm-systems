@@ -376,6 +376,14 @@ protected:
         REGLogChecker checker = getLogChecker();
         const bool sawSymmetric = checker.usedSymmetricCollective(collective);
         const bool sawLegacy = checker.usedLegacyCollective(collective);
+        // AlltoAll lowers to direct p2p. There is no "AlltoAll: ... -> Algo" line.
+        if (std::strcmp(collective, "AlltoAll") == 0 && !expectSymmetric) {
+            EXPECT_FALSE(sawSymmetric) << collective;
+            ASSERT_TRUE(checker.usedDirectAlltoAll())
+                << collective
+                << ": missing direct-path marker; NCCL_DEBUG_SUBSYS must include TUNING";
+            return;
+        }
         ASSERT_TRUE(sawSymmetric || sawLegacy)
             << collective
             << ": missing scheduler marker; NCCL_DEBUG_SUBSYS must include TUNING";
@@ -554,16 +562,16 @@ protected:
 
         ncclWindow_t sendWin = nullptr;
         ncclWindow_t recvWin = nullptr;
+        auto winCleanup = makeScopeGuard([&]() {
+            if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
+            if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+        });
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
             getActiveCommunicator(), sendSeg.vaBase, sendSeg.totalSize, &sendWin,
             NCCL_WIN_COLL_SYMMETRIC));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
             getActiveCommunicator(), recvSeg.vaBase, recvSeg.totalSize, &recvWin,
             NCCL_WIN_COLL_SYMMETRIC));
-        auto winCleanup = makeScopeGuard([&]() {
-            if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
-            if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
-        });
 
         // AlltoAll sends rank+1 in every element, so each receive block matches
         // the AllGather layout.
@@ -727,17 +735,65 @@ protected:
 
         ncclWindow_t sendWin = nullptr;
         ncclWindow_t recvWin = nullptr;
+        auto winCleanup = makeScopeGuard([&]() {
+            if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
+            if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+        });
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
             getActiveCommunicator(), sendPtr, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
             getActiveCommunicator(), recvHybrid.ptr, recvHybrid.totalSize, &recvWin,
             NCCL_WIN_COLL_SYMMETRIC));
-        auto winCleanup = makeScopeGuard([&]() {
-            if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
-            if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
-        });
 
-        initSendBuffer<T>(sendPtr, initCount, rank);
+        // Host segments are one allocation per local rank, imported by the others.
+        // Only the owner writes its segment. The expected sum is that shared value
+        // added once for every rank that maps it.
+        std::vector<T> hostExpected;
+        if (allGather || reduceScatter) {
+            initSendBuffer<T>(sendPtr, initCount, rank);
+        } else {
+            const int localSize = recvHybrid.localSize;
+            ASSERT_GT(localSize, 0);
+            ASSERT_EQ(nRanks % localSize, 0);
+            ASSERT_EQ(recvHybrid.segSizes.size(), static_cast<size_t>(localSize + 1));
+            char* base = static_cast<char*>(sendPtr);
+            const size_t gpuElems = recvHybrid.segSizes[0] / sizeof(T);
+            ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(
+                base, gpuElems,
+                [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
+            size_t offset = recvHybrid.segSizes[0];
+            for (int seg = 0; seg < localSize; ++seg) {
+                const size_t bytes = recvHybrid.segSizes[static_cast<size_t>(seg + 1)];
+                ASSERT_EQ(bytes % sizeof(T), 0u);
+                if (seg == recvHybrid.localRank) {
+                    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(
+                        base + offset, bytes / sizeof(T),
+                        [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
+                }
+                offset += bytes;
+            }
+            ASSERT_EQ(MPI_SUCCESS, MPI_Barrier(MPI_COMM_WORLD));
+            std::vector<float> localHost(static_cast<size_t>(localSize));
+            offset = recvHybrid.segSizes[0];
+            for (int seg = 0; seg < localSize; ++seg) {
+                T sample{};
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(
+                    &sample, base + offset, sizeof(T), hipMemcpyDeviceToHost));
+                localHost[static_cast<size_t>(seg)] = static_cast<float>(sample);
+                offset += recvHybrid.segSizes[static_cast<size_t>(seg + 1)];
+            }
+            std::vector<float> allHost(static_cast<size_t>(nRanks * localSize));
+            ASSERT_EQ(MPI_SUCCESS, MPI_Allgather(
+                localHost.data(), localSize, MPI_FLOAT,
+                allHost.data(), localSize, MPI_FLOAT, MPI_COMM_WORLD));
+            hostExpected.resize(static_cast<size_t>(localSize));
+            for (int seg = 0; seg < localSize; ++seg) {
+                float sum = 0.f;
+                for (int r = 0; r < nRanks; ++r)
+                    sum += allHost[static_cast<size_t>(r * localSize + seg)];
+                hostExpected[static_cast<size_t>(seg)] = static_cast<T>(sum);
+            }
+        }
         const ncclDataType_t dtype = getNcclDataType<T>();
         ncclComm* comm = getActiveCommunicator();
         hipStream_t stream = getActiveStream();
@@ -756,8 +812,21 @@ protected:
             ASSERT_TRUE(verifyAllGatherResult<T>(recvHybrid.ptr, count, nRanks));
         else if (reduceScatter)
             ASSERT_TRUE(verifyReduceScatterResult<T>(recvHybrid.ptr, count, nRanks));
-        else
-            ASSERT_TRUE(verifyAllReduceResult<T>(recvHybrid.ptr, count, nRanks));
+        else {
+            char* base = static_cast<char*>(recvHybrid.ptr);
+            const size_t gpuElems = recvHybrid.segSizes[0] / sizeof(T);
+            const T gpuExpected = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+            ASSERT_TRUE(verifyBufferData<T>(base, gpuElems,
+                [gpuExpected](size_t) { return gpuExpected; }));
+            size_t offset = recvHybrid.segSizes[0];
+            for (int seg = 0; seg < recvHybrid.localSize; ++seg) {
+                const size_t elems = recvHybrid.segSizes[static_cast<size_t>(seg + 1)] / sizeof(T);
+                const T expected = hostExpected[static_cast<size_t>(seg)];
+                ASSERT_TRUE(verifyBufferData<T>(base + offset, elems,
+                    [expected](size_t) { return expected; }));
+                offset += elems * sizeof(T);
+            }
+        }
 
         REGLogChecker checker = getLogChecker();
         ASSERT_TRUE(checker.hasNumSegments(recvHybrid.localSize + 1));
@@ -893,6 +962,12 @@ protected:
         ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, 2, gpuRecv));
         ASSERT_NO_FATAL_FAILURE(createMixedMultiSegmentBuffer(dev, kSegmentSize, 2, 1, elasticSend));
         ASSERT_NO_FATAL_FAILURE(createMixedMultiSegmentBuffer(dev, kSegmentSize, 2, 1, elasticRecv));
+        auto vmmCleanup = makeScopeGuard([&]() {
+            releaseMultiSegmentBuffer(gpuSend);
+            releaseMultiSegmentBuffer(gpuRecv);
+            releaseMultiSegmentBuffer(elasticSend);
+            releaseMultiSegmentBuffer(elasticRecv);
+        });
         {
             const bool allocated = gpuSend.totalSize != 0 && gpuRecv.totalSize != 0 &&
                                    elasticSend.totalSize != 0 && elasticRecv.totalSize != 0;
@@ -903,12 +978,6 @@ protected:
                 return;
             }
         }
-        auto vmmCleanup = makeScopeGuard([&]() {
-            releaseMultiSegmentBuffer(gpuSend);
-            releaseMultiSegmentBuffer(gpuRecv);
-            releaseMultiSegmentBuffer(elasticSend);
-            releaseMultiSegmentBuffer(elasticRecv);
-        });
 
         ASSERT_EQ(gpuSend.totalSize, gpuRecv.totalSize);
         ASSERT_EQ(elasticSend.totalSize, elasticRecv.totalSize);
@@ -923,17 +992,17 @@ protected:
         }
 
         ncclWindow_t wins[4] = {};
+        auto winCleanup = makeScopeGuard([&]() {
+            for (ncclWindow_t win : wins) {
+                if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+            }
+        });
         void* ptrs[4] = {gpuSend.vaBase, gpuRecv.vaBase, elasticSend.vaBase, elasticRecv.vaBase};
         size_t sizes[4] = {gpuSend.totalSize, gpuRecv.totalSize, elasticSend.totalSize, elasticRecv.totalSize};
         for (int i = 0; i < 4; ++i) {
             ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
                 getActiveCommunicator(), ptrs[i], sizes[i], &wins[i], NCCL_WIN_COLL_SYMMETRIC));
         }
-        auto winCleanup = makeScopeGuard([&]() {
-            for (ncclWindow_t win : wins) {
-                if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
-            }
-        });
 
         auto ceSelected = [&](ncclFunc_t coll, void* send, void* recv, size_t count) {
             int algo = 0, proto = 0, nCh = 0;

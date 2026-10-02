@@ -10,8 +10,9 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
-#include "ResourceGuards.hpp"
 #include "MultiSegmentVmmHelpers.hpp"
+#include "../multisegment/MultiSegmentTestFixture.hpp"
+#include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
@@ -1190,14 +1191,14 @@ protected:
 
         ncclWindow_t sendWin = nullptr;
         ncclWindow_t recvWin = nullptr;
-        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
-            getActiveCommunicator(), send.ptr, send.totalSize, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
-        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
-            getActiveCommunicator(), recv.ptr, recv.totalSize, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
         auto winCleanup = RCCLTestGuards::makeScopeGuard([&]() {
             if(sendWin) ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
             if(recvWin) ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
         });
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
+            getActiveCommunicator(), send.ptr, send.totalSize, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
+            getActiveCommunicator(), recv.ptr, recv.totalSize, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
 
         constexpr int kRoot = 0;
         if(coll == Coll::AllGather || coll == Coll::Gather)
@@ -1338,6 +1339,103 @@ TEST_F(CeMPI_MultiSegment, SingleNodeGather)
 TEST_F(CeMPI_MultiSegment, SingleNodeAllReduce)
 {
     run(Coll::AllReduce, "CeMPI_MultiSegment/SingleNodeAllReduce", /*hierarchical=*/false);
+}
+
+// recvBuf sits one segment past the window base and CE must still reduce it.
+TEST_F(UBR_MultiSegment, CE_RecvOffset)
+{
+    MultiSegmentBuffer buf;
+    ncclWindow_t win = nullptr;
+    int rank = 0, nRanks = 0;
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    size_t count = 0, totalBytes = 0;
+    prepareSymmetricLsaRecvOffset(buf, &win, &rank, &nRanks, &sendBuf, &recvBuf, &count, &totalBytes,
+                                  /*requireCeEnv=*/true);
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
+
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !ceAllReduceSelected(sendBuf, recvBuf, count),
+            "CE AllReduce was not selected (rcclGetCollImplInfo)");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+    if (::testing::Test::IsSkipped()) return;
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
+        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    (void)totalBytes;
+}
+
+#ifdef ENABLE_FAULT_INJECTION
+// Phase 3 peer copies use rank * shardBytes without the receive-window offset.
+TEST_F(UBR_MultiSegment, CE_RecvOffset_BeforeLegacyCorruptsResult)
+{
+    MultiSegmentBuffer buf;
+    ncclWindow_t win = nullptr;
+    int rank = 0, nRanks = 0;
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    size_t count = 0, totalBytes = 0;
+    prepareSymmetricLsaRecvOffset(buf, &win, &rank, &nRanks, &sendBuf, &recvBuf, &count, &totalBytes,
+                                  /*requireCeEnv=*/true);
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
+
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !ceAllReduceSelected(sendBuf, recvBuf, count),
+            "CE AllReduce was not selected (rcclGetCollImplInfo)");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalBytes));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCeFaultSet(
+        getActiveCommunicator(), CE_FAULT_LEGACY_RECV_OFFSET));
+    auto faultCleanup = makeScopeGuard([&]() {
+        HIP_EXPECT(ncclCeFaultClear(getActiveCommunicator()));
+    });
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
+        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const size_t shardElems = count / static_cast<size_t>(nRanks);
+    const T expectedLocal = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+    const T expectedOther = static_cast<T>(static_cast<float>(0));
+    ASSERT_TRUE(verifyBufferData<T>(recvBuf, count,
+        [shardElems, rank, expectedLocal, expectedOther](size_t i) {
+            return (i / shardElems == static_cast<size_t>(rank)) ? expectedLocal : expectedOther;
+        }))
+        << "BEFORE control did not pin local-shard reduce + memset-0 remote shards";
+    EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
+        << "BEFORE control did not reproduce the legacy receive-window offset corruption";
+}
+#endif
+
+// The GPU window is the control; CE must reject the elastic window.
+TEST_F(UBR_MultiSegment, CE_Elastic_Gating)
+{
+    runCeElasticGating(/*hierarchical=*/false);
+}
+
+TEST_F(UBR_MultiSegment, CE_Elastic_HierarchicalGating)
+{
+    runCeElasticGating(/*hierarchical=*/true);
 }
 
 #endif // MPI_TESTS_ENABLED

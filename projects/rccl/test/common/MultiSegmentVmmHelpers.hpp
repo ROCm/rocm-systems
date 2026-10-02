@@ -1,18 +1,19 @@
-/*
+/*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * GPU multi-segment and DeepEP [GPU][CPU] windows for collective tests that
- * do not link the RMA plugin.
- */
+ * See LICENSE.txt for license information
+ *
+ * GPU multi-segment windows for collective tests that do not link the
+ * RMA plugin.
+ ************************************************************************/
 
 #ifndef RCCL_TEST_COMMON_MULTISEGMENT_VMM_HELPERS_HPP
 #define RCCL_TEST_COMMON_MULTISEGMENT_VMM_HELPERS_HPP
 
 #ifdef MPI_TESTS_ENABLED
 
-#include "HybridVmmHelpers.hpp"
-
 #include <hip/hip_runtime.h>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -33,7 +34,7 @@ inline void FreeVmmWindow(VmmWindow& b)
 {
     if (b.base != 0)
     {
-        hipDeviceptr_t off = b.base;
+        auto* off = static_cast<char*>(b.base);
         for (size_t i = 0; i < b.handles.size(); ++i)
         {
             const size_t bytes = i < b.segSizes.size() ? b.segSizes[i] : 0;
@@ -63,6 +64,7 @@ inline bool AllocUniformGpu(int dev, int nSegments, size_t segBytes, VmmWindow* 
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;
+    // Reject a size the caller did not align. The RMA helper rounds up instead.
     if (hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum) != hipSuccess ||
         granularity == 0 || segBytes % granularity != 0)
         return false;
@@ -82,8 +84,10 @@ inline bool AllocUniformGpu(int dev, int nSegments, size_t segBytes, VmmWindow* 
     for (int i = 0; i < nSegments; ++i)
     {
         hipMemGenericAllocationHandle_t handle = 0;
+        hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(
+            reinterpret_cast<uintptr_t>(base) + static_cast<uintptr_t>(i) * segBytes);
         if (hipMemCreate(&handle, segBytes, &prop, 0) != hipSuccess ||
-            hipMemMap(base + static_cast<hipDeviceptr_t>(i * segBytes), segBytes, 0, handle, 0) != hipSuccess)
+            hipMemMap(segVa, segBytes, 0, handle, 0) != hipSuccess)
         {
             if (handle != 0)
                 hipMemRelease(handle);
@@ -104,23 +108,6 @@ inline bool AllocUniformGpu(int dev, int nSegments, size_t segBytes, VmmWindow* 
     }
     window.ptr = reinterpret_cast<void*>(base);
     *out       = std::move(window);
-    return true;
-}
-
-inline bool AllocElastic(int dev, size_t gpuBytes, size_t cpuBytes, VmmWindow* out)
-{
-    if (out == nullptr)
-        return false;
-    RCCLHybridVmmTests::DeepEpElasticRange range;
-    if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, gpuBytes, cpuBytes, &range))
-        return false;
-    *out           = VmmWindow{};
-    out->ptr       = reinterpret_cast<void*>(range.base);
-    out->base      = range.base;
-    out->totalSize = range.totalSize;
-    out->nSegments = static_cast<int>(range.handles.size());
-    out->handles   = std::move(range.handles);
-    out->segSizes  = std::move(range.segSizes);
     return true;
 }
 
