@@ -28,8 +28,9 @@
 #include <cstdint>
 
 using rocprofiler::kernel_replay::blit::kernel_abi::bytes_per_item;
-using rocprofiler::kernel_replay::blit::kernel_abi::bytes_per_tile;
 using rocprofiler::kernel_replay::blit::kernel_abi::copy_descriptor_t;
+using rocprofiler::kernel_replay::blit::kernel_abi::first_local_item;
+using rocprofiler::kernel_replay::blit::kernel_abi::items_for_size;
 using rocprofiler::kernel_replay::blit::kernel_abi::kernel_args_t;
 using rocprofiler::kernel_replay::blit::kernel_abi::workgroup_size;
 
@@ -39,62 +40,50 @@ using global_descriptor_t = copy_descriptor_t __attribute__((address_space(1)));
 
 static_assert(bytes_per_item == sizeof(copy_vector_t));
 
-__device__ __forceinline__ copy_descriptor_t
-find_descriptor(const global_descriptor_t* descriptors,
-                std::uint64_t              descriptor_count,
-                std::uint64_t              tile)
-{
-    auto first = std::uint64_t{0};
-    auto last  = descriptor_count;
-    while(first < last)
-    {
-        const auto middle     = first + (last - first) / 2;
-        const auto descriptor = descriptors[middle];
-        if(tile < descriptor.first_tile + descriptor.tile_count)
-            last = middle;
-        else
-            first = middle + 1;
-    }
-    return descriptors[first];
-}
-
 __device__ __forceinline__ void
-copy_tile(const kernel_args_t& args, std::uint64_t tile)
+copy_item(const copy_descriptor_t& copy, std::uint64_t item_offset)
 {
-    const auto* descriptors =
-        reinterpret_cast<const global_descriptor_t*>(args.descriptors_address);
-    const auto copy        = find_descriptor(descriptors, args.descriptor_count, tile);
-    const auto byte_offset = (tile - copy.first_tile) * bytes_per_tile +
-                             static_cast<std::uint64_t>(threadIdx.x) * bytes_per_item;
+    const auto  byte_offset = item_offset * bytes_per_item;
+    const auto* src_bytes   = reinterpret_cast<const global_byte_t*>(copy.source_address);
+    auto*       dst_bytes   = reinterpret_cast<global_byte_t*>(copy.destination_address);
 
-    const auto* src = reinterpret_cast<const global_byte_t*>(copy.source_address);
-    auto*       dst = reinterpret_cast<global_byte_t*>(copy.destination_address);
-
-    if(byte_offset + sizeof(copy_vector_t) <= copy.size)
+    if(copy.size - byte_offset >= bytes_per_item)
     {
         auto value = copy_vector_t{};
-        __builtin_memcpy(&value, src + byte_offset, sizeof(value));
-        __builtin_memcpy(dst + byte_offset, &value, sizeof(value));
+        __builtin_memcpy(&value, src_bytes + byte_offset, sizeof(value));
+        __builtin_memcpy(dst_bytes + byte_offset, &value, sizeof(value));
         return;
     }
 
-    if(byte_offset < copy.size)
-    {
-        for(auto i = byte_offset; i < copy.size; ++i)
-            dst[i] = src[i];
-    }
+    for(auto i = byte_offset; i < copy.size; ++i)
+        dst_bytes[i] = src_bytes[i];
 }
 
 extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_blit(kernel_args_t args)
 {
-    const auto tile = static_cast<std::uint64_t>(blockIdx.x);
-    if(tile < args.total_tiles) copy_tile(args, tile);
-}
+    const auto* descriptors =
+        reinterpret_cast<const global_descriptor_t*>(args.descriptors_address);
+    const auto thread = static_cast<std::uint64_t>(threadIdx.x) +
+                        static_cast<std::uint64_t>(workgroup_size) * blockIdx.x;
+    const auto stride = args.launched_items;
 
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_blit_stride(
-    kernel_args_t args)
-{
-    for(auto tile = static_cast<std::uint64_t>(blockIdx.x); tile < args.total_tiles;
-        tile += args.launched_tiles)
-        copy_tile(args, tile);
+    auto logical_base = std::uint64_t{0};
+    for(auto region = std::uint64_t{0}; region < args.descriptor_count; ++region)
+    {
+        auto copy = copy_descriptor_t{};
+        __builtin_memcpy(&copy, descriptors + region, sizeof(copy));
+        const auto item_count = items_for_size(copy.size);
+        // Thread `t` owns compact logical items `t + k * stride`. Rotate that assignment by this
+        // region's prefix to obtain its first physical 16-byte item in the discontiguous
+        // allocation.
+        auto item_offset = first_local_item(thread, stride, logical_base);
+
+        while(item_offset < item_count)
+        {
+            copy_item(copy, item_offset);
+            if(item_count - item_offset <= stride) break;
+            item_offset += stride;
+        }
+        logical_base += item_count;
+    }
 }
