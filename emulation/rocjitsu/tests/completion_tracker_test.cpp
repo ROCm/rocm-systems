@@ -202,7 +202,7 @@ public:
   CompletionTracker tracker;
   InterruptSubscription subscription;
   CompletionEndCounter *end_counter = nullptr;
-  std::vector<AqlQueueRecord> queues;
+  std::vector<ComputeQueueRecord> queues;
   uint32_t retired = 0;
   uint32_t interrupts = 0;
 };
@@ -299,7 +299,7 @@ TEST(CompletionTrackerTest, UnavailableQueueDoesNotStarveIndependentQueueRetirem
   fixture.memory->store(kSecondSignal + CompletionFixture::kMailboxOffset, kSecondMailbox);
   fixture.memory->store(kSecondSignal + CompletionFixture::kEventOffset, kSecondEvent);
 
-  AqlQueueRecord second_queue{};
+  ComputeQueueRecord second_queue{};
   second_queue.fanout_replica = true;
   DispatchEntry second_entry{};
   second_entry.dispatch_id = 8;

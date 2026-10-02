@@ -243,4 +243,8 @@ ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 ncclResult_t IbCastResiliencyRemoteCompletionRecordsSet(struct ncclIbResiliency* resCtx, uint32_t cmplsRecordsRkey,
                                                         uint64_t cmplsRecordsAddr, uint devIndex);
 
+// Resiliency RCCL params (defined in p2p_resiliency.cc / p2p_resiliency_recovery.cc)
+int64_t ncclParamIbCastResiliencyPortFailover();
+int64_t ncclParamIbCastResiliencyPortRecovery();
+
 #endif // NET_IB_P2P_RESILIENCY_H_

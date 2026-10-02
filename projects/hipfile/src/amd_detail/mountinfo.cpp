@@ -9,6 +9,7 @@
 #include <cstring>
 #include <libmount/libmount.h>
 #include <stdexcept>
+#include <system_error>
 
 struct libmnt_context;
 struct libmnt_fs;
@@ -64,6 +65,7 @@ std::optional<MountInfo>
 LibMountHelper::getMountInfo(dev_t dev) const
 {
     auto libmount{Context<LibMount>::get()};
+    int  libmount_err;
 
     auto mnt_ctx{libmount->mnt_new_context()};
     if (!mnt_ctx) {
@@ -71,9 +73,11 @@ LibMountHelper::getMountInfo(dev_t dev) const
     }
 
     struct libmnt_table *mnt_tbl{};
-    if (libmount->mnt_context_get_mtab(mnt_ctx, &mnt_tbl) != 0) {
+    libmount_err = libmount->mnt_context_get_mtab(mnt_ctx, &mnt_tbl);
+    if (libmount_err) {
         libmount->mnt_free_context(mnt_ctx);
-        throw std::runtime_error("libmount: Could not get mount table");
+        throw std::system_error(-libmount_err, std::generic_category(),
+                                "libmount: Could not get mount table");
     }
 
     struct libmnt_fs *mnt_fs{libmount->mnt_table_find_devno(mnt_tbl, dev, MNT_ITER_FORWARD)};
