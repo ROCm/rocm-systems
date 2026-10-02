@@ -532,19 +532,26 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_MalformedEnvPayloadsReturnInternalE
 
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_TwoDistinctCommsAreReportedSeparately) {
   const size_t stride = EnvRecordStride();
-  std::vector<char> buf(stride * 3, 0);
+  std::vector<char> buf(stride * 4, 0);
 
-  FillEnvRecord(buf, 0, {0x8000, 0x8100, 0x8200}, 0, 1);
-  FillEnvRecord(buf, 1, {0x8000, 0x8300, 0x8400}, 0, 1);
+  FillEnvRecord(buf, 0, {0x8000, 0x8100, 0x8200}, 0, 1, {"NCCL_FIRST=ONLY"});
+  FillEnvRecord(buf, 1, {0x8000, 0x8300, 0x8400}, 1, 2, {"NCCL_DEBUG=WARN"});
   FillEnvRecord(buf, 2, {0x9000, 0x9100, 0x9200}, 0, 1);
+  FillEnvRecord(buf, 3, {0x8000, 0x8300, 0x8400}, 0, 2, {"NCCL_DEBUG=INFO"});
 
   auto reporter = MakeRecordingReporter();
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNcclEnvSummarize(nullptr, &reporter, buf.data(), static_cast<int>(buf.size())));
-  int consistentCount = 0;
-  for (auto& l : g_emittedLines) {
-    if (l.find("consistent across 1 ranks") != std::string::npos) consistentCount++;
-  }
-  EXPECT_EQ(3, consistentCount);
+  const std::vector<std::string> expectedLines = {
+    "[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x8000",
+    "[INFO] NCCL environment: mismatch across 2 ranks in comm 0x8000 for NCCL_DEBUG",
+    "[INFO] NCCL environment: NCCL_DEBUG=INFO on rank(s) {0}",
+    "[INFO] NCCL environment: NCCL_DEBUG=WARN on rank(s) {1}",
+    "[INFO] NCCL environment: 1 NCCL_* env var(s) differ across ranks in comm 0x8000",
+    "[OK]   NCCL environment: NCCL_* env vars consistent across 1 ranks in comm 0x9000",
+  };
+  EXPECT_EQ(expectedLines, g_emittedLines);
+  const std::vector<size_t> expectedAllocationCounts = {buf.size(), 1, 1, 2, 2, 2, 2};
+  EXPECT_EQ(expectedAllocationCounts, g_allocationCounts);
 }
 
 TEST_F(RasDiagnosticsEnvMicrotest, Summarize_LongKeyAndValueAreTruncatedWithEllipsis) {
