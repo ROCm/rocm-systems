@@ -15,8 +15,11 @@
 /// render-node discovery, GEM buffers, contexts, syncobj fences, and PM4 compute
 /// submission for the Vulkan userspace driver.
 
+#include "embedded_schema.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
@@ -26,11 +29,14 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/kmd/rj_interposer.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include <filesystem>
+#include <fstream>
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -415,6 +421,9 @@ public:
     errno = saved_errno;
     new (storage_) InterposerContext();
     ctx.owner_pid_ = getpid();
+    const char *programmatic = getenv(rocjitsu::kProgrammaticEnv);
+    ctx.programmatic_ = programmatic && std::strcmp(programmatic, "1") == 0;
+    ctx.inherited_programmatic_ = programmatic && std::strcmp(programmatic, "2") == 0;
     // Record the HOST KFD device identity once, here, while single-threaded and
     // before real().resolve() flips the gate. A forked child compares a resolved
     // open target against this to decide whether it is about to touch real GPU
@@ -538,13 +547,116 @@ public:
     if (inherited_gpu)
       return;
     const std::string *invocation_dir = ctx.invocation_runtime_dir_;
+    const std::string *enabled_config = ctx.enabled_config_path_;
+    const bool programmatic = ctx.programmatic_;
+    const bool inherited_programmatic = ctx.inherited_programmatic_;
     const dev_t host_kfd = ctx.host_kfd_rdev_;
     new (storage_) InterposerContext();
     ctx.invocation_runtime_dir_ = invocation_dir;
+    ctx.enabled_config_path_ = enabled_config;
+    ctx.programmatic_enabled_.store(enabled_config != nullptr, std::memory_order_release);
+    ctx.programmatic_ = programmatic;
+    ctx.inherited_programmatic_ = inherited_programmatic;
     ctx.host_kfd_rdev_ = host_kfd;
     in_construction = false;
     rocjitsu::reset_host_mapping_lock_after_fork();
     ctx.owner_pid_ = getpid();
+  }
+
+  /// @brief Validate and snapshot a startup-only local activation request.
+  /// @details Commit after the handoff is complete; a configured CLI launch
+  /// must keep the backend and config selected by its launcher.
+  int enable(const char *path, const char *runtime_directory, const uint32_t *budget, char *error,
+             size_t error_size) {
+    auto fail = [&](int status, const char *message) {
+      if (error && error_size)
+        std::snprintf(error, error_size, "%s", message);
+      return status;
+    };
+    if (!owned_by_current_process())
+      return fail(EBUSY, "inherited active GPU context after fork");
+    if (!programmatic_ && !inherited_programmatic_)
+      return fail(ENOTSUP, "process already has a native launch configuration; use a new Session");
+    std::lock_guard lock(init_mutex_);
+    if (!inherited_programmatic_ &&
+        (backend_started_.load(std::memory_order_acquire) || enabled_config_path_))
+      return fail(EBUSY, "GPU discovery or activation has already started");
+    if (!path || !*path || !runtime_directory || !*runtime_directory)
+      return fail(EINVAL, "configuration and private runtime directory are required");
+    try {
+      ConstructionScope scope;
+      // Use the same parser and override rules as the native CLI. The snapshot
+      // owns both lazy initialization and the config inherited by exec children.
+      if (rocjitsu::config::load_dbt_guest_config_from_file(path).enabled)
+        return fail(EINVAL, "DBT requires the CLI or Session launcher");
+      std::string json = rocjitsu::config::read_config_file(path);
+      if (budget)
+        json = rocjitsu::config::json_with_cpu_thread_budget(json, *budget);
+      if (inherited_programmatic_) {
+        const auto handoff = child_config_handoff(invocation_runtime_dir() + "/config_path");
+        if (!handoff)
+          return fail(EINVAL, "inherited activation has no config handoff");
+        // Canonical schema JSON preserves explicit scalar presence while ignoring
+        // whitespace and object-key order, including relaxed native JSON input.
+        auto canonical = [](const std::string &source) {
+          flatbuffers::IDLOptions options;
+          options.force_defaults = true;
+          options.skip_unexpected_fields_in_json = true;
+          flatbuffers::Parser parser(options);
+          if (!parser.Parse(rocjitsu::kEmbeddedSchema) || !parser.Parse(source.c_str()))
+            throw std::runtime_error(parser.error_);
+          std::string result;
+          if (const char *failure =
+                  flatbuffers::GenText(parser, parser.builder_.GetBufferPointer(), &result))
+            throw std::runtime_error(failure);
+          return result;
+        };
+        if (canonical(json) != canonical(rocjitsu::config::read_config_file(handoff->config_path)))
+          return fail(ENOTSUP, "inherited simulation has a different configuration");
+        // Keep the original handoff, driver and ownership. In particular, do not
+        // replace a parent's snapshot with an empty child-owned directory.
+        return EALREADY;
+      }
+      (void)rocjitsu::config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+      auto snapshot = std::make_unique<const std::string>(
+          (std::filesystem::path(runtime_directory) / "enabled.json").string());
+      auto write = [](const std::filesystem::path &file, const std::string &contents) {
+        std::ofstream out;
+        out.exceptions(std::ios::failbit | std::ios::badbit);
+        out.open(file);
+        out << contents;
+        out.close();
+      };
+      write(*snapshot, json);
+      write(std::filesystem::path(runtime_directory) / "config_path", *snapshot + "\n");
+      // Only commit activation after validation, allocation and handoff succeed.
+      enabled_config_path_ = snapshot.release();
+      programmatic_enabled_.store(true, std::memory_order_release);
+      return 0;
+    } catch (const std::exception &exception) {
+      return fail(EINVAL, exception.what());
+    } catch (...) {
+      return fail(EINVAL, "unexpected native configuration failure");
+    }
+  }
+
+  /// @brief Whether interposed GPU discovery must wait for explicit activation.
+  bool awaiting_programmatic_activation() const {
+    return programmatic_ && !programmatic_enabled_.load(std::memory_order_acquire);
+  }
+
+  /// @brief Whether this process owns an explicitly activated configuration.
+  bool programmatic_activation_enabled() const {
+    return owned_by_current_process() &&
+           (inherited_programmatic_ || programmatic_enabled_.load(std::memory_order_acquire));
+  }
+
+  /// @brief Freeze activation after a discovery attempt, including a refused one.
+  /// @details Frameworks can cache failed discovery; changing their device model
+  /// afterwards is unsafe even if no driver was successfully initialized.
+  void note_programmatic_discovery() {
+    if (!backend_started_.exchange(true, std::memory_order_acq_rel))
+      util::Logger::warn("rocjitsu: call enable(config) before GPU discovery");
   }
 
   std::shared_ptr<LinuxKfd> driver() const {
@@ -767,6 +879,8 @@ public:
   };
 
   RemoteOpenResult get_or_create_remote() {
+    if (programmatic_ || inherited_programmatic_)
+      return {};
     backend_started_.store(true, std::memory_order_release);
     std::lock_guard lock(remote_mutex_);
     auto active_remote = remote();
@@ -3108,6 +3222,10 @@ public:
         return nullptr;
       }
       ConstructionScope construction_scope;
+      if (programmatic_ && !enabled_config_path_) {
+        util::Logger::warn("rocjitsu: call enable(config) before GPU discovery");
+        return nullptr;
+      }
       // Config-path discovery mirrors load_dbt_guest_config_from_runtime_config()'s
       // reader precedence exactly, probing tiers in order and using the first whose
       // config_path handoff actually exists:
@@ -3128,8 +3246,12 @@ public:
       cfg_candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
       cfg_candidates.push_back(rocjitsu::rpc_default_config_file_path());
       std::optional<rocjitsu::config::DbtRuntimeConfigHandoff> handoff;
+      if (enabled_config_path_)
+        handoff = rocjitsu::config::DbtRuntimeConfigHandoff{*enabled_config_path_, std::nullopt};
       std::string tried_last;
       for (const auto &candidate : cfg_candidates) {
+        if (handoff)
+          break;
         if (candidate == tried_last)
           continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
         tried_last = candidate;
@@ -3558,6 +3680,16 @@ private:
   /// @details Stored outside this context so the child can preserve its pointer
   /// when reconstructing unused state without copying or destroying the string.
   const std::string *invocation_runtime_dir_ = nullptr;
+  /// @brief Snapshot path retained through finalization and unused-context forks.
+  /// @details Activation publishes it under init_mutex_; programmatic_enabled_
+  /// supplies the corresponding lock-free entry-point gate.
+  const std::string *enabled_config_path_ = nullptr;
+  /// @brief Immutable startup mode retained across an unused-context fork.
+  bool programmatic_ = false;
+  /// @brief Exec descendant of global activation; only identical reactivation is allowed.
+  bool inherited_programmatic_ = false;
+  /// @brief Whether the startup-only activation transaction has committed.
+  std::atomic<bool> programmatic_enabled_{false};
 
   alignas(16) static uint8_t storage_[];
 };
@@ -3593,6 +3725,31 @@ template <typename F> auto with_host_mapping_held(F &&syscall) {
 } // namespace
 
 extern "C" {
+
+int rj_interposer_is_enabled_v1() {
+  return InterposerContext::ctx.programmatic_activation_enabled() ? 1 : 0;
+}
+
+int rj_interposer_enable_v1(const char *config_path, const char *runtime_directory,
+                            const uint32_t *cpu_thread_budget, char *error, size_t error_size) {
+  if (error && error_size)
+    error[0] = '\0';
+  // Loading this DSO after libc does not install process-wide interception.
+  // Confirm ordinary symbol lookup actually reaches this image before accepting
+  // activation, including when called through an explicit dlopen handle.
+  Dl_info interposer{}, resolved{};
+  if (!dladdr(reinterpret_cast<void *>(&InterposerContext::init), &interposer) ||
+      !dladdr(dlsym(RTLD_DEFAULT, "open"), &resolved) || interposer.dli_fbase != resolved.dli_fbase)
+    return ENOTSUP;
+  try {
+    return InterposerContext::ctx.enable(config_path, runtime_directory, cpu_thread_budget, error,
+                                         error_size);
+  } catch (...) {
+    if (error && error_size)
+      std::snprintf(error, error_size, "%s", "native activation failed before validation");
+    return EINVAL;
+  }
+}
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
@@ -3979,6 +4136,35 @@ inline void rj_path_normalize(char *p) {
   return InterposerContext::ctx.owned_by_current_process();
 }
 
+/// @brief Refuse GPU endpoints and discovery trees until programmatic activation.
+/// @details Classify device aliases with O_PATH only; never open a host driver.
+/// Use the same gate for opens and metadata so discovery cannot fall through just
+/// because the local backend intentionally does not exist yet.
+[[nodiscard]] inline bool rj_programmatic_refuses_path(int dirfd, const char *path) {
+  if (InterposerContext::in_construction || !path ||
+      !InterposerContext::ctx.awaiting_programmatic_activation())
+    return false;
+  char absolute[PATH_MAX];
+  bool metadata = false;
+  if (rj_child_absolute_path(dirfd, path, absolute, sizeof(absolute))) {
+    rj_path_normalize(absolute);
+    const std::string_view name(absolute);
+    auto within = [&](std::string_view root) {
+      return name == root ||
+             (name.starts_with(root) && name.size() > root.size() && name[root.size()] == '/');
+    };
+    metadata = within("/dev/dri") || within("/sys/class/drm") || within("/sys/class/kfd") ||
+               within("/sys/devices/virtual/kfd") || name.starts_with("/sys/dev/char/226:") ||
+               (name.starts_with("/sys/") &&
+                (name.find("/drm/") != std::string_view::npos || name.ends_with("/drm")));
+  }
+  if (!metadata && !rj_child_open_hits_gpu_device(dirfd, path))
+    return false;
+  InterposerContext::ctx.note_programmatic_discovery();
+  errno = ENODEV;
+  return true;
+}
+
 RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
@@ -4006,6 +4192,8 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
     return snapshot;
 
@@ -4090,6 +4278,9 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
   if (InterposerContext::in_construction)
     return InterposerContext::real().openat(dirfd, path, flags, mode);
+
+  if (rj_programmatic_refuses_path(dirfd, path))
+    return -1;
 
   if (path[0] == '/') {
     if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
@@ -5388,6 +5579,8 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
   if (!path || !mode)
     return nullptr;
 
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return nullptr;
   int open_flags = InterposerContext::fopen_flags_from_mode(mode);
   if (int snapshot = open_proc_maps_snapshot(path, open_flags); snapshot >= 0)
     return fdopen(snapshot, mode);
@@ -5444,6 +5637,16 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
     }
     return reopened;
   }
+  if (rj_programmatic_refuses_path(AT_FDCWD, path)) {
+    RJ_DIAGNOSTIC_PUSH
+    RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
+    if (stream)
+      fclose(stream);
+    RJ_DIAGNOSTIC_POP
+    errno = ENODEV;
+    return nullptr;
+  }
+
   RJ_DIAGNOSTIC_PUSH
   RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
   if (stream)
@@ -5636,6 +5839,8 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
   }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().stat(path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5653,6 +5858,8 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
   }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().lstat(path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5670,6 +5877,8 @@ RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
   }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().access(path, mode);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5694,6 +5903,8 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
     errno = EINVAL;
     return nullptr;
   }
+  if (rj_programmatic_refuses_path(AT_FDCWD, name))
+    return nullptr;
   if (!InterposerContext::in_construction) {
     std::string redirected = InterposerContext::ctx.redirect_sysfs_path(name);
     if (redirected.empty())
@@ -5846,6 +6057,8 @@ RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
   }
   if (!rj_owns_interposer_state() || InterposerContext::in_construction)
     return real.realpath_fn(path, resolved_path);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return nullptr;
   auto redirected = redirect_canonical_path(path);
   return real.realpath_fn(redirected.empty() ? path : redirected.c_str(), resolved_path);
 }
@@ -5863,6 +6076,8 @@ RJ_INTERPOSER_EXPORT char *__realpath_chk(const char *path, char *resolved_path,
   }
   if (!rj_owns_interposer_state() || InterposerContext::in_construction)
     return real.realpath_chk_fn(path, resolved_path, size);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return nullptr;
   auto redirected = redirect_canonical_path(path);
   return real.realpath_chk_fn(redirected.empty() ? path : redirected.c_str(), resolved_path, size);
 }
@@ -5876,11 +6091,117 @@ RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz
   }
   if (!rj_owns_interposer_state())
     return InterposerContext::real().readlink_fn(path, buf, bufsiz);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_sysfs_path(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return InterposerContext::real().readlink_fn(actual, buf, bufsiz);
+}
+
+// Directory-relative metadata APIs do not call the non-at libc wrappers.
+// Preserve their ordinary ABI/flag semantics; before activation they share the
+// same device/discovery refusal policy, including cwd-relative requests.
+RJ_INTERPOSER_EXPORT int fstatat(int dirfd, const char *path, struct stat *buf, int flags) {
+  auto &real = InterposerContext::real();
+  auto fn = real.fstatat_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "fstatat");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(dirfd, path, buf, flags);
+}
+
+RJ_INTERPOSER_EXPORT int fstatat64(int dirfd, const char *path, struct stat64 *buf, int flags) {
+  auto &real = InterposerContext::real();
+  auto fn = real.fstatat64_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "fstatat64");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(dirfd, path, buf, flags);
+}
+
+RJ_INTERPOSER_EXPORT int __fxstatat(int ver, int dirfd, const char *path, struct stat *buf,
+                                    int flags) {
+  auto &real = InterposerContext::real();
+  auto fn = real.__fxstatat_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "__fxstatat");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(ver, dirfd, path, buf, flags);
+}
+
+RJ_INTERPOSER_EXPORT int __fxstatat64(int ver, int dirfd, const char *path, struct stat64 *buf,
+                                      int flags) {
+  auto &real = InterposerContext::real();
+  auto fn = real.__fxstatat64_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "__fxstatat64");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(ver, dirfd, path, buf, flags);
+}
+
+RJ_INTERPOSER_EXPORT int faccessat(int dirfd, const char *path, int mode, int flags) {
+  auto &real = InterposerContext::real();
+  auto fn = real.faccessat_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "faccessat");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(dirfd, path, mode, flags);
+}
+
+RJ_INTERPOSER_EXPORT ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t size) {
+  auto &real = InterposerContext::real();
+  auto fn = real.readlinkat_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "readlinkat");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(dirfd, path, buf, size);
+}
+
+RJ_INTERPOSER_EXPORT int statx(int dirfd, const char *path, int flags, unsigned int mask,
+                               struct statx *buf) {
+  auto &real = InterposerContext::real();
+  auto fn = real.statx_fn;
+  if (!real.ready())
+    fn = util::lookup_symbol<decltype(fn)>(RTLD_NEXT, "statx");
+  if (!fn) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (real.ready() && rj_owns_interposer_state() && rj_programmatic_refuses_path(dirfd, path))
+    return -1;
+  return fn(dirfd, path, flags, mask, buf);
 }
 
 // -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
@@ -5898,6 +6219,8 @@ RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.stat64_fn(path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5921,6 +6244,8 @@ RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.lstat64_fn(path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5944,6 +6269,8 @@ RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.xstat_fn(ver, path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5967,6 +6294,8 @@ RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.xstat64_fn(ver, path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -5990,6 +6319,8 @@ RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.lxstat_fn(ver, path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -6013,6 +6344,8 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
     return real.lxstat64_fn(ver, path, buf);
+  if (rj_programmatic_refuses_path(AT_FDCWD, path))
+    return -1;
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);

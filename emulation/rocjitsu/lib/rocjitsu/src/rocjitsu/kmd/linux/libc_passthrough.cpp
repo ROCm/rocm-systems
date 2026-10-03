@@ -57,6 +57,13 @@ void LibcPassthrough::resolve() {
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
   realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
+  fstatat_fn = util::lookup_symbol<decltype(fstatat_fn)>(handle, "fstatat");
+  fstatat64_fn = util::lookup_symbol<decltype(fstatat64_fn)>(handle, "fstatat64");
+  __fxstatat_fn = util::lookup_symbol<decltype(__fxstatat_fn)>(handle, "__fxstatat");
+  __fxstatat64_fn = util::lookup_symbol<decltype(__fxstatat64_fn)>(handle, "__fxstatat64");
+  faccessat_fn = util::lookup_symbol<decltype(faccessat_fn)>(handle, "faccessat");
+  readlinkat_fn = util::lookup_symbol<decltype(readlinkat_fn)>(handle, "readlinkat");
+  statx_fn = util::lookup_symbol<decltype(statx_fn)>(handle, "statx");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   // Keep ready() false unless every required interposed libc entry point was
   // resolved. In release builds the asserts disappear, so the boolean must not

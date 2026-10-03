@@ -47,6 +47,7 @@ The rocJITsu public repository is located at
       * :doc:`ConSan GPU LDS sanitizer reference <reference/consan>`
       * :doc:`waitcheck hazard analyzer reference <reference/waitcheck>`
       * :doc:`Virtual machine API reference <reference/api-vm>`
+      * :doc:`Linux interposer activation API reference <reference/api-kmd>`
       * :doc:`Code object and instruction API reference <reference/api-code-object>`
       * :doc:`Status codes and compiler macros reference <reference/api-status>`
       * :doc:`rj_dbt_translate command reference <reference/rj-dbt-translate>`

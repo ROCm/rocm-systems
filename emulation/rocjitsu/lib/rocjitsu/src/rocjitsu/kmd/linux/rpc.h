@@ -309,6 +309,11 @@ inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 /// therefore nothing to compare a peer against.
 inline constexpr char kRpcDaemonPidEnv[] = "ROCJITSU_DAEMON_PID";
 
+/// @brief Startup-only interposer activation, set by --preload-only ("1").
+/// @details Configured launches use "0"; global-activation exec children use "2"
+/// so repeating the same activation is allowed without changing the launch mode.
+inline constexpr char kProgrammaticEnv[] = "ROCJITSU_PROGRAMMATIC";
+
 /// @brief Per-invocation runtime directory scoped by PID.
 /// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
 /// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct

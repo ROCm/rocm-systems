@@ -53,7 +53,8 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Path to simulation config JSON (required) |
+| `--config <path>` | Path to simulation config JSON (required except with `--preload-only`) |
+| `--preload-only` | Preload the interposer without a config. The application must call `rocjitsu.enable(config)` in Python (or `rj_interposer_enable_v1` in C) before GPU discovery; the Python bootstrap `python -m rocjitsu` uses this mode. Cannot be combined with configuration or other execution modes. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors. |
@@ -332,3 +333,22 @@ kernel 6.12.59+ and 6.15+.
 - **Windows**: Named pipe transport, KMD escape driver backend
 - **RDMA**: Rack-scale transport for distributed simulation
 - **Platform-independent commands**: Abstract command enum for cross-platform
+
+### Programmatic activation environment
+
+`--preload-only` sets `ROCJITSU_PROGRAMMATIC=1`. Interposed KFD/DRM device
+and discovery paths refuse access until the application activates a config.
+A discovery attempt prevents later activation because frameworks may cache the
+failed result. Ordinary configured launches set the variable to `0`.
+
+After successful activation, Python exports `ROCJITSU_INVOCATION_DIR` pointing
+to its private config handoff and sets `ROCJITSU_PROGRAMMATIC=2` for fresh exec
+children. C callers of `rj_interposer_enable_v1` must publish those two variables
+themselves if they want children to inherit the config, and keep the handoff
+directory alive until those children finish.
+
+The inherited mode (`2`) permits an identical `enable` call when multiprocessing
+re-imports a module in a spawn or forkserver child. The native parser compares
+the effective configs, including any CPU thread budget override; a different
+config is refused. `EALREADY` indicates this no-op to C callers, who must preserve
+the existing handoff. Configured CLI launches (`0`) still reject activation.

@@ -18,6 +18,7 @@
 
 // Forward declaration keeps legacy aliases independent of feature-macro order.
 struct stat64;
+struct statx;
 
 namespace rocjitsu {
 
@@ -73,6 +74,16 @@ public:
   int (*xstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   int (*lxstat_fn)(int, const char *, struct stat *) = nullptr;
   int (*lxstat64_fn)(int, const char *, struct stat64 *) = nullptr;
+  /// @brief Directory-relative metadata hooks, resolved eagerly for fork safety.
+  int (*fstatat_fn)(int dirfd, const char *path, struct stat *buf, int flags) = nullptr;
+  int (*fstatat64_fn)(int dirfd, const char *path, struct stat64 *buf, int flags) = nullptr;
+  int (*__fxstatat_fn)(int ver, int dirfd, const char *path, struct stat *buf, int flags) = nullptr;
+  int (*__fxstatat64_fn)(int ver, int dirfd, const char *path, struct stat64 *buf,
+                         int flags) = nullptr;
+  int (*faccessat_fn)(int dirfd, const char *path, int mode, int flags) = nullptr;
+  ssize_t (*readlinkat_fn)(int dirfd, const char *path, char *buf, size_t size) = nullptr;
+  int (*statx_fn)(int dirfd, const char *path, int flags, unsigned int mask,
+                  struct statx *buf) = nullptr;
   pid_t (*fork)() = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.
