@@ -1,8 +1,11 @@
 {
   "_comment": [
-    "Device-API benchmark matrix for run-device-api-ci.sh.",
+    "GIN device-API benchmark matrix for run-device-api-ci.sh.",
     "Add a mode by appending a suites entry. Each suite runs every bin as:",
-    "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ./build/<bin> $bench_args <args>",
+    "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ${RCCL_TESTS_BIN_DIR}/<bin> $bench_args <args>",
+    "RCCL_TESTS_BIN_DIR is the absolute cmake build dir (.ci-out/rccl-tests-build",
+    "for this job). The non-GIN symmetric matrix is device-api-nongin-tests.json,",
+    "run against the ENABLE_DEVICE_API=1 ./install.sh build.",
     "After the matrix, run-device-api-ci.sh runs pytest test/test_AllToAllDevtime.py",
     "(GIN -D 3 device-timing smoke: -B 1/2 and -B 2 -H 1; ENABLE_DEVICE_API build).",
     "bench_args: common bench flags | base_env: -x on every run",
@@ -21,25 +24,16 @@
 
   "suites": [
     {
-      "name": "symmetric",
-      "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
-      "args": "-R 2"
-    },
-    {
-      "name": "lsa-d1",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 1"
-    },
-    {
-      "name": "lsa-d2",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 2"
-    },
-    {
       "name": "gin-d3",
       "bins": ["alltoall_perf"],
       "args": "-R 2 -D 3",
       "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
+      "name": "gin-d3-allgather",
+      "bins": ["all_gather_perf"],
+      "args": "-R 2 -D 3",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
     },
     {
       "name": "gin-d4",
