@@ -63,14 +63,19 @@ private:
         uint64_t                                            end_ts);
 
     static size_t default_thread_pool_size();
+    static size_t default_connection_count();
+
+    ph_event_list_t core_get_track_events_parallel(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track,
+        size_t                                              parts);
 
     std::string         m_file_path;
     ph_schema_version_t m_schema_version;
 
-    static constexpr size_t                         k_connection_count = 5;
     std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,
-                                                             k_connection_count,
+                                                             default_connection_count(),
                                                              m_catalog };
 
     profiler_hub::reader_types::track_info_list_t m_tracks;

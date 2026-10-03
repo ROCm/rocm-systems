@@ -7,6 +7,9 @@
 #include "reader_catalog.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <thread>
@@ -14,6 +17,14 @@
 
 namespace
 {
+
+size_t
+env_size(const char* name, size_t fallback)
+{
+    const char* value = std::getenv(name);
+    if(value == nullptr || value[0] == '\0') return fallback;
+    return static_cast<size_t>(std::strtoull(value, nullptr, 10));
+}
 
 ph_track_category_t
 to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
@@ -41,7 +52,13 @@ size_t
 ph_ctx::default_thread_pool_size()
 {
     const auto hw = std::thread::hardware_concurrency();
-    return std::max<size_t>(1, hw / 2);
+    return env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2));
+}
+
+size_t
+ph_ctx::default_connection_count()
+{
+    return std::max<size_t>(1, env_size("PH_CONNECTIONS", 8));
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
@@ -129,6 +146,14 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                                 std::numeric_limits<std::int64_t>::max());
     }
 
+    const size_t parts = env_size("PH_READ_PARTS", 8);
+    if(parts > 1 && !(start_ts != 0 || end_ts != 0) &&
+       track->category == profiler_hub::reader_types::track_kind_t::thread &&
+       track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
+    {
+        return core_get_track_events_parallel(conn, track, parts);
+    }
+
     track_events_result_t result;
     result.events = conn.reader().get_events_for_track(track, filter);
     result.c_events.reserve(result.events.size());
@@ -139,6 +164,107 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
             .end   = event.end_timestamp,
             .name  = event.display_name.empty() ? "" : event.display_name.data(),
         });
+    }
+
+    std::scoped_lock lock{ m_track_results_mutex };
+    auto&            stored = m_track_events_results.emplace_back(std::move(result));
+
+    return ph_event_list_t{ .list_size =
+                                static_cast<std::uint32_t>(stored.c_events.size()),
+                            .events = stored.c_events.data() };
+}
+
+ph_event_list_t
+ph_ctx::core_get_track_events_parallel(
+    profiler_hub::common::connection&                   conn,
+    const profiler_hub::reader_types::track_info_ptr_t& track,
+    size_t                                              parts)
+{
+    using profiler_hub::reader_types::event_type_t;
+
+    constexpr std::array types{ event_type_t::region,
+                                event_type_t::kernel_dispatch,
+                                event_type_t::memory_allocate,
+                                event_type_t::memory_copy };
+
+    struct work_item
+    {
+        event_type_t            type;
+        size_t                  begin;
+        size_t                  end;
+        std::vector<ph_event_t> out;
+    };
+
+    std::array<std::pair<size_t, size_t>, types.size()> spans{};
+    size_t                                              total_span = 0;
+    for(size_t i = 0; i < types.size(); ++i)
+    {
+        const auto span = conn.reader().get_event_id_span(types[i]);
+        if(span.second >= span.first && span.second != 0)
+        {
+            spans[i] = span;
+            total_span += span.second - span.first + 1;
+        }
+    }
+
+    std::vector<work_item> items;
+    for(size_t i = 0; i < types.size(); ++i)
+    {
+        if(spans[i].second == 0) continue;
+        const size_t low   = spans[i].first;
+        const size_t high  = spans[i].second + 1;
+        const size_t share = (high - low) * parts;
+        const size_t count = std::max<size_t>(1, (share + total_span / 2) / total_span);
+        const size_t step  = (high - low + count - 1) / count;
+        for(size_t begin = low; begin < high; begin += step)
+        {
+            items.push_back({ types[i], begin, std::min(begin + step, high), {} });
+        }
+    }
+
+    const auto visitor = [](void*                                      context,
+                            profiler_hub::reader_types::timestamp_ns_t start,
+                            profiler_hub::reader_types::timestamp_ns_t end,
+                            std::string_view                           name) {
+        static_cast<std::vector<ph_event_t>*>(context)->push_back(ph_event_t{
+            .start = start, .end = end, .name = name.empty() ? "" : name.data() });
+    };
+
+    std::atomic<size_t> next{ 0 };
+    const auto          worker = [&](profiler_hub::common::connection& worker_conn) {
+        for(size_t i = next.fetch_add(1); i < items.size(); i = next.fetch_add(1))
+        {
+            auto& item = items[i];
+            worker_conn.reader().visit_track_events_in_id_range(
+                track, item.type, item.begin, item.end, visitor, &item.out);
+        }
+    };
+
+    {
+        std::vector<std::jthread> helpers;
+        const size_t              wanted = std::min(parts, items.size());
+        for(size_t i = 1; i < wanted; ++i)
+        {
+            auto lease = m_connection_pool.try_acquire();
+            if(!lease.has_value()) break;
+            helpers.emplace_back(
+                [&worker, held = std::move(lease)]() mutable { worker(**held); });
+        }
+        worker(conn);
+    }
+
+    size_t total = 0;
+    for(const auto& item : items)
+    {
+        total += item.out.size();
+    }
+
+    track_events_result_t result;
+    result.c_events.reserve(total);
+    for(auto& item : items)
+    {
+        result.c_events.insert(result.c_events.end(), item.out.begin(), item.out.end());
+        std::vector<ph_event_t>().swap(item.out);
     }
 
     std::scoped_lock lock{ m_track_results_mutex };

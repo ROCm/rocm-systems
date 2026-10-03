@@ -101,6 +101,24 @@ reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
     return m_impl->get_events_for_track(std::move(track), filter);
 }
 
+std::pair<size_t, size_t>
+reader_t::get_event_id_span(reader_types::event_type_t type) const
+{
+    return m_impl->get_event_id_span(type);
+}
+
+void
+reader_t::visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
+                                         reader_types::event_type_t            type,
+                                         size_t                                id_begin,
+                                         size_t                                id_end,
+                                         event_visitor_t                       visitor,
+                                         void* context) const
+{
+    m_impl->visit_track_events_in_id_range(
+        track, type, id_begin, id_end, visitor, context);
+}
+
 reader_types::counter_timeline_event_list_t
 reader_t::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
                                        const reader_types::event_filter_t& filter) const

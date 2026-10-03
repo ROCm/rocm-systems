@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdlib>
+
 #include <sqlite3.h>
 
 #include <cstdint>
@@ -35,7 +37,10 @@ struct sqlite_api_policy
 
     static int open(const char* path, database_t* out_db) noexcept
     {
-        return sqlite3_open(path, out_db);
+        int         flags   = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+        const char* nomutex = std::getenv("PH_SQLITE_NOMUTEX");
+        if(nomutex == nullptr || nomutex[0] != '0') flags |= SQLITE_OPEN_NOMUTEX;
+        return sqlite3_open_v2(path, out_db, flags, nullptr);
     }
 
     static int close(database_t db) noexcept { return sqlite3_close(db); }
