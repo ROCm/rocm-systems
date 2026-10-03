@@ -27,7 +27,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather
+    64ULL*1024,         // [2] AllGather
     16ULL*1024*1024,     // [3] ReduceScatter
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
