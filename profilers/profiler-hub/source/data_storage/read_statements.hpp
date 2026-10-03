@@ -1012,8 +1012,10 @@ private:
                                  "COUNT(*) AS count",
                                  "MIN(T.start) AS min_start",
                                  "MAX(T.end) AS max_end")
-                         .from(fmt::format("{}_{}", table, m_uuid), "T")
-                         .inner_join("rocpd_sample", "S", "S.event_id = T.event_id")
+                         .from("rocpd_sample", "S")
+                         .cross_join(fmt::format("{}_{}", table, m_uuid),
+                                     "T",
+                                     "T.event_id = S.event_id")
                          .group_by("T.nid", "T.pid", "T.tid", "S.track_id")
                          .get_query_string();
             return m_backend->create_read_statement_executor<track_thread_sample_result>(
