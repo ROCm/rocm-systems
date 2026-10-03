@@ -263,13 +263,34 @@ struct kernel_symbol_info_t
 using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
 using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
+/** @brief Distinguishes the identity columns a track was derived from.
+ *         Needed because `agent_id` alone can't tell a kernel-dispatch
+ *         per-agent+queue track apart from a PMC per-agent track once both
+ *         set it. */
+enum class track_kind_t
+{
+    thread,                       ///< (nid,pid,tid)-based; from rocpd_track.
+    pmc_agent,                    ///< PMC/counter samples split by agent_id.
+    kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
+    memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
+    memory_copy_agent_queue,      ///< Memory copies, by (nid,dst_agent_id,queue_id).
+    // One merged track per (nid,pid,stream_id), combining kernel-dispatch +
+    // memory-allocate + memory-copy events on that stream -- matches optiq's
+    // actual behavior (a single kRocProfVisDmStreamTrack per stream, not one
+    // per event type; confirmed against a real roc_optiq_track_info cache).
+    stream,
+};
+
 struct track_info_t
 {
-    size_t      id{};
-    std::string name{};
-    std::string extdata{};
-    size_t      event_count{};
-    size_t      agent_id{};
+    size_t       id{};
+    std::string  name{};
+    std::string  extdata{};
+    size_t       event_count{};
+    size_t       agent_id{};
+    size_t       queue_id{};
+    size_t       stream_id{};
+    track_kind_t category{ track_kind_t::thread };
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
