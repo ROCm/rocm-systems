@@ -19,6 +19,18 @@
 
 namespace hiprtc {
 
+namespace {
+bool isProfileRuntimeOption(const std::string& option) {
+  auto isExactOrJoined = [&option](const char* spelling) {
+    return option == spelling || option.rfind(std::string(spelling) + "=", 0) == 0;
+  };
+  return isExactOrJoined("-fprofile-generate") || isExactOrJoined("-fcs-profile-generate") ||
+         isExactOrJoined("-fprofile-instr-generate") ||
+         isExactOrJoined("-fprofile-generate-cold-function-coverage") ||
+         option == "-fcreate-profile" || option == "-noprofilelib";
+}
+}  // namespace
+
 // RTC Compile Program Member Functions
 RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_), fgpu_rdc_(false) {
   if ((compile_input_.Create() != AMD_COMGR_STATUS_SUCCESS) ||
@@ -212,8 +224,15 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     }
   } else {
     LogInfo("Using the new path of comgr");
-    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_,
-                                           build_log_, executable_)) {
+    std::vector<std::string> linkOpts(link_options_);
+    // Profile generation needs the device runtime at the final COMGR link.
+    for (const auto& option : compileOpts) {
+      if (isProfileRuntimeOption(option)) {
+        linkOpts.push_back(option);
+      }
+    }
+    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, linkOpts, build_log_,
+                                           executable_)) {
       LogError("Failing to compile to realloc");
       return false;
     }
