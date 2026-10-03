@@ -45,6 +45,12 @@ class GpuAgent;
 ///   e. Publish via the doorbell signal store after a release fence.
 /// Callers must serialize a-e (e.g. a lock) because the index accessors here
 /// do not implement a reservation/commit handshake.
+///
+/// RESERVED TAIL. On Windows/DXG libhsakmt appends a progress-fence packet on every doorbell,
+/// so the producer must reserve room for it: count those bytes in the ring-space check, keep
+/// them from straddling the ring end, and advance the write index by (packets + tail) leaving
+/// the trailing bytes unwritten. The size comes from HsaSdmaUserQueueInfo::EpilogueBytes and
+/// is 0 on every other path. RingDoorbell publishes the write index unchanged.
 class SdmaQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
  public:
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }

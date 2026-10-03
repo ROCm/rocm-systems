@@ -233,19 +233,29 @@ hsa_status_t SdmaQueue::RingDoorbell(uint64_t write_index) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
-  // Publish step of the submission protocol. SDMA queues are externally
-  // synchronized: by the time the doorbell is stored the caller must have
-  // written complete packets into the ring and handled wrap/space checks.
-  //
-  // The public write-index operations use queue_wptr_ directly. Ensure the
-  // canonical write pointer and packet stores are visible before the doorbell.
-  atomic::Store(queue_wptr_, write_index, std::memory_order_release);
+  // Published exactly as the caller advanced it: reserving the epilogue is the producer's
+  // job, like every other ring-space decision (see the class header's RESERVED TAIL note).
+  const uint64_t publish_index = write_index;
+
+  // Publish step: SDMA queues are externally synchronized, so by now the caller must have
+  // written complete packets and handled wrap/space checks. Make the write pointer and the
+  // packet stores visible before the doorbell.
+  atomic::Store(queue_wptr_, publish_index, std::memory_order_release);
   std::atomic_thread_fence(std::memory_order_release);
-  *queue_doorbell_ = write_index;
+  *queue_doorbell_ = publish_index;
 
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ||
       core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, write_index));
+    // On DXG this is what submits the span to the KMD, so a failure here means the span will
+    // never execute.
+    HSAKMT_STATUS kmt_status =
+        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, publish_index));
+    if (kmt_status != HSAKMT_STATUS_SUCCESS) {
+      debug_print("SDMA doorbell failed: QueueId=0x%llx, wptr=0x%llx, status=%d\n",
+                  (unsigned long long)queue_resource_.QueueId,
+                  (unsigned long long)publish_index, kmt_status);
+      return HSA_STATUS_ERROR;
+    }
   }
 
   return HSA_STATUS_SUCCESS;

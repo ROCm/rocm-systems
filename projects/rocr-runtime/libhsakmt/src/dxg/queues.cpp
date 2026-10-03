@@ -141,6 +141,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
     QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
     QueueResource->Queue_write_ptr_aql = queue_->GetRingWptr();
     QueueResource->Queue_read_ptr_aql = queue_->GetRingRptr();
+    // The producer also needs the per-submit epilogue size; it asks for it with
+    // hsaKmtGetSdmaUserQueueInfo rather than getting it back through HsaQueueResource.
   } break;
   default:
     assert(false);
@@ -260,7 +262,30 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  queue_->RingDoorbell(value);
+  // A false return means the packets were never handed to the KMD; report it so the
+  // producer can fail the submission instead of waiting on work that will never run.
+  if (!queue_->RingDoorbell(value))
+    return HSAKMT_STATUS_ERROR;
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetSdmaUserQueueInfo(HSA_QUEUEID QueueId,
+                                                   HsaSdmaUserQueueInfo *Info) {
+  CHECK_DXG_OPEN();
+
+  auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
+  if (!queue_ || !Info)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  memset(Info, 0, sizeof(*Info));
+
+  // Only a native SDMA user queue has a ring epilogue; every other queue kind (compute,
+  // or SDMA on the legacy SWS translation thread) reports zero, which leaves the
+  // producer's reservation arithmetic a no-op.
+  if (queue_->IsNativeSdma())
+    Info->EpilogueBytes = wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes;
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

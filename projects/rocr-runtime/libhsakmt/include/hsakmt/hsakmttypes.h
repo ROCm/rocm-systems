@@ -795,6 +795,26 @@ typedef struct _HsaQueueResource
     volatile HSAint64* ErrorReason;  /** exception bits signal payload */
 } HsaQueueResource;
 
+/** Windows/DXG only: properties of a native SDMA user queue, i.e. a WDDM HwQueue
+ *  driven straight from an ROCr-owned SDMA ring. Retrieved per queue with
+ *  hsaKmtGetSdmaUserQueueInfo.
+ *
+ *  This is deliberately NOT part of HsaQueueResource: that struct is embedded
+ *  verbatim in the virtio guest/host wire format (vHsaQueueResource in
+ *  hsakmt_virtio_proto.h), which carries no version field, so growing it would
+ *  silently shift every following field for a mismatched guest/host pair.
+ */
+typedef struct _HsaSdmaUserQueueInfo
+{
+    /** Byte count of the FENCE epilogue that libhsakmt appends to the ring on every
+     *  native SDMA HwQueue doorbell. The producer must reserve this many extra bytes
+     *  per submit so its write index stays in step with the submitted wptr, and must
+     *  keep the epilogue from straddling the ring end. 0 when the queue is not a
+     *  native SDMA user queue. */
+    HSAuint32 EpilogueBytes;
+    HSAuint32 Reserved;
+} HsaSdmaUserQueueInfo;
+
 
 //TEMPORARY structure definition - to be used only on "Triniti + Southern Islands" platform
 typedef struct _HsaQueueReport
