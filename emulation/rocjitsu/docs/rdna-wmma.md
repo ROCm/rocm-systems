@@ -26,15 +26,26 @@ other SIMD instruction paths. It is read once per linked module at load time.
 
 Both wave sizes are eligible for optional async execution of these WMMA shapes.
 The ordinary full-EXEC, register-footprint, plugin and execution-mode checks
-still apply. Helpers execute the same portable SIMD implementation. The arithmetic backend
-does not change admission policy: an independent instruction must be available
+still apply. Helpers execute the same portable SIMD implementation. The
+arithmetic backend does not change admission policy: an independent instruction must be available
 on the issuer, and unavailable helper capacity falls back to inline execution.
 Use the JSON thread controls documented in [asynchronous MMA](async-instructions.md).
 
 Faster individual instructions can reduce the benefit of offloading them.
-Thread allocation must therefore be measured with SIMD enabled rather
-than copied from scalar-WMMA measurements. Three-repetition application results
-and the selected thread policy are recorded with the production qualification.
+Thread allocation is measured with SIMD enabled. The gfx1100 preset selects
+32 dispatch threads and no helpers at a budget of 32 or more: this improves
+Gluon while the FP16 IREE matmul is essentially unchanged. gfx1201 selects
+24 dispatch threads and eight helpers at that budget: Tensile benefits while
+IREE and Gluon remain close to their synchronous timings. Both retain the
+existing synchronous entries through 24 threads. gfx1151 keeps its existing
+24-thread ceiling pending application performance measurements.
+
+These choices come from three interleaved repetitions on fixed physical CPUs,
+using whole-process time including validation. The RDNA3 FP16 IREE workload
+is a 1024-cubed matmul with disassembled wave32 WMMA; unlike the existing FP32
+controls, it exercises the optimized arithmetic. Helpers can issue substantial
+fractions of WMMA without improving end-to-end time, so issue counts alone do
+not justify reserving helper threads. Custom JSON allocations remain available.
 
 ## Qualification
 

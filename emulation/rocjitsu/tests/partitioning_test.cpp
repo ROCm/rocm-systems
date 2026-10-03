@@ -481,16 +481,29 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
   }
 }
 
-TEST(ExecutionThreadBudgetTest, DesktopTablesStopAtTheMeasuredCeiling) {
-  for (const auto *name : {"gfx1100_w7900", "gfx1151", "gfx1201_r9700"}) {
+TEST(ExecutionThreadBudgetTest, DesktopTablesUseMeasuredSimdAllocations) {
+  struct Case {
+    const char *name;
+    uint32_t dispatch, helpers;
+  };
+  for (Case c :
+       {Case{"gfx1100_w7900", 32, 0}, Case{"gfx1151", 24, 0}, Case{"gfx1201_r9700", 24, 8}}) {
+    SCOPED_TRACE(c.name);
     auto settings = config::load_execution_thread_settings(
-        std::string(CONFIG_DIR) + "/" + name + ".json", rocjitsu::kEmbeddedSchema);
-    for (uint32_t budget : {24u, 32u, 64u}) {
+        std::string(CONFIG_DIR) + "/" + c.name + ".json", rocjitsu::kEmbeddedSchema);
+    for (uint32_t budget : {24u, 31u, 32u, 64u}) {
+      SCOPED_TRACE(budget);
       settings.request.budget = budget;
-      auto plan = settings.resolve(128);
+      const auto plan = settings.resolve(128);
       EXPECT_EQ(plan.engines, 1u);
-      EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{24}));
+      EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{budget >= 32 ? c.dispatch : 24}));
+      EXPECT_EQ(plan.helpers, budget >= 32 ? c.helpers : 0u);
+      EXPECT_LE(plan.dispatch[0] + plan.helpers, budget);
     }
+    settings.request.helpers = 0;
+    const auto synchronous = settings.resolve(128);
+    EXPECT_EQ(synchronous.dispatch, (std::vector<uint32_t>{c.dispatch}));
+    EXPECT_EQ(synchronous.helpers, 0u);
   }
 }
 

@@ -6,15 +6,16 @@ wave. A register scoreboard keeps reads and writes ordered. The wave drains
 all pending work before leaving its bounded issue window or returning to CU
 scheduling.
 
-The gfx950 and gfx1250 single-GPU presets enable this path when their selected
-thread granule includes helpers. Other shipped targets and multi-GPU presets
-keep helpers disabled. This accelerates host execution; it does not model GPU
+The gfx950, gfx1250 and gfx1201 single-GPU presets enable this path when their
+selected thread granule includes helpers. Other shipped targets and multi-GPU
+presets keep helpers disabled. This accelerates host execution; it does not model GPU
 MMA latency or validate application memory hazards.
 
-RDNA3, RDNA3.5 and RDNA4 support opt-in helpers for wave32 and wave64 F32-output FP16/BF16 K16 WMMA,
-including the bit-exact arithmetic paths. Their shipped thread tables retain zero
-helpers. Partial-EXEC waves execute synchronously. See [RDNA WMMA execution](rdna-wmma.md)
-for SIMD backends and their interaction with helper allocation.
+RDNA3, RDNA3.5 and RDNA4 support helpers for wave32 and wave64 F32-output
+FP16/BF16 K16 WMMA, including the bit-exact arithmetic paths. gfx1201 selects
+24 dispatch threads plus eight helpers at a budget of 32; gfx1100 and gfx1151
+keep helpers opt-in. Partial-EXEC waves execute synchronously. See
+[RDNA WMMA execution](rdna-wmma.md) for SIMD and its effect on helper allocation.
 
 ## Thread policy
 
@@ -26,8 +27,9 @@ executes its own CUs while helpers can execute eligible MMA instructions.
 `async_helper_threads` extends the existing allocation tables. Omission or -1
 selects the configured policy; zero disables helpers. Explicit counts range
 from 0 to 128 and take priority over the automatic budget. Automatic selection
-uses CPU affinity and the target's allocation table. Desktop and older CDNA
-presets stop at an engine/dispatch cost of 24. gfx950 adds eight helpers for
+uses CPU affinity and the target's allocation table. gfx1151, gfx1201 and older CDNA
+presets stop at an engine/dispatch cost of 24; gfx1100 uses up to 32 dispatch
+threads. gfx1201 adds eight helpers at a budget of 32. gfx950 adds eight helpers for
 32 total threads; gfx1250 uses up to 40 engine/dispatch threads and eight
 helpers for 48 total.
 
@@ -55,7 +57,9 @@ eligible MMA reaches the adapter. Disabling helpers retains 8/17/0 on gfx950
 and 8/33/0 on gfx1250 at larger budgets. These defaults limit CPU use while
 retaining matrix overlap; they are not universal throughput optima.
 
-Desktop and MI210 presets stop at 1/24/0; CDNA3 stops at 8/17/0.
+gfx1100 stops at 1/32/0, gfx1201 at 1/24/8, and gfx1151 and MI210 at
+1/24/0; CDNA3 stops at 8/17/0. The desktop entries through 24 threads are
+unchanged. Disabling gfx1201 helpers retains 1/24/0.
 Two- and four-GPU presets keep **1/1/0** for RCCL. Mirage embeds these native
 tables in its rocjitsu backend and exposes the helper option alongside the
 engine, dispatch and total-budget options.
@@ -100,7 +104,7 @@ Both targets use [cached lookahead admission](mma-admission.md) to require an
 independent MMA that can remain on the issuer. Scaled instructions require
 vector or inline scale operands; scalar-register scales execute synchronously.
 Encoding filters bypass ineligible instructions before queue construction.
-The opt-in RDNA paths uses the same admission and register dependency checks.
+The RDNA paths use the same admission and register dependency checks.
 
 The adapter requires functional execution, the target wave size, full EXEC,
 ordinary register addressing, and no active debugger or trap handler. An ISA
