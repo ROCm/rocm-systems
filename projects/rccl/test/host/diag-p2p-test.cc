@@ -1412,9 +1412,9 @@ struct DiagP2pRunScene {
       myDesc = desc[0];
     }
     for (int p = 0; p < n; p++) {
-      if (descs != nullptr) {
-        descs[p] = p == self ? myDesc : ncclDiagP2pMemDesc{1, n * sizeof(ncclDiagP2pSlot),
-                                                           reinterpret_cast<uintptr_t>(peerSlots[p].data()), {}};
+      if (descs != nullptr && p != self) {
+        descs[p] = {1, n * sizeof(ncclDiagP2pSlot), reinterpret_cast<uintptr_t>(peerSlots[p].data()), {}};
+        std::memcpy(&descs[p].ipcDesc, &descs[p].directPtr, sizeof(descs[p].directPtr));
       }
       if (p == self) {
         continue;
