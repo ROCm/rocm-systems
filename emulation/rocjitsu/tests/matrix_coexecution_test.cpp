@@ -637,13 +637,19 @@ struct ExtendedMmaCase {
   bool mfma;
   unsigned wmma_k;
   unsigned mfma_family;
+  unsigned wave_size;
 };
 std::vector<ExtendedMmaCase> extended_mma_cases() {
   std::vector<ExtendedMmaCase> cases;
   auto add = [&](rj_code_arch_t arch, auto words, uint32_t input, unsigned wmma_k,
                  unsigned mfma_family = 0) {
-    cases.push_back(
-        {arch, {words.begin(), words.end()}, input, mfma_family != 0, wmma_k, mfma_family});
+    cases.push_back({arch,
+                     {words.begin(), words.end()},
+                     input,
+                     mfma_family != 0,
+                     wmma_k,
+                     mfma_family,
+                     mfma_family != 0 ? 64u : 32u});
   };
   for (auto opcode : {cdna5::kVWmmaF3216x16x32F16Vop3p, cdna5::kVWmmaF3216x16x32Bf16Vop3p})
     add(ROCJITSU_CODE_ARCH_CDNA5,
@@ -721,6 +727,16 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
                                                 inline_scale ? 242 : 449, 0, 0, 4, 4, 64, 256, 288,
                                                 320),
           0x22222222, 0, 2);
+  const size_t wave32_cases = cases.size();
+  for (size_t index = 0; index != wave32_cases; ++index) {
+    const auto arch = cases[index].arch;
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+        arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      auto wave64 = cases[index];
+      wave64.wave_size = 64;
+      cases.push_back(std::move(wave64));
+    }
+  }
   return cases;
 }
 
@@ -734,6 +750,10 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
+    const unsigned wave_size = c.wave_size;
+    SCOPED_TRACE(wave_size);
+    const bool rdna = c.arch == ROCJITSU_CODE_ARCH_RDNA3 || c.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                      c.arch == ROCJITSU_CODE_ARCH_RDNA4;
     const bool expect_async =
         c.mfma ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
                : (c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32) ||
@@ -742,10 +762,15 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
                       c.wmma_k == 16);
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
-    for (unsigned hazard = 0; hazard != 5; ++hazard) {
+    for (unsigned hazard = 0; hazard != (rdna ? 7u : 5u); ++hazard) {
       SCOPED_TRACE(hazard);
       auto second_words = c.words;
-      const unsigned dst = hazard == 2 ? 0 : hazard == 3 ? 64 : hazard == 4 ? 192 : 128;
+      const unsigned dst = hazard == 2   ? 0
+                           : hazard == 3 ? 64
+                           : hazard == 4 ? 192
+                           : hazard == 5 ? 64 + 256 / wave_size
+                           : hazard == 6 ? 256 - 256 / wave_size
+                                         : 128;
       const unsigned src0 = hazard == 1 ? 320 : 256;
       second_words[suffix] = (second_words[suffix] & ~255u) | dst;
       second_words[suffix + 1] =
@@ -768,11 +793,10 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 256;
       auto cu = amdgpu::ComputeUnitCore::create("extended_matrix_cu", config, &memory, &l2);
-      auto *wf = cu->dispatch_wf(0, pc, 106, 256);
+      auto *wf = cu->dispatch_wf(0, pc, 106, 256, wave_size);
       ASSERT_NE(wf, nullptr);
-      const unsigned wave_size = c.mfma ? 64 : 32;
       const unsigned registers = c.mfma ? 512 : 256;
-      wf->set_exec(c.mfma ? ~uint64_t{0} : 0xffffffff);
+      wf->set_exec(wave_size == 64 ? ~uint64_t{0} : 0xffffffff);
       const auto base = wf->vgpr_alloc().base;
       auto seed = [&] {
         for (unsigned reg = 0; reg != registers; ++reg)
@@ -817,7 +841,11 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
       if (!expect_async) {
         EXPECT_EQ(offloads, 0u);
         EXPECT_EQ(after.windows - windows_before, 0u);
-      } else if (hazard == 0) {
+      } else if (rdna && wave_size == 64 && hazard >= 5) {
+        // Wave32-sized decoded footprints conservatively overlap adjacent
+        // wave64 outputs or exceed the register file at its last four VGPRs.
+        EXPECT_EQ(offloads, 0u);
+      } else if (hazard == 0 || (rdna && hazard >= 5)) {
         // Admission may reject dependent pairs, but this pair is independent
         // for every shape, register bank, and scale representation above.
         EXPECT_GT(offloads, 0u);

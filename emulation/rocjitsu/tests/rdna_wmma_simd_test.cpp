@@ -1,5 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
+/// @file rdna_wmma_simd_test.cpp
+/// @brief Raw-bit arithmetic and decoded-register qualification for RDNA WMMA SIMD.
+
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -14,12 +18,19 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd_test_hooks.h"
+
 #include <array>
 #include <cfenv>
+#include <cstdint>
 #include <gtest/gtest.h>
+#include <memory>
 #include <random>
+#include <vector>
+
 namespace {
+
 using namespace rocjitsu;
+
 struct HostState {
   fenv_t environment;
   bool scalar = util::force_scalar();

@@ -1,9 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
+/// @file rdna_dot_simd.h
+/// @brief Integer SIMD for bit-exact GFX11 DOT2 and GFX12 DOT4 WMMA outputs.
+
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "util/simd.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
 
 // Vectorize independent F32 outputs, preserving each architecture's reduction boundaries.
 // No floating-point operations, host-specific intrinsics, or scalar lane fallback.
@@ -13,7 +20,7 @@ namespace sx = util::stdx;
 using U = util::native<uint32_t>;
 using I = util::native<int32_t>;
 using M = U::mask_type;
-inline constexpr size_t width = U::size();
+inline constexpr std::size_t width = U::size();
 
 inline U u(I v) { return sx::static_simd_cast<U>(v); }
 inline I i(U v) { return sx::static_simd_cast<I>(v); }

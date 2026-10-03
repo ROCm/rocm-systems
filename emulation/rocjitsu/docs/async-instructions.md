@@ -106,6 +106,12 @@ vector or inline scale operands; scalar-register scales execute synchronously.
 Encoding filters bypass ineligible instructions before queue construction.
 The RDNA paths use the same admission and register dependency checks.
 
+RDNA wave64 eligibility is correctness-qualified with conservative footprints
+from the decoded wave32 operand widths. This can create extra register
+dependencies or reject otherwise valid operands near the end of the allocated
+register file, causing synchronous execution. The current application
+performance measurements use wave32; wave64 throughput has not been measured.
+
 The adapter requires functional execution, the target wave size, full EXEC,
 ordinary register addressing, and no active debugger or trap handler. An ISA
 property enables the adapter only for supported families. Other architectures

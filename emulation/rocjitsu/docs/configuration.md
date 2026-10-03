@@ -189,24 +189,26 @@ engine caller and can share the SoC's D-1 persistent workers. Callers progress
 concurrently and join only their own submission. Runtime, doorbell and daemon
 threads are outside this execution budget.
 
-The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
+The single-GPU tables select these engine/dispatch/helper triples (E/D/H):
 
-| Budget | gfx950 E/D | gfx1250 E/D | gfx1100/gfx1151/gfx1201 E/D |
-|---:|---:|---:|---:|
-| 1 | 1/1 | 1/1 | 1/1 |
-| 2 | 1/2 | 1/2 | 1/2 |
-| 4 | 2/3 | 1/4 | 1/4 |
-| 8 | 2/7 | 2/7 | 1/8 |
-| 16 | 8/9 | 8/9 | 1/16 |
-| 24 | 8/17 | 8/17 | 1/24 |
-| 32 | 8/17 | 8/25 | 1/24 |
-| 40 and above | 8/17 | 8/33 | 1/24 |
+| Budget | gfx950 | gfx1250 | gfx1100 | gfx1151 | gfx1201 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1/1/0 | 1/1/0 | 1/1/0 | 1/1/0 | 1/1/0 |
+| 2 | 1/2/0 | 1/2/0 | 1/2/0 | 1/2/0 | 1/2/0 |
+| 4 | 2/3/0 | 1/4/0 | 1/4/0 | 1/4/0 | 1/4/0 |
+| 8 | 2/7/0 | 2/7/0 | 1/8/0 | 1/8/0 | 1/8/0 |
+| 16 | 8/9/0 | 8/9/0 | 1/16/0 | 1/16/0 | 1/16/0 |
+| 24 | 8/17/0 | 8/17/0 | 1/24/0 | 1/24/0 | 1/24/0 |
+| 32 | 8/17/8 | 8/25/0 | 1/32/0 | 1/24/0 | 1/24/8 |
+| 40 | 8/17/8 | 8/33/0 | 1/32/0 | 1/24/0 | 1/24/8 |
+| 48 and above | 8/17/8 | 8/33/8 | 1/32/0 | 1/24/0 | 1/24/8 |
 
-The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
-gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
-at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
-`async_helper_threads: 0` retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
-CDNA3 stops at 8/17/0.
+The gfx950, gfx1250 and gfx1201 tables enable
+[async MMA helpers](async-instructions.md#thread-policy) after reaching their
+engine/dispatch ceiling. Larger hosts retain the last allocation. Explicit
+`async_helper_threads: 0` removes helpers while retaining the synchronous
+engine/dispatch allocation: 8/17/0 on gfx950, 8/33/0 on gfx1250 and 1/24/0 on
+gfx1201 at larger budgets. MI210 stops at 1/24/0; CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:

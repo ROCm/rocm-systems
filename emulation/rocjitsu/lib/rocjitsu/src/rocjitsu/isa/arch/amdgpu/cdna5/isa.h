@@ -64,7 +64,7 @@ public:
 
 /// @brief gfx1250 ISA traits.
 struct Isa : amdgpu::RdnaIsaBase {
-  static constexpr uint32_t ASYNC_MMA_WAVE_SIZES = 32; ///< Async MMA adapter wave size.
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZES = 32; ///< Mask of qualified async MMA wave sizes.
   using Decoder = rocjitsu::cdna5::Decoder;
   using MachineInst = rocjitsu::cdna5::MachineInst;
   using OperandType = rocjitsu::cdna5::OperandType;

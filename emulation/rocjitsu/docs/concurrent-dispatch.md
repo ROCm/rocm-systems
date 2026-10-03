@@ -32,16 +32,16 @@ other runtime service threads are outside this allocation.
 
 ## Configuration policy
 
-`thread_allocations` contains preferred `num_threads`/`cpu_dispatch_threads`
-pairs. `resolve_execution_threads()` is a pure function: apply explicit overrides
+`thread_allocations` contains preferred engine/dispatch/helper triples. `resolve_execution_threads()` is a pure function: apply explicit overrides
 and topology clamps, calculate each entry's total retained thread count, and
 choose the largest fitting entry. Later entries break ties. It does not fill
 unused budget between entries. The default budget is CPU affinity and the
 target table sets the allocation ceiling. `cpu_thread_budget` overrides the
 budget; explicit knob settings take priority.
 
-Desktop, MI210 and CDNA3 tables stop at an engine/dispatch cost of 24.
-gfx950 adds eight MMA helpers for 32 total threads; gfx1250 uses up to 40
+gfx1100 uses up to 32 dispatch threads without helpers. gfx1151, gfx1201,
+MI210 and CDNA3 stop at an engine/dispatch cost of 24. gfx1201 and gfx950
+add eight MMA helpers for 32 total threads; gfx1250 uses up to 40
 engine/dispatch threads and eight helpers for 48 total. See
 [the allocation table](configuration.md#thread-accounting-and-preferred-allocations)
 and [async MMA policy](async-instructions.md#thread-policy).

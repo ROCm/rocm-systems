@@ -10,7 +10,8 @@ fallback. Packed-output WMMA retains its existing implementation.
 The portable backend uses `std::experimental::simd` through `util::stdx`.
 It is enabled for native widths of eight or sixteen 32-bit lanes. All arithmetic,
 including special values, is vectorized with integer operations. Narrower native
-SIMD widths retain scalar execution. This follows the codebase's existing
+SIMD widths retain scalar execution. The arithmetic primitives are also tested
+at four lanes; this does not enable the production fast path at that width. This follows the codebase's existing
 `util::stdx` and `RJ_FORCE_SCALAR` conventions without a new backend selector.
 
 The implementation acquires observed register regions, gathers operands with
@@ -27,8 +28,8 @@ other SIMD instruction paths. It is read once per linked module at load time.
 Both wave sizes are eligible for optional async execution of these WMMA shapes.
 The ordinary full-EXEC, register-footprint, plugin and execution-mode checks
 still apply. Helpers execute the same portable SIMD implementation. The
-arithmetic backend does not change admission policy: an independent instruction must be available
-on the issuer, and unavailable helper capacity falls back to inline execution.
+arithmetic backend does not change admission policy: an independent instruction
+must be available on the issuer, and unavailable helper capacity falls back to inline execution.
 Use the JSON thread controls documented in [asynchronous MMA](async-instructions.md).
 
 Faster individual instructions can reduce the benefit of offloading them.
@@ -36,7 +37,11 @@ Thread allocation is measured with SIMD enabled. The gfx1100 preset selects
 32 dispatch threads and no helpers at a budget of 32 or more: this improves
 Gluon while the FP16 IREE matmul is essentially unchanged. gfx1201 selects
 24 dispatch threads and eight helpers at that budget: Tensile benefits while
-IREE and Gluon remain close to their synchronous timings. Both retain the
+IREE and Gluon remain close to their synchronous timings. This policy keeps
+the existing 24 dispatch threads and adds helpers using the additional budget,
+preserving general CU capacity for workloads with little eligible WMMA. The
+measured 16-dispatch/16-helper split is faster for Tensile but trades away
+that dispatch capacity, so it remains an explicit workload-specific option. Both retain the
 existing synchronous entries through 24 threads. gfx1151 keeps its existing
 24-thread ceiling pending application performance measurements.
 
