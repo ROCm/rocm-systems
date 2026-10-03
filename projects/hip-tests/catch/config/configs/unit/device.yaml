@@ -464,7 +464,7 @@ device:
     tags: [P0]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "(amd_linux) SWDEV-511679 : Below tests fail in stress test; (amd_wsl) Note: hsa_amd_ipc_ is dummy Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
     <<: *level_2
     tags: [P0]
@@ -482,7 +482,7 @@ device:
     tags: [P0]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "(amd_linux) SWDEV-511679 : Below tests fail in stress test; (amd_wsl) Note: hsa_amd_ipc_ is dummy Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     tags: [P0]
@@ -494,4 +494,4 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process/device — not locally verifiable on single-GPU gfx1030. Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"

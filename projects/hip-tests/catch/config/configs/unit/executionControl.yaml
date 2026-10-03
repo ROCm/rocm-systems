@@ -4,7 +4,7 @@ executionControl:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-242 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: attr.constSizeBytes != kConstSizeBytes (defect EXSWHTEC-242). AIRUNTIME-XXXX Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncGetAttributes_Negative_Parameters:
     <<: *level_2

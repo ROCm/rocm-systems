@@ -4,7 +4,7 @@ dynamicLoading:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: device-kernels-from-library REQUIRE(testResult==true) fails. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
     <<: *level_2

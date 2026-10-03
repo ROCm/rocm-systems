@@ -37,7 +37,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale ModuleTest, correct cwd): launch error-code mismatch (was PSDB fail). AIRUNTIME-XXXX Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
@@ -346,7 +346,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale ModuleTest, correct cwd): launch error-code mismatch (was PSDB fail). AIRUNTIME-XXXX Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2

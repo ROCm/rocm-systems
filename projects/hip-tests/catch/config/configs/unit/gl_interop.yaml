@@ -54,7 +54,7 @@ gl_interop:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-439004: Below tests failing randomly in CQE staging Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires GL + display; exe not built in headless Docker — not locally verifiable on gfx1030. SWDEV-439004 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
     <<: *level_2
     disabled:
@@ -64,7 +64,7 @@ gl_interop:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-439004: Below tests failing randomly in CQE staging Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires GL + display; exe not built in headless Docker — not locally verifiable on gfx1030. SWDEV-439004 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
     <<: *level_2
     disabled:
@@ -74,17 +74,17 @@ gl_interop:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-439004: Below tests failing randomly in CQE staging Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires GL + display; exe not built in headless Docker — not locally verifiable on gfx1030. SWDEV-439004 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphicsUnmapResources_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-439004: Below tests failing randomly in CQE staging Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires GL + display; exe not built in headless Docker — not locally verifiable on gfx1030. SWDEV-439004 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphicsUnregisterResource_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-439004: Below tests failing randomly in CQE staging Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires GL + display; exe not built in headless Docker — not locally verifiable on gfx1030. SWDEV-439004 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters: *level_2
   Unit_hipGL_ContextSwitch_Basic: *level_2
   Unit_hipGL_ContextSwitch_SeparateContextSetups: *level_2

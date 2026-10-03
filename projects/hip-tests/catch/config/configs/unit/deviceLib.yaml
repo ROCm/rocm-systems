@@ -653,7 +653,7 @@ deviceLib:
     tags: [misc]
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "\"============================TheRock_Bump_Windows_timeout #4547===========================\"; \"=== This is newly added test to check ASAN memory errors deduced from rocDecode ===\"; \"=== during ASAN/memleak detection work on Linux ===\" Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) genuine 180s hang/SIGTERM (stale DeviceTest; matches TheRock_Bump_Windows_timeout #4547). AIRUNTIME-XXXX Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
   Unit_coop_memcpy_async_thread_block_tile_Basic:
     <<: *level_2
     tags: [cooperative, ops]

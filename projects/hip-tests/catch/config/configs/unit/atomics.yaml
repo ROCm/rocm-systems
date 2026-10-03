@@ -236,7 +236,7 @@ atomics:
     tags: [deviceLib, system, multigpu]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Requires >1 GPU (peer); self-skips on single-device gfx1030 — not locally verifiable. Rock_Linux_Failures_on_gfx94X Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_2
     tags: [deviceLib, system]

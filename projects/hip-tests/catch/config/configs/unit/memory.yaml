@@ -857,13 +857,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale MemoryTest1): accessedBy sentinel (-1) not written (defect EXSWHTEC-238). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale MemoryTest1): accessedBy sentinel not written on partial range (defect EXSWHTEC-238). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice:
     <<: *level_2
@@ -1174,7 +1174,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Self-skips: fewer than two GPUs (3D peer) — not locally verifiable. Rock_Linux_Failures_on_gfx94X Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_2
@@ -2592,7 +2592,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "(amd_linux) NOTE: The following test is disabled due to defect - EXSWHTEC-244; (amd_windows) Note: intermittent Seg fault failure; (amd_wsl) Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale MemoryTest2): advise-flag attribute mismatch (defect EXSWHTEC-244). AIRUNTIME-XXXX Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_Rounding:
     <<: *level_2
@@ -3048,7 +3048,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process — not locally verifiable single-GPU. Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetDefaultMemPool_Negative:
     <<: *level_2
     tags: [alloc]

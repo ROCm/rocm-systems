@@ -125,7 +125,7 @@ graph:
     tags: [lifecycle, multigpu]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Self-skips: requires >1 GPU (device-context change) — not locally verifiable single-GPU. SWDEV-445928 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
     <<: *level_2
     disabled:
@@ -615,7 +615,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "ROCM-22772: Temporarily disabled until multi-device graph is added Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Self-skips: fewer than two GPUs (multi-device) — not locally verifiable. ROCM-22772 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
     tags: [multigpu]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative:
     <<: *level_2
@@ -1581,7 +1581,7 @@ graph:
     tags: [exec]
     disabled:
       targets: [amd_windows, amd_linux]
-      reason: "ROCM-22772: Temporarily disabled until multi-device graph is added Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Self-skips: fewer than two GPUs (cross-device) — not locally verifiable. ROCM-22772 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
@@ -1787,7 +1787,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "(amd_linux) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German); (amd_windows) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German) Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: expected hipErrorInvalidValue not returned on free-alloc-again (SWDEV-457316). ROCM-29915 Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_2

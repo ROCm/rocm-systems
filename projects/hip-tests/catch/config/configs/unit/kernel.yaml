@@ -88,7 +88,7 @@ kernel:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: expected hipErrorInvalidConfiguration not returned for oversize grid. AIRUNTIME-2862 Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_2
@@ -107,7 +107,7 @@ kernel:
     tags: [P0]
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Source hipKernelStackSize.cc compiled only for gfx1250/gfx1251 (unit/kernel/CMakeLists.txt arch gate); not built on other asics. Needs to be triaged on gfx1250/gfx1251 — if valid there, keep disabled on all other asics (they return gracefully). AIRUNTIME-2744"
   Unit_Validate_User_Sgpr_Count:
     <<: *level_2
   Unit_hipGridLaunch_MaxGridDim_DeviceProperties:
