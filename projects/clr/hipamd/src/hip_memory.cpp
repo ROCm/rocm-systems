@@ -3145,6 +3145,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         case hipReadBuffer:
           return hipErrorNotSupported;
       }
+
+      // ROCr would reject it asynchronously, too late to report.
+      if (copyFlags & hipMemcpyFlagExtOpSwap) {
+        const uintptr_t alignMask = stream.device().settings().sdma_swap_alignment_ - 1;
+        if (((reinterpret_cast<uintptr_t>(srcs[i]) | reinterpret_cast<uintptr_t>(dsts[i])) &
+             alignMask) != 0) {
+          return hipErrorInvalidValue;
+        }
+      }
     }
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);

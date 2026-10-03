@@ -850,6 +850,12 @@ memory:
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Misaligned:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Offsets:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast:
     <<: *level_2
     tags: [transfer]

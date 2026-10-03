@@ -853,6 +853,97 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   }
 }
 
+/**
+ * A misaligned swap is rejected and leaves both buffers untouched.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Misaligned) {
+  constexpr size_t kSizeInBytes = 4096;
+  constexpr size_t kMisalignment = 16;  // Below every swap granularity.
+  const bool misalignA = GENERATE(true, false);
+  const bool misalignB = GENERATE(true, false);
+  if (!misalignA && !misalignB) {
+    return;
+  }
+  CAPTURE(misalignA, misalignB);
+
+  const hipError_t expectedError =
+      getSwapExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) == hipSuccess
+          ? hipErrorInvalidValue
+          : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> initialValuesA(kSizeInBytes + kMisalignment, 10);
+  const std::vector<unsigned char> initialValuesB(kSizeInBytes + kMisalignment, 4);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, initialValuesA.size());
+  LinearAllocGuard<unsigned char> allocB(LinearAllocs::hipMalloc, initialValuesB.size());
+  fillBuffer(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+
+  void* swapPtrA = allocA.ptr() + (misalignA ? kMisalignment : 0);
+  void* swapPtrB = allocB.ptr() + (misalignB ? kMisalignment : 0);
+  size_t size = kSizeInBytes;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_index = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&swapPtrA, &swapPtrB, &size, 1, &attr, attrs_idxs, 1,
+                                      &fail_index, stream_guard.stream()),
+                  expectedError);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Swaps a range at an offset into each buffer; only that range is exchanged.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Offsets) {
+  constexpr size_t kAllocSize = 8192;
+  constexpr size_t kSwapSize = 4096;
+  const LinearAllocs allocTypeB = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc);
+  const auto [offsetA, offsetB] = GENERATE(table<size_t, size_t>(
+      {{0x0, 0x0}, {0x40, 0x40}, {0x0, 0x100}, {0x80, 0x180}, {0x0, 0x40}, {0xc0, 0x40}}));
+  CAPTURE(allocTypeB, offsetA, offsetB);
+
+  HIP_CHECK(hipSetDevice(0));
+  if (getSwapExpectedReturn(LinearAllocs::hipMalloc, allocTypeB) != hipSuccess) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+    return;
+  }
+
+  std::vector<unsigned char> initialA(kAllocSize);
+  std::vector<unsigned char> initialB(kAllocSize);
+  for (size_t i = 0; i < kAllocSize; ++i) {
+    initialA[i] = static_cast<unsigned char>(i ^ (i >> 8));
+    initialB[i] = static_cast<unsigned char>(~(i ^ (i >> 8)));
+  }
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, kAllocSize);
+  LinearAllocGuard<unsigned char> allocB(allocTypeB, kAllocSize);
+  fillBuffer(allocA.ptr(), initialA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialB, allocTypeB);
+
+  void* dsts[] = {allocA.ptr() + offsetA};
+  void* srcs[] = {allocB.ptr() + offsetB};
+  size_t sizes[] = {kSwapSize};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  std::vector<unsigned char> expectedA = initialA;
+  std::vector<unsigned char> expectedB = initialB;
+  std::copy_n(initialB.begin() + offsetB, kSwapSize, expectedA.begin() + offsetA);
+  std::copy_n(initialA.begin() + offsetA, kSwapSize, expectedB.begin() + offsetB);
+  requireBufferEquals(allocA.ptr(), expectedA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), expectedB, allocTypeB);
+}
+
 // Batched multicast copy: one shared source, multiple destinations.
 static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAllocs srcAllocType,
                                  LinearAllocs dstAllocType) {
