@@ -137,8 +137,14 @@ annotate_with_nic(const std::string& nic, std::optional<int> first_section = std
 {
     std::stringstream ss;
     ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
+    if(first_section)
+    {
+        ss << "_" << std::to_string(*first_section);
+    }
+    if(second_section)
+    {
+        ss << "_" << std::to_string(*second_section);
+    }
     return ss.str();
 }
 
@@ -244,26 +250,26 @@ struct metadata_registry
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
-    common::synchronized<info::process, state::thread> m_process{};
+    common::synchronized<info::process, state::thread> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>,
         state::thread>
-                                                                m_pmc_infos{};
-    common::synchronized<std::set<info::thread>, state::thread> m_threads{};
-    common::synchronized<std::set<info::track>, state::thread>  m_tracks{};
+                                                                m_pmc_infos;
+    common::synchronized<std::set<info::thread>, state::thread> m_threads;
+    common::synchronized<std::set<info::track>, state::thread>  m_tracks;
 
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_streams{};
-    common::synchronized<std::set<std::uint64_t>, state::thread>         m_queues{};
-    common::synchronized<std::unordered_set<std::string>, state::thread> m_strings{};
+    common::synchronized<std::set<std::uint64_t>, state::thread>         m_streams;
+    common::synchronized<std::set<std::uint64_t>, state::thread>         m_queues;
+    common::synchronized<std::unordered_set<std::string>, state::thread> m_strings;
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>,
                          state::thread>
-        m_code_objects{};
+        m_code_objects;
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>,
         state::thread>
-                                                      m_kernel_symbols{};
+                                                      m_kernel_symbols;
     rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
         rocprofiler::sdk::get_buffer_tracing_names<const char*>()
     };
@@ -273,10 +279,10 @@ private:
 
     // SDK PMC counter name ordering: device_id -> ordered name entries
     std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
-        m_gpu_perf_counter_counter_names{};
+        m_gpu_perf_counter_counter_names;
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
-        m_gpu_perf_counter_index{};
+        m_gpu_perf_counter_index;
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;
