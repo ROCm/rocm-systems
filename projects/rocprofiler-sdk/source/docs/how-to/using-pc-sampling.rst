@@ -144,6 +144,10 @@ The preceding command enables PC sampling with the ``host_trap`` method, ``time`
 
 This generates two files, ``agent_info.csv`` and ``pc_sampling_host_trap.csv``. Both files are prefixed with the process ID.
 
+.. note::
+
+   ``rocprofv3`` configures PC sampling on every GPU agent that ROCprofiler-SDK reports, including GPUs that ``HIP_VISIBLE_DEVICES`` hides from the application. Processes share the PC sampling configuration of a GPU agent (:ref:`pc-sampling`). If another process already uses PC sampling, a ``rocprofv3`` session that requests a different configuration, such as a different interval, can fail with the message ``Given PC sampling configuration is not supported on any of the agents``. This can happen even when the two applications use different GPUs. In this case, the message doesn't necessarily mean that the configuration is unsupported: the same configuration can work when no other process uses PC sampling. Use the same PC sampling configuration in all concurrent ``rocprofv3`` sessions.
+
 Here are the contents of ``pc_sampling_host_trap.csv`` file generated for MatrixTranspose sample application:
 
 .. _pc_sampling_host_trap:
