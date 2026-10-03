@@ -41,7 +41,10 @@ struct State {
   int connCheckWriteCalls = 0;
   int connCheckVerifyCalls = 0;
   std::vector<unsigned long long> connCheckWriteStamps;
+  int bootstrapAllGatherCalls = 0;
+  int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  uintptr_t lsaInputBase = 0;
 };
 
 struct FakeSdmaOpaque {
@@ -65,7 +68,12 @@ void SetBootstrapIntResult(const int* values, int count) {
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
-void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetLsaSelfAddr(void* addr) {
+  g.lsaSelfAddr = addr;
+  // Drop the latched input base so the next resolve is relative to this address,
+  // not the first arena that happened to be resolved.
+  g.lsaInputBase = 0;
+}
 void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
 int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
 int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
@@ -77,6 +85,8 @@ unsigned long long GetConnCheckWriteStamp(int call) {
 const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
 int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
 int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
+int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
 int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
@@ -127,6 +137,7 @@ static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
 
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   (void)commState;
+  GinAnvilPluginStubs::g.bootstrapAllGatherCalls++;
   return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
 }
 
@@ -145,6 +156,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  GinAnvilPluginStubs::g.intraNodeAllGatherCalls++;
   return stubIntAllGather(allData, nranks, size);
 }
 
@@ -158,12 +170,14 @@ ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, in
 
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   (void)devr;
-  (void)addr;
   if (GinAnvilPluginStubs::g.lsaAddrFail) {
     *outAddr = nullptr;
     return ncclSuccess;
   }
-  *outAddr = GinAnvilPluginStubs::g.lsaSelfAddr;
+  uintptr_t input = reinterpret_cast<uintptr_t>(addr);
+  if (GinAnvilPluginStubs::g.lsaInputBase == 0) GinAnvilPluginStubs::g.lsaInputBase = input;
+  uintptr_t offset = input - GinAnvilPluginStubs::g.lsaInputBase;
+  *outAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.lsaSelfAddr) + offset);
   return ncclSuccess;
 }
 

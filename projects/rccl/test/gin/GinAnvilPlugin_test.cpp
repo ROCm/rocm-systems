@@ -364,6 +364,65 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   plugin_.finalize(ictx);
 }
 
+// AICOMRCCL-2339: logical contexts on one Anvil connection share SDMA
+// queues, but each context must bind a distinct signal stripe. A second
+// pending context on the same comm makes slot and contextId diverge: the
+// first context's contextId 0 is not slot 0.
+TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  cfg.nCounters = 5;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinConfig_t cfgB{};
+  cfgB.nContexts = 1;
+  cfgB.nSignals = 2;
+  cfgB.nCounters = 5;
+  void* ginCtxB = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandleB = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfgB, &ginCtxB, &devHandleB), ncclSuccess);
+
+  char arena[8192] = {};
+  // Pending list is newest-first: ginCtxB takes slot 0, ginCtx takes slots 1..3.
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 4, 4), ncclSuccess);
+  ASSERT_EQ(devHandle->size, 3 * sizeof(ncclGinAnvilSdmaGPUContext));
+  ASSERT_EQ(devHandleB->size, sizeof(ncclGinAnvilSdmaGPUContext));
+
+  ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ncclGinAnvilSdmaGPUContext hostCtxB{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  ASSERT_EQ(hipMemcpy(&hostCtxB, devHandleB->handle, sizeof(hostCtxB), hipMemcpyDeviceToHost), hipSuccess);
+  ASSERT_NE(hostCtx[0].signals, nullptr);
+  ASSERT_NE(hostCtx[1].signals, nullptr);
+  ASSERT_NE(hostCtx[2].signals, nullptr);
+  ASSERT_NE(hostCtxB.signals, nullptr);
+  EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 4);
+  EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 4);
+  EXPECT_EQ(hostCtx[0].signals - hostCtxB.signals, 4);
+  EXPECT_NE(hostCtx[0].signal_remote_addrs, hostCtx[1].signal_remote_addrs);
+
+  // Queue ownership remains at the connection level by design.
+  EXPECT_EQ(hostCtx[0].queueHandles, hostCtx[1].queueHandles);
+  EXPECT_EQ(hostCtx[0].sdmaDirty, hostCtx[1].sdmaDirty);
+  EXPECT_EQ(hostCtx[0].queueHandles, hostCtxB.queueHandles);
+  EXPECT_NE(hostCtx[0].counters, nullptr);
+  EXPECT_NE(hostCtx[1].counters, nullptr);
+  EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 5);
+  EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 5);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.destroyContext(ginCtxB);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G15: dereg null, progress, queryLastError.
 TEST_F(GinAnvilPluginTest, Misc_NoOpPaths) {
   EXPECT_EQ(plugin_.deregMrSym(nullptr, nullptr), ncclSuccess);
@@ -655,6 +714,85 @@ TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
   EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// AICOMRCCL-2339: the comm-wide collectives in the bind path are per span, not
+// per logical context. Binding a context with nContexts=3 must still cost one
+// local-base allgather and one conn-check, or ncclDevCommCreate pays a bootstrap
+// round trip for every logical context.
+TEST_F(GinAnvilPluginTest, BindSignals_CommWideCollectivesRunOncePerSpan) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 8), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  // connectColl runs the factory allgather; only the bind path is under test.
+  const int allGathersBeforeBind = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  const int intraNodeBeforeBind = GinAnvilPluginStubs::GetIntraNodeAllGatherCalls();
+
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 2), ncclSuccess);
+
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - allGathersBeforeBind, 1);
+  // One conn-check, which costs two LSA allgathers: the setup state exchange and
+  // the missing-count exchange of its single attempt.
+  EXPECT_EQ(GinAnvilPluginStubs::GetIntraNodeAllGatherCalls() - intraNodeBeforeBind, 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  // All three contexts are still bound to their own stripe.
+  ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 2);
+  EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 2);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The skip path returns before the comm is marked as checked, so a per-context
+// conn-check call would repeat its setup allgather nContexts times.
+TEST_F(GinAnvilPluginTest, BindSignals_SkippedConnCheckStillRunsOncePerSpan) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 4;  // != nRanks, so the gate skips
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  const int intraNodeBeforeBind = GinAnvilPluginStubs::GetIntraNodeAllGatherCalls();
+
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 2), ncclSuccess);
+
+  EXPECT_EQ(GinAnvilPluginStubs::GetIntraNodeAllGatherCalls() - intraNodeBeforeBind, 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
