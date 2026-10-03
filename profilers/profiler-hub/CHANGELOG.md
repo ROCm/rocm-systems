@@ -57,6 +57,15 @@ downstream consumer of the library.
 - `reader_types.hpp`: `counter_timeline_event_t::value` is now `double` (was `size_t`).
 - `reader_types.hpp`: `timeline_event_t::display_name`/`category` are now
   `std::string_view` (were `std::string`).
+- `ph_ctx_create()` is significantly faster when its internal connection
+  pool has more than one connection: trace metadata (nodes/processes/
+  threads/agents/tracks/code objects/kernel symbols/streams/queues/pmc
+  info) is now built once and shared across all pooled connections,
+  instead of every connection independently rebuilding its own copy. The
+  independent categories are additionally fetched in parallel across the
+  pool's own connections. Measured ~5x faster `ph_ctx_create()` on a
+  5-connection pool against a 1.8GB trace (~780ms -> ~160ms
+  steady-state).
 
 ### Fixed
 

@@ -6,6 +6,7 @@
 #include "debug.hpp"
 
 #include <utility>
+#include <vector>
 
 namespace profiler_hub::common
 {
@@ -38,12 +39,14 @@ connection_pool::lease::~lease()
     }
 }
 
-connection_pool::connection_pool(std::string_view file_path, size_t num_connections)
+connection_pool::connection_pool(std::string_view file_path,
+                                 size_t           num_connections,
+                                 std::shared_ptr<profiler_hub::reader_catalog_t> catalog)
 {
     m_connections.reserve(num_connections);
     for(size_t i = 0; i < num_connections; ++i)
     {
-        m_connections.push_back(std::make_unique<connection>(file_path));
+        m_connections.push_back(std::make_unique<connection>(file_path, catalog));
         m_free.push_back(m_connections.back().get());
     }
 }

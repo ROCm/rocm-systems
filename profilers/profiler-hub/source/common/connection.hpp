@@ -8,6 +8,11 @@
 #include <memory>
 #include <string_view>
 
+namespace profiler_hub
+{
+class reader_catalog_t;
+}  // namespace profiler_hub
+
 namespace profiler_hub::common
 {
 
@@ -20,6 +25,12 @@ class connection
 {
 public:
     explicit connection(std::string_view file_path);
+
+    // Pooled/shared-catalog construction: `catalog` (non-null) is shared
+    // with sibling connections in the same pool; see connection_pool.
+    connection(std::string_view                                file_path,
+               std::shared_ptr<profiler_hub::reader_catalog_t> catalog);
+
     ~connection() = default;
 
     connection(const connection&)            = delete;
