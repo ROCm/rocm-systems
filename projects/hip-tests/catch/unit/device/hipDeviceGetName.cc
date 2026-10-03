@@ -206,20 +206,17 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
     HIP_SKIP_TEST("unable to create command file.");
   }
   char command_op[BUFFER_LEN];
-  const char* defCpu = "gfx000";
   int j = 0;
   std::map<int, std::vector<char>> dNameMap;
   while (fgets(command_op, BUFFER_LEN, fpipe)) {
     command_op[strcspn(command_op, "\n")] = '\0';
     std::string rocmCommand_line(command_op);
     int dNameLen = strlen(rocmCommand_line.c_str());
-    if (std::string::npos != rocmCommand_line.find(defCpu)) {  // ignore CPU
-      continue;
-    } else {
-      std::vector<char> dName(dNameLen + 1, 0);
-      std::memcpy(dName.data(), &rocmCommand_line[0], dNameLen);
-      dNameMap[j] = dName;
-    }
+
+    std::vector<char> dName(dNameLen + 1, 0);
+    std::memcpy(dName.data(), &rocmCommand_line[0], dNameLen);
+    dNameMap[j] = dName;
+
     j++;
   }
 
