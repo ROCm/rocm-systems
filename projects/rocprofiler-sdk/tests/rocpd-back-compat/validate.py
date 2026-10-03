@@ -255,6 +255,48 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.5 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
+
+    Verifies that the pipe_id column is not in the kernel trace CSV.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        print(
+            f"Schema {old_schema} is newer than 3.0.5, calling test_csv_for_schema_3_0_5_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
+
+    kernel_csv = output_root / old_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {old_schema}: {kernel_csv}"
+    assert "pipe_id" not in _csv_columns(
+        kernel_csv
+    ), f"pipe_id unexpectedly present in kernel CSV for schema {old_schema}"
+
+
+def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Schema 3.0.5 additions must be present for the latest schema.
+
+    Verifies that the kernel trace CSV carries pipe_id, including the -1 (unknown) default.
+    """
+    kernel_csv = output_root / latest_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {latest_schema}: {kernel_csv}"
+    with open(kernel_csv) as fh:
+        pipe_ids = sorted(int(row["Pipe_Id"]) for row in csv_mod.DictReader(fh))
+    assert pipe_ids == [
+        -1,
+        2,
+    ], f"unexpected pipe_id values in kernel CSV for schema {latest_schema}: {pipe_ids}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 
