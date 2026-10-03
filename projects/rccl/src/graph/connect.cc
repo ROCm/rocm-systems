@@ -151,6 +151,8 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     topoRanks->treeToParent[c] = -1;
     topoRanks->treeToChild0[c] = -1;
     topoRanks->treeToChild1[c] = -1;
+    topoRanks->treeUp[c] = topoRanks->treeDown[c] = -1;
+    topoRanks->collnetChainUp[c] = topoRanks->collnetChainDown[c] = -1;
     topoRanks->nvlsHeads[c] = -1; // Align NVLS with Tree/Ring sentinels
 
     struct ncclChannel* channel = comm->channels + c;
@@ -187,8 +189,6 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   }
 
   for (int c = 0; c < nChannels; c++) {
-    struct ncclChannel* channel = comm->channels + c;
-
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
     // Permute only when we need diversity in rings
     if ( intraGraphGen && !disableRingDiversity) {
@@ -218,21 +218,16 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->treeToParent[c] = treeIntra[parentIndex];
         topoRanks->treeToChild0[c] = treeIntra[child0Index];
         topoRanks->treeToChild1[c] = treeIntra[child1Index];
-        channel->tree.up = (i == 0) ? -1 : treeIntra[i - 1];
-        channel->tree.down[0] = (i == localRanks - 1) ? -1 : treeIntra[i + 1];
+        topoRanks->treeUp[c] = (i == 0) ? -1 : treeIntra[i - 1];
+        topoRanks->treeDown[c] = (i == localRanks - 1) ? -1 : treeIntra[i + 1];
       }
       if (collNetIntra[i] == rank) {
-        channel->collnetChain.up = (i == 0) ? comm->nRanks : collNetIntra[i - 1];
-        channel->collnetChain.down[0] = (i == localRanks - 1) ? -1 : collNetIntra[i + 1];
+        topoRanks->collnetChainUp[c] = (i == 0) ? comm->nRanks : collNetIntra[i - 1];
+        topoRanks->collnetChainDown[c] = (i == localRanks - 1) ? -1 : collNetIntra[i + 1];
       }
     }
   }
-  // Duplicate channels trees
-  {
-    struct ncclChannel* channel0 = comm->channels;
-    struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
-    if (channel1) memcpy(channel1, channel0, nChannels * sizeof(struct ncclChannel));
-  }
+  topoRanks->nChannels = nChannels;
 
   // Get nvls heads and the number of heads. Duplicate head is not allowed.
   for (int c = 0; c < graphs[NCCL_ALGO_NVLS]->nChannels; ++c) {
@@ -950,6 +945,34 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
  * But call to this function is a safety net for all architectures, and is idempotent, This only
  * handles Ring and Trees
  */
+// Each rank's ncclTopoPreset fills topoRanks->nChannels channels, and the channel count can change before
+// ncclTopoPostset. Map every channel of the final count onto those, identically for rings, trees and CollNet chains.
+static ncclResult_t expandTopoRanks(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
+  for (int r = 0; r < nranks; r++) {
+    struct ncclTopoRanks* t = allTopoRanks[r];
+    if (t->nChannels <= 0 || t->nChannels > MAXCHANNELS) {
+      WARN("TopoPostset: rank %d reported %d preset channels, expected [1,%d]", r, t->nChannels, MAXCHANNELS);
+      return ncclInternalError;
+    }
+    for (int c = t->nChannels; c < nChannels; c++) {
+      const int src = c % t->nChannels;
+      t->ringRecv[c] = t->ringRecv[src];
+      t->ringSend[c] = t->ringSend[src];
+      t->ringPrev[c] = t->ringPrev[src];
+      t->ringNext[c] = t->ringNext[src];
+      t->treeToParent[c] = t->treeToParent[src];
+      t->treeToChild0[c] = t->treeToChild0[src];
+      t->treeToChild1[c] = t->treeToChild1[src];
+      t->treeUp[c] = t->treeUp[src];
+      t->treeDown[c] = t->treeDown[src];
+      t->collnetChainUp[c] = t->collnetChainUp[src];
+      t->collnetChainDown[c] = t->collnetChainDown[src];
+    }
+    t->nChannels = std::max(t->nChannels, nChannels);
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
   for (int r = 0; r < nranks; r++) {
     for (int c = 1; c < nChannels; c++) {
@@ -1011,6 +1034,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes * MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes * MAXCHANNELS), ret, fail);
 
+  NCCLCHECKGOTO(expandTopoRanks(allTopoRanks, nranks, nChannels), ret, fail);
   NCCLCHECK(repairMissingChannels(allTopoRanks, nranks, nChannels));
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
@@ -1065,6 +1089,23 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   } else {
     // Connect rings and trees. This should also duplicate the channels.
     NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+  }
+
+  // Intra-node tree and CollNet chain links, for both halves like the rings below; inter-node links are added next.
+  for (int c = 0; c < nChannels; c++) {
+    const struct ncclTopoRanks* mine = allTopoRanks[comm->rank];
+    struct ncclChannel* channel0 = comm->channels + c;
+    channel0->tree.up = mine->treeUp[c];
+    channel0->tree.down[0] = mine->treeDown[c];
+    channel0->collnetChain.up = mine->collnetChainUp[c];
+    channel0->collnetChain.down[0] = mine->collnetChainDown[c];
+    if (c + nChannels < MAXCHANNELS) {
+      struct ncclChannel* channel1 = channel0 + nChannels;
+      channel1->tree.up = channel0->tree.up;
+      channel1->tree.down[0] = channel0->tree.down[0];
+      channel1->collnetChain.up = channel0->collnetChain.up;
+      channel1->collnetChain.down[0] = channel0->collnetChain.down[0];
+    }
   }
 
   // [RCCL] Connect rail-optimized trees
