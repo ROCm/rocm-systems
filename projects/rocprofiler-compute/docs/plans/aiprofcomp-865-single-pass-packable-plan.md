@@ -160,7 +160,7 @@ pmc_perf_*.txt  (gfx942: 14 passes, +0 for SLOT fill)
 | Risk | Mitigation |
 |------|------------|
 | +2 passes increases profile time | Document; compare wall-clock on CPX; optional later merge/CP-SAT to claw back passes without breaking packable coverage |
-| Duplicate PMCs change analyze assumptions | Audit analyze joins by counter name across files; add test if any path assumes uniqueness |
+| Duplicate PMCs change analyze assumptions | **Mitigated (CLI + DB):** `PassLayout` + shadow columns (`{counter}@pass:{key}`) in `load_df_pmc` / `process_rocpd_csv`; CLI `eval_metric` and DB `calc_expressions` / `bind_expression_dataframe` bind each packable metric to a co-located pass via `utils/metrics/pass_provenance.py`. Escape hatch: `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE=1`. Remaining: iteration-multiplex pass assignment. |
 | Filtered `--block` / `--set` profiles | Allocate only on detected counters; re-eval inspector on subset profiles |
 | gfx1250 anti-affinity (VALU vs VMEM) | Multi-arch validation (§5); may need `never_same_bucket` constraints later |
 | SLOT fill not in allocate today | P1-1 wires it; regression if eval and allocate diverge |

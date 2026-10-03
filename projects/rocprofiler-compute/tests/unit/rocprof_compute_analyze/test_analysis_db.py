@@ -768,6 +768,111 @@ def test_calc_dataframe_expressions_empty_returns_assignable_series():
     expression_df["value"] = result
 
 
+def test_calc_dataframe_expressions_same_pass_bind_uses_shadow_denominator():
+    """DB path must evaluate TA_BUSY with co-located GRBM (200), not base (100)."""
+    from utils.metrics.pass_provenance import (
+        PassLayout,
+        bind_expression_dataframe,
+    )
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_WAVES"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    pmc_df = pd.DataFrame({
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+        "TA_BUSY": [50.0],
+        "SQ_WAVES": [4.0],
+    })
+    util_expr = "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
+    expression_df = pd.DataFrame({
+        "metric_id": ["9.9.9"],
+        "value_name": ["Avg"],
+        "value": [util_expr],
+    })
+    used = bind_expression_dataframe(expression_df, layout, "MI300")
+    assert used == {"pmc_perf_1"}
+    assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[0, "value"]
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ):
+        unbound = db_analysis.calc_dataframe_expressions(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            pd.DataFrame({
+                "metric_id": ["9.9.9"],
+                "value_name": ["Avg"],
+                "value": [util_expr],
+            }),
+        )
+        bound = db_analysis.calc_dataframe_expressions(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            expression_df,
+            pass_layout=layout,
+            used_passes=used,
+        )
+
+    assert unbound.iloc[0] == 50.0  # cross-pass base GRBM=100
+    assert bound.iloc[0] == 25.0  # same-pass GRBM=200
+
+
+def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
+    """Bound ammolite__GRBM_*__passN must resolve via pass-scoped sys_info."""
+    from utils.metrics.pass_provenance import (
+        PassLayout,
+        bind_expression_dataframe,
+    )
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_WAVES"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    pmc_df = pd.DataFrame({
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+        "TA_BUSY": [50.0],
+    })
+    expression_df = pd.DataFrame({
+        "metric_id": ["9.9.9"],
+        "value_name": ["Avg"],
+        "value": [
+            "to_avg(raw_pmc_df['TA_BUSY'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD)",
+        ],
+    })
+    used = bind_expression_dataframe(expression_df, layout, "MI300")
+    assert "ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1" in expression_df.at[0, "value"]
+
+    sys_info = {"gpu_arch": "gfx942", "num_xcd": 1}
+    result = db_analysis.calc_dataframe_expressions(
+        pmc_df,
+        sys_info,
+        expression_df,
+        pass_layout=layout,
+        used_passes=used,
+    )
+
+    # Pass-1 PER_XCD = 200 / 1; 50 / 200 = 0.25. Base GRBM would give 0.5.
+    assert float(result.iloc[0]) == 0.25
+    per_xcd = sys_info["GRBM_GUI_ACTIVE_PER_XCD__pass1"]
+    per_xcd_value = (
+        float(per_xcd.iloc[0]) if isinstance(per_xcd, pd.Series) else float(per_xcd)
+    )
+    assert per_xcd_value == 200.0
+
+
 # =============================================================================
 # calc_metrics_data tests
 # =============================================================================
