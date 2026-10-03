@@ -184,6 +184,22 @@ public:
   /// @param[in] handle driver identity returned by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(const DriverMemoryHandle& handle) = 0;
 
+  /// @brief Describes the allocation of this driver's that contains @p ptr.
+  ///
+  /// Backs @c hsa_amd_pointer_info: the runtime asks each driver in turn and maps the first
+  /// answer onto the public struct, so every driver's allocations are reported the same way.
+  /// @c GPUAddress is the address the owning agent accesses the block at, which need not be its
+  /// host address. @c MappedNodes, if non-null, must stay valid after the allocation is freed:
+  /// the runtime reads it without holding any lock of the driver's.
+  ///
+  /// @param[in] ptr any address, possibly not one of this driver's.
+  /// @param[out] info the containing block, in the thunk's terms.
+  /// @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if no allocation of this driver's contains
+  /// @p ptr, which is also the answer of a driver that tracks none.
+  virtual hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
   /// @brief Create an agent dispatch queue with user-mode access rights.
   /// @param[in] node_id Node ID of the agent on which the queue is being created.
   /// @param[in] type Queue's type.

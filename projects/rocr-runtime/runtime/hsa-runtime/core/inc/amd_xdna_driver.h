@@ -43,7 +43,10 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
+#include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -88,6 +91,7 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -207,6 +211,18 @@ public:
 
   /// @brief Device heap alignment in bytes.
   static constexpr size_t dev_heap_alignment = 64 * 1024 * 1024;
+
+  /// @brief Guards @ref mapped_bos and @ref bo_nodes.
+  mutable std::mutex mapped_bos_lock;
+
+  /// @brief Every mapped BO from @ref AllocateMemory, keyed on its VA, as
+  /// @ref QueryPointerInfo reports it.
+  std::map<const void*, HsaPointerInfo> mapped_bos;
+
+  /// @brief Node ids the entries of @ref mapped_bos point their MappedNodes at.
+  ///
+  /// Never erased, so a MappedNodes pointer already handed out stays valid after its BO is freed.
+  std::set<uint32_t> bo_nodes;
 };
 
 } // namespace AMD
