@@ -66,6 +66,7 @@ static void DiagFree(void* ptr) {
     g_diagHostLive.erase(it);
   } else if (ptr != nullptr) {
     ADD_FAILURE() << "free of untracked host pointer " << ptr;
+    return;
   }
   std::free(ptr);
 }
@@ -148,6 +149,11 @@ std::string DiagP2pOkLine(int edges) {
   return DiagLine("NCCL DIAG [OK]   p2p: all " + std::to_string(edges) + " directed GPU P2P edges verified");
 }
 
+std::string DiagP2pSetupFailLine(int rank, ncclResult_t result) {
+  return DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank " + std::to_string(rank) +
+                  " result=" + std::to_string(result));
+}
+
 std::string DiagP2pCleanupLine(int rank, int result) {
   return DiagLine("NCCL DIAG [INFO] p2p: resource cleanup failed rank=" + std::to_string(rank) +
                   " result=" + std::to_string(result) + "; some temporary resources may remain");
@@ -191,6 +197,10 @@ class DiagP2pMicrotest : public ::testing::Test {
     g_diagCallocFailBytes = 0;
     g_diagCallocFailNth = 0;
     g_diagCallocPad = false;
+    EXPECT_TRUE(g_diagHostLive.empty()) << "host buffers leaked: " << g_diagHostLive.size();
+    for (void* p : g_diagHostLive) {
+      std::free(p);
+    }
     g_diagHostLive.clear();
     g_diagHostFrees.clear();
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
@@ -649,7 +659,7 @@ TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCollectsSameUuidInRankOrder) {
   EXPECT_EQ(std::vector<int>(ranks, ranks + 3), (std::vector<int>{1, 3, 5}));
   EXPECT_EQ(rank, 2);
   EXPECT_EQ(nRanks, 3);
-  std::free(ranks);
+  DiagFree(ranks);
 }
 
 TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueRejectsDomainSizeMismatch) {
@@ -673,13 +683,13 @@ TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueRejectsDomainSizeMismatch) {
     EXPECT_EQ(nRanks, domainSize);
     ASSERT_NE(ranks, nullptr) << domainSize;
     EXPECT_EQ(ranks[domainSize], 0);
-    std::free(ranks);
+    DiagFree(ranks);
     ranks = nullptr;
   }
   comm_->nvlDomainSize = 3;
   EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
   EXPECT_EQ(rank, 1);
-  std::free(ranks);
+  DiagFree(ranks);
 }
 
 TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCallocFailurePropagates) {
@@ -1179,7 +1189,7 @@ struct DiagP2pRemoteOpsScene {
     mappings[3].ptr = slotsB;
   }
   ~DiagP2pRemoteOpsScene() {
-    std::free(opsHost);
+    DiagFree(opsHost);
   }
   bool Run(ncclComm* comm, const int* ranks) {
     return ncclDiagP2pPrepareRemoteOps(comm, ranks, kGroupSelf, kGroupN, kGroupOutPeerCount, kGroupOutPeers, results,
@@ -1729,8 +1739,7 @@ TEST_F(DiagP2pMicrotest, Run_PeerSetupFailures_ReportedThenLastReturnedBeforeEdg
     run.peerSetup[3] = ncclInvalidUsage;
     EXPECT_EQ(run.Run(), ncclInvalidUsage);
     EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
-    EXPECT_EQ(run.out, DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 2 result=2") +
-                           DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 3 result=5"));
+    EXPECT_EQ(run.out, DiagP2pSetupFailLine(2, ncclSystemError) + DiagP2pSetupFailLine(3, ncclInvalidUsage));
     EXPECT_EQ(run.streamDestroy.calls, 1);
   }
   BuildGroupComm();
@@ -1747,7 +1756,7 @@ TEST_F(DiagP2pMicrotest, Run_LocalSetupFailure_IsSharedThroughAgreementGather) {
   EXPECT_EQ(run.Run(), ncclInternalError);
   EXPECT_EQ(run.mySetup, ncclInternalError);
   EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
-  EXPECT_EQ(run.out, DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 0 result=3"));
+  EXPECT_EQ(run.out, DiagP2pSetupFailLine(0, ncclInternalError));
 }
 
 // Pins a hang: this failure skips the gather the other ranks wait in.
