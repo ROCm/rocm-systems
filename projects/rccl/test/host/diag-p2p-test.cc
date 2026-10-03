@@ -706,7 +706,7 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
     *inter = rank2 == 5 ? 2 : (rank2 == 0 ? 3 : -1);
     return rank2 == 2 ? ncclSystemError : ncclSuccess;
   });
-  int outPeers[kN] = {};
+  int outPeers[kN] = {99, 99, 99, 99, 99};
   int outPeerCount = 99;
   ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
   const std::string log = CaptureLog([&] {
@@ -741,7 +741,7 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
 
 struct DiagP2pInboundScene {
   ncclDiagP2pEdgeInfo edges[kGroupN * kGroupN] = {};
-  int inPeers[kGroupN] = {};
+  int inPeers[kGroupN] = {99, 99, 99, 99};
   int inPeerCount = 99;
   bool needsLocalHandle = true;
 };
@@ -763,19 +763,19 @@ TEST_F(DiagP2pMicrotest, BuildInboundPeers_ListsSourcesInOwnColumn) {
 TEST_F(DiagP2pMicrotest, BuildInboundPeers_NeedsHandleOnlyForCuMemSameProcessOtherDevice) {
   BuildGroupComm();
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-  const auto run = [&](int sameProcess) {
+  const auto run = [&](int sameProcess, bool expected) {
     DiagP2pInboundScene s;
     s.edges[InEdge(3)] = {1, 0, PATH_NVL, sameProcess, ncclDiagP2pHandleDirect};
-    s.needsLocalHandle = !sameProcess;
+    s.needsLocalHandle = !expected;
     ncclDiagP2pBuildInboundPeers(comm_.get(), localRanks_.data(), kGroupSelf, kGroupN, s.edges, s.inPeers,
                                  &s.inPeerCount, &s.needsLocalHandle);
     EXPECT_EQ(s.inPeerCount, 1);
     return s.needsLocalHandle;
   };
-  EXPECT_TRUE(run(1));
-  EXPECT_FALSE(run(0));
+  EXPECT_TRUE(run(1, true));
+  EXPECT_FALSE(run(0, false));
   peers_[2].cudaDev = 4;
-  EXPECT_FALSE(run(1));
+  EXPECT_FALSE(run(1, false));
 }
 
 // ROCm gap: CUDART_VERSION unset leaks the retained handle; a fix flips this.
@@ -1051,6 +1051,7 @@ TEST_F(DiagP2pMicrotest, ImportMappings_CuMemTracksOnlySuccessfulImportsAndFlags
   BuildGroupComm();
   peers_[1].cudaDev = 4;
   DiagP2pImportScene s;
+  s.mappings[3].tracked = 1;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook importHook(g_ncclP2pImportShareableBuffer,
                         [&](ncclComm*, int peer, size_t, ncclIpcDesc*, void** ptr, void*, ncclMemType_t) {
@@ -1148,6 +1149,7 @@ TEST_F(DiagP2pMicrotest, PrepareRemoteOps_BuildsOneOpPerImportedPeerAndCopiesToD
                   });
   ScopedHook devAlloc(g_diagCudaCalloc,
                       [&](void** ptr, std::size_t bytes, ncclMemManager* manager, ncclMemType_t memType) {
+                        EXPECT_EQ(bytes, 2 * sizeof(ncclDiagP2pRemoteOp));
                         EXPECT_EQ(manager, comm_->memManager);
                         EXPECT_EQ(memType, ncclMemScratch);
                         return DefaultDiagCudaCalloc(ptr, bytes, manager, memType);
