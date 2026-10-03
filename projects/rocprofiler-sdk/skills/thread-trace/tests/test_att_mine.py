@@ -80,8 +80,8 @@ class ParsingTests(unittest.TestCase):
         )
         self.assertEqual(mine.short_source(""), "?")
 
-    def test_latency_is_issue_plus_stall_as_codeindex_counts_it(self):
-        i = mine.Inst(0, 4, 90, 0, "IMMED", "s_waitcnt vmcnt(0)", "", mine.Pc(0x10, 1))
+    def test_latency_is_the_duration_which_includes_the_stall(self):
+        i = mine.Inst(0, 90, 86, 0, "IMMED", "s_waitcnt vmcnt(0)", "", mine.Pc(0x10, 1))
         self.assertEqual(i.latency, 90)
         self.assertEqual(i.cost, 90)
 
@@ -135,6 +135,54 @@ class HotspotTests(unittest.TestCase):
 
 
 class SummaryTests(unittest.TestCase):
+    def test_resources_come_from_the_dispatch_the_waves_belong_to(self):
+        other = SimpleNamespace(
+            me_id=0,
+            pipe_id=0,
+            time=0,
+            vgprs=8,
+            sgprs=8,
+            lds_size=0,
+            thread_dim_x=1,
+            thread_dim_y=1,
+            thread_dim_z=1,
+        )
+        traced = SimpleNamespace(
+            me_id=0,
+            pipe_id=0,
+            time=500,
+            vgprs=176,
+            sgprs=112,
+            lds_size=32768,
+            thread_dim_x=256,
+            thread_dim_y=1,
+            thread_dim_z=1,
+        )
+        waves = [
+            wave([inst(1000 + k, "v_add_f32 v0, v0, v1")], wave_id=k) for k in range(3)
+        ]
+        s = mine.Capture.from_waves(waves, dispatches=[traced, other]).summary()
+        self.assertEqual(s["dispatch"]["vgprs"], 176)
+        self.assertEqual(s["dispatches_with_traced_waves"], 1)
+
+    def test_idle_before_the_first_instruction_is_not_counted_twice(self):
+        # The idle before the first instruction is the IDLE state; only later gaps count.
+        insts = [
+            mine.Inst(
+                10, 4, 0, 10, "VALU", "v_add_f32 v0, v0, v1", "/k.hip:1", mine.Pc(0, 1)
+            ),
+            mine.Inst(
+                24, 4, 0, 10, "VALU", "v_add_f32 v0, v0, v1", "/k.hip:1", mine.Pc(4, 1)
+            ),
+        ]
+        w = mine.WaveTrace(
+            0, 1, 0, 0, 0, 0, 28, 0, insts, Counter({"IDLE": 10, "EXEC": 18})
+        )
+        self.assertEqual(
+            mine.Capture.from_waves([w]).summary()["idle_between_instructions"],
+            round(100 * 10 / 28, 1),
+        )
+
     def test_wave_state_split_and_dispatch_resources(self):
         a = wave([inst(0, "v_add_f32 v0, v0, v1")], states={"EXEC": 30, "WAIT": 70})
         b = wave(
@@ -173,12 +221,7 @@ def timed(time, text, duration, stall=0, category="VALU", addr=None):
 
 class PipeTests(unittest.TestCase):
     def test_classes_split_valu_and_name_waits_and_barriers(self):
-        self.assertEqual(
-            mine.inst_class(timed(0, "v_exp_f32_e32 v1, v1", 16)), "VALU transcendental"
-        )
-        self.assertEqual(
-            mine.inst_class(timed(0, "v_rcp_iflag_f32 v1, v1", 16)), "VALU transcendental"
-        )
+        self.assertEqual(mine.inst_class(timed(0, "v_exp_f32_e32 v1, v1", 16)), "VALU")
         self.assertEqual(
             mine.inst_class(
                 timed(0, "v_mfma_f32_32x32x8_bf16 a[0:15], v[0:1], v[2:3], 0", 4)
@@ -201,9 +244,9 @@ class PipeTests(unittest.TestCase):
             mine.inst_class(timed(0, "ds_read_b128 v[0:3], v4", 8, 4, "LDS")), "LDS"
         )
 
-    def test_issue_is_duration_minus_stall_against_simd_time(self):
-        # Two waves on one SIMD, resident from 0 to 100: 3 transcendental instructions issuing
-        # 16 cycles each after a 10-cycle stall, and 5 ordinary VALU instructions issuing 4.
+    def test_busy_share_counts_instructions_issued_together_once(self):
+        # Two waves on one SIMD, resident from 0 to 100. Their VALU issue intervals
+        # (time + stall to time + duration) overlap; the union covers 46 cycles.
         a = wave(
             [
                 timed(0, "v_exp_f32_e32 v1, v1", 26, 10),
@@ -224,15 +267,33 @@ class PipeTests(unittest.TestCase):
         )
         p = mine.Capture.from_waves([a, b]).pipes()
         by = {c["class"]: c for c in p["classes"]}
-        self.assertEqual(p["simds"], 1)
-        self.assertEqual(p["simd_cycles"], 100)
-        self.assertEqual(by["VALU transcendental"]["issue_share"], 48.0)
-        self.assertEqual(by["VALU transcendental"]["cycles_each"], 16.0)
-        self.assertEqual(by["VALU transcendental"]["stall_share"], 100.0)
-        self.assertEqual(by["VALU transcendental"]["per_wave"], 1.5)
-        self.assertEqual(by["VALU"]["issue_share"], 20.0)
-        self.assertEqual(p["valu_issue_share"], 68.0)
-        self.assertEqual(p["classes"][0]["class"], "VALU transcendental")
+        self.assertEqual((p["simds"], p["resident_cycles"]), (1, 100))
+        self.assertEqual(by["VALU"]["busy_share"], 46.0)
+        self.assertEqual(p["valu_busy"], 46.0)
+        self.assertEqual(by["VALU"]["cycles_each"], 8.5)
+        self.assertEqual(by["VALU"]["stall_share"], 100.0)
+        self.assertEqual(by["VALU"]["per_wave"], 4.0)
+        self.assertEqual(by["VALU"]["top_stalled"], "v_exp_f32_e32")
+
+    def test_wait_time_is_kept_apart_from_stall(self):
+        # A wait's "stall" is the time it waited; it must not dilute the VALU stall share.
+        w = wave(
+            [
+                timed(0, "v_exp_f32_e32 v1, v1", 30, 26),
+                timed(30, "s_waitcnt vmcnt(0)", 90, 90, "IMMED"),
+            ]
+        )
+        by = {c["class"]: c for c in mine.Capture.from_waves([w]).pipes()["classes"]}
+        self.assertEqual(
+            (by["VALU"]["stall_share"], by["VALU"]["wait_share"]), (100.0, 0.0)
+        )
+        wait = by["wait (s_waitcnt, s_wait_*)"]
+        self.assertEqual((wait["stall_share"], wait["wait_share"]), (0.0, 100.0))
+
+    def test_busy_share_never_exceeds_resident_time(self):
+        same = [timed(4 * k, "v_add_f32 v1, v1, v2", 4) for k in range(25)]
+        waves = [wave(same, wave_id=k) for k in range(3)]  # three waves issuing together
+        self.assertEqual(mine.Capture.from_waves(waves).pipes()["valu_busy"], 100.0)
 
     def test_waves_on_different_simds_add_their_resident_time(self):
         a = wave(
@@ -243,15 +304,23 @@ class PipeTests(unittest.TestCase):
             simd=1,
         )
         p = mine.Capture.from_waves([a, b]).pipes()
-        self.assertEqual((p["simds"], p["simd_cycles"]), (2, 150))
-        self.assertEqual(p["valu_issue_share"], round(100 * 16 / 150, 1))
+        self.assertEqual((p["simds"], p["resident_cycles"]), (2, 150))
+        self.assertEqual(p["valu_busy"], round(100 * 16 / 150, 1))
 
 
 class NextReadTests(unittest.TestCase):
-    def pipes(self, **stall):
+    def pipes(self, top_stalled="", **stall):
         return {
-            "valu_issue_share": stall.pop("valu", 10.0),
-            "classes": [{"class": k, "stall_share": v} for k, v in stall.items()],
+            "valu_busy": stall.pop("valu", 10.0),
+            "classes": [
+                {
+                    "class": k,
+                    "stall_share": 0.0 if k in mine.WAIT_CLASSES else v,
+                    "wait_share": v if k in mine.WAIT_CLASSES else 0.0,
+                    "top_stalled": top_stalled,
+                }
+                for k, v in stall.items()
+            ],
         }
 
     def test_the_largest_wave_state_picks_the_page(self):
@@ -277,12 +346,16 @@ class NextReadTests(unittest.TestCase):
 
     def test_stall_names_the_class_that_holds_it_and_a_saturated_valu(self):
         busy = self.pipes(
-            valu=112.5,
-            **{"VALU transcendental": 64, "barrier (s_barrier)": 17, "VALU": 11},
+            valu=95.5,
+            top_stalled="v_exp_f32_e32",
+            **{"VALU": 64, "barrier (s_barrier)": 17, "LDS": 11},
         )
         hint = mine.next_read({"STALL": 62, "WAIT": 19, "EXEC": 19}, busy)
-        self.assertIn("VALU transcendental instructions hold most of the stall", hint)
-        self.assertIn("112.5%", hint)
+        self.assertIn(
+            "VALU instructions hold the largest share of the stall (most stalled: v_exp_f32_e32)",
+            hint,
+        )
+        self.assertIn("95.5%", hint)
         self.assertIn("resources/compute.md (section 'Ceiling check')", hint)
         self.assertTrue(
             Path(hint.split("read ", 1)[1].split(" (section", 1)[0]).is_file()
@@ -313,6 +386,40 @@ class NextReadTests(unittest.TestCase):
         self.assertIn("`pipes`", mine.flat_profile_note([{"share": 2.8}], "instruction"))
         self.assertEqual(mine.flat_profile_note([{"share": 40.0}], "instruction"), "")
         self.assertEqual(mine.flat_profile_note([], "source line"), "")
+
+
+class IdleRoutingTests(unittest.TestCase):
+    def test_idle_between_instructions_counts_against_exec(self):
+        # The decoder counts idle between instructions as EXEC; summary reports it apart.
+        hint = mine.next_read({"EXEC": 70, "WAIT": 20, "STALL": 10}, idle_share=50)
+        self.assertIn("resources/stalls.md", hint)
+        self.assertIn("idle", hint)
+        self.assertIn(
+            "resources/compute.md", mine.next_read({"EXEC": 70, "WAIT": 20, "STALL": 10})
+        )
+
+    def test_stall_hint_names_the_class_whose_pipe_did_not_accept_it(self):
+        p = {
+            "classes": [{"class": "VALU matrix", "stall_share": 80}],
+            "valu_busy": 20,
+        }
+        hint = mine.next_read({"STALL": 60, "EXEC": 40}, p)
+        self.assertIn(
+            "did not accept them, usually because the unit was busy or its queue full",
+            hint,
+        )
+        self.assertNotIn("earlier result", hint)
+
+    def test_exec_routes_to_the_ceiling_check(self):
+        hint = mine.next_read({"EXEC": 70, "WAIT": 20, "STALL": 10})
+        self.assertIn("compute.md (section 'Ceiling check')", hint)
+        self.assertIn("EXEC is the largest wave state", hint)
+
+    def test_stats_route_idle_dominated_top_instruction(self):
+        rows = {
+            "instructions": [{"text": "v_fma_f32 v1, v2, v3", "latency": 10, "idle": 90}]
+        }
+        self.assertIn("resources/stalls.md", mine.next_read_from_stats(rows))
 
 
 class BarrierTests(unittest.TestCase):
@@ -357,7 +464,7 @@ class BarrierTests(unittest.TestCase):
                     ),
                     mine.Inst(
                         begin + 908,
-                        4,
+                        900,
                         896,
                         0,
                         "IMMED",
@@ -393,6 +500,52 @@ class BarrierTests(unittest.TestCase):
         self.assertGreater(b["others_barrier_share_p50"], 90)
         self.assertEqual(b["least_waiting_wave_ran"][0]["line"], "k.hip:23")
         self.assertEqual(b["others_waited_at"][0]["line"], "k.hip:24")
+
+    def test_a_large_workgroup_launched_over_many_cycles_stays_one_group(self):
+        # 16 waves (1024 threads) launched 5 cycles apart: 75 cycles from first to last.
+        dispatch = SimpleNamespace(
+            time=0,
+            me_id=0,
+            pipe_id=0,
+            vgprs=32,
+            sgprs=16,
+            lds_size=0,
+            thread_dim_x=1024,
+            thread_dim_y=1,
+            thread_dim_z=1,
+        )
+        waves = []
+        for k in range(16):
+            begin = 1000 + 5 * k
+            work = 900 if k == 15 else 4
+            insts = [
+                mine.Inst(
+                    begin + 4,
+                    work,
+                    0,
+                    0,
+                    "VALU",
+                    "v_fma_f32 v1, v2, v3, v4",
+                    "/k.hip:23",
+                    mine.Pc(0x10, 1),
+                ),
+                mine.Inst(
+                    begin + 4 + work,
+                    4 + (0 if k == 15 else 900 - work),  # duration includes the stall
+                    0 if k == 15 else 900 - work,
+                    0,
+                    "IMMED",
+                    "s_barrier",
+                    "/k.hip:24",
+                    mine.Pc(0x14, 1),
+                ),
+            ]
+            waves.append(
+                mine.WaveTrace(0, 1, k % 4, k // 4, 0, begin, 2000, 0, insts, Counter())
+            )
+        b = mine.Capture.from_waves(waves, dispatches=[dispatch]).barriers()
+        self.assertEqual((b["workgroups"], b["waves_per_workgroup"]), (1, 16))
+        self.assertEqual(b["least_waiting_rank"], {"rank 15": "100%"})
 
     def test_waves_launched_apart_are_different_workgroups(self):
         dispatch = SimpleNamespace(
@@ -593,6 +746,198 @@ class DecoderSetupTests(unittest.TestCase):
             finally:
                 sys.meta_path.remove(finder)
         self.assertIn("pyelftools", str(err.exception))
+
+
+class WaitColumnAndScratchTests(unittest.TestCase):
+    def test_wait_time_goes_to_the_wait_column_not_stall(self):
+        load = mine.Inst(
+            0, 40, 30, 0, "VMEM", "global_load_dword v1", "/a/k.hip:5", mine.Pc(0x10, 1)
+        )
+        wait = mine.Inst(
+            40, 400, 400, 0, "IMMED", "s_waitcnt vmcnt(0)", "/a/k.hip:5", mine.Pc(0x14, 1)
+        )
+        rows = {
+            r["text"].split(" ")[0]: r
+            for r in mine.Capture.from_waves([wave([load, wait])]).hotspots()
+        }
+        self.assertEqual(
+            (rows["global_load_dword"]["stall"], rows["global_load_dword"]["wait"]),
+            (30, 0),
+        )
+        self.assertEqual(
+            (rows["s_waitcnt"]["stall"], rows["s_waitcnt"]["wait"]), (0, 400)
+        )
+        line = mine.Capture.from_waves([wave([load, wait])]).hotspots(by_line=True)[0]
+        self.assertEqual((line["stall"], line["wait"]), (30, 400))
+
+    def test_stats_csv_splits_wait_from_stall(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "stats_x_dispatch_1.csv").write_text(
+                '"CodeObj","Vaddr","Instruction","Hitcount","Latency","Stall","Idle","Source"\n'
+                '2,4,"s_waitcnt vmcnt(0)",10,900,900,0,"/a/k.hip:7"\n'
+                '2,8,"global_load_dword v1, v[2:3], off",10,60,20,0,"/a/k.hip:7"\n'
+            )
+            stats = mine.read_stats(d)
+        self.assertEqual(
+            (stats["lines"][0]["stall"], stats["lines"][0]["wait"]), (20, 900)
+        )
+
+    def test_scratch_instructions_are_reported_only_when_present(self):
+        plain = mine.Capture.from_waves([wave([inst(0, "v_add_f32 v0, v0, v1")])])
+        self.assertNotIn("scratch_instructions", plain.pipes())
+        spill = mine.Inst(
+            4, 20, 0, 0, "FLAT", "scratch_store_dword off, v1", "", mine.Pc(0x20, 1)
+        )
+        cap = mine.Capture.from_waves([wave([inst(0, "v_add_f32 v0, v0, v1"), spill])])
+        sc = cap.pipes()["scratch_instructions"]
+        self.assertEqual((sc["per_wave"], sc["opcodes"]), (1.0, "scratch_store_dword"))
+        self.assertEqual(sc["share_of_cost"], round(100 * 20 / 24, 1))
+
+
+class AlsoReadTests(unittest.TestCase):
+    def test_a_large_second_state_adds_its_page(self):
+        hint = mine.next_read({"STALL": 50, "WAIT": 30, "EXEC": 20})
+        self.assertIn("read " + str(mine.RESOURCES / "compute.md"), hint)
+        self.assertIn(
+            "Also read "
+            + str(mine.RESOURCES / "latency.md")
+            + " (WAIT is 30% of wave time)",
+            hint,
+        )
+
+    def test_small_states_and_the_main_page_are_not_repeated(self):
+        self.assertNotIn(
+            "Also read", mine.next_read({"STALL": 70, "WAIT": 19, "EXEC": 11})
+        )
+        self.assertNotIn("Also read", mine.next_read({"WAIT": 80, "EXEC": 20}))
+
+    def test_idle_between_instructions_adds_the_idle_section(self):
+        hint = mine.next_read({"STALL": 60, "EXEC": 40}, idle_share=25)
+        self.assertIn("Idle cycles", hint)
+        self.assertIn("idle between instructions is 25% of wave time", hint)
+
+    def test_few_resident_waves_add_the_few_waves_section(self):
+        few = {"mean": 1.8, "peak": 2.0, "max": 8}
+        self.assertIn("Few waves", mine.next_read({"STALL": 60, "EXEC": 40}, waves=few))
+        many = {"mean": 6.0, "peak": 7.0, "max": 8}
+        self.assertNotIn(
+            "Few waves", mine.next_read({"STALL": 60, "EXEC": 40}, waves=many)
+        )
+        self.assertNotIn(
+            "Few waves",
+            mine.next_read({"STALL": 60, "EXEC": 40}, waves={"peak": 1, "max": None}),
+        )
+
+    def test_waves_per_simd_from_occupancy_rows(self):
+        rows = [
+            {"time": 0, "active_waves": 2},
+            {"time": 50, "active_waves": 4},
+            {"time": 100, "active_waves": 0},
+        ]
+        self.assertEqual(mine.mean_and_peak_per_simd(rows, 2), {"mean": 1.5, "peak": 2.0})
+        self.assertEqual(mine.mean_and_peak_per_simd(rows[:1], 2), {"mean": 0, "peak": 0})
+
+
+class InstsAndGuardTests(unittest.TestCase):
+    def test_lines_count_the_distinct_instructions_of_each_line(self):
+        w = wave(
+            [
+                inst(0, "v_rcp_f32 v1, v2", addr=0x10, source="/a/k.hip:5"),
+                inst(4, "v_fma_f32 v1, v2, v3, v4", addr=0x14, source="/a/k.hip:5"),
+                inst(8, "v_mul_f32 v1, v2, v3", addr=0x18, source="/a/k.hip:5"),
+                inst(12, "v_rcp_f32 v1, v2", addr=0x10, source="/a/k.hip:5"),
+                inst(16, "v_add_f32 v1, v2, v3", addr=0x1C, source="/a/k.hip:6"),
+            ]
+        )
+        rows = {r["line"]: r for r in mine.Capture.from_waves([w]).hotspots(by_line=True)}
+        self.assertEqual((rows["k.hip:5"]["insts"], rows["k.hip:6"]["insts"]), (3, 1))
+
+    def test_stats_lines_count_instructions_that_ran(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "stats_x_dispatch_1.csv").write_text(
+                '"CodeObj","Vaddr","Instruction","Hitcount","Latency","Stall","Idle","Source"\n'
+                '2,4,"v_rcp_f32 v1, v2",10,40,0,0,"/a/k.hip:5"\n'
+                '2,8,"v_fma_f32 v1, v2, v3, v4",10,40,0,0,"/a/k.hip:5"\n'
+                '2,12,"v_mul_f32 v1, v2, v3",0,0,0,0,"/a/k.hip:5"\n'
+            )
+            stats = mine.read_stats(d)
+        self.assertEqual(stats["lines"][0]["insts"], 2)
+
+    def test_every_next_line_ends_with_the_guard(self):
+        self.assertTrue(mine.next_read({"STALL": 60, "EXEC": 40}).endswith(mine.GUARD))
+        row = {
+            "instructions": [
+                {"text": "s_waitcnt vmcnt(0)", "share": 90, "idle": 0, "latency": 9}
+            ]
+        }
+        self.assertTrue(mine.next_read_from_stats(row).endswith(mine.GUARD))
+
+
+class WaitIsLatencyTests(unittest.TestCase):
+    def test_a_barrier_whose_wait_is_in_its_latency_counts_as_wait(self):
+        # gfx11 and later: a barrier's wait is in its duration, not its stall
+        barrier = mine.Inst(
+            0, 500, 0, 0, "MESSAGE", "s_barrier", "/a/k.hip:9", mine.Pc(0x20, 1)
+        )
+        row = mine.Capture.from_waves([wave([barrier])]).hotspots()[0]
+        self.assertEqual((row["stall"], row["wait"]), (0, 500))
+        p = mine.Capture.from_waves([wave([barrier])]).pipes()
+        b = next(c for c in p["classes"] if c["class"] == "barrier (s_barrier)")
+        self.assertEqual((b["stall_share"], b["wait_share"]), (0.0, 100.0))
+
+    def test_the_flat_profile_hint_also_ends_with_the_guard(self):
+        rows = {
+            "instructions": [
+                {"text": "v_add_f32 v1, v2, v3", "share": 2.0, "idle": 0, "latency": 4}
+            ]
+        }
+        self.assertTrue(mine.next_read_from_stats(rows).endswith(mine.GUARD))
+
+
+class LargestStateWordingTests(unittest.TestCase):
+    def test_the_basis_is_named_only_when_moving_idle_changes_the_largest_state(self):
+        changed = mine.next_read({"EXEC": 50, "WAIT": 40, "STALL": 10}, idle_share=15)
+        self.assertIn(
+            "WAIT is the largest wave state (with idle between instructions", changed
+        )
+        same = mine.next_read({"WAIT": 60, "EXEC": 30, "STALL": 10}, idle_share=5)
+        self.assertIn("WAIT is the largest wave state.", same)
+        self.assertNotIn("counted apart", same)
+
+
+class CeilingAlsoReadTests(unittest.TestCase):
+    def test_a_busy_vector_unit_adds_the_ceiling_check_whatever_the_largest_state(self):
+        hint = mine.next_read(
+            {"WAIT": 75, "EXEC": 20, "STALL": 5}, {"valu_busy": 87.2, "classes": []}
+        )
+        self.assertIn("Ceiling check", hint)
+        quiet = mine.next_read(
+            {"WAIT": 75, "EXEC": 20, "STALL": 5}, {"valu_busy": 30.0, "classes": []}
+        )
+        self.assertNotIn("Ceiling check", quiet)
+
+
+class DispatchKeyTests(unittest.TestCase):
+    def test_one_dispatch_on_two_shader_engines_counts_once(self):
+        d0 = SimpleNamespace(time=100, thread_dim_x=64, thread_dim_y=1, thread_dim_z=1)
+        d1 = SimpleNamespace(time=90, thread_dim_x=64, thread_dim_y=1, thread_dim_z=1)
+        w0 = wave([inst(200, "v_add_f32 v0, v0, v1")])
+        w1 = wave([inst(210, "v_add_f32 v0, v0, v1")])
+        mine.assign_dispatches([w0], [d0], ("53377", "1"))
+        mine.assign_dispatches([w1], [d1], ("53377", "1"))
+        self.assertEqual(w0.dispatch_key, w1.dispatch_key)
+
+    def test_consecutive_kernels_in_one_file_count_separately(self):
+        a = SimpleNamespace(time=100)
+        b = SimpleNamespace(time=500)
+        w0 = wave([inst(200, "v_add_f32 v0, v0, v1")])
+        w1 = wave([inst(600, "v_add_f32 v0, v0, v1")])
+        mine.assign_dispatches([w0, w1], [a, b], ("53377", "1"))
+        self.assertNotEqual(w0.dispatch_key, w1.dispatch_key)
 
 
 if __name__ == "__main__":

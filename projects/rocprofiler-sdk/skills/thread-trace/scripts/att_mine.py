@@ -6,31 +6,35 @@ usage: att_mine.py <capture_dir> <command> [--top N] [--json]
 
 commands:
   stats      the stats_*.csv rocprofv3 writes, ranked by instruction and by source line
-             (reads only the CSV; no decoder needed)
-  summary    decoder warnings, waves, dispatch resources, wave-state split, active waves
-  hotspots   instructions ranked by non-hidden latency, with per-hit p50/p90
-  lines      the same ranking grouped by source line
-  pipes      issue and stall cycles by instruction class (VALU, transcendental, matrix, LDS,
-             memory, waits, ...) and how much of the SIMDs' time vector instructions issue
-  barriers   how each workgroup's waves split their time around s_barrier: which wave the
-             others waited for, their barrier shares, and the lines that wave ran
+             (reads only the CSV; no decoder needed; the CSV names only the innermost
+             source line of inlined code)
+  summary    decoder warnings, waves, the traced dispatch's resources, wave-state split, idle
+             between instructions, active waves
+  hotspots   instructions ranked by non-hidden cost (latency plus idle, minus hidden), with
+             per-hit p50/p90 of cost
+  lines      the same ranking grouped by source line, with the number of distinct
+             instructions each line ran
+  pipes      per instruction class (VALU, matrix, LDS, memory, waits, ...): issue cycles per
+             instruction (execution cycles on gfx10 and later), share of resident time issuing, and shares of stall and wait
+             cycles; the opcodes that stalled most; and how much of the SIMDs' resident time
+             VALU instructions (matrix included) were issuing
+  barriers   how each workgroup's waves split their time around s_barrier: which wave
+             waited least (often, not always, the one the others waited for), the
+             barrier shares, and the lines that wave ran
   lifetime   wave lifetime against s_wait latency, VALU latency, other latency, and idle time
   occupancy  active waves and SGPR/VGPR allocation over time
-  compare    cost per source line in this capture vs another
+  compare    cost per wave by source line in this capture vs another
 
-stats, summary, pipes, hotspots, and lines end with a "next:" line naming the page of the
-skill's resources/ that covers what the trace shows.
+stats, summary, pipes, hotspots, and lines end with a "next:" line naming the pages of the
+skill's resources/ to read (for a flat stats profile it points to summary and pipes
+instead; a capture with no waves gets none; with --json, only summary and pipes carry it,
+as a "next" key). In hotspots and lines, the time wait, barrier, and other immediate
+instructions waited is in "wait", not "stall" (in stats, for s_waitcnt, s_wait_*, and
+s_barrier). barriers estimates workgroups from launch times. For your own queries, see the
+skill's resources/python-api.md.
 
-Every number comes from the decoder's records (waves with their instructions and timeline
-states, occupancy, dispatches), its CodeIndex, or its hidden-latency analysis. hotspots,
-lifetime, and occupancy compute what the decoder's hidden_latency_hotspots,
-plot_wave_lifetime, and plot_occupancy_resources samples compute.
-
-Import it to write your own queries: Capture(path) exposes .waves (WaveTrace objects with
-.insts, each an Inst with time, duration, stall, latency, idle, category, text, source).
-
-Needs Python 3.10 or later with pyelftools, PYTHONPATH=$DECODER_ROOT/python, and
-ROCPROF_TRACE_DECODER_LIB=<library file>.
+Needs Python 3.10 or later, pyelftools, llvm-objdump, and the decoder's Python package and
+library, set up as in the skill's resources/capture.md (Setup).
 """
 
 from __future__ import annotations
@@ -65,8 +69,8 @@ class Inst:
 
     @property
     def latency(self) -> int:
-        """Issue plus stall cycles, as the decoder's CodeIndex counts them."""
-        return max(self.stall, self.duration)
+        """Stall plus issue cycles: the decoder's duration, which includes the stall."""
+        return self.duration
 
     @property
     def cost(self) -> int:
@@ -85,6 +89,10 @@ class WaveTrace:
     contexts: int
     insts: list[Inst] = field(default_factory=list)
     states: Counter = field(default_factory=Counter)
+    dispatch: object = None  # the decoder Dispatch record the wave belongs to, if known
+    # Identifies the dispatch across files: rocprofv3 writes one .att file per shader engine,
+    # each with its own record of the same dispatch.
+    dispatch_key: object = None
 
     @property
     def lifetime(self) -> int:
@@ -104,14 +112,19 @@ GPU_FIELDS = (
     "wave_front_size",
     "max_waves_per_simd",
     "lds_size_in_kb",
-    "max_engine_clk_fcompute",
     "num_xcc",
 )
 
 
 def gpu_properties(path: Path) -> dict:
     """The traced GPU as rocprofv3 records it: rocpd_info_agent in *_results.db, or the
-    *_agent_info.csv that --output-format csv writes."""
+    *_agent_info.csv that --output-format csv writes. The .att file names carry the traced
+    agent's handle (<pid>_<agent>_shader_engine_<se>_<n>.att), which selects its row."""
+    handles = {
+        int(m.group(1))
+        for f in path.rglob("*.att")
+        if (m := re.search(r"(\d+)_shader_engine_", f.name))
+    }
     for db_path in sorted(path.rglob("*_results.db")):
         import sqlite3
 
@@ -124,8 +137,11 @@ def gpu_properties(path: Path) -> dict:
         except sqlite3.Error:
             continue
         if rows:
-            product, name, extdata = rows[0]
-            info = json.loads(extdata or "{}")
+            parsed = [(prod, nm, json.loads(ext or "{}")) for prod, nm, ext in rows]
+            traced = [
+                r for r in parsed if (r[2].get("id") or {}).get("handle") in handles
+            ]
+            product, name, info = (traced or parsed)[0]
             return {
                 "product": product,
                 "name": name,
@@ -148,6 +164,40 @@ def gpu_properties(path: Path) -> dict:
     return {}
 
 
+def union_length(intervals: list) -> int:
+    """Cycles covered by at least one of the (begin, end) intervals."""
+    total, end = 0, None
+    for a, b in sorted(intervals):
+        if end is None or a > end:
+            total += max(b - a, 0)
+            end = b
+        elif b > end:
+            total += b - end
+            end = b
+    return total
+
+
+def assign_dispatches(waves: list, dispatches: list, file_key: object = None) -> None:
+    """Give each wave the last dispatch that started before it (dispatches: decoder records of
+    the same trace file, in any order). With `file_key`, the files of one dispatch on several
+    shader engines share a key, so the wave's dispatch_key is that key plus the dispatch's
+    position in its file (consecutive kernels share a file)."""
+    ordered = sorted(dispatches, key=lambda d: d.time)
+    times = [d.time for d in ordered]
+    for w in waves:
+        k = bisect.bisect_right(times, w.begin) - 1
+        w.dispatch = ordered[k] if k >= 0 else None
+        if w.dispatch is not None:
+            w.dispatch_key = (file_key, k) if file_key is not None else id(w.dispatch)
+
+
+def waves_per_workgroup(dispatch, wave_size: int) -> int:
+    if dispatch is None:
+        return 0
+    threads = dispatch.thread_dim_x * dispatch.thread_dim_y * dispatch.thread_dim_z
+    return max(1, -(-threads // wave_size))
+
+
 def short_source(source: str) -> str:
     """file:line without directories; for inlined code, the call site in your file first."""
     if not source:
@@ -157,20 +207,28 @@ def short_source(source: str) -> str:
 
 
 RESOURCES = Path(__file__).resolve().parents[1] / "resources"
-MATRIX_OPS = ("v_mfma", "v_smfmac", "v_wmma", "v_swmmac")
-TRANSCENDENTAL = re.compile(r"v_(exp|log|rcp|rsq|sqrt|sin|cos)_")
-FLAT_PROFILE_SHARE = 5.0  # hotspots: no instruction holds more than this % of the cost
-LAUNCH_SLACK = 64  # cycles within which the waves of one workgroup are launched
+# The prefixes the decoder's hidden-latency analysis treats as matrix instructions.
+MATRIX_OPS = ("v_mfma", "v_smfma", "v_wmma", "v_swmma")
+FLAT_PROFILE_SHARE = 5.0  # heuristic: below this share, no single row stands out
+WAIT_CLASSES = ("wait (s_waitcnt, s_wait_*)", "barrier (s_barrier)", "IMMED")
+VALU_BUSY_ROUTE = 80.0  # heuristic: route to the ceiling check at this vector-busy share
+GUARD = (
+    "The trace shows where the time went in the code that ran, not which change will help; "
+    "it does not show how the work would run with other instructions or another algorithm. "
+    "Time a candidate change rather than ruling it out from the trace."
+)
+ALSO_READ_SHARE = 20.0  # heuristic: a wave state this large also gets its page named
+FEW_WAVES_FRACTION = 0.5  # heuristic: below this fraction of the maximum waves per SIMD
+LAUNCH_SLACK = 8  # cycles per wave within which the waves of one workgroup are launched
 
 
 def inst_class(inst: Inst) -> str:
-    """The instruction's decoder category, with VALU split into matrix, transcendental, and
-    other VALU instructions, and the IMMED waits and barriers named."""
+    """The instruction's decoder category, with matrix instructions split from other VALU
+    instructions (as the decoder's hidden-latency analysis does) and the waits and barriers
+    named."""
     op = inst.text.split(" ", 1)[0]
     if inst.category == "VALU":
-        if op.startswith(MATRIX_OPS):
-            return "VALU matrix"
-        return "VALU transcendental" if TRANSCENDENTAL.match(op) else "VALU"
+        return "VALU matrix" if op.startswith(MATRIX_OPS) else "VALU"
     if op.startswith(("s_waitcnt", "s_wait_")):
         return "wait (s_waitcnt, s_wait_*)"
     if op.startswith("s_barrier"):
@@ -178,43 +236,153 @@ def inst_class(inst: Inst) -> str:
     return inst.category
 
 
-def next_read(states: dict, pipes: dict | None = None) -> str:
-    """Which page of resources/ covers what the trace shows, and why."""
-    if not states:
-        return ""
-    state = max(states, key=states.get)
-    held = {c["class"]: c["stall_share"] for c in (pipes or {}).get("classes", [])}
-    if state == "WAIT":
-        page, why = "latency.md", "WAIT is the largest wave state"
-        if held.get("barrier (s_barrier)", 0) > held.get("wait (s_waitcnt, s_wait_*)", 0):
-            page, why = (
-                "synchronization.md",
-                "WAIT is the largest wave state and s_barrier holds it; "
-                "`barriers` shows which wave the others wait for",
-            )
-    elif state == "IDLE":
-        page, why = "stalls.md#idle-cycles", "IDLE is the largest wave state"
-    else:
-        page = "compute.md"
-        why = f"{state} is the largest wave state"
-        busy = [c for c in held if not c.startswith(("wait", "barrier"))]
-        if state == "STALL" and busy:
-            why += (
-                f"; {max(busy, key=held.get)} instructions hold most of the stall (a busy pipe, "
-                "or waits for earlier results)"
-            )
-        if pipes and pipes.get("valu_issue_share", 0) >= 80:
-            why += f"; vector instructions issue {pipes['valu_issue_share']}% of the SIMDs' time"
-            page = "compute.md#ceiling-check"
+def is_wait_op(text: str) -> bool:
+    """Wait and barrier instructions, whose latency is the time they waited. The stats CSV
+    has no instruction category, so they are told apart by opcode."""
+    return text.startswith(("s_waitcnt", "s_wait_", "s_barrier"))
+
+
+def page_ref(page: str) -> str:
     name, _, anchor = page.partition("#")
-    where = f"{RESOURCES / name}" + (
+    return f"{RESOURCES / name}" + (
         f" (section {anchor.replace('-', ' ').capitalize()!r})" if anchor else ""
     )
-    return (
-        f"{why}. Before changing the kernel, read {where}: it lists the changes "
-        "that address this, roughly in order of what they gain, and how to confirm each one "
-        "in the next capture."
+
+
+def wait_page(pipes: dict | None) -> tuple[str, str]:
+    """latency.md for waits on earlier instructions, synchronization.md when s_barrier holds
+    more of the waiting than the wait instructions."""
+    waited = {
+        c["class"]: c.get("wait_share", c.get("stall_share", 0))
+        for c in (pipes or {}).get("classes", [])
+    }
+    if waited.get("barrier (s_barrier)", 0) > waited.get("wait (s_waitcnt, s_wait_*)", 0):
+        return (
+            "synchronization.md",
+            "s_barrier waited longer than the wait instructions; `barriers` shows which wave "
+            "waited least at s_barrier",
+        )
+    return "latency.md", ""
+
+
+def next_read(
+    states: dict,
+    pipes: dict | None = None,
+    idle_share: float = 0.0,
+    waves: dict | None = None,
+) -> str:
+    """Which page of resources/ covers what the trace shows, and why. The decoder counts the
+    idle cycles between a wave's instructions as EXEC; `idle_share` (from `summary`) moves them
+    to IDLE, so that idle before instructions decides as much as the other states. The page for
+    the largest state comes first; WAIT or idle time of at least ALSO_READ_SHARE, and few
+    resident waves (`waves`, from `summary`), add their pages."""
+    if not states:
+        return ""
+    raw_wait = states.get("WAIT", 0)
+    raw_state = max(states, key=states.get)
+    if idle_share:
+        states = dict(states)
+        states["EXEC"] = max(states.get("EXEC", 0) - idle_share, 0)
+        states["IDLE"] = states.get("IDLE", 0) + idle_share
+    state = max(states, key=states.get)
+    # summary prints the states before idle is moved out of EXEC; say so when that changed
+    # which state is largest.
+    basis = (
+        " (with idle between instructions counted apart from EXEC)"
+        if state != raw_state
+        else ""
     )
+    classes = (pipes or {}).get("classes", [])
+    held = {c["class"]: c.get("stall_share", 0) for c in classes}
+    if state == "WAIT":
+        page, detail = wait_page(pipes)
+        why = f"WAIT is the largest wave state{basis}" + (
+            f" and {detail}" if detail else ""
+        )
+    elif state == "IDLE":
+        page, why = (
+            "stalls.md#idle-cycles",
+            "idle time before instructions holds the most wave time",
+        )
+    elif state == "EXEC":
+        page, why = (
+            "compute.md#ceiling-check",
+            f"EXEC is the largest wave state{basis}: the waves spend more time issuing than in "
+            "any other state",
+        )
+    else:
+        page = "compute.md"
+        why = f"{state} is the largest wave state{basis}"
+        busy = [c for c in held if c not in WAIT_CLASSES and c != "MESSAGE" and held[c]]
+        if state == "STALL" and busy:
+            top = max(busy, key=held.get)
+            ops = next(
+                (c.get("top_stalled", "") for c in pipes["classes"] if c["class"] == top),
+                "",
+            )
+            why += (
+                f"; {top} instructions hold the largest share of the stall"
+                + (f" (most stalled: {ops})" if ops else "")
+                + ": their pipe did not accept them, usually because the unit was busy or its "
+                "queue full"
+            )
+    if (
+        pipes
+        and pipes.get("valu_busy", 0) >= VALU_BUSY_ROUTE
+        and state in ("STALL", "EXEC")
+    ):
+        why += (
+            f"; VALU instructions were issuing during {pipes['valu_busy']}% of the SIMDs' "
+            "resident time"
+        )
+        page = "compute.md#ceiling-check"
+    also = []
+    if raw_wait >= ALSO_READ_SHARE and state != "WAIT":
+        also.append((wait_page(pipes)[0], f"WAIT is {raw_wait}% of wave time"))
+    if idle_share >= ALSO_READ_SHARE and state != "IDLE":
+        also.append(
+            (
+                "stalls.md#idle-cycles",
+                f"idle between instructions is {idle_share}% of wave time",
+            )
+        )
+    if (
+        waves
+        and waves.get("max")
+        and waves.get("peak", 0) < FEW_WAVES_FRACTION * waves["max"]
+    ):
+        also.append(
+            (
+                "latency.md#few-waves",
+                f"{waves['peak']} waves per SIMD on average at the busiest moment, of "
+                f"{waves['max']}",
+            )
+        )
+    if (
+        pipes
+        and pipes.get("valu_busy", 0) >= VALU_BUSY_ROUTE
+        and state not in ("STALL", "EXEC")
+    ):
+        also.append(
+            (
+                "compute.md#ceiling-check",
+                f"VALU instructions were issuing during {pipes['valu_busy']}% of the SIMDs' "
+                "resident time",
+            )
+        )
+    also = [(p, w) for p, w in also if p != page]
+    text = (
+        f"{why}. Before changing the kernel, read {page_ref(page)}: it lists possible causes, "
+        "what each looks like in the trace, suggested changes, and how to confirm them."
+    )
+    same = [(p, w) for p, w in also if p.partition("#")[0] == page.partition("#")[0]]
+    other = [(p, w) for p, w in also if (p, w) not in same]
+    for p, w in same:
+        section = p.partition("#")[2].replace("-", " ").capitalize()
+        text += f" See its section {section!r} too ({w})."
+    if other:
+        text += " Also read " + "; ".join(f"{page_ref(p)} ({w})" for p, w in other) + "."
+    return f"{text} {GUARD}"
 
 
 def next_read_from_stats(stats: dict) -> str:
@@ -223,23 +391,49 @@ def next_read_from_stats(stats: dict) -> str:
     if not rows:
         return ""
     op = rows[0]["text"].split(" ", 1)[0]
-    if op.startswith("s_barrier"):
+    if rows[0].get("share", 100) < FLAT_PROFILE_SHARE:
+        return (
+            f"no instruction holds more than {rows[0]['share']}% of the cost in the CSV; "
+            f"`summary` and `pipes` show where the time goes. {GUARD}"
+        )
+    if rows[0].get("idle", 0) > rows[0].get("latency", 0):
+        page, why = (
+            "stalls.md#idle-cycles",
+            f"{op} holds the most time, mostly as idle cycles before it",
+        )
+    elif op.startswith("s_barrier"):
         page, why = (
             "synchronization.md",
-            "s_barrier holds the most time; `barriers` shows which wave of each "
-            "workgroup the others wait for, which the CSV cannot",
+            "s_barrier holds the most time; `barriers` shows which wave, by launch order, "
+            "waited least at s_barrier, and in what share of the workgroups, which the CSV "
+            "cannot",
         )
     elif op.startswith(("s_waitcnt", "s_wait_")):
         page, why = "latency.md", "wait instructions hold the most time"
     else:
         page, why = (
             "compute.md",
-            f"{op} holds the most time; `pipes` shows which instruction class it belongs to",
+            f"{op} holds the most time; `pipes` shows how busy its class was",
         )
     return (
-        f"{why}. Before changing the kernel, read {RESOURCES / page}: it lists the changes that address "
-        "this, roughly in order of what they gain, and how to confirm each one in the next capture."
+        f"{why}. Before changing the kernel, read {page_ref(page)}: it lists possible causes, "
+        f"what each looks like in the trace, suggested changes, and how to confirm them. {GUARD}"
     )
+
+
+def mean_and_peak_per_simd(rows: list[dict], simds: int) -> dict:
+    """Mean (over the span of the occupancy records) and peak active waves per SIMD."""
+    if len(rows) < 2 or not simds:
+        return {"mean": 0, "peak": 0}
+    times = [r["time"] for r in rows]
+    span = max(times[-1] - times[0], 1)
+    mean = (
+        sum(r["active_waves"] * (t1 - r["time"]) for r, t1 in zip(rows, times[1:])) / span
+    )
+    return {
+        "mean": round(mean / simds, 1),
+        "peak": round(max(r["active_waves"] for r in rows) / simds, 1),
+    }
 
 
 def flat_profile_note(rows: list[dict], what: str) -> str:
@@ -247,31 +441,30 @@ def flat_profile_note(rows: list[dict], what: str) -> str:
     if not rows or rows[0]["share"] >= FLAT_PROFILE_SHARE:
         return ""
     return (
-        f"no {what} holds more than {rows[0]['share']}% of the non-hidden cost; the cost is "
-        "spread out. `pipes` shows which instruction classes it goes to."
+        f"no {what} holds more than {rows[0]['share']}% of the non-hidden cost; `pipes` shows "
+        "which instruction classes the issue, stall, and wait cycles go to."
     )
 
 
 class Capture:
     def __init__(self, path: str | Path):
         try:
-            from rocprof_trace_decoder import (
-                CodeObject,
-                Decoder,
-                HiddenLatency,
-                analyze_hidden_latency,
-                generate_code_artifacts,
-            )
+            from rocprof_trace_decoder import CodeObject, Decoder, generate_code_artifacts
         except ImportError as err:
-            if err.name == "elftools":
+            if err.name == "elftools":  # packages that import pyelftools eagerly
                 raise SystemExit(
-                    "the decoder's Python package needs pyelftools: "
-                    "pip install pyelftools"
+                    "the decoder's Python package needs pyelftools: pip install pyelftools"
                 ) from None
             raise SystemExit(
-                f"cannot import rocprof_trace_decoder ({err}); set PYTHONPATH to "
-                "the decoder's python directory and ROCPROF_TRACE_DECODER_LIB to "
-                "librocprof-trace-decoder.so"
+                f"cannot import rocprof_trace_decoder ({err}); set PYTHONPATH to the "
+                "decoder's python directory (see the skill's resources/capture.md)"
+            ) from None
+        try:
+            from rocprof_trace_decoder import HiddenLatency, analyze_hidden_latency
+        except ImportError:
+            raise SystemExit(
+                "this rocprof_trace_decoder package has no analyze_hidden_latency; use a "
+                "release of the decoder's Python package that includes it"
             ) from None
         self.path = Path(path)
         att_files = sorted(self.path.rglob("*.att"))
@@ -283,7 +476,14 @@ class Capture:
         ]
         if not objects:
             raise SystemExit(f"no *_code_object_id_*.out code objects under {self.path}")
-        self.code_index = generate_code_artifacts(objects).code_index
+        try:
+            self.code_index = generate_code_artifacts(objects).code_index
+        except ImportError as err:
+            if "elftools" in str(err) or err.name == "elftools":
+                raise SystemExit(
+                    "the decoder's Python package needs pyelftools: pip install pyelftools"
+                ) from None
+            raise
         self.gpu = gpu_properties(self.path)
         self.waves: list[WaveTrace] = []
         self.dispatches: list = []
@@ -313,8 +513,12 @@ class Capture:
                 for pc, h in hidden.by_pc.items():
                     self.hidden_by_pc.setdefault(pc, HiddenLatency())
                     self.hidden_by_pc[pc] += h
-                for w in records.waves:
-                    self.waves.append(self._wave(se, w))
+                file_waves = [self._wave(se, w) for w in records.waves]
+                # <agent>_shader_engine_<se>_<n>.att: the same agent and n on every engine
+                named = re.search(r"(\d+)_shader_engine_\d+_(\d+)\.att$", att.name)
+                file_key = named.groups() if named else att.name
+                assign_dispatches(file_waves, records.dispatches, file_key)
+                self.waves += file_waves
 
     @classmethod
     def from_waves(
@@ -340,6 +544,7 @@ class Capture:
         cap.waves = list(waves)
         cap.dispatch_records = with_se(dispatches)
         cap.dispatches = [d for _, d in cap.dispatch_records]
+        assign_dispatches(cap.waves, cap.dispatches)
         cap.occupancy = with_se(occupancy)
         cap.warnings = set()
         cap.unresolved = 0
@@ -361,9 +566,10 @@ class Capture:
         )
         prev_end = w.begin_time
         for i in w.instructions:
-            # Unresolved instructions are skipped the way CodeIndex.accumulate_wave skips them.
+            # Records with no pc are skipped the way CodeIndex.accumulate_wave skips them; trap
+            # and context records (category CONTEXT) have none either, but are not unresolved.
             if i.pc.code_object_id == 0 and i.pc.address == 0:
-                self.unresolved += 1
+                self.unresolved += InstCategory(i.category).name != "CONTEXT"
                 continue
             entry = self.code_index.entries.get(i.pc)
             inst = Inst(
@@ -389,12 +595,36 @@ class Capture:
         for w in self.waves:
             states += w.states
         total_state = sum(states.values()) or 1
-        dispatch = self.dispatches[0] if self.dispatches else None
+        traced = Counter(w.dispatch_key for w in self.waves if w.dispatch is not None)
+        main_key = traced.most_common(1)[0][0] if traced else None
+        dispatch = next(
+            (w.dispatch for w in self.waves if w.dispatch_key == main_key),
+            self.dispatches[0] if self.dispatches else None,
+        )
+        warnings = set(self.warnings)
+        if len(traced) > 1:
+            warnings.add(
+                f"the traced waves belong to {len(traced)} dispatches (from a kernel regex that matches "
+                "several kernels or no regex, --att-consecutive-kernels, an iteration range, "
+                "--selected-regions, several GPUs (limit them with --att-gpu-index), or earlier "
+                "captures left in this directory); these figures "
+                "mix them (dispatch: the one with the most waves). For one kernel, capture into a "
+                "new directory"
+            )
         rows = self.occupancy_rows()
+        simds = len({(se, o.cu, o.simd) for se, o in self.occupancy})
         return {
             "waves": len(self.waves),
             "waves_with_context_switch": sum(w.contexts != 0 for w in self.waves),
-            "warnings": sorted(self.warnings),
+            # Every .att file under the directory is decoded together.
+            "dispatches_with_traced_waves": len(traced),
+            # Idle cycles between instructions, which the decoder's wave states count as EXEC
+            # (the idle before a wave's first instruction is its IDLE state).
+            "idle_between_instructions": round(
+                100 * sum(i.idle for w in self.waves for i in w.insts[1:]) / total_state,
+                1,
+            ),
+            "warnings": sorted(warnings),
             "unresolved_instructions": self.unresolved,
             "wave_lifetime_median": (
                 statistics.median(w.lifetime for w in self.waves) if self.waves else 0
@@ -416,9 +646,35 @@ class Capture:
                     ],
                 }
             ),
-            "occupancy_simds": len({(se, o.cu, o.simd) for se, o in self.occupancy}),
+            "occupancy_simds": simds,
             "peak_active_waves": max((r["active_waves"] for r in rows), default=0),
+            # Active waves per SIMD that held a wave, against the most a SIMD can hold.
+            "waves_per_simd": {
+                **mean_and_peak_per_simd(rows, simds),
+                "max": self.gpu.get("max_waves_per_simd"),
+            },
+            **self.scratch(),
             "gpu": self.gpu,
+        }
+
+    def scratch(self) -> dict:
+        """scratch_* instructions (scratch memory: register spills or private arrays), if any
+        ran: instructions per wave and their share of the waves' instruction cost."""
+        insts = [i for w in self.waves for i in w.insts if i.text.startswith("scratch_")]
+        if not insts:
+            return {}
+        total = sum(i.cost for w in self.waves for i in w.insts) or 1
+        return {
+            "scratch_instructions": {
+                "per_wave": round(len(insts) / (len(self.waves) or 1), 1),
+                "share_of_cost": round(100 * sum(i.cost for i in insts) / total, 1),
+                "opcodes": ", ".join(
+                    op
+                    for op, _ in Counter(
+                        i.text.split(" ", 1)[0] for i in insts
+                    ).most_common(3)
+                ),
+            }
         }
 
     # ------------------------------------------------------------------ hotspots
@@ -436,15 +692,21 @@ class Capture:
             latency = sum(i.latency for i in insts)
             idle = sum(i.idle for i in insts)
             hidden = h.stall + h.issue + min(h.idle, idle) if h else 0
+            stall = sum(i.stall for i in insts)
+            waits = inst_class(insts[0]) in WAIT_CLASSES
             rows.append(
                 {
                     "pc": pc,
                     "text": insts[0].text,
                     "source": short_source(insts[0].source),
-                    "category": insts[0].category,
+                    "category": max(insts, key=lambda i: i.cost).category,
                     "hits": len(insts),
                     "cost": latency + idle,
-                    "stall": sum(i.stall for i in insts),
+                    # A wait or barrier instruction's stall is the time it waited.
+                    "stall": 0 if waits else stall,
+                    # A wait, barrier, or other immediate instruction's latency is the time it
+                    # waited (on some architectures that wait is not in its stall).
+                    "wait": latency if waits else 0,
                     "idle": idle,
                     "non_hidden": latency + idle - hidden,
                     "p50": pct([i.cost for i in insts], 0.5),
@@ -462,12 +724,15 @@ class Capture:
                         "non_hidden": 0,
                         "hits": 0,
                         "stall": 0,
+                        "wait": 0,
                         "idle": 0,
+                        "insts": 0,
                         "top_inst": Counter(),
                     },
                 )
-                for k in ("cost", "non_hidden", "hits", "stall", "idle"):
+                for k in ("cost", "non_hidden", "hits", "stall", "wait", "idle"):
                     g[k] += r[k]
+                g["insts"] += 1  # rows are per instruction (pc): distinct instructions
                 g["top_inst"][r["text"].split(" ", 1)[0]] += r["non_hidden"]
             rows = list(grouped.values())
             for g in rows:
@@ -480,71 +745,97 @@ class Capture:
     # ------------------------------------------------------------------ pipes
 
     def pipes(self) -> dict:
-        """Issue and stall cycles by instruction class, against the time the traced SIMDs had
-        waves resident. Issue cycles are an instruction's duration minus its stall: the cycles
-        it occupied its pipe's issue port once the pipe took it."""
-        span: dict[tuple, list[int]] = {}
-        issue, stall, count = Counter(), Counter(), Counter()
+        """Per instruction class: instructions per wave, issue cycles per instruction, the share
+        of the SIMDs' resident time during which the class was issuing, the share of stall
+        cycles, and the opcodes that stalled most. Issue cycles are an instruction's duration
+        minus its stall. Instructions of different waves can issue in the same cycles, so busy
+        time is the union of their issue intervals on each SIMD, counted once; resident time is
+        the union of the traced waves' lifetimes on each SIMD."""
+        lifetimes: dict[tuple, list] = defaultdict(list)
+        issuing: dict[tuple, list] = defaultdict(list)
+        issue, stall, waited, count = Counter(), Counter(), Counter(), Counter()
+        stalled_ops: dict[str, Counter] = defaultdict(Counter)
         for w in self.waves:
-            s = span.setdefault((w.se, w.cu, w.simd), [w.begin, w.end])
-            s[0], s[1] = min(s[0], w.begin), max(s[1], w.end)
+            simd = (w.se, w.cu, w.simd)
+            lifetimes[simd].append((w.begin, w.end))
             for i in w.insts:
                 c = inst_class(i)
                 count[c] += 1
                 issue[c] += max(i.duration - i.stall, 0)
                 stall[c] += i.stall
-        simd_time = sum(max(end - begin, 1) for begin, end in span.values()) or 1
-        total_stall = sum(stall.values()) or 1
+                if c in WAIT_CLASSES:
+                    waited[c] += i.latency
+                stalled_ops[c][i.text.split(" ", 1)[0]] += i.stall
+                issuing[(c, simd)].append((i.time + i.stall, i.time + i.duration))
+        resident = sum(union_length(v) for v in lifetimes.values()) or 1
+        busy = Counter()
+        valu: dict[tuple, list] = defaultdict(list)
+        for (c, simd), spans in issuing.items():
+            busy[c] += union_length(spans)
+            if c.startswith("VALU"):
+                valu[simd] += spans
+        # Wait, barrier, and other immediate instructions spend their latency waiting; keep it
+        # apart from the stall of instructions their pipe did not accept.
+        total_stall = sum(v for c, v in stall.items() if c not in WAIT_CLASSES) or 1
+        total_wait = sum(waited.values()) or 1
         waves = len(self.waves) or 1
         classes = [
             {
                 "class": c,
                 "per_wave": round(count[c] / waves, 1),
                 "cycles_each": round(issue[c] / count[c], 1),
-                "issue_share": round(100 * issue[c] / simd_time, 1),
-                "stall_share": round(100 * stall[c] / total_stall, 1),
+                "busy_share": round(100 * busy[c] / resident, 1),
+                "stall_share": (
+                    0.0 if c in WAIT_CLASSES else round(100 * stall[c] / total_stall, 1)
+                ),
+                "wait_share": (
+                    round(100 * waited[c] / total_wait, 1) if c in WAIT_CLASSES else 0.0
+                ),
+                "top_stalled": (
+                    ""
+                    if c in WAIT_CLASSES
+                    else ", ".join(op for op, n in stalled_ops[c].most_common(3) if n)
+                ),
             }
             for c in count
         ]
-        classes.sort(key=lambda r: -(r["issue_share"] + r["stall_share"]))
-        valu = sum(issue[c] for c in issue if c.startswith("VALU"))
+        classes.sort(
+            key=lambda r: -(r["busy_share"] + r["stall_share"] + r["wait_share"])
+        )
         return {
             "waves": len(self.waves),
-            "simds": len(span),
-            "simd_cycles": simd_time,
-            "valu_issue_share": round(100 * valu / simd_time, 1),
+            "simds": len(lifetimes),
+            "resident_cycles": resident,
+            "valu_busy": round(
+                100 * sum(union_length(v) for v in valu.values()) / resident, 1
+            ),
             "classes": classes,
+            **self.scratch(),
         }
 
     # ------------------------------------------------------------------ barriers
 
     def barriers(self, top: int = 3) -> dict:
-        """How the waves of a workgroup split their time around s_barrier. A workgroup's waves are
-        launched together, so on each compute unit consecutive waves that start within LAUNCH_SLACK
-        cycles of each other, up to the dispatch's waves per workgroup, form one workgroup; rank 0 is
-        its first wave. In each workgroup the wave with the smallest share of its lifetime at
-        s_barrier is the one the others waited for: the report gives which rank that is, its
-        barrier share against the others', the lines it spent its time on, and the barriers the
+        """How the waves of a workgroup split their time around s_barrier. A workgroup's
+        waves are launched together, so on each compute unit and dispatch, consecutive
+        waves that start within LAUNCH_SLACK cycles per wave (at least 8 waves' worth)
+        of the workgroup's first wave, up to the dispatch's waves per workgroup, form
+        one workgroup (an estimate: the trace's workgroup ids are not reliable). Ranks
+        are launch order, waves launched in the same cycle ordered by SIMD. In each
+        workgroup the wave with the smallest share of its lifetime at s_barrier (often,
+        not always, the one the others waited for) is reported: which rank that is, its barrier
+        share against the others', the lines it spent its time on, and the barriers the
         others waited at."""
-        dispatch = self.dispatches[0] if self.dispatches else None
         wave_size = int(self.gpu.get("wave_front_size") or 64)
-        per_wg = (
-            max(
-                1,
-                -(
-                    -dispatch.thread_dim_x
-                    * dispatch.thread_dim_y
-                    * dispatch.thread_dim_z
-                    // wave_size
-                ),
-            )
-            if dispatch
-            else 0
-        )
+        fallback = self.dispatches[0] if self.dispatches else None
+
+        def per_wg(w: WaveTrace) -> int:
+            return waves_per_workgroup(w.dispatch or fallback, wave_size)
+
         by_cu: dict[tuple, list[WaveTrace]] = defaultdict(list)
         for w in self.waves:
             if any(i.text.startswith("s_barrier") for i in w.insts):
-                by_cu[(w.se, w.cu)].append(w)
+                by_cu[(w.se, w.cu, id(w.dispatch))].append(w)
         groups: list[list[WaveTrace]] = []
         for waves in by_cu.values():
             waves.sort(key=lambda w: (w.begin, w.simd, w.wave_id))
@@ -552,9 +843,10 @@ class Capture:
                 g = groups[-1] if groups else None
                 if (
                     g
-                    and (g[0].se, g[0].cu) == (w.se, w.cu)
-                    and w.begin - g[0].begin <= LAUNCH_SLACK
-                    and (not per_wg or len(g) < per_wg)
+                    and (g[0].se, g[0].cu, id(g[0].dispatch))
+                    == (w.se, w.cu, id(w.dispatch))
+                    and w.begin - g[0].begin <= LAUNCH_SLACK * max(per_wg(w), 8)
+                    and (not per_wg(w) or len(g) < per_wg(w))
                 ):
                     g.append(w)
                 else:
@@ -588,7 +880,10 @@ class Capture:
         ran_total, wait_total = sum(ran.values()) or 1, sum(waited_at.values()) or 1
         return {
             "workgroups": len(groups),
-            "waves_per_workgroup": per_wg or None,
+            "waves_per_workgroup": (
+                Counter(len(g) for g in groups).most_common(1)[0][0] if groups else None
+            ),
+            "ranks": "launch order within the workgroup (estimated from launch times)",
             "least_waiting_rank": {
                 f"rank {r}": f"{100 * c / n:.0f}%" for r, c in ranks.most_common(3)
             },
@@ -759,12 +1054,14 @@ def read_stats(path: str | Path, top: int = 15) -> dict:
                 latency, stall, idle = (
                     int(float(r.get(k) or 0)) for k in ("Latency", "Stall", "Idle")
                 )
+                waits = is_wait_op(text)
                 insts.append(
                     {
                         "cost": latency + idle,
                         "hits": hits,
                         "latency": latency,
-                        "stall": stall,
+                        "stall": 0 if waits else stall,
+                        "wait": latency if waits else 0,
                         "idle": idle,
                         "text": text,
                         "source": short_source(r.get("Source", "")),
@@ -776,18 +1073,28 @@ def read_stats(path: str | Path, top: int = 15) -> dict:
         i["share"] = round(100 * i["cost"] / total, 1)
         g = lines.setdefault(
             i["source"],
-            {"line": i["source"], "cost": 0, "stall": 0, "idle": 0, "insts": Counter()},
+            {
+                "line": i["source"],
+                "cost": 0,
+                "stall": 0,
+                "wait": 0,
+                "idle": 0,
+                "count": 0,
+                "insts": Counter(),
+            },
         )
-        g["cost"] += i["cost"]
-        g["stall"] += i["stall"]
-        g["idle"] += i["idle"]
+        for k in ("cost", "stall", "wait", "idle"):
+            g[k] += i[k]
+        g["count"] += 1
         g["insts"][i["text"].split(" ", 1)[0]] += i["cost"]
     by_line = [
         {
             "share": round(100 * g["cost"] / total, 1),
             "cost": g["cost"],
             "stall": g["stall"],
+            "wait": g["wait"],
             "idle": g["idle"],
+            "insts": g["count"],
             "line": g["line"],
             "top_inst": ", ".join(k for k, _ in g["insts"].most_common(2)),
         }
@@ -844,11 +1151,22 @@ def main() -> int:
         print("\nInstructions by cost (latency + idle, summed over traced waves):")
         print_rows(
             result["instructions"],
-            ["share", "cost", "hits", "latency", "stall", "idle", "text", "source"],
+            [
+                "share",
+                "cost",
+                "hits",
+                "latency",
+                "stall",
+                "wait",
+                "idle",
+                "text",
+                "source",
+            ],
         )
         print("\nSource lines by cost:")
         print_rows(
-            result["lines"], ["share", "cost", "stall", "idle", "line", "top_inst"]
+            result["lines"],
+            ["share", "cost", "stall", "wait", "idle", "insts", "line", "top_inst"],
         )
         hint = next_read_from_stats(result)
         if hint:
@@ -858,7 +1176,13 @@ def main() -> int:
     cap = Capture(args.capture)
     hint = ""
     if args.command in ("summary", "pipes", "hotspots", "lines"):
-        hint = next_read(cap.summary()["wave_states"], cap.pipes())
+        summ = cap.summary()
+        hint = next_read(
+            summ["wave_states"],
+            cap.pipes(),
+            summ["idle_between_instructions"],
+            summ["waves_per_simd"],
+        )
     if args.command == "summary":
         result = cap.summary()
         result["next"] = hint
@@ -877,6 +1201,12 @@ def main() -> int:
         if not args.other:
             p.error("compare needs a second capture directory")
         before, after = cap.cost_by_line(), Capture(args.other).cost_by_line()
+
+        def source_files(lines: dict) -> set:
+            return {k.split(" (inlined", 1)[0].rsplit(":", 1)[0] for k in lines}
+
+        if not source_files(before) & source_files(after):
+            print("warning: the two captures share no source files", file=sys.stderr)
         rows = [
             {
                 "line": k,
@@ -906,27 +1236,51 @@ def main() -> int:
                 print(f"{k}: {v}")
     elif args.command == "pipes":
         print(
-            f"waves: {result['waves']}  SIMDs: {result['simds']}  SIMD cycles with waves resident: "
-            f"{result['simd_cycles']}"
+            f"waves: {result['waves']}  SIMDs: {result['simds']}  resident cycles (time with a "
+            f"traced wave on the SIMD, summed over SIMDs): {result['resident_cycles']}"
         )
         print_rows(
             result["classes"],
-            ["class", "per_wave", "cycles_each", "issue_share", "stall_share"],
+            [
+                "class",
+                "per_wave",
+                "cycles_each",
+                "busy_share",
+                "stall_share",
+                "wait_share",
+                "top_stalled",
+            ],
         )
         print(
-            f"\nvector instructions (all VALU classes) issue {result['valu_issue_share']}% of the "
-            "SIMDs' time. Near or above 100%, the SIMDs issue a vector instruction almost every "
-            "cycle: only issuing fewer or cheaper vector instructions shortens the kernel. Stall "
-            "on a class is a busy pipe or a wait for an earlier result of the same kind (matrix "
-            "and transcendental instructions take many cycles); with few waves resident it is "
-            "usually the wait. Matrix instructions issue in a few cycles, so compare the "
-            "kernel's FLOP/s with the GPU's matrix peak to see how busy the matrix core is."
+            "\nbusy_share: share of the SIMDs' resident time the class was issuing (overlapping "
+            "issue counted once); cycles_each: mean cycles per instruction after its stall (issue "
+            "cycles on gfx9; on gfx10 and later execution cycles, mostly a fixed number by "
+            "instruction type rather than measured); stall_share: share of the "
+            "stall cycles of all classes but wait, barrier, and IMMED, the cycles the pipe did not accept the "
+            "class's instructions, usually "
+            "because the unit was busy or its queue full; wait_share: share of the time wait, "
+            "barrier, and other immediate instructions waited."
+            + (
+                ""  # the next: line below already gives it
+                if "VALU instructions were issuing" in hint
+                else " VALU instructions (matrix included) were issuing during "
+                f"{result['valu_busy']}% of the resident time "
+                f"({page_ref('compute.md#ceiling-check')})."
+            )
+            + f" Measures: {page_ref('stalls.md')}."
         )
+        if result.get("scratch_instructions"):
+            sc = result["scratch_instructions"]
+            print(
+                f"scratch_* instructions (scratch memory: register spills or private arrays) "
+                f"ran: {sc['per_wave']} per wave ({sc['opcodes']}), {sc['share_of_cost']}% of "
+                "the instruction cost."
+            )
     elif args.command == "barriers":
         for k, v in result.items():
             if not isinstance(v, list):
                 print(f"{k}: {v}")
-        print("\nThe wave the others waited for spent its time on:")
+        print("\nThe wave that waited least at s_barrier spent its time on:")
         print_rows(result["least_waiting_wave_ran"], ["share", "line"])
         print("\nThe other waves waited at:")
         print_rows(result["others_waited_at"], ["share", "line"])
@@ -949,6 +1303,7 @@ def main() -> int:
                 "p50",
                 "p90",
                 "stall",
+                "wait",
                 "idle",
                 "category",
                 "text",
@@ -958,7 +1313,18 @@ def main() -> int:
     elif args.command == "lines":
         print_rows(
             result,
-            ["share", "non_hidden", "cost", "hits", "stall", "idle", "line", "top_inst"],
+            [
+                "share",
+                "non_hidden",
+                "cost",
+                "hits",
+                "stall",
+                "wait",
+                "idle",
+                "insts",
+                "line",
+                "top_inst",
+            ],
         )
     else:
         print_rows(result, ["line", "before", "after", "delta"])

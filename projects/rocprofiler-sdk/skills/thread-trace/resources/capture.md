@@ -2,7 +2,7 @@
 
 ## Setup
 
-- rocprofv3 from ROCm 7.0 or later, with thread trace support for your GPU. The
+- rocprofv3 from ROCm 10.0 or later, with thread trace support for your GPU. The
   [supported devices](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-thread-trace.html#supported-devices)
   table lists the validated architectures and what each supports (counters inside the
   trace, for example, only on some); treat hardware not listed there as unverified until a
@@ -11,71 +11,77 @@
   `ls ${ROCM_PATH:-/opt/rocm}/lib/librocprof-trace-decoder.so*`; if your ROCm does not ship
   it, build it from rocm-systems:
 
-  ```bash
+```bash
   git clone --depth 1 https://github.com/ROCm/rocm-systems.git
   cmake -S rocm-systems/projects/rocprof-trace-decoder -B decoder-build
   cmake --build decoder-build -j
-  export ROCPROF_ATT_LIBRARY_PATH=$PWD/decoder-build/lib        # found by rocprofv3
   export ROCPROF_TRACE_DECODER_LIB=$PWD/decoder-build/lib/librocprof-trace-decoder.so
   export PYTHONPATH=$PWD/rocm-systems/projects/rocprof-trace-decoder/python
-  ```
+```
 
-  rocprofv3 finds the library through `ROCPROF_ATT_LIBRARY_PATH` (a directory) or
-  `--att-library-path`. The other two variables are for `att_mine.py`, which also needs
-  Python 3.10 or later with `pyelftools` 0.31 or later.
-- Line tables, so instructions map to source lines: build with `-gline-tables-only` (or
-  `-g`). Kernels built without them, such as most library kernels, are still traced;
-  results then name instruction addresses, which the disassembly of the captured code
-  object resolves.
+  Pass the library's directory to rocprofv3 with
+  `--att-library-path $PWD/decoder-build/lib`. Some rocprofv3 releases do not honour the
+  `ROCPROF_ATT_LIBRARY_PATH` variable and search the whole filesystem for a decoder instead;
+  the option works in all of them. The two variables are for `att_mine.py`, which also needs
+  Python 3.10 or later, `pyelftools` 0.31 or later, and `llvm-objdump` (from ROCm or on
+  `PATH`).
+- The kernel built as you run it, with its optimization flags, plus line tables so
+  instructions map to source lines: add `-gline-tables-only`, which does not change the
+  generated code (`-g` can). Kernels built without line tables are still traced; their
+  instructions then have no source line, and the disassembly of the captured code object
+  places them.
 
 ## Capture
 
-```bash
-rocprofv3 --att --kernel-include-regex '<kernel name regex>' -d capture -- <application> <args>
-```
+Add these to the command in [SKILL.md](../SKILL.md#how-to-use-att):
 
 | Need | Option |
 | --- | --- |
-| A steady-state dispatch rather than the first | `--kernel-iteration-range N-N` (the Nth matching dispatch; the application must launch the kernel at least N times) |
+| A steady-state dispatch rather than the first | `--kernel-iteration-range N-N` (the Nth dispatch of each matching kernel; the application must launch it at least N times) |
 | Several consecutive kernels in one trace | `--att-consecutive-kernels N` |
 | A different compute unit (a WGP on RDNA; default 1) | `--att-target-cu N` |
 | More shader engines (default only the first) | `--att-shader-engine-mask 0x...` |
-| Fewer SIMDs, for a long kernel that loses data | `--att-simd-select 0x...` |
-| A larger trace buffer | `--att-buffer-size N` |
+| Only some SIMDs | `--att-simd-select` (a SIMD bitmask on gfx9; on RDNA, the one SIMD to trace) |
+| A larger trace buffer, when rocprofv3 warns that the buffer is full | `--att-buffer-size N` |
 | Only some GPUs | `--att-gpu-index N,...` |
 
-Run `rocprofv3 --help` for the full list. By default rocprofv3 traces only the first
-dispatch of each kernel that matches the regex.
+Run `rocprofv3 --help` for the full list.
 
 **Unknown kernel names.** Capture without `--kernel-include-regex`: every traced dispatch
-gets its own `stats_*_dispatch_<n>.csv`, whose first row names the kernel. C++ kernel
-names are mangled; match a distinctive part of the name.
+gets a `stats_*_dispatch_<n>.csv` whose rows name its kernel. The regex is searched in the
+demangled name (for example `gemm_kernel(int, ...)`): a distinctive part is enough, with
+regex characters such as parentheses escaped. Then capture the kernel you want into a new
+directory. rocprofv3 does not clear the output directory and by default names each run's
+files by its process ID, so a reused directory keeps the earlier capture's `.att` files
+beside the new ones, and `att_mine.py` decodes them all together. `summary` reports how many
+dispatches the traced waves came from.
 
 ## Output
 
 | Output | What it is |
 | --- | --- |
-| `stats_*_dispatch_<n>.csv` | Per-instruction summary of the traced waves, summed over waves; `att_mine.py` reads it with the per-wave records (see [reading-the-trace.md](reading-the-trace.md#commands)) |
-| `ui_output_*_dispatch_<n>/` | Per-wave JSON for the ROCprof Compute Viewer |
-| `*/*_shader_engine_<se>_<id>.att` | The raw trace, one file per shader engine |
-| `*/*_code_object_id_<n>.out` | The code objects the trace refers to |
-| `*_results.db` | rocprofv3's database for the run; its `rocpd_info_agent` table holds the GPU's properties (`cu_count`, `simd_per_cu`, `wave_front_size`, `max_waves_per_simd`, `lds_size_in_kb`, and more). With `--output-format csv` they are in `*_agent_info.csv` instead. |
+| `stats_*_dispatch_<n>.csv` | Per-instruction summary of the traced waves, summed over waves; `att_mine.py stats` ranks it ([reading-the-trace.md](reading-the-trace.md#the-stats-csv)) |
+| `ui_output_*_dispatch_<n>/` | The decoded trace as JSON for the ROCprof Compute Viewer; `att_mine.py` does not need it |
+| `*_shader_engine_<se>_<n>.att` | The raw trace: one file per traced shader engine and dispatch on each GPU traced (consecutive kernels share a file) |
+| `*_code_object_id_<n>.out` | Every code object loaded during the run, runtime kernels included |
+| `*_results.db` | rocprofv3's database for the run, with the GPU's properties (compute units, SIMDs per CU, wave size, maximum waves per SIMD, LDS size); `summary` prints them. With `--output-format csv` they are in `*_agent_info.csv`. |
 
 The code objects are also the kernel's ISA: `llvm-objdump -d` the one whose symbols
-include your kernel (`llvm-objdump -t <file> | grep <name>`; low ids are often runtime
-kernels).
+include your kernel (`llvm-objdump -t <file> | grep <name>`).
 
 ## Troubleshooting
 
-`att_mine.py capture summary` reports the checks below.
+`att_mine.py capture summary` reports the decoder's warnings and the other checks below,
+except the buffer-full warning, which rocprofv3 prints during the capture.
 
 | Symptom | Meaning and remedy |
 | --- | --- |
-| `Data Lost` | The trace buffer overflowed and the capture is invalid. Raise `--att-buffer-size`, trace fewer SIMDs, or use a smaller problem that keeps the per-wave work unchanged. |
-| Zero waves | No work landed on the traced compute unit; it does not mean the kernel is fast. Launch more workgroups or trace another compute unit. |
-| `Stitch Incomplete` or unresolved instructions | Some instructions could not be matched to the code object; later costs in those waves are not attributed. Check that the capture's code objects belong to the binary that ran. |
-| Waves with a context switch | Not steady state; capture again. |
-| LDS size 0 in a kernel that uses LDS | The compiler removed the allocation, for example when LDS is touched only by inline assembly. |
+| `Data Lost` | The profiler dropped part of the trace because of bandwidth limits. The rest is still decoded, but the totals miss what was dropped. When counters are streamed into the trace, a low `--att-perfcounter-ctrl` can cause it; raise it, or capture without counters. |
+| `Thread trace buffer full!` (rocprofv3) | The trace buffer filled before the kernel ended. Raise `--att-buffer-size`, or trace a smaller problem that keeps the per-wave work unchanged. |
+| `Wave incomplete` | The trace ended before some waves did; their lifetimes and totals are cut short. |
+| `Stitch Incomplete` or unresolved instructions | Some trace tokens could not be matched to the disassembly, and instructions that could not be resolved are left out of the per-instruction totals. Check that the capture's code objects belong to the binary that ran. |
+| Zero waves | No work landed on the traced compute unit (on RDNA, or with `--att-simd-select`, the traced SIMDs); it does not mean the kernel is fast. Launch more workgroups, or trace another compute unit or SIMD. |
+| Waves with a context switch | The wave was switched out and back during the trace; treat its timing with care, or capture again. |
 
 ## Further reading
 

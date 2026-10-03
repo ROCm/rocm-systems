@@ -7,7 +7,7 @@
       "prompt": "row_sums.hip in this directory runs on an AMD MI300X. Build it as its header comment says. Use thread trace to find out why it is slow: which instruction and source line hold the time, and what behavior causes it. Do not change the code.",
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
-        "Identifies that the s_waitcnt right after the global load in the loop holds most of the time and that WAIT is the largest wave state: each iteration waits for its own load before anything else can issue",
+        "Identifies that the s_waitcnt vmcnt(0) that follows the loop's global load holds most of the time and that WAIT is the largest wave state: each iteration waits for its own load before anything else can issue",
         "Names the responsible source line (the planted defect is at row_sums.hip:29)"
       ],
       "unexpected_behavior": [
