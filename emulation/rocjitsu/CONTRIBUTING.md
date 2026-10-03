@@ -30,6 +30,7 @@
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |
 | CLI changes | `tools/rocjitsu/` |
+| Python execution API | `python/` (tests in `python/tests/`) |
 | New GPU topology config | `configs/` |
 | Tests | `tests/` (mirror the source structure: `tests/dbt/`, `tests/analysis/`, `tests/patch/`, etc.) |
 

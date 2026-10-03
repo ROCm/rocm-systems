@@ -50,7 +50,8 @@ lib/
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
-tools/rocjitsu/         CLI (local, daemon, attach modes)
+python/                 Python execution sessions and startup activation
+tools/rocjitsu/         CLI (local, daemon, attach, preload-only modes)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
@@ -146,6 +147,10 @@ rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
 
 See [docs/building.md](docs/building.md) for container setup with PyTorch.
 
+The [Python API](python/README.md) provides `rocjitsu.run`, persistent `Session`
+workers, and main-process startup activation with `rocjitsu.enable`. Scripts,
+tests, interactive shells, and notebooks use the same library.
+
 ## Documentation
 
 ### Getting started
@@ -157,6 +162,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [Two-node RCCL NET smoke](docs/rccl-scaleout.md) | Reproduce an unqualified gfx1250 daemon-mode control |
 | [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |
+| [Python API](python/README.md) | Configuration presets, callable workers, sessions, and startup activation |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
 | [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |
