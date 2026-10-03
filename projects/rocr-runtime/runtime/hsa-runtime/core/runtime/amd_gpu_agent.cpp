@@ -69,6 +69,7 @@
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
 #include "core/util/atomic_helpers.h"
+#include "inc/hsa_ext_amd.h"
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "inc/hsa_ven_amd_pc_sampling.h"
@@ -416,6 +417,22 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
            {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
+       }},
+      {"FillBytes",
+       {
+           // gfx7 and gfx8 blit shaders are checked in as pre-built blobs and
+           // are not regenerated, so byte fill is not available there.  The
+           // caller falls back to SDMA on those targets.
+           {NULL, 0, 0, 0},                                                 // gfx7
+           {NULL, 0, 0, 0},                                                 // gfx8
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx9
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx90a
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx942
+           {kCodeFillBytes1010, sizeof(kCodeFillBytes1010), 17, 8},         // gfx1010
+           {kCodeFillBytes10, sizeof(kCodeFillBytes10), 17, 8},             // gfx10
+           {kCodeFillBytes11, sizeof(kCodeFillBytes11), 17, 8},             // gfx11
+           {kCodeFillBytes12, sizeof(kCodeFillBytes12), 17, 8},             // gfx12
+           {kCodeFillBytes1250, sizeof(kCodeFillBytes1250), 17, 8},         // gfx1250
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -2276,6 +2293,17 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
 
 hsa_status_t GpuAgent::DmaFill(void* ptr, uint32_t value, size_t count) {
   return blits_[BlitDevToDev]->SubmitLinearFillCommand(ptr, value, count);
+}
+
+hsa_status_t GpuAgent::DmaFillBytes(void* ptr, uint8_t value, size_t size) {
+  // gfx7 and gfx8 have no byte fill blit shader.  Their blit shaders are
+  // checked in as pre-built blobs that the build does not regenerate, and
+  // neither target can back a blit with SDMA either: user SDMA queues are
+  // disabled on gfx8 and CreateBlitSdma has no gfx7 case.  Refuse on those
+  // agents the same way DmaCopyRect does.
+  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
 }
 
 hsa_status_t GpuAgent::EnableDmaProfiling(bool enable) {
