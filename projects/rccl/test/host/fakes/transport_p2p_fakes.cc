@@ -24,14 +24,16 @@ static ncclResult_t DefaultNcclP2pAllocateShareableBuffer(size_t size, int, nccl
     return ncclSystemError;
   }
   std::memset(ipcDesc, 0, sizeof(*ipcDesc));
+  std::memcpy(ipcDesc, ptr, sizeof(*ptr));
   return ncclSuccess;
 }
 std::function<ncclResult_t(size_t, int, ncclIpcDesc*, void**, int, struct ncclMemManager*, ncclMemType_t)>
     g_ncclP2pAllocateShareableBuffer = DefaultNcclP2pAllocateShareableBuffer;
 
-static ncclResult_t DefaultNcclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc*, void** devMemPtr,
-                                                        void* ownerPtr, ncclMemType_t) {
-  if (devMemPtr == nullptr || ownerPtr == nullptr) {
+static ncclResult_t DefaultNcclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc* ipcDesc,
+                                                        void** devMemPtr, void* ownerPtr, ncclMemType_t) {
+  if (devMemPtr == nullptr || ownerPtr == nullptr || ipcDesc == nullptr ||
+      std::memcmp(ipcDesc, &ownerPtr, sizeof(ownerPtr)) != 0) {
     return ncclInvalidArgument;
   }
   *devMemPtr = ownerPtr;

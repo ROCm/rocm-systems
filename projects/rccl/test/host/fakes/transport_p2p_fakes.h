@@ -15,12 +15,12 @@
 #include "nccl.h"
 #include "p2p.h"
 
-// Default: host calloc as the device buffer, *ipcDesc zeroed; the caller owns it and frees it, as in production.
+// Default: host calloc as the device buffer, its address in a zeroed *ipcDesc; the caller owns and frees it.
 extern std::function<ncclResult_t(size_t /*size*/, int /*directMap*/, ncclIpcDesc* /*ipcDesc*/, void** /*ptr*/,
                                   int /*peerRank*/, struct ncclMemManager* /*manager*/, ncclMemType_t /*memtype*/)>
     g_ncclP2pAllocateShareableBuffer;
 
-// Default: one host address space, so the import maps ownerPtr.
+// Default: one host address space, so the import maps ownerPtr, and only if *ipcDesc starts with that address.
 extern std::function<ncclResult_t(struct ncclComm* /*comm*/, int /*peer*/, size_t /*size*/,
                                   ncclIpcDesc* /*ipcDesc*/, void** /*devMemPtr*/, void* /*ownerPtr*/,
                                   ncclMemType_t /*memType*/)>

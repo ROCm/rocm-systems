@@ -1,6 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
+ * Host-only microtests for src/diagnostics/p2p.cc, #include-d via DIAG_P2P_CC_PATH to reach its file-static helpers.
+ * ncclCalloc is DiagCalloc around that include: it fails the Nth calloc of a size or pads a zeroed guard element.
+ *
  * See LICENSE.txt for license information
  ************************************************************************/
 
@@ -34,7 +37,6 @@ using RcclUnitTesting::CaptureStdout;
 using RcclUnitTesting::LogHas;
 using RcclUnitTesting::ScopedDebugLogging;
 
-// Fails the Nth calloc of g_diagCallocFailBytes; g_diagCallocPad adds a zeroed guard element.
 static std::size_t g_diagCallocFailBytes = 0;
 static int g_diagCallocFailNth = 0;
 static bool g_diagCallocPad = false;
@@ -513,37 +515,33 @@ TEST_F(DiagP2pMicrotest, BuildRankSet_LocalRanksOrMnnvlClique) {
   EXPECT_EQ(nRanks, 4);
 }
 
-void SetUuid(ncclPeerInfo* peer, uint8_t tag) {
-  std::memset(peer->fabricInfo.clusterUuid, 0, sizeof(peer->fabricInfo.clusterUuid));
-  peer->fabricInfo.clusterUuid[15] = tag;
+void SetUuids(std::vector<ncclPeerInfo>* peers, const std::vector<uint8_t>& tags) {
+  for (size_t r = 0; r < tags.size(); r++) {
+    std::memset((*peers)[r].fabricInfo.clusterUuid, 0, sizeof((*peers)[r].fabricInfo.clusterUuid));
+    (*peers)[r].fabricInfo.clusterUuid[15] = tags[r];
+  }
 }
 
 TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCollectsSameUuidInRankOrder) {
-  BuildComm(6, 4, {4, 5});
+  BuildComm(6, 5, {4, 5});
   comm_->p2pCrossClique = true;
   comm_->MNNVL = 1;
-  const uint8_t kUuids[] = {7, 9, 7, 9, 7, 9};
-  for (int r = 0; r < 6; r++) {
-    SetUuid(&peers_[r], kUuids[r]);
-  }
+  SetUuids(&peers_, {7, 9, 7, 9, 7, 9});
   comm_->nvlDomainSize = 3;
   int* ranks = nullptr;
   int rank = -7;
   int nRanks = -7;
   ASSERT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclSuccess);
-  EXPECT_EQ(std::vector<int>(ranks, ranks + 3), (std::vector<int>{0, 2, 4}));
+  EXPECT_EQ(std::vector<int>(ranks, ranks + 3), (std::vector<int>{1, 3, 5}));
   EXPECT_EQ(rank, 2);
   EXPECT_EQ(nRanks, 3);
   std::free(ranks);
 }
 
 TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueRejectsDomainSizeMismatch) {
-  BuildComm(4, 1, {0, 1, 2, 3});
+  BuildComm(4, 2, {0, 1, 2, 3});
   comm_->p2pCrossClique = true;
-  const uint8_t kUuids[] = {3, 3, 3, 8};
-  for (int r = 0; r < 4; r++) {
-    SetUuid(&peers_[r], kUuids[r]);
-  }
+  SetUuids(&peers_, {3, 8, 8, 8});
   int* ranks = nullptr;
   int rank = -7;
   int nRanks = -7;
