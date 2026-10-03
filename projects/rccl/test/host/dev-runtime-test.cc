@@ -36,6 +36,7 @@
 // ResetDevRuntimeMicroFakes() cannot see them.
 #include "alloc.h"
 
+#include <cstddef>
 #include <utility>  // std::forward, used by MicroCalloc below
 
 static int g_devrCallocCallIndex = 0;
@@ -3177,6 +3178,10 @@ TEST_F(WindowCloseIpcPeersTest, MixedCuMemAndLegacy_TakesMatchingRelease) {
 
 
 // ---------------------------------------------------------------------------
+static_assert(offsetof(ncclDevrNonSymExchangeEntry, ownerPtr) >
+                  offsetof(ncclDevrNonSymExchangeEntry, userSize),
+              "ownerPtr is part of the all-gather record windowRegisterNonSym publishes");
+
 // windowRegisterNonSym registers a window that is not backed by the symmetric
 // VMM machinery. Three stages, the first two conditional:
 //
@@ -3318,18 +3323,8 @@ TEST_F(WindowRegisterNonSymTest, HeaderCopyFails_ClearsOutput) {
 
 class WindowRegisterNonSymIpcTest : public WindowRegisterNonSymTest {
 protected:
-  // Mirrors the ExchangeEntry symMemory's caller all-gathers. Layout must match
-  // for the hook to publish values the function then reads back.
-  struct ExchangeEntry {
-    hipIpcMemHandle_t handle;
-    uint64_t cuMemHandle;
-    size_t allocSize;
-    int isCuMem;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset;
-    size_t userSize;
-  };
+  // The record windowRegisterNonSym all-gathers. Same type as production.
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -3654,6 +3649,8 @@ protected:
         e[r].allocSize = allocSize;
         e[r].isCuMem = 1;
         e[r].cuMemHandle = 0xAB00 + r;  // the exporter's handle, opaque to us
+        // Distinct exporter VAs. Resume matches these; a null owner pointer cannot.
+        e[r].ownerPtr = 0xA11000ull + static_cast<uint64_t>(r) * 0x1000ull;
       }
       return ncclSuccess;
     };
@@ -3713,11 +3710,13 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
   // so suspend/resume has a dyn-mem entry to walk. ncclMemPersist early-outs.
   std::vector<ncclMemType_t> trackedTypes;
   std::vector<size_t> trackedSizes;
+  std::vector<void*> trackedOwners;
   ScopedHook track(g_memTrackImportFromPeer,
                    [&](ncclMemManager*, void*, size_t size, hipMemGenericAllocationHandle_t,
-                       hipMemAllocationHandleType, ncclMemType_t memType, int, int, void*) {
+                       hipMemAllocationHandleType, ncclMemType_t memType, int, int, void* ownerPtr) {
                      trackedTypes.push_back(memType);
                      trackedSizes.push_back(size);
+                     trackedOwners.push_back(ownerPtr);
                      return ncclSuccess;
                    });
 
@@ -3745,11 +3744,13 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
   EXPECT_EQ(publishedSelf.allocSize, 4096u);
   EXPECT_EQ(publishedSelf.userOffset, 0u);
   EXPECT_EQ(publishedSelf.userSize, 4096u);  // Register()'s default window size
-  // The invariant the importer enforces, checked against our own entry: a rank
-  // must not publish a window that runs past the allocation it advertises, or
-  // every remote peer rejects it while this rank reports success.
-  EXPECT_LE(publishedSelf.userOffset, publishedSelf.allocSize);
-  EXPECT_LE(publishedSelf.userSize, publishedSelf.allocSize - publishedSelf.userOffset);
+  // The allocation base this rank queried. The importer passes the peer's copy
+  // of this field as ownerPtr.
+  EXPECT_EQ(publishedSelf.ownerPtr, reinterpret_cast<uintptr_t>(kUserPtr));
+
+  ASSERT_EQ(trackedOwners.size(), 2u);
+  EXPECT_EQ(trackedOwners[0], reinterpret_cast<void*>(static_cast<uintptr_t>(0xA11000ull + 0x1000ull)));
+  EXPECT_EQ(trackedOwners[1], reinterpret_cast<void*>(static_cast<uintptr_t>(0xA11000ull + 2 * 0x1000ull)));
 
   ncclDevrWindow* win = comm->devrState.winSorted[0].win;
   ASSERT_EQ(win->ipcPeerCount, 3);

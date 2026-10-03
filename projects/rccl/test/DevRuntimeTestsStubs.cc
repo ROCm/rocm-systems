@@ -159,7 +159,7 @@ ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) { retu
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc*, void** devMemPtr, void*,
                                           ncclMemType_t) {
   if (devMemPtr) *devMemPtr = nullptr;
-  return ncclSuccess;
+  return ncclInternalError;
 }
 
 // ---------------------------------------------------------------------------

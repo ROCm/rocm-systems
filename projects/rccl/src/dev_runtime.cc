@@ -1176,19 +1176,7 @@ static void windowCloseIpcPeers(struct ncclComm* comm, struct ncclDevrWindow* wi
 //       call upstream issues from symMemoryRegisterRma.
 static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags,
                                          void* localRegHandle, ncclWindow_t* outWinDev) {
-  struct ExchangeEntry {
-    cudaIpcMemHandle_t handle;
-    // cuMem/VMM allocations cannot be exported through the legacy IPC handle above. For those the
-    // exporter publishes the raw allocation handle and the importer resolves it through the
-    // exporter's proxy, same as ncclP2pImportShareableBuffer does for registered buffers.
-    uint64_t cuMemHandle;
-    size_t allocSize;
-    int isCuMem;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset; // userPtr - allocBase
-    size_t userSize;
-  };
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   // Intra-node barrier tag for the non-sym window mapping handshake.
   static constexpr int kNonSymWindowBarrierTag = 0xbeed;
@@ -1284,6 +1272,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
       mine->isCuMem = 0;
     }
     mine->allocSize = allocSize;
+    // Resume matches this against the owner's mem-manager pointer. It is the
+    // allocation base, because the import covers allocSize bytes from there.
+    mine->ownerPtr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(allocBase));
 
     mine->hostHash = comm->peerInfo[comm->rank].hostHash;
     mine->pidHash = comm->peerInfo[comm->rank].pidHash;
@@ -1339,9 +1330,11 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
           ncclIpcDesc ipcDesc;
           memset(&ipcDesc, 0, sizeof(ipcDesc));
           memcpy(&ipcDesc.cuDesc.data, &peers[r].cuMemHandle, sizeof(peers[r].cuMemHandle));
-          // Match transport/p2p.cc: ncclMemOffload creates a dyn-mem entry for suspend/resume.
+          // Match transport/p2p.cc: ncclMemOffload creates a dyn-mem entry for suspend/resume,
+          // and the owner's device VA is what resume matches the entry against.
+          void* const ownerPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(peers[r].ownerPtr));
           if (ncclSuccess != ncclP2pImportShareableBuffer(comm, teamRankList[r], peers[r].allocSize, &ipcDesc,
-                                                          &peerBase, /*ownerPtr=*/nullptr, ncclMemOffload)) {
+                                                          &peerBase, ownerPtr, ncclMemOffload)) {
             WARN("windowRegisterNonSym: ncclP2pImportShareableBuffer for teamRank=%d failed", r);
             goto fail;
           }

@@ -43,6 +43,28 @@
 
 namespace sdma_anvil {
 
+// True when the doubled OAM-map id cannot be used as-is. A partition (no xGMI
+// engines) folds even when the doubled id is in range: same-device peers share
+// the map diagonal and would otherwise all land on engine 0. An id past the
+// engines this node reports folds too. numSdmaEnginesTotal == 0 never folds,
+// so the modulo below is not asked to divide by zero.
+inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal,
+                                 int doubledEngineId) {
+  const bool partition = numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
+  const bool outOfRange =
+      numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
+  return partition || outOfRange;
+}
+
+// Fold the undoubled OAM-map value and both PCI functions into the engines this
+// node reports. numEngines must be > 0. An unreadable function (-1) counts as 0
+// and therefore collides with function 0.
+inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEngines) {
+  const int src = srcFn < 0 ? 0 : srcFn;
+  const int dst = dstFn < 0 ? 0 : dstFn;
+  return (oamEngine + src + dst) % static_cast<int>(numEngines);
+}
+
 // How an engine was chosen for one peer, and the values that explain the choice. The two failure
 // logs that report it -- the queue-create error and the missing-xGMI-id error -- need the same
 // fields, so they travel as one record: a second copy means the next diagnostic field has to be
@@ -79,15 +101,11 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
-  // Engine id the successful create used. For a generic HSA_QUEUE_SDMA retry this is 0 (KFD
-  // picks); the budget map keys on this value rather than the id that was requested.
-  uint32_t engineId() const { return engineId_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
-  uint32_t engineId_{0};
   uint64_t* cachedWptr_{nullptr};
   uint64_t* committedWptr_{nullptr};
   void* queueBuffer_{nullptr};

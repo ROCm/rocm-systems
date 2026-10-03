@@ -167,7 +167,7 @@ static const std::string getBusId(int deviceId) {
 
 SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
                      uint32_t engineId, const EngineSelection& selection)
-    : remoteDeviceId_(remoteDeviceId), engineId_(engineId) {
+    : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
   ANVIL_CHECK_HIP_ERROR(hipGetDevice(&originalDeviceId));  // Save the current device
@@ -216,10 +216,6 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     queueStatus =
         hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA, DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY,
                              0, queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
-    if (queueStatus == HSAKMT_STATUS_SUCCESS) {
-      // KFD picks; charge the budget against engine 0, which is the id the generic create takes.
-      engineId_ = 0;
-    }
   }
 
   // A generic retry can return NO_MEMORY after the pinned create returned INVALID_PARAMETER.
@@ -573,6 +569,15 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
         numSdmaQueuesPerEngine_, numChannels);
   };
 
+  // The whole request is known up front. Refusing here avoids creating a queue
+  // that rollback would destroy immediately.
+  const uint32_t used = queuesUsedTotal_;
+  if (numChannels > 0 && queueBudget > 0 &&
+      used + static_cast<uint32_t>(numChannels) > queueBudget) {
+    reportBudget(used);
+    return false;
+  }
+
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
   auto rollback = [&]() {
@@ -592,16 +597,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
       rollback();
       return false;
     }
-    const uint32_t used = queuesUsedTotal_;
-    // Count before the limit check so rollback, which decrements every valid queue it pops, cannot
-    // subtract a queue this connect never charged.
     queuesUsedTotal_ += 1;
-    const uint32_t stillNeeded = static_cast<uint32_t>(numChannels - c);
-    if (queueBudget > 0 && used + stillNeeded > queueBudget) {
-      reportBudget(used);
-      rollback();
-      return false;
-    }
   }
   return true;
 }
@@ -708,19 +704,17 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
   // same way, but once the node has more than 2 engines the sum still separates pairs that share a
   // destination function. Two engines cannot give 8 partitions distinct ids.
   const bool partition = numSdmaXgmiEngines_ == 0 && numSdmaEnginesTotal_ > 0;
-  const bool outOfRange =
-      numSdmaEnginesTotal_ > 0 && static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_;
-  if (partition || outOfRange) {
+  if (oamMapEngineNeedsFold(numSdmaXgmiEngines_, numSdmaEnginesTotal_, engineId)) {
     const PciFunctionBus srcPci = pciFunctionBus(getBusId(srcDeviceId));
     const PciFunctionBus dstPci = pciFunctionBus(getBusId(dstDeviceId));
     // An unreadable tail adds 0 and therefore collides with function 0. The warning logs the raw
-    // BDF so that case is not silent.
+    // BDF so that case is not silent. The info line reports the values the fold actually added.
     const int srcFn = srcPci.function < 0 ? 0 : srcPci.function;
     const int dstFn = dstPci.function < 0 ? 0 : dstPci.function;
-    const int folded = (oamEngine + srcFn + dstFn) % static_cast<int>(numSdmaEnginesTotal_);
+    const int folded = foldOamMapEngine(oamEngine, srcFn, dstFn, numSdmaEnginesTotal_);
     if (srcPci.function < 0 || dstPci.function < 0) {
-      LOG_WARN("anvil: PCI function unreadable src=%s dst=%s, using engine %d (oam=%d)",
-               srcPci.busId.c_str(), dstPci.busId.c_str(), folded, oamEngine);
+      LOG_WARN("anvil: PCI function unreadable src=%s dst=%s, using engine %d (oam=%d total=%u)",
+               srcPci.busId.c_str(), dstPci.busId.c_str(), folded, oamEngine, numSdmaEnginesTotal_);
     } else if (partition) {
       LOG_INFO("anvil: partition engine %d (oam=%d srcFn=%d dstFn=%d total=%u)", folded, oamEngine,
                srcFn, dstFn, numSdmaEnginesTotal_);
