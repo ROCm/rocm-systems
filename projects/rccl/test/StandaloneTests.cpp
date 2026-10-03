@@ -397,6 +397,17 @@ namespace RcclUnitTesting
     });
   }
 
+  static std::string nvlsLogPath;
+  static void RemoveNvlsLog()
+  {
+    if (!nvlsLogPath.empty())
+      std::remove(nvlsLogPath.c_str());
+  }
+  struct NvlsLogRemover
+  {
+    ~NvlsLogRemover() { RemoveNvlsLog(); }
+  };
+
   // Init + AllReduce across all devices, then check the RCCL log (NCCL_DEBUG_FILE) for NVLS activity.
   static void RunAllReduceAndCheckNoNvls()
   {
@@ -407,6 +418,11 @@ namespace RcclUnitTesting
     ASSERT_GE(logFd, 0) << "mkstemp failed";
     close(logFd);
     std::string const logPath = logTemplate;
+    nvlsLogPath = logPath;
+    // The guard covers ASSERT_* early returns; HIPCALL failures exit(-1), which skips local
+    // destructors but still runs atexit handlers.
+    std::atexit(RemoveNvlsLog);
+    NvlsLogRemover removeLog;
     ASSERT_EQ(setenv("NCCL_DEBUG_FILE", logPath.c_str(), 1), 0);
 
     int numDevices;
@@ -461,7 +477,6 @@ namespace RcclUnitTesting
     ASSERT_TRUE(logFile.is_open()) << "RCCL wrote no log to " << logPath;
     std::stringstream log;
     log << logFile.rdbuf();
-    std::remove(logPath.c_str());
     EXPECT_NE(log.str().find("Init COMPLETE"), std::string::npos) << "log did not capture communicator init";
     // Tripwires: both strings exist only in nvls.cc's `#if CUDART_VERSION >= 12010` branch, which
     // RCCL does not compile today. They fail only if a future change enables that branch.

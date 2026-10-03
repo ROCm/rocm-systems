@@ -225,7 +225,7 @@
       "num_gpus": 1,
       "timeout": 60,
       "tests": [
-        {"name": "NvlsMicrotests", "description": "Host-only transport/nvls.cc microtests: NVLS stays off for every NCCL_NVLS_ENABLE value (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+        {"name": "NvlsMicrotests", "description": "Host-only transport/nvls.cc microtests: the NVLS stubs leave NVLS off and never read NCCL_NVLS_ENABLE (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     }
   },

@@ -144,10 +144,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
   fake would be needed.
 - **`rccl-UnitTestsMicroNvls`** — the REAL `src/transport/nvls.cc` (via
-  `NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*` and its
-  `NvlsEnableValues/` instantiations. RCCL always compiles the NVLS stub branch
-  (the multicast code needs `CUDART_VERSION >= 12010`), and the suite checks
-  that no `NCCL_NVLS_ENABLE` value turns NVLS on. Its own binary, not shared with
+  `NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`. RCCL always
+  compiles the NVLS stub branch (the multicast code needs `CUDART_VERSION >= 12010`),
+  and the suite checks that the stubs leave NVLS off and never read
+  `NCCL_NVLS_ENABLE`, so no value can turn it on. Its own binary, not shared with
   `rccl-UnitTestsMicro`: `fakes/transport_stubs.cc` and
   `fakes/collective_stubs.cc` fake the `ncclNvls*` symbols the real file defines.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via

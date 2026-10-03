@@ -9,12 +9,13 @@
 // NVLS (NVLink SHARP) multicast exists only behind `#if CUDART_VERSION >= 12010`,
 // which no RCCL build defines, so RCCL always compiles the stub branch of nvls.cc.
 // NCCL 2.29 reports a failed cuMulticastBindMem as WARN plus an initialization
-// error for NCCL_NVLS_ENABLE=1 and =2. These tests pin the RCCL side of that: no
-// NCCL_NVLS_ENABLE value turns NVLS on, so no multicast bind is ever attempted
-// and every NVLS entry point succeeds without effect.
+// error for NCCL_NVLS_ENABLE=1 and =2. These tests pin the RCCL side of that: the
+// stubs never read NCCL_NVLS_ENABLE, so no value turns NVLS on, no multicast bind
+// is ever attempted, and every NVLS entry point succeeds without effect.
 //
 // The suite compiles the hipified nvls.cc directly (via NVLS_CC_PATH), with
-// NCCL_PARAM redirected through g_loadParam so each case picks its own value.
+// NCCL_PARAM redirected through g_loadParam so each case can detect a stub that
+// starts reading NCCL_NVLS_ENABLE.
 
 #include <gtest/gtest.h>
 
@@ -36,7 +37,7 @@
 
 namespace {
 
-class NvlsHipStubTest : public ::testing::TestWithParam<int64_t> {
+class NvlsHipStubTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> commStorage_;
   ncclComm* comm_ = nullptr;
@@ -48,12 +49,12 @@ class NvlsHipStubTest : public ::testing::TestWithParam<int64_t> {
     comm_ = commStorage_.get();
   }
 
-  // A g_loadParam hook that answers NVLS_ENABLE with `value` and records each lookup of it.
-  auto NvlsEnableIs(int64_t value) {
-    return [this, value](const char* env, int64_t deft) -> int64_t {
-      if (std::strcmp(env, "NVLS_ENABLE") != 0) return deft;
-      nvlsEnableLookups_.emplace_back(env);
-      return value;
+  // A g_loadParam hook that records each NVLS_ENABLE lookup. No stub reads the param, so its
+  // value cannot change their behavior; the empty-lookups checks pin that invariant instead.
+  auto RecordNvlsEnableLookups() {
+    return [this](const char* env, int64_t deft) -> int64_t {
+      if (std::strcmp(env, "NVLS_ENABLE") == 0) nvlsEnableLookups_.emplace_back(env);
+      return deft;
     };
   }
 };
@@ -69,8 +70,8 @@ TEST_F(NvlsHipStubTest, DefaultMatchesNccl) {
   EXPECT_EQ(seenDefault, 2);
 }
 
-TEST_P(NvlsHipStubTest, InitLeavesNvlsOff) {
-  ScopedHook param(g_loadParam, NvlsEnableIs(GetParam()));
+TEST_F(NvlsHipStubTest, InitLeavesNvlsOff) {
+  ScopedHook param(g_loadParam, RecordNvlsEnableLookups());
   comm_->nvlsChannels = 16;
 
   EXPECT_EQ(ncclNvlsInit(comm_), ncclSuccess);
@@ -79,8 +80,8 @@ TEST_P(NvlsHipStubTest, InitLeavesNvlsOff) {
   EXPECT_TRUE(nvlsEnableLookups_.empty()) << "the stubs must not consult NCCL_NVLS_ENABLE";
 }
 
-TEST_P(NvlsHipStubTest, SetupPathSucceedsWithoutAllocating) {
-  ScopedHook param(g_loadParam, NvlsEnableIs(GetParam()));
+TEST_F(NvlsHipStubTest, SetupPathSucceedsWithoutAllocating) {
+  ScopedHook param(g_loadParam, RecordNvlsEnableLookups());
 
   ASSERT_EQ(ncclNvlsInit(comm_), ncclSuccess);
   EXPECT_EQ(ncclNvlsSetup(comm_, /*parent=*/nullptr), ncclSuccess);
@@ -93,8 +94,8 @@ TEST_P(NvlsHipStubTest, SetupPathSucceedsWithoutAllocating) {
   EXPECT_TRUE(nvlsEnableLookups_.empty());
 }
 
-TEST_P(NvlsHipStubTest, BufferRegistrationFallsBackToNonNvls) {
-  ScopedHook param(g_loadParam, NvlsEnableIs(GetParam()));
+TEST_F(NvlsHipStubTest, BufferRegistrationFallsBackToNonNvls) {
+  ScopedHook param(g_loadParam, RecordNvlsEnableLookups());
   alignas(64) char send[64] = {};
   alignas(64) char recv[64] = {};
   int regUsed = 1;
@@ -111,10 +112,5 @@ TEST_P(NvlsHipStubTest, BufferRegistrationFallsBackToNonNvls) {
   EXPECT_EQ(recChannels, 0);
   EXPECT_TRUE(nvlsEnableLookups_.empty());
 }
-
-INSTANTIATE_TEST_SUITE_P(NvlsEnableValues, NvlsHipStubTest, ::testing::Values<int64_t>(0, 1, 2),
-                         [](const ::testing::TestParamInfo<int64_t>& info) {
-                           return "NvlsEnable" + std::to_string(info.param);
-                         });
 
 }  // namespace
