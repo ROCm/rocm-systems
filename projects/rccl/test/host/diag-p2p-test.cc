@@ -652,8 +652,30 @@ TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueCallocFailurePropagates) {
   EXPECT_EQ(ranks, nullptr);
 }
 
-std::vector<int> Fields(const ncclDiagP2pEdgeInfo& e) {
-  return {e.p2p, e.read, e.pathType, e.sameProcess, e.handleType};
+::testing::AssertionResult VerifyNcclDiagP2pEdgeInfo(const ncclDiagP2pEdgeInfo& actual,
+                                                     const ncclDiagP2pEdgeInfo& expected) {
+  const struct {
+    const char* name;
+    int actual;
+    int expected;
+  } fields[] = {
+      {"p2p", actual.p2p, expected.p2p},
+      {"read", actual.read, expected.read},
+      {"pathType", actual.pathType, expected.pathType},
+      {"sameProcess", actual.sameProcess, expected.sameProcess},
+      {"handleType", actual.handleType, expected.handleType},
+  };
+  std::string mismatches;
+  for (const auto& field : fields) {
+    if (field.actual != field.expected) {
+      mismatches += std::string(" ") + field.name + "=" + std::to_string(field.actual) + " (expected " +
+                    std::to_string(field.expected) + ")";
+    }
+  }
+  if (mismatches.empty()) {
+    return ::testing::AssertionSuccess();
+  }
+  return ::testing::AssertionFailure() << "edge info fields differ:" << mismatches;
 }
 
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5157);
@@ -695,11 +717,11 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
   EXPECT_EQ(outPeerCount, 1);
   EXPECT_EQ(outPeers[0], 0);
   const ncclDiagP2pEdgeInfo* row = edges.data() + kSelf * kN;
-  EXPECT_EQ(Fields(row[0]), (std::vector<int>{1, 1, PATH_NVL, 1, ncclDiagP2pHandleDirect}));
-  EXPECT_EQ(Fields(row[1]), (std::vector<int>{0, 0, PATH_LOC, 1, ncclDiagP2pHandleDirect}));
-  EXPECT_EQ(Fields(row[2]), (std::vector<int>{0, 0, PATH_PIX, 0, ncclDiagP2pHandleLegacyIpc}));
-  EXPECT_EQ(Fields(row[3]), (std::vector<int>{0, 0, PATH_SYS, 0, ncclDiagP2pHandleLegacyIpc}));
-  EXPECT_EQ(Fields(row[4]), (std::vector<int>{0, 1, PATH_PHB, 0, ncclDiagP2pHandleLegacyIpc}));
+  EXPECT_TRUE(VerifyNcclDiagP2pEdgeInfo(row[0], {1, 1, PATH_NVL, 1, ncclDiagP2pHandleDirect}));
+  EXPECT_TRUE(VerifyNcclDiagP2pEdgeInfo(row[1], {0, 0, PATH_LOC, 1, ncclDiagP2pHandleDirect}));
+  EXPECT_TRUE(VerifyNcclDiagP2pEdgeInfo(row[2], {0, 0, PATH_PIX, 0, ncclDiagP2pHandleLegacyIpc}));
+  EXPECT_TRUE(VerifyNcclDiagP2pEdgeInfo(row[3], {0, 0, PATH_SYS, 0, ncclDiagP2pHandleLegacyIpc}));
+  EXPECT_TRUE(VerifyNcclDiagP2pEdgeInfo(row[4], {0, 1, PATH_PHB, 0, ncclDiagP2pHandleLegacyIpc}));
   const int kTested[kN] = {1, 0, 0, 1, 0};
   const int kReason[kN] = {0, 0, ncclDiagP2pReasonIndirect, ncclDiagP2pReasonTopo, 0};
   for (int i = 0; i < kN * kN; i++) {
