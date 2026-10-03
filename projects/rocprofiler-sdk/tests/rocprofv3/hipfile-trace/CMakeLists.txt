@@ -70,7 +70,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS ${HIPFILE_TRACE_DEPENDS}
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     ENVIRONMENT ${HIPFILE_TRACE_ENVIRONMENT}
     FIXTURES_SETUP rocprofv3-test-hipfile-tracing
     DISABLED "${IS_DISABLED}")

@@ -65,7 +65,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex)
 
 rocprofiler_add_integration_validate_test(
@@ -99,7 +99,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiple-yaml)
 
 rocprofiler_add_integration_validate_test(
@@ -138,7 +138,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex-3group-yaml)
 
 rocprofiler_add_integration_validate_test(
@@ -178,7 +178,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex-interval4-yaml)
 
 rocprofiler_add_integration_validate_test(
@@ -255,7 +255,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     DISABLED ${_MULTIPLEX_OVERSUB_DISABLED}
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex-oversub)
 
@@ -296,7 +296,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex-degraded)
 
 rocprofiler_add_integration_validate_test(
