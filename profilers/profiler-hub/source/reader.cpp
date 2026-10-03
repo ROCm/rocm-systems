@@ -23,6 +23,12 @@ reader_t::reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
 reader_t::~reader_t() = default;
 
 void
+reader_t::ensure_track_topology_indexes()
+{
+    m_impl->ensure_track_topology_indexes();
+}
+
+void
 reader_t::build_catalog_category(catalog_category_t category, reader_catalog_t& catalog)
 {
     m_impl->build_catalog_category(category, catalog);

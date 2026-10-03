@@ -30,6 +30,7 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                                                                  m_backend->get_uuid()))
 , m_catalog(std::make_shared<reader_catalog_t>())
 {
+    ensure_track_topology_indexes();
     m_catalog->build_all(*m_read_statements);
 }
 
@@ -44,6 +45,12 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage,
                                                                  m_backend->get_uuid()))
 , m_catalog(std::move(catalog))
 {}
+
+void
+reader_t::impl::ensure_track_topology_indexes()
+{
+    m_read_statements->create_track_topology_indexes();
+}
 
 void
 reader_t::impl::build_catalog_category(reader_t::catalog_category_t category,

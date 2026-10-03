@@ -49,7 +49,7 @@ struct topology_key_hash_t
  * its own copy.
  *
  * Build methods are grouped by dependency (see each group's comment); a
- * caller building this incrementally (e.g. connection_pool's parallel
+ * caller building this incrementally (e.g. populate_reader_catalog's parallel
  * bootstrap) MUST respect that order. build_all() does so sequentially and
  * is what a standalone (non-pooled) reader_t uses.
  */
@@ -60,9 +60,9 @@ struct reader_catalog_t
     void build_nodes(data_storage::schema_v3::read_statements& stmts);
     void build_processes(data_storage::schema_v3::read_statements& stmts);
     void build_threads(data_storage::schema_v3::read_statements& stmts);
+    void build_agents(data_storage::schema_v3::read_statements& stmts);
 
     // ---- Independent of each other, once the prefix above is done. ----
-    void build_agents(data_storage::schema_v3::read_statements& stmts);
     void build_tracks(data_storage::schema_v3::read_statements& stmts);
     void build_code_objects(data_storage::schema_v3::read_statements& stmts);
     void build_streams(data_storage::schema_v3::read_statements& stmts);

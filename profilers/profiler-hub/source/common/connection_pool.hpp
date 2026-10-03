@@ -26,7 +26,9 @@ namespace profiler_hub::common
 class connection_pool
 {
 public:
-    connection_pool(std::string_view file_path, size_t num_connections);
+    connection_pool(std::string_view                                file_path,
+                    size_t                                          num_connections,
+                    std::shared_ptr<profiler_hub::reader_catalog_t> catalog);
     ~connection_pool() = default;
 
     connection_pool(const connection_pool&)            = delete;
@@ -77,13 +79,6 @@ public:
 
 private:
     void release(connection* conn);
-
-    // Populates the connections' shared catalog: a short sequential prefix
-    // (string_list/nodes/processes/threads, each depending on the last),
-    // then the remaining independent categories fanned out across the
-    // pool's own connections via scoped jthreads -- deliberately not using
-    // thread_pool (see class doc: connection_pool stays independent of it).
-    void build_catalog(reader_catalog_t& catalog);
 
     std::vector<std::unique_ptr<connection>> m_connections;
     std::deque<connection*>                  m_free;

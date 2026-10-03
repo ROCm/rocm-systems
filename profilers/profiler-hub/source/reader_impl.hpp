@@ -31,6 +31,7 @@ struct reader_t::impl
 
     void build_catalog_category(reader_t::catalog_category_t category,
                                 reader_catalog_t&            catalog);
+    void ensure_track_topology_indexes();
 
     // Info table accessors (cached)
     [[nodiscard]] reader_types::node_info_list_t          get_all_nodes();
