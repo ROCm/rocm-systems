@@ -178,6 +178,13 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
+  set(TEST_MICRO_GIN_HOST_SOURCE_FILES
+    gin-host-test.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
@@ -809,6 +816,16 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinHost
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
+  SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_ginhost.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
