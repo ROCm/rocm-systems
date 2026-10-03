@@ -1,7 +1,6 @@
 #include "profiler_hub_ctx.hpp"
 #include "common/natural_merge_sort.hpp"
 #include "debug.hpp"
-#include "fmt/base.h"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler_hub_future.hpp"
@@ -120,7 +119,7 @@ ph_ctx::get_storage_version()
 ph_track_list_t
 ph_ctx::get_track_list()
 {
-    fmt::println("[Profiler-Hub] Get track list");
+    LOG_DEBUG("[Profiler-Hub] Get track list");
     return ph_track_list_t{ .list_size = static_cast<std::uint32_t>(m_c_tracks.size()),
                             .tracks    = m_c_tracks.data() };
 }
@@ -427,10 +426,10 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
 ph_event_list_t
 ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
-    fmt::println("[Profiler-Hub] Get track events. Track id {}, time slice [{} - {}]",
-                 track_id,
-                 start_ts,
-                 end_ts);
+    LOG_DEBUG("[Profiler-Hub] Get track events. Track id {}, time slice [{} - {}]",
+              track_id,
+              start_ts,
+              end_ts);
     const auto track_it = m_track_by_id.find(track_id);
     if(track_it == m_track_by_id.end())
     {
@@ -450,10 +449,10 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
-    fmt::println("[Profiler-Hub] Get track samples. Track id {}, time slice [{} - {}]",
-                 track_id,
-                 start_ts,
-                 end_ts);
+    LOG_DEBUG("[Profiler-Hub] Get track samples. Track id {}, time slice [{} - {}]",
+              track_id,
+              start_ts,
+              end_ts);
     const auto track_it = m_track_by_id.find(track_id);
     if(track_it == m_track_by_id.end())
     {
