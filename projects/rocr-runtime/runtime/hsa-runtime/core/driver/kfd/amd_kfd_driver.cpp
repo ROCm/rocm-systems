@@ -660,6 +660,23 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   }
 }
 
+hsa_status_t KfdDriver::QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) const {
+  if (dmabuf_fd < 0 || info == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The symbol is loaded optionally, so an older thunk leaves it null.
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo) == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  HsaDmaBufInfo kmt_info = {};
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo)(dmabuf_fd, &kmt_info) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  info->size = kmt_info.Size;
+  info->node_id = kmt_info.GpuId;
+  info->is_device_memory = kmt_info.IsDeviceMemory != 0;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
                             hsa_access_permission_t perms, uint32_t node_id) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
