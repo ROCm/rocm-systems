@@ -461,6 +461,14 @@ hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
       : HSA_STATUS_ERROR;
 }
 
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS ||
+      info->Type == HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                     void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,

@@ -184,21 +184,20 @@ public:
   /// @param[in] handle driver identity returned by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(const DriverMemoryHandle& handle) = 0;
 
-  /// @brief Reports the address at which the owning agent accesses an allocation.
+  /// @brief Describes the allocation of this driver's that contains @p ptr.
   ///
-  /// Drivers whose allocations the agent reaches at their host virtual address need not
-  /// implement this. Those that give an allocation a separate device address report it here, so
-  /// that @c hsa_amd_pointer_info can answer with the address the agent actually uses.
+  /// Backs @c hsa_amd_pointer_info: the runtime asks each driver in turn and maps the first
+  /// answer onto the public struct, so every driver's allocations are reported the same way.
+  /// @c GPUAddress is the address the owning agent accesses the block at, which need not be its
+  /// host address. @c MappedNodes, if non-null, must stay valid after the allocation is freed:
+  /// the runtime reads it without holding any lock of the driver's.
   ///
-  /// @param[in] handle driver identity returned by @ref AllocateMemory.
-  /// @param[out] device_address address the agent accesses the allocation at, or 0 if the
-  /// allocation has no address distinct from its host one. Zero does NOT mean unreachable: an
-  /// allocation shared with the host is reached at its host virtual address, which is what
-  /// XdnaDriver's GetBODevAddr reports zero for, and the caller should use that address.
-  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver has no such notion.
-  virtual hsa_status_t GetMemoryDeviceAddress(const DriverMemoryHandle& handle,
-                                              uint64_t* device_address) const {
-    return HSA_STATUS_ERROR_INVALID_AGENT;
+  /// @param[in] ptr any address, possibly not one of this driver's.
+  /// @param[out] info the containing block, in the thunk's terms.
+  /// @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if no allocation of this driver's contains
+  /// @p ptr, which is also the answer of a driver that tracks none.
+  virtual hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   /// @brief Create an agent dispatch queue with user-mode access rights.

@@ -1206,95 +1206,6 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t Runtime::DriverPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info,
-                                    void* (*alloc)(size_t), uint32_t* num_agents_accessible,
-                                    hsa_agent_t** accessible, PtrInfoBlockData* block_info) {
-  auto it = allocation_map_.upper_bound(ptr);
-  if (it == allocation_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  --it;
-
-  const auto* base = reinterpret_cast<const uint8_t*>(it->first);
-  // size_requested, not size: an allocation is rounded up to the region's granularity, and the
-  // padding past what the caller asked for belongs to nobody. PtrInfo's own fragment lookup draws
-  // the line in the same place. Admitting one bound while reporting sizeInBytes from the other
-  // would hand out an agentBaseAddress for an address the caller never owned -- and that address
-  // is patched into a design's control code, where a wrong value hangs the dispatch rather than
-  // faulting.
-  if (ptr < base || ptr >= base + it->second.size_requested)
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  const AMD::MemoryRegion* region = static_cast<const AMD::MemoryRegion*>(it->second.region);
-  Agent* owner = (region != nullptr) ? region->owner() : nullptr;
-  if (owner == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  uint64_t device_address = 0;
-  const hsa_status_t err =
-      owner->driver().GetMemoryDeviceAddress(it->second.driver_handle, &device_address);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  info->type = HSA_EXT_POINTER_TYPE_HSA;
-  info->hostBaseAddress = const_cast<void*>(it->first);
-  // An allocation the agent reaches at its host address has no separate device address, and the
-  // driver reports 0 for it. Either way this is the address at which the agent accesses it.
-  info->agentBaseAddress = (device_address != 0) ? reinterpret_cast<void*>(device_address)
-                                                 : const_cast<void*>(it->first);
-  info->sizeInBytes = it->second.size_requested;
-  info->registered = true;
-  info->userData = it->second.user_ptr;
-  info->agentOwner = owner->public_handle();
-
-  // The same mapping VMemoryPtrInfo applies, in the same order. Reporting a subset here would
-  // make an allocation's flags depend on which path resolved it -- and the kernarg case is not
-  // hypothetical: AMD::MemoryRegion sets Uncached for a kernarg pool, so an AIE kernarg
-  // allocation would silently lose HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT.
-  const HsaMemFlags& regionFlags = region->mem_flags();
-  info->global_flags = regionFlags.ui32.CoarseGrain ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
-                                                    : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-  info->global_flags |=
-      regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
-  info->global_flags |= regionFlags.ui32.ExtendedCoherent
-      ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
-      : 0;
-
-  info->alloc_flags = 0;
-  if (regionFlags.ui32.ReadOnly) info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
-  if (regionFlags.ui32.HostAccess)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
-  if (regionFlags.ui32.AtomicAccessFull)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
-  if (regionFlags.ui32.AtomicAccessPartial)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
-
-  // And the per-allocation flags, which are the caller's own request rather than a property of
-  // the pool -- allocation_map_ keeps them for exactly this.
-  const MemoryRegion::AllocateFlags af = it->second.alloc_flags;
-  if (af & core::MemoryRegion::AllocateExecutable)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
-  if (af & core::MemoryRegion::AllocateContiguous)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
-  if (af & core::MemoryRegion::AllocateNonPaged)
-    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
-
-  if (block_info != nullptr) {
-    // There is no suballocation here: the block is the allocation.
-    block_info->base = info->hostBaseAddress;
-    block_info->length = info->sizeInBytes;
-    block_info->agentOwner = owner;
-  }
-
-  if (alloc && num_agents_accessible && accessible) {
-    // The allocation came from one agent's pool and carries no per-agent imports, so that agent
-    // is the only one able to reach it.
-    AMD::callback_t<decltype(alloc)> Alloc(alloc);
-    *accessible = reinterpret_cast<hsa_agent_t*>(Alloc(sizeof(hsa_agent_t)));
-    if (*accessible == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    (*accessible)[0] = info->agentOwner;
-    *num_agents_accessible = 1;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible,
                               PtrInfoBlockData* block_info) {
@@ -1326,6 +1237,18 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
   bool allocation_map_entry_found = false;
 
+  // The driver that answered for ptr. Node ids are per driver -- XDNA's node 0 and KFD's share
+  // agents_by_node_[0] -- so the nodes it reports are resolved against its agents only.
+  const Driver* ptr_driver = nullptr;
+  auto node_agents = [&](uint32_t node) {
+    std::vector<Agent*> agents;
+    auto it = agents_by_node_.find(node);
+    if (it == agents_by_node_.end()) return agents;
+    for (auto agent : it->second)
+      if (&agent->driver() == ptr_driver) agents.push_back(agent);
+    return agents;
+  };
+
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -1344,24 +1267,21 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       }
     }
 
-    // We don't care if this returns an error code.
-    // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+    // Each driver knows only its own allocations -- the thunk has never heard of an XDNA buffer
+    // object -- so ask them in turn. None answering means the type is UNKNOWN.
+    for (const auto& driver : agent_drivers_) {
+      if (driver->QueryPointerInfo(ptr, &thunkInfo) == HSA_STATUS_SUCCESS) {
+        ptr_driver = driver.get();
+        break;
+      }
+    }
+    if (ptr_driver == nullptr) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
         /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
          * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
          * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
          * were previously filled with VMemoryPtrInfo.
          */
-        memcpy(info, &retInfo, retInfo.size);
-        return HSA_STATUS_SUCCESS;
-      }
-
-      // The thunk only knows KFD allocations, so memory another kernel driver allocated -- an AIE
-      // agent's, say -- looks unknown to it. Ask the runtime's own allocation map before giving up.
-      if (DriverPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible, block_info) ==
-          HSA_STATUS_SUCCESS) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1427,9 +1347,9 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       block_info->length = retInfo.sizeInBytes;
 
       // Report the owning agent, even if such an agent is not usable in the process.
-      auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-      assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-      block_info->agentOwner = nodeAgents->second[0];
+      auto nodeAgents = node_agents(thunkInfo.Node);
+      assert(!nodeAgents.empty() && "Node id not found!");
+      block_info->agentOwner = nodeAgents[0];
     }
     auto fragment = allocation_map_.upper_bound(ptr);
     if (fragment != allocation_map_.begin()) {
@@ -1437,11 +1357,16 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if ((fragment->first <= ptr) &&
           (ptr <
            reinterpret_cast<const uint8_t*>(fragment->first) + fragment->second.size_requested)) {
-        // agent and host address must match here. Only lock memory is allowed to have differing
-        // addresses but lock memory has type HSA_EXT_POINTER_TYPE_LOCKED and cannot be
-        // suballocated.
-        retInfo.agentBaseAddress = const_cast<void*>(fragment->first);
-        retInfo.hostBaseAddress = retInfo.agentBaseAddress;
+        // The fragment sits at the same offset into the block for the agent as for the host. For
+        // KFD memory the two bases are equal (lock memory, the one exception, has type
+        // HSA_EXT_POINTER_TYPE_LOCKED and cannot be suballocated), but an XDNA BO has a device
+        // address of its own, and that is the one a caller patches into the agent's code.
+        const void* block_base =
+            retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress;
+        const size_t offset = reinterpret_cast<const uint8_t*>(fragment->first) -
+            static_cast<const uint8_t*>(block_base);
+        retInfo.agentBaseAddress = static_cast<uint8_t*>(retInfo.agentBaseAddress) + offset;
+        retInfo.hostBaseAddress = const_cast<void*>(fragment->first);
         retInfo.sizeInBytes = fragment->second.size_requested;
         retInfo.userData = fragment->second.user_ptr;
         allocation_map_entry_found = true;
@@ -1458,9 +1383,9 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // IPC and Graphics memory may come from a node that does not have an agent in this process.
   // Ex. ROCR_VISIBLE_DEVICES or peer GPU is not supported by ROCm.
   retInfo.agentOwner.handle = 0;
-  auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-  assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-  for (auto agent : nodeAgents->second) {
+  auto nodeAgents = node_agents(thunkInfo.Node);
+  assert(!nodeAgents.empty() && "Node id not found!");
+  for (auto agent : nodeAgents) {
     if (agent->Enabled()) {
       retInfo.agentOwner = agent->public_handle();
       break;
@@ -1470,8 +1395,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // Correct agentOwner for locked memory.  Thunk reports the GPU that owns the
   // alias but users are expecting to see a CPU when the memory is system.
   if (retInfo.type == HSA_EXT_POINTER_TYPE_LOCKED) {
-    if ((nodeAgents == agents_by_node_.end()) ||
-        (nodeAgents->second[0]->device_type() != core::Agent::kAmdCpuDevice)) {
+    if (nodeAgents.empty() || (nodeAgents[0]->device_type() != core::Agent::kAmdCpuDevice)) {
       retInfo.agentOwner = cpu_agents_[0]->public_handle();
     }
   }
@@ -1483,7 +1407,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
       assert(mappedNodes[i] <= max_node_id() &&
              "PointerInfo: Invalid node ID returned from thunk.");
-      count += agents_by_node_[mappedNodes[i]].size();
+      count += node_agents(mappedNodes[i]).size();
     }
 
     *num_agents_accessible = count;
@@ -1497,8 +1421,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
       uint32_t index = 0;
       for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
-        auto& list = agents_by_node_[mappedNodes[i]];
-        for (auto agent : list) {
+        for (auto agent : node_agents(mappedNodes[i])) {
           (*accessible)[index] = agent->public_handle();
           index++;
         }

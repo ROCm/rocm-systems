@@ -1930,9 +1930,9 @@ TEST_F(DispatchTest, PointerInfoReportsPerAllocationFlags) {
 }
 
 TEST_F(DispatchTest, PointerInfoLeavesNonAieAllocationsAlone) {
-  // A CPU agent's pool allocation is in the same allocation map, and its driver
-  // does not implement a device address. It must keep resolving the way it
-  // always has -- through the thunk -- and not be claimed by the AIE path.
+  // A CPU agent's pool allocation is in the same allocation map, but it is the
+  // KFD driver's, not XDNA's. It must keep resolving the way it always has --
+  // through the thunk -- and not be claimed by the AIE path.
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(aie_test::discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
             HSA_STATUS_SUCCESS);
@@ -1956,7 +1956,7 @@ TEST_F(DispatchTest, PointerInfoLeavesNonAieAllocationsAlone) {
   // System memory: the agent reaches it at the host address, and the owner is a
   // CPU, not the AIE agent.
   EXPECT_EQ(info.agentBaseAddress, ptr);
-  EXPECT_NE(info.agentOwner.handle, aie_agents.front().handle);
+  EXPECT_EQ(info.agentOwner.handle, cpu_agents.front().handle);
 
   EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
 }
