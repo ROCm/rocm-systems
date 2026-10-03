@@ -157,6 +157,16 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t phase1_dst_start;
+      uint64_t phase2_dst_start;
+      uint64_t phase3_dst_start;
+      uint64_t phase4_dst_start;
+      uint64_t phase4_dst_end;
+      uint32_t fill_value;
+      uint32_t num_workitems;
+    } fill_bytes;
   };
 
   // Index after which bytes will have been written.
@@ -186,6 +196,7 @@ class BlitKernel : public core::Blit {
     CopyAligned,
     CopyMisaligned,
     Fill,
+    FillBytes,
   };
 
   struct KernelCode {

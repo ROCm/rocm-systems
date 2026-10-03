@@ -418,6 +418,9 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   void BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint32_t value,
                         size_t count);
 
+  void BuildFillCommandBytes(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint8_t value,
+                             size_t size);
+
   void BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference);
 
   void BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference);
