@@ -4268,9 +4268,10 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       // Wait for all host-local ranks before stopping the proxy threads, to ensure that PXN connection establishment
       // can complete if some ranks were to try destroying the communicator early.  Skip when nNodes == 1 because PXN
       // is only used for multi-node communication, and on single-node configs the barrier can deadlock if processes
-      // reach destroy at different times.  Skip when hasExcludedLocalRank is set because after shrink, a local peer
-      // may have aborted and will never reach this barrier.  As an optimization, filter comm->localRanks to the local
-      // host only, since on MNNVL systems it can include other hosts, while PXN is strictly host-local.
+      // reach destroy at different times.  Skip when hasExcludedLocalRank is set because an NCCL_SHRINK_ABORT excluded
+      // a local peer, which has aborted and will never reach this barrier.  As an optimization, filter
+      // comm->localRanks to the local host only, since on MNNVL systems it can include other hosts, while PXN is
+      // strictly host-local.
       NCCLCHECKGOTO(ncclCalloc(&hostRanks, comm->localRanks), ret, fail);
       for (int i = 0; i < comm->localRanks; i++) {
         if (comm->peerInfo[comm->localRankToRank[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
@@ -4770,7 +4771,10 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     job->excludeRanksCount = excludeRanksCount;
     NCCLCHECKGOTO(ncclCalloc(&job->excludeRanksList, excludeRanksCount), res, fail);
     memcpy(job->excludeRanksList, excludeRanksList, excludeRanksCount * sizeof(int));
-    if (comm->peerInfo) {
+    // Only NCCL_SHRINK_ABORT leaves behind an excluded rank that will never reach the destroy barrier.
+    // Under NCCL_SHRINK_DEFAULT the excluded rank is healthy and still destroys its parent normally, so it
+    // does enter the barrier -- skipping it here would hang that rank instead.
+    if ((flags & NCCL_SHRINK_ABORT) && comm->peerInfo) {
       for (int i = 0; i < excludeRanksCount; i++) {
         if (comm->peerInfo[excludeRanksList[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
           comm->hasExcludedLocalRank = true;
