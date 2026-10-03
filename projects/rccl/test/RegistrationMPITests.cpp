@@ -1336,6 +1336,95 @@ TEST_F(UBR_MultiSegment, Generic)
 }
 
 /**
+ * @brief Graph-captured AllReduce whose graph registration reuses a wider record.
+ *
+ * An 8-segment graph record exists before capture. Each half spans four
+ * segments, so ncclRegister reuses that record and NET registers all eight.
+ * The NET segment count must cover the reused record, not the collective's half.
+ */
+TEST_F(UBR_MultiSegment, GenericGraph)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isGraphRegisterEnabled()) << "NCCL_GRAPH_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int    kNumSegments = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    const size_t halfSize = buf.totalSize / 2;
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + halfSize;
+    size_t count   = halfSize / sizeof(T);
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    struct ncclReg* wide = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommGraphRegister(comm, buf.vaBase, buf.totalSize, (void**)&wide));
+    auto wideCleanup = makeScopeGuard([&]() {
+        if (wide) EXPECT_EQ(ncclSuccess, ncclCommGraphDeregister(comm, wide));
+    });
+    ASSERT_MPI_NE(wide, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    hipGraph_t     graph     = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    auto graphCleanup = makeScopeGuard([&]() {
+        if (graphExec) (void)hipGraphExecDestroy(graphExec);
+        if (graph) (void)hipGraphDestroy(graph);
+    });
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                             getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    // Gate on NET_REG_COMPLETE, not allPeers: a graph path that never commits must fail here.
+    const bool netRegistered = (wide->state & NET_REG_COMPLETE) != 0;
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !MPIHelpers::anyRankTrue(netRegistered),
+            "Graph NET registration did not happen on any rank");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+    if (netRegistered) {
+        ASSERT_TRUE(wide->rcclNet.allPeers) << "Graph NET registration did not record all-peer completion";
+        ASSERT_EQ(wide->rcclNet.nSegments, kNumSegments)
+            << "Graph NET registration counted the collective's half, not the reused 8-segment record";
+    }
+}
+
+/**
  * @brief NET segment count for an odd-sized hipMalloc registration.
  *
  * The registration cache rounds endAddr up to a page, but HIP reports a

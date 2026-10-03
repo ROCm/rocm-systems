@@ -2404,10 +2404,19 @@ ncclResult_t ncclNetGraphRegisterBuffer(
     NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize, &numSegments));
     if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
     NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&regRecord), ret, fail);
+    // ncclRegister may reuse a wider record, so count over the whole registration.
+    if (regRecord) {
+      NCCLCHECKGOTO(rcclNetRegSegmentCount(comm, regRecord, &numSegments), ret, fail);
+      if (numSegments > 1 && !ncclParamMultiSegmentRegister()) {
+        NCCLCHECKGOTO(ncclCommGraphDeregister(comm, regRecord), ret, fail);
+        goto exit;
+      }
+    }
     NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
                                     numSegments),
                   ret, fail);
     if (*outRegBufFlag) {
+      rcclNetRegCommit(comm, regRecord, numSegments);
       NCCLCHECKGOTO(ncclCalloc(&record, 1), ret, fail);
       record->base.fn = cleanupNet;
       record->comm = comm;
