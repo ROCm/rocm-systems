@@ -755,6 +755,71 @@
         { "name": "C1_alltoall_counters_ROCMIB", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s on the ROCM-IB backend. Capped at 128M to keep the counter run fast; large-size coverage lives in alltoall_fullrange_guard." },
         { "name": "C1_allreduce_counters_ROCMIB", "binary": "all_reduce_perf", "command_args": "-b 1G -e 8G -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counter validation on allreduce over the ROCM-IB backend." }
       ]
+    },
+
+    "cast_udma_pinning": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "AINIC UDMA QP pinning verification. Establishes a CAST connection, reads back per-QP UDMA indices via ionic_dv_qp_get_udma_idx, and verifies round-robin distribution across all available UDMA engines. Requires AINIC NIC with ionic driver supporting qp_get_udma_idx. Skips cleanly on non-AINIC or older drivers.",
+      "tests": [
+        {
+          "name": "A23_Cast_UdmaPinningVerify",
+          "description": "Per-QP UDMA index read back from driver matches expected round-robin distribution across all UDMA engines, plus data-integrity send/recv.",
+          "test_filter": "NetIbMPITest.CastUdmaPinningVerify"
+        }
+      ]
+    },
+
+    "net_ib_cast_udma_unit": {
+      "extends": "gtest_base",
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Pure host-side unit tests for dynamic UDMA count discovery and round-robin QP-to-UDMA pinning. Validates distribution balance for 1/2/4/8 UDMA engines, backward compatibility with the legacy 2-engine pattern, QP-sharing mask computation, and error handling. No MPI/verbs/NIC required.",
+      "tests": [
+        {
+          "name": "A22_UdmaRoundRobin2Engines",
+          "description": "2-engine round-robin produces alternating UDMA_MASK_LOW/HIGH pattern.",
+          "test_filter": "NetIbCastUdma.RoundRobin2Engines"
+        },
+        {
+          "name": "A22_UdmaRoundRobin4Engines",
+          "description": "4-engine round-robin cycles through all four UDMA masks.",
+          "test_filter": "NetIbCastUdma.RoundRobin4Engines"
+        },
+        {
+          "name": "A22_UdmaRoundRobin1Engine",
+          "description": "Single-engine device pins all QPs to UDMA mask 0x01.",
+          "test_filter": "NetIbCastUdma.RoundRobin1Engine"
+        },
+        {
+          "name": "A22_UdmaRoundRobin8Engines",
+          "description": "8-engine round-robin distributes across all engines.",
+          "test_filter": "NetIbCastUdma.RoundRobin8Engines"
+        },
+        {
+          "name": "A22_UdmaAllEnginesUsed",
+          "description": "Every UDMA engine gets an equal share for udmaCount 1..8.",
+          "test_filter": "NetIbCastUdma.AllEnginesUsed"
+        },
+        {
+          "name": "A22_UdmaSharingPathMask",
+          "description": "QP-sharing path mask computation produces valid single-bit masks within range.",
+          "test_filter": "NetIbCastUdma.SharingPathMaskComputation"
+        },
+        {
+          "name": "A22_UdmaInvalidArgs",
+          "description": "Null pointer, zero udmaCount, and zero channels return ncclInvalidArgument.",
+          "test_filter": "NetIbCastUdma.InvalidArgs"
+        },
+        {
+          "name": "A22_UdmaBackwardCompat",
+          "description": "2-engine distribution matches legacy IONIC_UDMA_MASK_LOW/HIGH (0x01/0x02) pattern.",
+          "test_filter": "NetIbCastUdma.BackwardCompatWith2Engines"
+        }
+      ]
     }
   },
 
@@ -774,6 +839,8 @@
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
     { "config": "net_ib_cast_multiplane_unit", "enabled": true, "smoke": true },
+    { "config": "net_ib_cast_udma_unit",     "enabled": true, "smoke": true },
+    { "config": "cast_udma_pinning",        "enabled": true, "smoke": true },
     { "config": "cast_multiplane_mpi",      "enabled": true },
     { "config": "cast_multiplane_disabled", "enabled": true },
 

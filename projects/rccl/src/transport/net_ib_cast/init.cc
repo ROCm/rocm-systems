@@ -508,6 +508,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
             }
             IbCastDevs[IbCastNDevs].context = context;
+            {
+              uint8_t udmaCount = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = (udmaCount > 0) ? udmaCount : 2;
+            }
             IbCastDevs[IbCastNDevs].pdRefs = 0;
             IbCastDevs[IbCastNDevs].pd = NULL;
             // for dev==1 (data direct device), pciPath is given by mlx5
@@ -521,11 +525,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               NCCLCHECK(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX));
               strncpy(IbCastDevs[IbCastNDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
-            }
-
-            {
-              uint8_t udmaCount = wrap_ionicdv_ctx_get_udma_count(context);
-              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = (udmaCount > 0) ? udmaCount : 2;
             }
 
             IbCastDevs[IbCastNDevs].maxQp = devAttr.max_qp;
@@ -544,11 +543,11 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
 
-            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
+            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u", d,
                  devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],
                  IbCastDevs[IbCastNDevs].speed, context, IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar,
-                 IbCastDevs[IbCastNDevs].oooRqSize);
+                 IbCastDevs[IbCastNDevs].oooRqSize, IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount);
 
             IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);

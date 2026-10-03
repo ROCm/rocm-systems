@@ -66,6 +66,13 @@ uint8_t wrap_ionicdv_ctx_get_udma_count(struct ibv_context* ibctx) {
   return ionicdvSymbols.ionicdv_internal_ctx_get_udma_count(ibctx);
 }
 
+uint8_t wrap_ionicdv_qp_get_udma_idx(struct ibv_qp* ibqp) {
+  if (ionicdvSymbols.ionicdv_internal_qp_get_udma_idx == NULL) {
+    return 0xFF;
+  }
+  return ionicdvSymbols.ionicdv_internal_qp_get_udma_idx(ibqp);
+}
+
 ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, uint8_t plane_idx,
                                                    struct ionic_dv_puec_route* route) {
   if (ionicdvSymbols.ionicdv_internal_qp_set_puec_plane_route == NULL) {

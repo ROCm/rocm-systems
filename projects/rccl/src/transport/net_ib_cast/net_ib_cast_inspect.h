@@ -50,6 +50,18 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
+/* ── UDMA pinning introspection (host-only, no HW needed for the unit test). ── */
+
+/* Simulates the UDMA round-robin assignment for nChannels channels on a device
+ * with udmaCount UDMA engines. Writes the assigned UDMA mask (1u << udId) for
+ * each channel into outMasks[0..nChannels-1].
+ * Returns ncclInvalidArgument if pointers are null, udmaCount==0, or nChannels<=0. */
+ncclResult_t ncclIbCastTestUdmaRoundRobin(uint8_t udmaCount, int nChannels, uint8_t* outMasks);
+
+/* Returns the udmaCount stored on physical device ibDevN (0-based).
+ * Returns 0 if ibDevN is out of range. */
+uint8_t ncclIbCastTestGetDevUdmaCount(int ibDevN);
+
 /* ── Test-only wrappers over internal static helpers (host-only, no HW). ── */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
@@ -70,6 +82,19 @@ struct ncclIbCastGrhState {
 /* Copy per-QP GRH state out of a connected send or recv comm.
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out);
+
+/* ── UDMA pinning introspection (HW: reads per-QP UDMA index from driver). ── */
+
+struct ncclIbCastUdmaState {
+  int      nqps;                          /* number of active QPs */
+  uint8_t  udmaCount;                     /* from capsProvider.ionic.udmaCount */
+  uint8_t  udmaIdx[NCCL_IB_MAX_QPS];     /* per-QP UDMA index read back via ionic_dv_qp_get_udma_idx */
+  bool     queryOk[NCCL_IB_MAX_QPS];     /* false if readback unavailable for this QP */
+};
+
+/* Copy per-QP UDMA pinning state out of a connected sendComm.
+ * Returns ncclInvalidArgument on null pointers. */
+ncclResult_t ncclIbCastGetUdmaState(void* sendComm, struct ncclIbCastUdmaState* out);
 
 /* ── Multiplane test-only wrappers (host-only, no HW). ── */
 
