@@ -30,40 +30,41 @@ class WSLGPUBackend : public IGPUBackend {
   // AMDSmiGPUDevice + WSLGPUBackend pairs, and populates sockets/processors.
   // Returns NOT_SUPPORTED if not a WSL environment.
   // Returns other error codes on WSL init failure.
-  static amdsmi_status_t TryPopulate(std::vector<AMDSmiSocket*>& sockets,
-                                     std::set<AMDSmiProcessor*>& processors);
+  static amdsmi_status_t try_populate(std::vector<AMDSmiSocket*>& sockets,
+                                      std::set<AMDSmiProcessor*>& processors);
 
-  // Returns true if TryPopulate succeeded (WSL devices are in use).
-  static bool IsActive();
+  // Returns true if try_populate succeeded (WSL devices are in use).
+  static bool is_active();
 
-  // Closes the KFD channel opened by TryPopulate. No-op if never populated.
-  static amdsmi_status_t Shutdown();
+  // Closes the KFD channel opened by try_populate. No-op if never populated.
+  static amdsmi_status_t shutdown();
 
   // IGPUBackend overrides
-  amdsmi_status_t GetAsicInfo(amdsmi_asic_info_t*) override;
-  amdsmi_status_t GetBoardInfo(amdsmi_board_info_t*) override;
-  amdsmi_status_t GetKfdInfo(amdsmi_kfd_info_t*) override;
-  amdsmi_status_t GetVramInfo(amdsmi_vram_info_t*) override;
-  amdsmi_status_t GetMemoryTotal(amdsmi_memory_type_t, uint64_t*) override;
-  amdsmi_status_t GetMemoryUsage(amdsmi_memory_type_t, uint64_t*) override;
-  amdsmi_status_t GetTempMetric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
-                                int64_t*) override;
-  amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t, int64_t*) override;
-  amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) override;
-  amdsmi_status_t GetGpuActivity(amdsmi_engine_usage_t*) override;
-  amdsmi_status_t GetBusyPercent(uint32_t*) override;
-  amdsmi_status_t GetClockInfo(amdsmi_clk_type_t, amdsmi_clk_info_t*) override;
-  amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) override;
-  amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) override;
-  amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) override;
-  amdsmi_status_t GetUuid(unsigned int*, char*) override;
-  amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) override;
-  amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) override;
-  amdsmi_status_t GetGpuMetricsInfo(amdsmi_gpu_metrics_t*) override;
-  amdsmi_status_t GetPowerCapInfo(amdsmi_power_cap_info_t*) override;
-  amdsmi_status_t GetFanRpms(uint32_t sensor_ind, int64_t* speed) override;
-  amdsmi_status_t GetFanSpeed(uint32_t sensor_ind, int64_t* speed) override;
-  amdsmi_status_t GetFanSpeedMax(uint32_t sensor_ind, uint64_t* max_speed) override;
+  amdsmi_status_t get_asic_info(amdsmi_asic_info_t*) override;
+  amdsmi_status_t get_board_info(amdsmi_board_info_t*) override;
+  amdsmi_status_t get_kfd_info(amdsmi_kfd_info_t*) override;
+  amdsmi_status_t get_vram_info(amdsmi_vram_info_t*) override;
+  amdsmi_status_t get_memory_total(amdsmi_memory_type_t, uint64_t*) override;
+  amdsmi_status_t get_memory_usage(amdsmi_memory_type_t, uint64_t*) override;
+  amdsmi_status_t get_temp_metric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
+                                  int64_t*) override;
+  amdsmi_status_t get_volt_metric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t,
+                                  int64_t*) override;
+  amdsmi_status_t get_power_info(amdsmi_power_info_t*) override;
+  amdsmi_status_t get_gpu_activity(amdsmi_engine_usage_t*) override;
+  amdsmi_status_t get_busy_percent(uint32_t*) override;
+  amdsmi_status_t get_clock_info(amdsmi_clk_type_t, amdsmi_clk_info_t*) override;
+  amdsmi_status_t get_pcie_info(amdsmi_pcie_info_t*) override;
+  amdsmi_status_t get_driver_info(amdsmi_driver_info_t*) override;
+  amdsmi_status_t get_vbios_info(amdsmi_vbios_info_t*) override;
+  amdsmi_status_t get_uuid(unsigned int*, char*) override;
+  amdsmi_status_t get_gpu_cache_info(amdsmi_gpu_cache_info_t*) override;
+  amdsmi_status_t get_fw_info(amdsmi_fw_info_t*) override;
+  amdsmi_status_t get_gpu_metrics_info(amdsmi_gpu_metrics_t*) override;
+  amdsmi_status_t get_power_cap_info(amdsmi_power_cap_info_t*) override;
+  amdsmi_status_t get_fan_rpms(uint32_t sensor_ind, int64_t* speed) override;
+  amdsmi_status_t get_fan_speed(uint32_t sensor_ind, int64_t* speed) override;
+  amdsmi_status_t get_fan_speed_max(uint32_t sensor_ind, uint64_t* max_speed) override;
 
   // Device identity (populated from HsaNodeProperties at construction).
   uint32_t node_id() const { return node_id_; }
