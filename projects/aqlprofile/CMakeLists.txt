@@ -63,6 +63,10 @@ endif ()
 
 # Enable/disable test
 option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
+option(AQLPROFILE_INSTALL_TESTS "Install tests for AQLProfile" OFF)
+if(AQLPROFILE_INSTALL_TESTS AND NOT AQLPROFILE_BUILD_TESTS)
+    message(FATAL_ERROR "AQLPROFILE_INSTALL_TESTS requires AQLPROFILE_BUILD_TESTS")
+endif()
 
 ## Build tests
 if(AQLPROFILE_BUILD_TESTS)
@@ -105,6 +109,33 @@ if(AQLPROFILE_INSTALL_TESTS)
     # Install Integration Tests
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/integration/
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/integration
+            COMPONENT tests)
+
+    # Install the native unit binaries as a separate, fail-closed host-ASAN
+    # payload. The manifest contains the exact positive selection and records
+    # every intentional exclusion; the TheRock runner validates its count and
+    # digest before executing anything.
+    set(AQLPROFILE_NATIVE_UNIT_TEST_TARGETS
+        gfx9-memory-manager-test
+        aqlprofile-test
+        command-buffer-test
+        counters-test
+        pm4-factory-test
+        logger-test
+        aql-profile-v2-test
+        aql-profile-v2-c-compatibility-test
+        command-builder-test
+        pmc-builder-test
+        gfx9-command-builder-test
+        spm-builder-test
+        trace-config-test
+        sqtt-builder-test
+        utility_tests)
+    install(TARGETS ${AQLPROFILE_NATIVE_UNIT_TEST_TARGETS}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/host-asan/bin
+            COMPONENT tests)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/test/host_asan_tests.json
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/host-asan
             COMPONENT tests)
 endif()
 
