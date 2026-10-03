@@ -10,6 +10,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.cpp

@@ -19,6 +19,7 @@ namespace common
 {
 class connection;
 class connection_pool;
+class thread_pool;
 }  // namespace common
 
 // ============================================================================
@@ -293,18 +294,19 @@ struct reader_t
 
 private:
     friend class common::connection;
-    friend class common::connection_pool;
+    friend void populate_reader_catalog(common::thread_pool&     workers,
+                                        common::connection_pool& connections,
+                                        reader_catalog_t&        catalog);
 
     // Pooled/shared-catalog construction: `catalog` is shared with sibling
     // connections in the same pool and may be populated by any of them (see
-    // connection_pool's parallel bootstrap). Caller guarantees non-null.
+    // populate_reader_catalog). Caller guarantees non-null.
     reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
              std::shared_ptr<reader_catalog_t>        catalog);
 
     /**
      * @brief Independently-buildable metadata categories (see
-     *        reader_catalog_t). Only used by connection_pool's parallel
-     *        bootstrap.
+     *        reader_catalog_t). Only used by populate_reader_catalog.
      */
     enum class catalog_category_t
     {
@@ -322,9 +324,11 @@ private:
     };
 
     // Builds one category of `catalog` using this reader's own connection.
-    // Caller (connection_pool) is responsible for respecting the dependency
+    // Caller (populate_reader_catalog) is responsible for respecting the dependency
     // order documented on reader_catalog_t.
     void build_catalog_category(catalog_category_t category, reader_catalog_t& catalog);
+
+    void ensure_track_topology_indexes();
 
     struct impl;
     std::unique_ptr<impl> m_impl;

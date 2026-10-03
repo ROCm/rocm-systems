@@ -367,7 +367,6 @@ struct read_statements
     : m_backend{ std::move(backend) }
     , m_uuid{ std::move(uuid) }
     {
-        initialize_track_topology_indexes();
         initialize_string_statement();
         initialize_node_info_statement();
         initialize_process_info_statement();
@@ -401,6 +400,34 @@ struct read_statements
     read_statements& operator=(const read_statements&) = delete;
     read_statements& operator=(read_statements&&)      = delete;
     virtual ~read_statements()                         = default;
+
+    // Best-effort: speeds up track_filtered/track_and_time_filtered queries
+    // (see initialize_timeline_event_variants) by letting SQLite index-seek
+    // the (nid,pid,tid) branch instead of a full table scan. Databases
+    // written before this existed won't have the index yet; create it
+    // lazily on open. A failure (e.g. read-only file) is only logged --
+    // queries still work without it, just slower.
+    void create_track_topology_indexes()
+    {
+        for(const auto* table : { "rocpd_region",
+                                  "rocpd_kernel_dispatch",
+                                  "rocpd_memory_allocate",
+                                  "rocpd_memory_copy" })
+        {
+            try
+            {
+                m_backend->execute(
+                    fmt::format("CREATE INDEX IF NOT EXISTS idx_{0}_{1}_niptid ON "
+                                "{0}_{1}(nid, pid, tid)",
+                                table,
+                                m_uuid));
+            } catch(const std::runtime_error& err)
+            {
+                // TODO
+                LOG_ERROR("Fail to execute indexing query...");
+            }
+        }
+    }
 
     using string_statement_func_t =
         std::function<sqlite_backend::result_set<string_result>()>;
@@ -931,28 +958,6 @@ private:
                 &agent_info_result::product_name,
                 &agent_info_result::user_name,
                 &agent_info_result::extdata);
-    }
-
-    void initialize_track_topology_indexes()
-    {
-        for(const auto* table : { "rocpd_region",
-                                  "rocpd_kernel_dispatch",
-                                  "rocpd_memory_allocate",
-                                  "rocpd_memory_copy" })
-        {
-            try
-            {
-                m_backend->execute(
-                    fmt::format("CREATE INDEX IF NOT EXISTS idx_{0}_{1}_niptid ON "
-                                "{0}_{1}(nid, pid, tid)",
-                                table,
-                                m_uuid));
-            } catch(const std::runtime_error& err)
-            {
-                // TODO
-                LOG_ERROR("Fail to execute indexing query...");
-            }
-        }
     }
 
     void initialize_track_event_count_statements()

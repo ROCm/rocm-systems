@@ -65,9 +65,11 @@ private:
     std::string         m_file_path;
     ph_schema_version_t m_schema_version;
 
-    static constexpr size_t               k_connection_count = 5;
-    profiler_hub::common::connection_pool m_connection_pool{ m_file_path,
-                                                             k_connection_count };
+    static constexpr size_t                         k_connection_count = 5;
+    std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
+    profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,
+                                                             k_connection_count,
+                                                             m_catalog };
 
     profiler_hub::reader_types::track_info_list_t m_tracks;
     std::vector<ph_track_t>                       m_c_tracks;

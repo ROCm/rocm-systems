@@ -1,8 +1,10 @@
 #include "profiler_hub_ctx.hpp"
 #include "debug.hpp"
 #include "fmt/base.h"
+#include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler_hub_future.hpp"
+#include "reader_catalog.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -55,12 +57,15 @@ ph_ctx::default_thread_pool_size()
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ trace_path }
+, m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
     const auto              version = version_probe.get_storage_version();
     m_schema_version                = { .major = version.major,
                                         .minor = version.minor,
                                         .patch = version.patch };
+
+    populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
 
     initialize_track_list();
     initialize_node_agents();
@@ -235,10 +240,7 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 void
 ph_ctx::initialize_track_list()
 {
-    const auto all_tracks =
-        m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
-            return conn.reader().get_all_tracks();
-        });
+    const auto& all_tracks = m_catalog->tracks;
 
     m_tracks.reserve(all_tracks.size());
     m_c_tracks.reserve(all_tracks.size());
@@ -284,9 +286,7 @@ void
 ph_ctx::initilaize_node_info()
 {
     m_c_node = std::make_unique<ph_node_t>();
-    m_nodes  = m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
-        return conn.reader().get_all_nodes();
-    });
+    m_nodes  = m_catalog->nodes;
 
     m_c_node->info = ph_node_info_t{ .id            = 0,
                                      .machine_id    = "",
@@ -326,9 +326,7 @@ ph_ctx::initilaize_node_info()
 void
 ph_ctx::initialize_node_agents()
 {
-    m_agents = m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
-        return conn.reader().get_all_agents();
-    });
+    m_agents = m_catalog->agents;
     m_c_agents.reserve(m_agents.size());
 
     for(const auto& agent : m_agents)
@@ -352,9 +350,7 @@ ph_ctx::initialize_node_agents()
 void
 ph_ctx::initialize_node_processes()
 {
-    m_processes = m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
-        return conn.reader().get_all_processes();
-    });
+    m_processes = m_catalog->processes;
     m_c_processes.reserve(m_processes.size());
 
     for(const auto& process : m_processes)
