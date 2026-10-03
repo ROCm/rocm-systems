@@ -25,6 +25,11 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
+from utils.metrics.pass_provenance import (
+    PassLayout,
+    bind_metric_tables_to_passes,
+    legacy_pass_merge_enabled,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
@@ -191,6 +196,101 @@ def calc_builtin_vars(
     return builtin_vars_collection
 
 
+def _gui_active_zero_detected(raw_pmc_df: pd.DataFrame) -> Optional[str]:
+    """Return a GUI-active column name that contains a zero, if any."""
+    candidates = [
+        column
+        for column in raw_pmc_df.columns
+        if column == "GRBM_GUI_ACTIVE"
+        or column == "GRBM_GUI_ACTIVE_sum"
+        or column.startswith("GRBM_GUI_ACTIVE@pass:")
+        or column.startswith("GRBM_GUI_ACTIVE_sum@pass:")
+    ]
+    for column in candidates:
+        if (raw_pmc_df[column] == 0).any():
+            return column
+    return None
+
+
+def _calc_pass_scoped_builtins(
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, int | float],
+    gpu_arch: str,
+    pass_layout: PassLayout,
+    used_passes: set[str],
+    expressions: list[str],
+) -> dict[str, Optional[str | float | int]]:
+    """Compute built-ins with duplicated counters bound to each used pass."""
+    from utils.metrics.pass_provenance import (
+        bind_expression,
+        pass_scoped_builtins,
+    )
+
+    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+    scoped = pass_scoped_builtins(pass_layout, gpu_series)
+    if not scoped or not used_passes:
+        return {}
+
+    _, expression_builtin_vars = extract_counters_and_variables(
+        "\n".join(expressions), gpu_series
+    )
+    build_in_vars = {
+        key: value
+        for key, value in get_build_in_vars(gpu_series).items()
+        if key in expression_builtin_vars and key in scoped
+    }
+    if not build_in_vars:
+        return {}
+
+    results: dict[str, Optional[str | float | int]] = {}
+    for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
+        ordinal = pass_layout.ordinal(pass_key)
+        pass_locals: dict[str, Optional[str | float | int]] = {}
+        # PER_XCD first, then dependents (same two-pass order as calc_builtin_vars).
+        for variable_key, variable_value in build_in_vars.items():
+            if "PER_XCD" not in variable_key:
+                continue
+            eval_string = bind_expression(
+                build_eval_string(variable_value),
+                pass_key,
+                pass_layout,
+                scoped,
+            )
+            try:
+                temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
+                calculation_result = temporary_evaluator.eval_expression(eval_string)
+                if np.isscalar(calculation_result) and calculation_result == "N/A":
+                    calculation_result = np.nan
+                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = (
+                    calculation_result
+                )
+            except (TypeError, NameError, KeyError, AttributeError):
+                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = np.nan
+
+        for variable_key, variable_value in build_in_vars.items():
+            if "PER_XCD" in variable_key:
+                continue
+            eval_string = bind_expression(
+                build_eval_string(variable_value),
+                pass_key,
+                pass_layout,
+                scoped,
+            )
+            try:
+                combined_vars = {**sys_vars, **pass_locals}
+                temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
+                calculation_result = temporary_evaluator.eval_expression(eval_string)
+                if np.isscalar(calculation_result) and calculation_result == "N/A":
+                    calculation_result = np.nan
+                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = (
+                    calculation_result
+                )
+            except (TypeError, NameError, KeyError, AttributeError):
+                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = np.nan
+        results.update(pass_locals)
+    return results
+
+
 @demarcate
 def eval_metric(
     dfs: dict,
@@ -200,39 +300,58 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
+    pass_layout: Optional[PassLayout] = None,
 ) -> None:
     """Execute the expr string for each metric in the df."""
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
-    gui_active_counter = next(
-        (
-            counter
-            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
-            if counter in raw_pmc_df.columns
-        ),
-        None,
-    )
-    if (
-        (not roof_only_run)
-        and gui_active_counter is not None
-        and (raw_pmc_df[gui_active_counter] == 0).any()
-    ):
-        console_warning(f"Detected {gui_active_counter} == 0")
+    zero_gui = None if roof_only_run else _gui_active_zero_detected(raw_pmc_df)
+    if zero_gui is not None:
+        console_warning(f"Detected {zero_gui} == 0")
         console_error("Halting execution for warning above.")
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    cache_collectable_expressions(dfs, dfs_type)
     expressions = [
         expr
         for df_id in dfs
         if dfs_type.get(df_id) == "metric_table"
         for expr in dfs_expressions.get(df_id, [])
     ]
+
+    used_passes: set[str] = set()
+    if (
+        pass_layout is not None
+        and pass_layout.has_duplicates
+        and not legacy_pass_merge_enabled()
+    ):
+        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+        used_passes = bind_metric_tables_to_passes(
+            dfs,
+            dfs_type,
+            pass_layout,
+            gpu_series,
+            frozenset(SUPPORTED_FIELD),
+        )
+
+    # Cache collectable strings after binding so submetrics keep pass scope.
+    cache_collectable_expressions(dfs, dfs_type)
+
     builtin_vars = calc_builtin_vars(
         raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
     )
     sys_vars.update(builtin_vars)
+    if pass_layout is not None and used_passes:
+        sys_vars.update(
+            _calc_pass_scoped_builtins(
+                raw_pmc_df,
+                sys_vars,
+                sys_info["gpu_arch"],
+                pass_layout,
+                used_passes,
+                expressions,
+            )
+        )
 
     # Clear any previous noise clamp warnings before this analysis
     clear_noise_clamp_warnings()
@@ -296,6 +415,7 @@ def eval_metric(
         raw_pmc_df,
         sys_vars,
         empirical_peaks,
+        pass_layout=pass_layout,
     )
 
     # Print aggregated summary of any noise clamping warnings

@@ -767,6 +767,7 @@ def load_table_data(
         workload.roofline_peaks,
         apply_filters(workload, dir_path, args.debug),
         args.debug,
+        pass_layout=getattr(workload, "pmc_pass_layout", None),
     )
 
 

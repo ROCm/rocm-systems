@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
 
@@ -21,6 +21,10 @@ from utils.metrics.expression import (
     is_composite_avg_formula,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.pass_provenance import resolve_weight_counter_column
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 METRIC_EVAL_GRAPH_ATTR = "metric_eval_graph"
 COLLECTABLE_EXPR_CACHE_ATTR = "collectable_expr_cache"
@@ -249,6 +253,7 @@ def _evaluate_weighted_composite(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, Any],
     empirical_peaks: dict[str, Any],
+    pass_layout: Optional[PassLayout] = None,
 ) -> float | str:
     avg_col = _avg_column_name(df)
     if avg_col is None:
@@ -276,11 +281,14 @@ def _evaluate_weighted_composite(
             )
             return "N/A"
 
+        bound_weight = resolve_weight_counter_column(
+            weight_counter, ref_name, df, pass_layout
+        )
         ratio_series_list.append(
             per_dispatch_ratio_series(built_avg, raw_pmc_df, sys_vars, empirical_peaks)
         )
         weight_series_list.append(
-            _weight_counter_per_dispatch(weight_counter, raw_pmc_df)
+            _weight_counter_per_dispatch(bound_weight, raw_pmc_df)
         )
 
     merged = merge_dispatch_weighted_avg(ratio_series_list, weight_series_list)
@@ -370,6 +378,7 @@ def apply_composite_metrics(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, Any],
     empirical_peaks: dict[str, Any],
+    pass_layout: Optional[PassLayout] = None,
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
     for df_id, df in dfs.items():
@@ -387,7 +396,12 @@ def apply_composite_metrics(
                 continue
             if composite.kind is CompositeKind.WEIGHTED_AVG:
                 result = _evaluate_weighted_composite(
-                    composite, df, raw_pmc_df, sys_vars, empirical_peaks
+                    composite,
+                    df,
+                    raw_pmc_df,
+                    sys_vars,
+                    empirical_peaks,
+                    pass_layout=pass_layout,
                 )
             elif composite.kind is CompositeKind.COLLECT_SUM:
                 result = _evaluate_collect_sum_composite(
