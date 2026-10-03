@@ -607,8 +607,8 @@ math:
   Unit_Device_tgammaf_Accuracy_Limited_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) ~5-ULP accuracy miss (tgammaf limited). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [deviceLib]
   Unit_Device_tgamma_Accuracy_Limited_Positive:
     <<: *level_2

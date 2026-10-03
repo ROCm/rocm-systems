@@ -207,9 +207,9 @@ stream:
     tags: [synchronization, P1]
   Unit_hipStreamKilledWorkerThread:
     <<: *level_2
-    disabled:
+    unsupported:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Windows-only test (unit/stream/CMakeLists.txt if(WIN32)); never built or run on Linux. AIRUNTIME-2744"
     tags: [synchronization]
   Unit_hipStreamQuery_WithNoWork:
     <<: *level_2

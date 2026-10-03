@@ -1786,8 +1786,8 @@ graph:
   Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
     <<: *level_2
     disabled:
-      targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3: expected hipErrorInvalidValue not returned on free-alloc-again (SWDEV-457316). ROCM-29915 Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_2
