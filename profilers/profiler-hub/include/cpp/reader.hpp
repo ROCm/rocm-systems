@@ -132,7 +132,7 @@ struct reader_t
         reader_types::track_info_ptr_t      track,
         const reader_types::event_filter_t& filter = {}) const;
 
-    [[nodiscard]] std::pair<size_t, size_t> get_event_id_span(
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
         reader_types::event_type_t type) const;
 
     using event_visitor_t = void (*)(void*                        context,

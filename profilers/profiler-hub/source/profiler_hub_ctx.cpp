@@ -1,4 +1,5 @@
 #include "profiler_hub_ctx.hpp"
+#include "common/natural_merge_sort.hpp"
 #include "debug.hpp"
 #include "fmt/base.h"
 #include "populate_reader_catalog.hpp"
@@ -146,14 +147,6 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                                 std::numeric_limits<std::int64_t>::max());
     }
 
-    const size_t parts = env_size("PH_READ_PARTS", 8);
-    if(parts > 1 && !(start_ts != 0 || end_ts != 0) &&
-       track->category == profiler_hub::reader_types::track_kind_t::thread &&
-       track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
-    {
-        return core_get_track_events_parallel(conn, track, parts);
-    }
-
     track_events_result_t result;
     result.events = conn.reader().get_events_for_track(track, filter);
     result.c_events.reserve(result.events.size());
@@ -174,8 +167,8 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                             .events = stored.c_events.data() };
 }
 
-ph_event_list_t
-ph_ctx::core_get_track_events_parallel(
+std::vector<ph_event_t>
+ph_ctx::build_thread_track_events(
     profiler_hub::common::connection&                   conn,
     const profiler_hub::reader_types::track_info_ptr_t& track,
     size_t                                              parts)
@@ -195,24 +188,23 @@ ph_ctx::core_get_track_events_parallel(
         std::vector<ph_event_t> out;
     };
 
-    std::array<std::pair<size_t, size_t>, types.size()> spans{};
-    size_t                                              total_span = 0;
+    std::array<std::optional<std::pair<size_t, size_t>>, types.size()> spans{};
+    size_t                                                             total_span = 0;
     for(size_t i = 0; i < types.size(); ++i)
     {
-        const auto span = conn.reader().get_event_id_span(types[i]);
-        if(span.second >= span.first && span.second != 0)
+        spans[i] = conn.reader().get_event_id_span(types[i]);
+        if(spans[i].has_value())
         {
-            spans[i] = span;
-            total_span += span.second - span.first + 1;
+            total_span += spans[i]->second - spans[i]->first + 1;
         }
     }
 
     std::vector<work_item> items;
     for(size_t i = 0; i < types.size(); ++i)
     {
-        if(spans[i].second == 0) continue;
-        const size_t low   = spans[i].first;
-        const size_t high  = spans[i].second + 1;
+        if(!spans[i].has_value()) continue;
+        const size_t low   = spans[i]->first;
+        const size_t high  = spans[i]->second + 1;
         const size_t share = (high - low) * parts;
         const size_t count = std::max<size_t>(1, (share + total_span / 2) / total_span);
         const size_t step  = (high - low + count - 1) / count;
@@ -259,20 +251,97 @@ ph_ctx::core_get_track_events_parallel(
         total += item.out.size();
     }
 
-    track_events_result_t result;
-    result.c_events.reserve(total);
-    for(auto& item : items)
+    std::vector<ph_event_t> events;
+    events.reserve(total);
+
+    std::vector<size_t> table_ends;
+    for(size_t i = 0; i < items.size(); ++i)
     {
-        result.c_events.insert(result.c_events.end(), item.out.begin(), item.out.end());
-        std::vector<ph_event_t>().swap(item.out);
+        events.insert(events.end(), items[i].out.begin(), items[i].out.end());
+        std::vector<ph_event_t>().swap(items[i].out);
+        if(i + 1 == items.size() || items[i + 1].type != items[i].type)
+        {
+            table_ends.push_back(events.size());
+        }
     }
 
-    std::scoped_lock lock{ m_track_results_mutex };
-    auto&            stored = m_track_events_results.emplace_back(std::move(result));
+    const auto by_start = [](const ph_event_t& lhs, const ph_event_t& rhs) {
+        return lhs.start < rhs.start;
+    };
 
-    return ph_event_list_t{ .list_size =
-                                static_cast<std::uint32_t>(stored.c_events.size()),
-                            .events = stored.c_events.data() };
+    size_t table_begin = 0;
+    for(const size_t table_end : table_ends)
+    {
+        profiler_hub::common::natural_merge_sort(
+            events.begin() + static_cast<std::ptrdiff_t>(table_begin),
+            events.begin() + static_cast<std::ptrdiff_t>(table_end),
+            by_start);
+        table_begin = table_end;
+    }
+    for(size_t i = 1; i < table_ends.size(); ++i)
+    {
+        std::inplace_merge(events.begin(),
+                           events.begin() +
+                               static_cast<std::ptrdiff_t>(table_ends[i - 1]),
+                           events.begin() + static_cast<std::ptrdiff_t>(table_ends[i]),
+                           by_start);
+    }
+
+    return events;
+}
+
+std::vector<ph_event_t>
+ph_ctx::build_sorted_track_events(
+    profiler_hub::common::connection&                   conn,
+    const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
+       track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
+    {
+        return build_thread_track_events(conn, track, env_size("PH_READ_PARTS", 8));
+    }
+
+    const auto events = conn.reader().get_events_for_track(track, {});
+
+    std::vector<ph_event_t> sorted;
+    sorted.reserve(events.size());
+    for(const auto& event : events)
+    {
+        sorted.push_back(ph_event_t{
+            .start = event.start_timestamp,
+            .end   = event.end_timestamp,
+            .name  = event.display_name.empty() ? "" : event.display_name.data(),
+        });
+    }
+
+    profiler_hub::common::natural_merge_sort(
+        sorted.begin(), sorted.end(), [](const ph_event_t& lhs, const ph_event_t& rhs) {
+            return lhs.start < rhs.start;
+        });
+
+    return sorted;
+}
+
+ph_event_list_t
+ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    track_events_entry* entry = nullptr;
+    {
+        std::scoped_lock lock{ m_track_cache_mutex };
+        auto&            slot = m_track_events_cache[static_cast<uint32_t>(track->id)];
+        if(!slot) slot = std::make_unique<track_events_entry>();
+        entry = slot.get();
+    }
+
+    std::call_once(entry->once, [&] {
+        entry->events =
+            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
+                return build_sorted_track_events(conn, track);
+            });
+    });
+
+    return ph_event_list_t{ .list_size = static_cast<std::uint32_t>(entry->events.size()),
+                            .events    = entry->events.data() };
 }
 
 ph_sample_list_t
@@ -319,6 +388,11 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     if(track_it == m_track_by_id.end())
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+
+    if(start_ts == 0 && end_ts == 0)
+    {
+        return get_cached_track_events(track_it->second);
     }
 
     return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {

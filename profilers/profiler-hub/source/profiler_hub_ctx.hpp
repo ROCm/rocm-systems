@@ -65,7 +65,14 @@ private:
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
 
-    ph_event_list_t core_get_track_events_parallel(
+    ph_event_list_t get_cached_track_events(
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_event_t> build_sorted_track_events(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_event_t> build_thread_track_events(
         profiler_hub::common::connection&                   conn,
         const profiler_hub::reader_types::track_info_ptr_t& track,
         size_t                                              parts);
@@ -97,6 +104,14 @@ private:
         profiler_hub::reader_types::timeline_event_list_t events;
         std::vector<ph_event_t>                           c_events;
     };
+    struct track_events_entry
+    {
+        std::once_flag          once;
+        std::vector<ph_event_t> events;
+    };
+    std::mutex m_track_cache_mutex;
+    std::unordered_map<uint32_t, std::unique_ptr<track_events_entry>>
+                                         m_track_events_cache;
     std::mutex                           m_track_results_mutex;
     std::deque<track_events_result_t>    m_track_events_results;
     std::deque<std::vector<ph_sample_t>> m_track_samples_results;

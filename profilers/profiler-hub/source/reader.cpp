@@ -101,7 +101,7 @@ reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
     return m_impl->get_events_for_track(std::move(track), filter);
 }
 
-std::pair<size_t, size_t>
+std::optional<std::pair<size_t, size_t>>
 reader_t::get_event_id_span(reader_types::event_type_t type) const
 {
     return m_impl->get_event_id_span(type);

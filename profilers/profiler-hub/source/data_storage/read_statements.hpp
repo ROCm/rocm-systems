@@ -161,8 +161,8 @@ struct pmc_info_result
 
 struct id_span_result
 {
-    size_t min_id{};
-    size_t max_id{};
+    std::optional<size_t> min_id;
+    std::optional<size_t> max_id;
 };
 
 struct timeline_event_result

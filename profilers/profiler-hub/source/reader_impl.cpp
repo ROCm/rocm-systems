@@ -457,12 +457,14 @@ statements_for(const data_storage::schema_v3::read_statements& stmts,
 
 }  // namespace
 
-std::pair<size_t, size_t>
+std::optional<std::pair<size_t, size_t>>
 reader_t::impl::get_event_id_span(reader_types::event_type_t type)
 {
     const auto rows = statements_for(*m_read_statements, type).id_span().to_vector();
-    if(rows.empty()) return { 0, 0 };
-    return { rows.front().min_id, rows.front().max_id };
+    if(rows.empty() || !rows.front().min_id.has_value() ||
+       !rows.front().max_id.has_value())
+        return std::nullopt;
+    return std::pair{ rows.front().min_id.value(), rows.front().max_id.value() };
 }
 
 void
