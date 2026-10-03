@@ -34,9 +34,31 @@ struct ncclDevrWindow {
   // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
   void** ipcPeerPtrs;
   void** ipcPeerPtrsAllocBase;
+  // A peer mapping is either a legacy IPC handle or a cuMem import, and the two unmap differently.
+  uint8_t* ipcPeerIsCuMem;
   int ipcPeerCount;
 #endif
 };
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// All-gathered by windowRegisterNonSym. One record per LSA rank. Host tests
+// publish through this type, so a field added here cannot be reinterpreted by
+// a second copy in another translation unit.
+struct ncclDevrNonSymExchangeEntry {
+  cudaIpcMemHandle_t handle;
+  uint64_t cuMemHandle;
+  size_t allocSize;
+  int isCuMem;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  size_t userOffset; // userPtr - allocBase
+  size_t userSize;
+  // Exporter's device VA of allocBase. Resume matches the owner's mem-manager
+  // pointer against this. A null owner pointer never matches, so the import
+  // stays released after ncclCommSuspend.
+  uint64_t ownerPtr;
+};
+#endif
 
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;

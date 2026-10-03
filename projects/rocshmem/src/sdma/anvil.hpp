@@ -43,23 +43,74 @@
 
 namespace sdma_anvil {
 
+// True when the doubled OAM-map id cannot be used as-is. A partition (no xGMI
+// engines) folds even when the doubled id is in range: same-device peers share
+// the map diagonal and would otherwise all land on engine 0. An id past the
+// engines this node reports folds too. numSdmaEnginesTotal == 0 never folds,
+// so the modulo below is not asked to divide by zero.
+inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal,
+                                 int doubledEngineId) {
+  const bool partition = numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
+  const bool outOfRange =
+      numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
+  return partition || outOfRange;
+}
+
+// Fold the undoubled OAM-map value and both PCI functions into the engines this
+// node reports. numEngines must be > 0. An unreadable function (-1) counts as 0
+// and therefore collides with function 0.
+inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEngines) {
+  const int src = srcFn < 0 ? 0 : srcFn;
+  const int dst = dstFn < 0 ? 0 : dstFn;
+  return (oamEngine + src + dst) % static_cast<int>(numEngines);
+}
+
+// How an engine was chosen for one peer, and the values that explain the choice. The two failure
+// logs that report it -- the queue-create error and the missing-xGMI-id error -- need the same
+// fields, so they travel as one record: a second copy means the next diagnostic field has to be
+// remembered in two places.
+struct EngineSelection {
+  int engineId{-1};  // -1 when no engine could be mapped for this pair
+  int srcDeviceId{-1};
+  int dstDeviceId{-1};
+  // Result of hsa_amd_memory_get_preferred_copy_engine. queried stays false when the agents were
+  // not valid enough to ask, which is different from asking and being refused.
+  hsa_status_t preferredStatus{HSA_STATUS_ERROR};
+  uint32_t preferredMask{0};
+  bool preferredQueried{false};
+  bool usedPreferred{false};
+  // Engine counts this node reports, which bound every id above.
+  uint32_t numSdmaEngines{0};
+  uint32_t numSdmaXgmiEngines{0};
+  uint32_t numSdmaEnginesTotal{0};
+};
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId,
+            const EngineSelection& selection);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
   SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle() const;
   void dump(std::ofstream& logFile);
+  // False when the constructor could not create an SDMA queue. The constructor releases whatever it
+  // acquired before giving up, so an invalid queue must be dropped without being used or destroyed
+  // any further.
+  bool valid() const;
+  // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
+  // (NO_MEMORY) apart from other failures.
+  HSAKMT_STATUS createStatus() const;
 
  private:
-  int remoteDeviceId_;
-  uint64_t* cachedWptr_;
-  uint64_t* committedWptr_;
-  void* queueBuffer_;
-  HsaQueueResource queue_;
-  SdmaQueueDeviceHandle* deviceHandle_;
+  bool valid_{false};
+  HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
+  int remoteDeviceId_{-1};
+  uint64_t* cachedWptr_{nullptr};
+  uint64_t* committedWptr_{nullptr};
+  void* queueBuffer_{nullptr};
+  HsaQueueResource queue_{};
+  SdmaQueueDeviceHandle* deviceHandle_{nullptr};
   SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle_{nullptr};
 };
 
@@ -82,7 +133,7 @@ class AnvilLib {
   void disconnect();
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                             int* channelIdx = nullptr);
+                             const EngineSelection& selection, int* channelIdx = nullptr);
 
  private:
   /*
@@ -111,13 +162,29 @@ class AnvilLib {
   uint32_t numSdmaEngines_{0};
   uint32_t numSdmaXgmiEngines_{0};
   uint32_t numSdmaEnginesTotal_{0};
+  // KFD caps user SDMA queues per engine, so a partition with few engines also has a small total
+  // queue budget. Track usage to refuse a mesh that cannot fit before KFD returns NO_MEMORY part
+  // way through building it.
+  uint32_t numSdmaQueuesPerEngine_{0};
+  // Queues already taken by this process, counted across all engines rather than per engine: a
+  // rejected engine-pinned create retries as a generic queue and reports engine 0, so on a
+  // partition every queue would charge the same key and a per-engine cap would refuse at a
+  // fraction of the real budget. connect() compares this against
+  // numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_.
+  uint32_t queuesUsedTotal_{0};
+  HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
+  // Selection in progress, so getOamId can report why the map was consulted without the caller
+  // threading the same values back down.
+  EngineSelection selection_;
 
   void buildGpuAgentMap();
   hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
   void querySdmaEngineCounts();
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
-  int getSdmaEngineId(int srcDeviceId, int dstDeviceId);
+  // Chooses an engine for the pair and records why, so the caller can hand the same record to
+  // every queue it then creates.
+  EngineSelection getSdmaEngineId(int srcDeviceId, int dstDeviceId);
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;

@@ -5,6 +5,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.31.2 for ROCm 10.0.0 (Unreleased)
 
 ### Added
+* `NCCL_GIN_MLOPART` (default `1`): allows GIN on MLO/CPX partitions. A partition reaches xGMI and the network over the physical device's paths, so GIN is as available to a partition as to the whole GPU. Mirrors `NCCL_NET_GDR_MLOPART`. Set to `0` to restore the previous partition exclusion.
 * `RCCL_CE_AR_MAX_MSG_BYTES` (default `-1`): overrides the 2-shot AllReduce size cap from the arch table. Set to a positive value to override `ceNonRegMax[AR]`.
 * `RCCL_CE_AR_REG_MAX_MSG_BYTES` (default `-1`): overrides the registered CE AllReduce size cap from the arch table.
 * `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.

@@ -28,6 +28,8 @@
 #include "gin/gin_host_anvil_sdma.h"
 #endif
 #include "argcheck.h"
+#include "alloc.h"
+#include "p2p.h"
 #include <mutex>
 
 int64_t ncclParamEnqueueRearchEnable();
@@ -1151,12 +1153,19 @@ fail:
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 static void windowCloseIpcPeers(struct ncclComm* comm, struct ncclDevrWindow* win) {
   if (win->ipcPeerPtrsAllocBase == nullptr) return;
+  ncclResult_t ignored = ncclSuccess;
   int teamSelf = comm->devrState.lsaSelf;
   for (int r = 0; r < win->ipcPeerCount; r++) {
     if (r == teamSelf) continue;
     void* peerAllocBase = win->ipcPeerPtrsAllocBase[r];
     if (peerAllocBase == nullptr) continue;
-    CUDACHECKIGNORE(cudaIpcCloseMemHandle(peerAllocBase));
+    if (win->ipcPeerIsCuMem != nullptr && win->ipcPeerIsCuMem[r]) {
+      // Match transport/p2p.cc: cross-process cuMem imports are freed with ncclCudaFree (retain +
+      // release). ncclCuMemFreeAddr only unmaps and would leave the imported handle pinned.
+      NCCLCHECKIGNORE(ncclCudaFree(peerAllocBase, comm->memManager), ignored);
+    } else {
+      CUDACHECKIGNORE(cudaIpcCloseMemHandle(peerAllocBase));
+    }
   }
 }
 
@@ -1167,13 +1176,7 @@ static void windowCloseIpcPeers(struct ncclComm* comm, struct ncclDevrWindow* wi
 //       NCCL_RMA_DISABLE. Same call upstream issues from symMemoryRegisterRma.
 static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags,
                                          void* localRegHandle, ncclWindow_t* outWinDev) {
-  struct ExchangeEntry {
-    cudaIpcMemHandle_t handle;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset; // userPtr - allocBase
-    size_t userSize;
-  };
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   // Intra-node barrier tag for the non-sym window mapping handshake.
   static constexpr int kNonSymWindowBarrierTag = 0xbeed;
@@ -1192,6 +1195,10 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
   struct ncclWindow_vidmem* winDevHost = nullptr;
   ExchangeEntry* peers = nullptr;
   int openedCount = 0;
+  // Held until every peer has imported, which the post-mapping barrier below establishes.
+  CUmemGenericAllocationHandle localCuMemHandle = 0;
+  bool haveLocalCuMemHandle = false;
+  bool exportCuMem = false;
 
   win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
   if (win == nullptr) goto fail;
@@ -1219,11 +1226,55 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     if (peers == nullptr) goto fail;
 
     ExchangeEntry* mine = &peers[teamSelf];
-    cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
-    if (cerr != cudaSuccess) {
-      WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));
-      goto fail;
+    // Zero both arms. The one this rank does not fill must not be read back as a handle.
+    memset(mine, 0, sizeof(*mine));
+    // GIN requires NCCL_CUMEM_ENABLE=1, and cudaIpcGetMemHandle rejects a cuMem/VMM allocation with
+    // "invalid argument". Probe for a VMM allocation first and fall back to legacy IPC only for
+    // buffers that really came from cudaMalloc. Only POSIX_FILE_DESCRIPTOR exports the raw handle
+    // through the owner's proxy (same as p2p.cc); a FABRIC build needs the full 64-byte descriptor.
+    // ExchangeEntry carries one handle and one size, so a window that spans more than one VMM
+    // segment cannot be described by it. That case is refused below rather than approximated:
+    // legacy IPC is not a fallback for it either, because cudaIpcGetMemHandle would export only
+    // the first segment while userOffset + userSize still runs past it, which every importing peer
+    // rejects at the bound check below.
+    exportCuMem = false;
+    if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
+        CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
+                                          reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
+      haveLocalCuMemHandle = true;
+      const size_t retainedSize = allocSize;
+      CUdeviceptr rangeBase = 0;
+      size_t rangeSize = 0;
+      const bool rangeOk =
+          ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
+      if (rangeOk && rangeSize > retainedSize) {
+        WARN("windowRegisterNonSym: window at %p size=%zu spans multiple VMM segments (range %zu > "
+             "segment %zu); this path publishes a single allocation handle and cannot describe it",
+             userPtr, userSize, rangeSize, retainedSize);
+        goto fail;
+      } else {
+        exportCuMem = true;
+        if (rangeOk) {
+          allocBase = rangeBase;
+          allocSize = rangeSize;
+          userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
+        }
+        mine->isCuMem = 1;
+        memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
+      }
     }
+    if (!exportCuMem) {
+      cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
+      if (cerr != cudaSuccess) {
+        WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));
+        goto fail;
+      }
+      mine->isCuMem = 0;
+    }
+    mine->allocSize = allocSize;
+    // Resume matches this against the owner's mem-manager pointer. It is the
+    // allocation base, because the import covers allocSize bytes from there.
+    mine->ownerPtr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(allocBase));
 
     mine->hostHash = comm->peerInfo[comm->rank].hostHash;
     mine->pidHash = comm->peerInfo[comm->rank].pidHash;
@@ -1238,7 +1289,8 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
 
     win->ipcPeerPtrs = (void**)calloc(teamSize, sizeof(void*));
     win->ipcPeerPtrsAllocBase = (void**)calloc(teamSize, sizeof(void*));
-    if (win->ipcPeerPtrs == nullptr || win->ipcPeerPtrsAllocBase == nullptr) {
+    win->ipcPeerIsCuMem = (uint8_t*)calloc(teamSize, sizeof(uint8_t));
+    if (win->ipcPeerPtrs == nullptr || win->ipcPeerPtrsAllocBase == nullptr || win->ipcPeerIsCuMem == nullptr) {
       goto fail;
     }
     win->ipcPeerCount = teamSize;
@@ -1257,12 +1309,44 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
         }
       } else {
         void* peerBase = nullptr;
-        cudaError_t orErr = cudaIpcOpenMemHandle(&peerBase, peers[r].handle, cudaIpcMemLazyEnablePeerAccess);
-        if (orErr != cudaSuccess) {
-          WARN("windowRegisterNonSym: cudaIpcOpenMemHandle for "
-               "teamRank=%d failed: %s",
-               r, cudaGetErrorString(orErr));
+        // userOffset + userSize wraps when the offset is near SIZE_MAX and would accept a range
+        // that does not fit. Compare each side against what remains in the allocation.
+        if (peers[r].userOffset > peers[r].allocSize ||
+            peers[r].userSize > peers[r].allocSize - peers[r].userOffset) {
+          WARN("windowRegisterNonSym: peer %d userOffset=%zu userSize=%zu exceeds allocSize=%zu", r,
+               peers[r].userOffset, peers[r].userSize, peers[r].allocSize);
           goto fail;
+        }
+        if (peers[r].isCuMem) {
+          // Re-decide on this rank's cuMem support. ncclP2pImportShareableBuffer falls through to
+          // cudaIpcOpenMemHandle when ncclCuMemEnable() is false, and would then feed 8 bytes of
+          // the peer's allocation handle into an 8-byte IPC union member.
+          if (!ncclCuMemEnable() || ncclCuMemHandleType != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+            WARN("windowRegisterNonSym: peer %d exported cuMem but this rank cannot import it "
+                 "(cuMemEnable=%d handleType=%d)",
+                 r, ncclCuMemEnable() ? 1 : 0, (int)ncclCuMemHandleType);
+            goto fail;
+          }
+          ncclIpcDesc ipcDesc;
+          memset(&ipcDesc, 0, sizeof(ipcDesc));
+          memcpy(&ipcDesc.cuDesc.data, &peers[r].cuMemHandle, sizeof(peers[r].cuMemHandle));
+          // Match transport/p2p.cc: ncclMemOffload creates a dyn-mem entry for suspend/resume,
+          // and the owner's device VA is what resume matches the entry against.
+          void* const ownerPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(peers[r].ownerPtr));
+          if (ncclSuccess != ncclP2pImportShareableBuffer(comm, teamRankList[r], peers[r].allocSize, &ipcDesc,
+                                                          &peerBase, ownerPtr, ncclMemOffload)) {
+            WARN("windowRegisterNonSym: ncclP2pImportShareableBuffer for teamRank=%d failed", r);
+            goto fail;
+          }
+          win->ipcPeerIsCuMem[r] = 1; // branch taken, not the exporter's flag alone
+        } else {
+          cudaError_t orErr = cudaIpcOpenMemHandle(&peerBase, peers[r].handle, cudaIpcMemLazyEnablePeerAccess);
+          if (orErr != cudaSuccess) {
+            WARN("windowRegisterNonSym: cudaIpcOpenMemHandle for "
+                 "teamRank=%d failed: %s",
+                 r, cudaGetErrorString(orErr));
+            goto fail;
+          }
         }
         win->ipcPeerPtrsAllocBase[r] = peerBase;
         win->ipcPeerPtrs[r] = (char*)peerBase + peers[r].userOffset;
@@ -1334,6 +1418,11 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     }
   }
 
+  if (haveLocalCuMemHandle) {
+    CUCHECKIGNORE(cuMemRelease(localCuMemHandle));
+    haveLocalCuMemHandle = false;
+  }
+
   INFO(NCCL_INIT,
        "windowRegisterNonSym: backing=%s teamSize=%d nRanks=%d "
        "userPtr=%p size=%zu opened=%d hostRma=%d",
@@ -1361,8 +1450,10 @@ fail:
     }
     free(win->ipcPeerPtrs);
     free(win->ipcPeerPtrsAllocBase);
+    free(win->ipcPeerIsCuMem);
     free(win);
   }
+  if (haveLocalCuMemHandle) CUCHECKIGNORE(cuMemRelease(localCuMemHandle));
   if (stream != nullptr) {
     CUDACHECKIGNORE(cudaStreamSynchronize(stream));
     CUDACHECKIGNORE(cudaStreamDestroy(stream));
@@ -2196,8 +2287,10 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
   windowCloseIpcPeers(comm, win);
   free(win->ipcPeerPtrs);
   free(win->ipcPeerPtrsAllocBase);
+  free(win->ipcPeerIsCuMem);
   win->ipcPeerPtrs = nullptr;
   win->ipcPeerPtrsAllocBase = nullptr;
+  win->ipcPeerIsCuMem = nullptr;
 
   // Undo stage 3: shadow pool entry.
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);

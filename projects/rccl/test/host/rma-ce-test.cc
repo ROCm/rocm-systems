@@ -7,10 +7,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <set>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -34,6 +35,10 @@
 
 namespace {
 
+static_assert(offsetof(ncclDevrNonSymExchangeEntry, ownerPtr) >
+                  offsetof(ncclDevrNonSymExchangeEntry, userSize),
+              "ownerPtr is part of the all-gather record windowRegisterNonSym publishes");
+
 // Release a window a test left registered: ncclRmaCeFinalize deregisters one
 // but never frees the host object. Non-symmetric windows only, so there is no
 // backing ncclDevrMemory to drain.
@@ -41,6 +46,7 @@ void ReclaimWindow(ncclDevrWindow* w) {
   if (w == nullptr) return;
   free(w->ipcPeerPtrs);
   free(w->ipcPeerPtrsAllocBase);
+  free(w->ipcPeerIsCuMem);
   free(w);
 }
 
@@ -164,15 +170,9 @@ protected:
   uint64_t* PeerWinByLsa(int lsaRank) { return peerWins_.data() + lsaRank * kWinSlots; }
   uint64_t* PeerWin(int peerWorldRank) { return PeerWinByLsa(LsaOf(peerWorldRank)); }
 
-  // Mirrors the entry windowRegisterNonSym all-gathers; the layout has to match
-  // for the hook to publish values the function then reads back.
-  struct ExchangeEntry {
-    hipIpcMemHandle_t handle;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset;
-    size_t userSize;
-  };
+  // The record windowRegisterNonSym all-gathers. Same type as production, so a
+  // field added on one side cannot be reinterpreted by the other.
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   void SetUp() override {
     ResetCeFakes();
@@ -231,8 +231,10 @@ protected:
           for (int r = 0; r < size; r++) {
             e[r].hostHash = (r == self) ? peerInfo_[kRank].hostHash : 500 + r;
             e[r].pidHash = (r == self) ? peerInfo_[kRank].pidHash : 600 + r;
-            e[r].userOffset = static_cast<size_t>(r) * kWinSlots * sizeof(uint64_t);
             e[r].userSize = kWinSlots * sizeof(uint64_t);
+            e[r].userOffset = static_cast<size_t>(r) * e[r].userSize;
+            e[r].allocSize = static_cast<size_t>(size) * e[r].userSize;
+            e[r].isCuMem = 0;
           }
           return ncclSuccess;
         };

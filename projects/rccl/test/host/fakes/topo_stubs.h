@@ -81,6 +81,7 @@ extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFu
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, bool*)> g_ncclTopoPathAllDirectNVLink;  // UNDRIVEN
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
 extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
