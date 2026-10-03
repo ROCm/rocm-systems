@@ -21,6 +21,9 @@
 
 #include "topo_stubs.h"
 
+// src/graph/topo.cc, AMD arm.
+const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+
 // Controllable (was fail-loud). :1982; the value reaches the AllGather3 payload, so the default is deterministic.
 std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =
     [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };

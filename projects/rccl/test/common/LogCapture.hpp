@@ -46,6 +46,14 @@ std::string CaptureLog(Fn&& body) {
   return testing::internal::GetCapturedStderr();
 }
 
+/** @brief The stdout twin of CaptureLog, for DIAG_PRINT-style reports. */
+template <typename Fn>
+std::string CaptureStdout(Fn&& body) {
+  testing::internal::CaptureStdout();
+  std::forward<Fn>(body)();
+  return testing::internal::GetCapturedStdout();
+}
+
 /**
  * @brief True if @p log contains @p needle.
  *
