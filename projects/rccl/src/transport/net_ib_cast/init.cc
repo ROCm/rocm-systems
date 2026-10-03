@@ -523,6 +523,11 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
             }
 
+            {
+              uint8_t udmaCount = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = (udmaCount > 0) ? udmaCount : 2;
+            }
+
             IbCastDevs[IbCastNDevs].maxQp = devAttr.max_qp;
             IbCastDevs[IbCastNDevs].maxCqe = devAttr.max_cqe;
             IbCastDevs[IbCastNDevs].oooRqSize = oooRqSize;

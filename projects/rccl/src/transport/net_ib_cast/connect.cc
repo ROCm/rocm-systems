@@ -59,12 +59,12 @@ enum ncclIbChannelType {
 
 struct ncclChannelToUd {
   int channelId;
-  bool udId;
+  uint8_t udId;
   bool udAllocated;
 };
 
 static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
-static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
+static uint8_t nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
@@ -480,6 +480,8 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
+  uint8_t udmaCount = IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount;
+
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
     // When only one sharing group exists, alternate UDMA engine per QP within
     // the group so both DMA engines are utilized.  With multiple groups the
@@ -487,21 +489,18 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
                         ? createQpAttrs->qpIdx
                         : createQpAttrs->qpSharingGroupIdx;
-    uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
+    uint8_t mask = 1u << (udmaSelector % udmaCount);
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
     if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
+      uint8_t lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
       nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
       nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
       nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
+        (lud + 1) % udmaCount;
     }
-    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-    } else {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-    }
+    uint8_t udId = nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId;
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, 1u << udId);
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));

@@ -135,6 +135,9 @@ struct alignas(64) ncclIbDev {
     struct {
       int dataDirect;
     } mlx5;
+    struct {
+      uint8_t udmaCount;
+    } ionic;
   } capsProvider;
 };
 
