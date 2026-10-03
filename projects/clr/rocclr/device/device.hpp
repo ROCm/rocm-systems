@@ -218,7 +218,15 @@ enum OclExtensions {
   ClKhrMipMapImageWrites,
   ClAmdCopyBufferP2P,
   ClAmdAssemblyProgram,
+  ClKhrDeviceUuid,
+  ClKhrSemaphore,
+  ClKhrExternalMemory,
+  ClKhrExternalSemaphore,
 #if defined(_WIN32)
+  ClKhrExternalMemoryWin32,
+  ClKhrExternalSemaphoreWin32,
+  // Keep ClAmdPlanarYuv last: its string is the only one without a trailing space,
+  // so anything appended after it would run together with "cl_amd_planar_yuv".
   ClAmdPlanarYuv,
 #endif
   ClExtTotal
@@ -261,7 +269,13 @@ static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
                                                       "cl_khr_mipmap_image_writes ",
                                                       "cl_amd_copy_buffer_p2p ",
                                                       "cl_amd_assembly_program ",
+                                                      "cl_khr_device_uuid ",
+                                                      "cl_khr_semaphore ",
+                                                      "cl_khr_external_memory ",
+                                                      "cl_khr_external_semaphore ",
 #if defined(_WIN32)
+                                                      "cl_khr_external_memory_win32 ",
+                                                      "cl_khr_external_semaphore_win32 ",
                                                       "cl_amd_planar_yuv",
 #endif
                                                       NULL};
@@ -712,6 +726,17 @@ struct Info : public amd::EmbeddedObject {
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 
   uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
+
+  //! cl_khr_external_memory / cl_khr_external_semaphore capability lists, reported
+  //! verbatim by CL_DEVICE_*_HANDLE_TYPES_KHR. A backend only lists a semaphore export
+  //! type once createExtSemaphore()/exportExtSemaphore() work for it - advertising earlier
+  //! turns a clean CTS skip into a hard failure.
+  std::vector<cl_external_memory_handle_type_khr> externalMemoryImportHandleTypes_;
+  std::vector<cl_external_semaphore_handle_type_khr> semaphoreImportHandleTypes_;
+  std::vector<cl_external_semaphore_handle_type_khr> semaphoreExportHandleTypes_;
+  //! Subset of externalMemoryImportHandleTypes_ for which an imported image may be
+  //! assumed linear. Empty: imported Vulkan images may be tiled.
+  std::vector<cl_external_memory_handle_type_khr> externalMemoryImportAssumeLinearImagesHandleTypes_;
 };
 
 //! Device settings
@@ -1950,6 +1975,25 @@ class Device : public RuntimeObject {
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) = 0;
   virtual void DestroyExtSemaphore(void* extSemaphore) = 0;
+
+  //! Creates a device-owned semaphore that can later be exported as an OS handle.
+  //! The opaque object produced here is the same flavour importExtSemaphore() produces, so
+  //! the signal/wait path (submitExternalSemaphoreCmd) and DestroyExtSemaphore() are shared.
+  //! Defaulted rather than pure: a backend without export support inherits "unsupported"
+  //! instead of every device class needing a stub.
+  virtual bool createExtSemaphore(void** extSemaphore,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type,
+                                  bool timeline) {
+    return false;
+  }
+
+  //! Creates a NEW OS handle referring to \p extSemaphore. The caller owns the handle and is
+  //! responsible for closing it - neither this object nor ~Semaphore() does, because the
+  //! importer (Vulkan's OPAQUE_WIN32) does not take ownership and may outlive the cl_semaphore.
+  virtual bool exportExtSemaphore(amd::Os::FileDesc* handle, void* extSemaphore,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) {
+    return false;
+  }
   /**
    * @return True if the device has its own custom host allocator to be used
    * instead of the generic OS allocation routines

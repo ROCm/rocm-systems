@@ -175,6 +175,13 @@ class Memory : public device::Memory {
 
   // Pointer to the interop device memory, which has an offset from deviceMemory_
   void* interop_deviceMemory_ = nullptr;
+  //! True when an NV12/P010 D3D11 texture is imported as a whole rather than one named plane.
+  //! Nothing describes that view - the hardware and addrlib address one plane at a time - so
+  //! neither an SRD nor WDDM surface metadata is queried. The image is instead built as a LINEAR
+  //! view over the whole allocation, which is what PAL does for the same case
+  //! (palresource.cpp, Pal::ImageTiling::Linear). That assumes the planes are contiguous and
+  //! unswizzled; a tiled planar surface has no valid whole-surface view at any layout.
+  bool interopWholePlanarView_ = false;
 
   // Track if this memory is interop, lock, gart, or normal.
   MEMORY_KIND kind_;

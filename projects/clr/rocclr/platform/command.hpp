@@ -1724,6 +1724,15 @@ class ExternalSemaphoreCmd : public Command {
         fence_(fence),
         cmd_type_(cmd_type) {}
 
+  //! OpenCL flavour: carries a real wait list and the cl_khr_semaphore command type so
+  //! clGetEventInfo reports CL_COMMAND_SEMAPHORE_{WAIT,SIGNAL}_KHR.
+  ExternalSemaphoreCmd(HostQueue& queue, const EventWaitList& eventWaitList, cl_command_type type,
+                       const void* sem_ptr, uint64_t fence, ExternalSemaphoreCmdType cmd_type)
+      : Command::Command(queue, type, eventWaitList),
+        sem_ptr_(sem_ptr),
+        fence_(fence),
+        cmd_type_(cmd_type) {}
+
   virtual void submit(device::VirtualDevice& device) { device.submitExternalSemaphoreCmd(*this); }
   const void* sem_ptr() const { return sem_ptr_; }
   const uint64_t fence() { return fence_; }

@@ -181,11 +181,29 @@ public:
   uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
+  // As CreateSyncobj, but the monitored fence is created shareable so an NT
+  // handle can be created from it later with ExportSyncobjToNtHandle. Kept
+  // separate because the sharing flags are not free: a shared object is
+  // refcounted by the KMD and cannot be reclaimed with the owning device.
+  // nt_sharing picks the sharing flavour: true creates an NT handle via
+  // ExportSyncobjToNtHandle, false makes the KMD return a global (KMT) handle
+  // in *shared_handle directly. The two are not interchangeable - a KMT handle
+  // is a D3DKMT_HANDLE, not an NT handle, and must not be CloseHandle()d.
+  bool CreateSharedSyncobj(D3DKMT_HANDLE *handle, uint64_t initial_value,
+                           bool timeline, bool nt_sharing,
+                           D3DKMT_HANDLE *shared_handle);
+  // Creates a NEW NT handle referring to syncobj. The caller owns it and must
+  // CloseHandle() it; the syncobj itself is unaffected.
+  bool ExportSyncobjToNtHandle(D3DKMT_HANDLE syncobj, void **nt_handle);
   // Returns true on STATUS_SUCCESS. Internal cleanup callers (queue
   // teardown / rollback) intentionally ignore the result; the external
   // semaphore close path propagates it so silent leaks become visible.
   bool DestroySyncobj(D3DKMT_HANDLE handle);
   bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
+  // Opens a global (KMT) shared sync object. Separate call because
+  // D3DKMTOpenSyncObjectFromNtHandle2 only accepts NT handles.
+  bool OpenSyncobjFromKmtHandle(D3DKMT_HANDLE kmt_handle,
+                                D3DKMT_HANDLE *out_handle);
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);

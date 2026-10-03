@@ -106,7 +106,11 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
      clGetDeviceAndHostTimer, clGetHostTimer, clGetKernelSubGroupInfo,
      clSetDefaultDeviceCommandQueue,
 
-     clSetProgramReleaseCallback, clSetProgramSpecializationConstant}};
+     clSetProgramReleaseCallback, clSetProgramSpecializationConstant,
+
+     // OpenCL 3.0. clSetContextDestructorCallback is not implemented, but the slot must
+     // still be present so a 3.0 loader does not index past the end of this table.
+     clCreateBufferWithProperties, clCreateImageWithProperties, NULL}};
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
                                                        cl_platform_id* platforms,
