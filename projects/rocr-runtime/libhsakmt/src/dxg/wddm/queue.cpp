@@ -194,8 +194,8 @@ void ComputeQueue::HandleError(hsa_status_t status) {
       {32, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT},
       {64, HSA_STATUS_ERROR_INVALID_ARGUMENT},
       //{128, HSA_STATUS_ERROR_OUT_OF_REGISTERS},
-      //{0x20000000, HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION},
-      //{0x40000000, HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION},
+      {0x20000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION)},
+      {0x40000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION)},
       {0x80000000, HSA_STATUS_ERROR_EXCEPTION},
   };
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
@@ -206,11 +206,74 @@ void ComputeQueue::HandleError(hsa_status_t status) {
     }
   }
 
+  // Trigger ROCr's DynamicQueueEventsHandler → callbackQueue(), same path as KFD.
   if (sig.handle) {
     hsakmt_hsa_signal_store_screlease(sig, val);
   }
-  if (error_code_) {
-    error_code_->store(val, std::memory_order_release);
+  if (error_reason_) {
+    // Not a std::atomic object; see error_reason_storage_.
+    rocr::atomic::Store(error_reason_, val, std::memory_order_release);
+  }
+}
+
+// Inverse of the QueueErrors table in HandleError().
+static hsa_status_t DecodeErrorReason(int64_t reason) {
+  const uint32_t bits = static_cast<uint32_t>(reason);
+  if (bits & 0x80000000) return HSA_STATUS_ERROR_EXCEPTION;
+  if (bits & 0x40000000) return static_cast<hsa_status_t>(HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION);
+  if (bits & 0x20000000) return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+  if (bits & 64) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (bits & 32) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  if (bits & 8) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  if (bits & 4) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  if (bits & 2) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+}
+
+void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
+  constexpr int kStallTimeoutMs = 30000;
+  uint64_t last_rptr = 0;
+  auto last_progress = std::chrono::steady_clock::now();
+
+  while (!queue->thread_stop_) {
+    // Preferred over stall detection below: arrives immediately and names the class.
+    if (queue->error_reason_) {
+      const int64_t reason = rocr::atomic::Load(queue->error_reason_, std::memory_order_acquire);
+      if (reason != 0) {
+        if (queue->thread_stop_.exchange(true)) return;
+        pr_err("fault delivered via error_reason=0x%" PRIx64 "\n", reason);
+        queue->HandleError(DecodeErrorReason(reason));
+        return;
+      }
+    }
+
+    // Stall detection: rptr hasn't advanced while work is pending.
+    // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
+    if (!dxg_runtime->disable_wait_timeout_) {
+      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+      if (current_rptr != last_rptr) {
+        last_rptr = current_rptr;
+        last_progress = std::chrono::steady_clock::now();
+      } else if (current_wptr > current_rptr) {
+        auto stall_duration = std::chrono::steady_clock::now() - last_progress;
+        if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          if (queue->thread_stop_.exchange(true)) return;
+          const int64_t reason =
+              queue->error_reason_
+                  ? rocr::atomic::Load(queue->error_reason_, std::memory_order_acquire)
+                  : 0;
+          pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
+                 " stalled for %dms, error_reason=0x%" PRIx64 " — possible device memory fault\n",
+                 current_rptr, current_wptr, kStallTimeoutMs, reason);
+          // reason is 0 in practice; DecodeErrorReason then gives an aperture violation.
+          queue->HandleError(DecodeErrorReason(reason));
+          return;
+        }
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
 
@@ -225,6 +288,8 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
+    if (queue->thread_stop_) break;
+
     if (!queue->IsInvalidPacket()) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
@@ -253,7 +318,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       if (queue->thread_stop_) break;
       pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", queue->ring,
                queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
-      queue->thread_cond_.wait(lock);
+      queue->thread_cond_.wait_for(lock, std::chrono::milliseconds(100));
     }
   }
 
@@ -269,7 +334,6 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
           (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
       ring(ring),
       ring_size(ring_size),
-      error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
       ib_start_addr(0),
       ib_size(0),
       sync_point(0),
@@ -286,7 +350,27 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       scratch_base_(nullptr) {
   ring_wptr = _ring_wptr;
   ring_rptr = _ring_rptr;
-  error_reason_ = error_addr;
+  // Bound once from one of three mutually exclusive sources, never reassigned.
+  if (error_addr) {
+    error_reason_ = error_addr;
+  } else {
+    // Allocate GPU-visible error_reason for the trap handler.
+    GpuMemoryCreateInfo err_create_info{};
+    err_create_info.size = dxg_runtime->page_size;
+    err_create_info.domain = Wkmi::kSystem;
+    GpuMemory* err_gpu_mem = nullptr;
+    auto err_code = device->CreateGpuMemory(err_create_info, &err_gpu_mem);
+    if (err_code == ErrorCode::Success) {
+      error_reason_mem_ = err_gpu_mem->GetGpuMemoryHandle();
+      error_reason_ = reinterpret_cast<volatile int64_t*>(err_gpu_mem->GpuAddress());
+      rocr::atomic::Store(error_reason_, int64_t(0), std::memory_order_relaxed);
+      pr_info("Allocated GPU-visible error_reason at %p\n", error_reason_);
+    } else {
+      error_reason_storage_ = 0;
+      error_reason_ = &error_reason_storage_;
+      pr_warn("Failed to allocate GPU-visible error_reason, using CPU fallback\n");
+    }
+  }
   error_event_id_ = event_id;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
   amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
@@ -310,6 +394,12 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   }
 
+  // Fault monitor watches ring pointers for a stalled (wedged) queue. On
+  // WSL/DXG the GPU trap handler never writes error_reason_ (no KFD; host does
+  // not program TBA for the guest VMID), so stall detection is the only
+  // in-guest fault signal for a wedged queue.
+  fault_monitor_thread_ = std::thread(FaultMonitorThread, this);
+
   if (device->Major() >= 11)
     scratch_mem_alignment_size_ = 256;
   else
@@ -317,12 +407,17 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
 }
 
 ComputeQueue::~ComputeQueue() {
+  thread_stop_ = true;
+
   if (!native_aql_) {
     thread_cond_lock_.lock();
-    thread_stop_ = true;
     thread_cond_lock_.unlock();
     thread_cond_.notify_one();
     aql_to_pm4_thread_.join();
+  }
+
+  if (fault_monitor_thread_.joinable()) {
+    fault_monitor_thread_.join();
   }
 
   // doorbell_signal_->Release();
@@ -336,6 +431,11 @@ ComputeQueue::~ComputeQueue() {
 
   auto amd_queue_gpu_mem = GpuMemory::Convert(amd_queue_mem_);
   delete amd_queue_gpu_mem;
+
+  if (error_reason_mem_) {
+    auto err_gpu_mem = GpuMemory::Convert(error_reason_mem_);
+    delete err_gpu_mem;
+  }
 }
 
 void ComputeQueue::InitScratchSRD() {
@@ -1113,11 +1213,17 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      // Submit() has advanced sync_point to the fence value it issued, which is
-      // the submission carrying the packet that owns signal_addr_. Copied out
-      // because the wait array belongs to the KMD for the duration of the call.
-      uint64_t fence_value = sync_point;
-      if (!device->CpuWait(&syncobj, &fence_value, 1, false)) return HSA_STATUS_ERROR;
+      constexpr int kFaultTimeoutMs = 30000;
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
+      while (*sync_addr < cmdbuf_aql_frame_write_index) {
+        if (!dxg_runtime->disable_wait_timeout_ &&
+            std::chrono::steady_clock::now() >= deadline) {
+          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
       signal_addr_ = NULL;

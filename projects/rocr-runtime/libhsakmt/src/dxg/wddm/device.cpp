@@ -49,6 +49,8 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#include <poll.h>
+#include <cerrno>
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -1303,9 +1305,8 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 
 // ================================================================================================
 uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
-#if defined(WIN32)
-  // Reset maibox locaiton to 0
   *mailbox = 0;
+#if defined(WIN32)
   // Start from 1, since 0 is the default state and can't be identified in KMD
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
     // Check if the current slot is free and assing the mailbox
@@ -1331,6 +1332,9 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
       }
     }
   }
+#else
+  // KMD event registration unavailable on Linux; fault detection polls error_reason_.
+  pr_debug("RegisterEvent: KMD event registration not available on Linux\n");
 #endif
   return 0;
 }
@@ -1360,6 +1364,11 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
 // ================================================================================================
 HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
                                                bool wait_all, uint32_t msec) {
+  // num_elems sizes a stack allocation below; bound it to the event table width.
+  if (num_elems > kNumberOfHsaEvents) {
+    pr_err("event count %u exceeds maximum %u\n", num_elems, kNumberOfHsaEvents);
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 #if defined(WIN32)
   HANDLE* event_handles_ = reinterpret_cast<HANDLE*>(_alloca(sizeof(HANDLE) * num_elems));
   for (uint32_t i = 0; i < num_elems; ++i) {
@@ -1396,6 +1405,53 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
       }
       size_to_process -= MAXIMUM_WAIT_OBJECTS;
     }
+  }
+#else
+  // Linux: poll() on eventfds
+  auto* pfds = reinterpret_cast<struct pollfd*>(alloca(sizeof(struct pollfd) * num_elems));
+  auto* signaled = reinterpret_cast<bool*>(alloca(sizeof(bool) * num_elems));
+  for (uint32_t i = 0; i < num_elems; ++i) {
+    void* handle = reinterpret_cast<Event*>(events[i])->GetHandle();
+    pfds[i].fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+    pfds[i].events = POLLIN;
+    pfds[i].revents = 0;
+    signaled[i] = false;
+  }
+
+  uint32_t effective_msec = msec;
+  constexpr uint32_t kWaitTimeout = 6000;
+  if (!dxg_runtime->disable_wait_timeout_ && (effective_msec > kWaitTimeout)) {
+    effective_msec = kWaitTimeout;
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(effective_msec);
+  uint32_t signaled_count = 0;
+
+  while (true) {
+    auto now = std::chrono::steady_clock::now();
+    int remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    if (remaining_ms < 0) remaining_ms = 0;
+
+    int ret = poll(pfds, num_elems, remaining_ms);
+    if (ret < 0) {
+      if (errno == EINTR) continue;  // Interrupted, not failed; retry on same deadline.
+      pr_err("poll() failed, errno %d\n", errno);
+      return HSAKMT_STATUS_WAIT_FAILURE;
+    }
+    if (ret > 0) {
+      for (uint32_t i = 0; i < num_elems; ++i) {
+        if ((pfds[i].revents & POLLIN) && !signaled[i]) {
+          uint64_t val;
+          // Another waiter may have consumed the counter since poll(); EFD_NONBLOCK gives EAGAIN.
+          if (read(pfds[i].fd, &val, sizeof(val)) != static_cast<ssize_t>(sizeof(val))) continue;
+          if (!wait_all) return HSAKMT_STATUS_SUCCESS;
+          signaled[i] = true;
+          signaled_count++;
+        }
+      }
+      if (wait_all && signaled_count >= num_elems) return HSAKMT_STATUS_SUCCESS;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) break;
   }
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
@@ -1456,7 +1512,14 @@ bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
   memset(priv_data, 0, priv_size);
   Wkmi::FillinTrapHandlerPrivData(priv_data, tba, tma);
 
-  return Escape(priv_data, priv_size, true);
+  const bool ok = Escape(priv_data, priv_size, true);
+  if (ok) {
+    pr_info("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " accepted\n", tba, tma);
+  } else {
+    pr_err("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " rejected by KMD;"
+           " faults will fall back to stall detection\n", tba, tma);
+  }
+  return ok;
 }
 
 
