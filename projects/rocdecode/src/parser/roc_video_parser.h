@@ -184,11 +184,14 @@ protected:
 
     // NAL unit info
     int start_code_num_;              // number of start codes found so far
-    int curr_start_code_offset_;
-    int next_start_code_offset_;
-    int nal_unit_size_;
+    // Unsigned to match pic_data_size_ and curr_byte_offset_, so that none of the arithmetic
+    // between them converts signedness. GetNalUnit() range checks the two offsets before it
+    // derives nal_unit_size_ from them.
+    uint32_t curr_start_code_offset_;
+    uint32_t next_start_code_offset_;
+    uint32_t nal_unit_size_;
 
-    int                 rbsp_size_;
+    size_t              rbsp_size_; // size_t to match the parse functions it is passed to
     uint8_t             rbsp_buf_[RBSP_BUF_SIZE]; // to store parameter set or slice header RBSP
 
     int                 num_slices_;
@@ -220,20 +223,27 @@ protected:
     ParserResult GetNalUnit();
 
     /*! \brief Function to convert from Encapsulated Byte Sequence Packets to Raw Byte Sequence Payload
-     * 
+     *
      * \param [in,out] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
      * \param [in] begin_bytepos Start position in the EBSP buffer to convert
      * \param [in] end_bytepos End position in the EBSP buffer to convert, generally it's size.
-     * \return Returns the size of the converted buffer in <tt>size_t</tt>
+     * \param [out] p_rbsp_size Size of the converted RBSP, which is the converted range less the
+     *             emulation prevention bytes that were discarded. Set to 0 on failure, so it can
+     *             never be mistaken for a length.
+     * \return <tt>ParserResult</tt>. PARSER_INVALID_ARG when an emulation prevention sequence is
+     *         malformed, in which case the caller should skip the NAL unit.
      */
-    size_t EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos);
+    ParserResult EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size);
 
-    /*! \brief Function to parse Sei Message Info
+    /*! \brief Function to parse Sei Message Info. Stops at the first message that runs past the
+     *         end of the NAL unit, keeping the messages read before it. SEI does not affect the
+     *         decode, so callers are expected to note the result and carry on with the picture
+     *         rather than treat it as a picture level failure.
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseSeiMessage(uint8_t *nalu, size_t size);
+    ParserResult ParseSeiMessage(uint8_t *nalu, size_t size);
 
     /*! \brief Function to initialize the decoded buffer pool
      */

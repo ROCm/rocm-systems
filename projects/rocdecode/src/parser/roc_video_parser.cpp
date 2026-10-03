@@ -130,6 +130,14 @@ ParserResult RocVideoParser::GetNalUnit() {
     nal_unit_size_ = 0;
     curr_start_code_offset_ = next_start_code_offset_;  // save the current start code offset
 
+    // A start code is three bytes, so there is nothing to scan in a smaller buffer. The check
+    // belongs here rather than in the loop condition: it also keeps pic_data_size_ - 2 from
+    // wrapping, both operands being uint32_t, and it does not depend on the callers resetting
+    // start_code_num_ for the return below to be reached.
+    if (pic_data_size_ < 3) {
+        return PARSER_NOT_FOUND;
+    }
+
     // Search for the next start code
     while (curr_byte_offset_ < pic_data_size_ - 2) {
         if (pic_data_buffer_ptr_[curr_byte_offset_] == 0 && pic_data_buffer_ptr_[curr_byte_offset_ + 1] == 0 && pic_data_buffer_ptr_[curr_byte_offset_ + 2] == 0x01) {
@@ -156,6 +164,15 @@ ParserResult RocVideoParser::GetNalUnit() {
         // No NAL unit in the frame data
         return PARSER_NOT_FOUND;
     }
+    // The subtractions below are unsigned, so an end offset below the start would yield a huge
+    // size rather than a negative one, and the nal_unit_size_ floor the callers apply before
+    // copying out of the NAL unit would not catch it. Check the ordering here instead.
+    if (curr_start_code_offset_ > pic_data_size_ ||
+        (start_code_found && next_start_code_offset_ < curr_start_code_offset_)) {
+        ErrorLog(g_rocdec_logger, "Start code offsets are out of order for the current picture.");
+        nal_unit_size_ = 0;
+        return PARSER_NOT_FOUND;
+    }
     if (start_code_found) {
         nal_unit_size_ = next_start_code_offset_ - curr_start_code_offset_;
         return PARSER_OK;
@@ -165,10 +182,12 @@ ParserResult RocVideoParser::GetNalUnit() {
     }
 }
 
-size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos) {
+ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size) {
     int count = 0;
+    *p_rbsp_size = 0;
     if (end_bytepos < begin_bytepos) {
-        return end_bytepos;
+        *p_rbsp_size = end_bytepos;
+        return PARSER_OK;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
     uint8_t *streamBuffer_end = streamBuffer + end_bytepos;
@@ -181,10 +200,12 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
             if (tmp == 0x03) {
                 //check the 4th uint8_t after 0x000003, except when cabac_zero_word is used, in which case the last three bytes of this NAL unit must be 0x000003
                 if ((streamBuffer_i + 1 != streamBuffer_end) && (streamBuffer_i[1] > 0x03)) {
-                    return static_cast<size_t>(-1);
+                    ErrorLog(g_rocdec_logger, "Malformed emulation prevention sequence in the NAL unit.");
+                    return PARSER_INVALID_ARG;
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000
                 if (streamBuffer_i + 1 == streamBuffer_end) {
+                    reduce_count++;  // discarded as well, so it is not part of the RBSP
                     break;
                 }
                 memmove(streamBuffer_i, streamBuffer_i + 1, streamBuffer_end-streamBuffer_i - 1);
@@ -202,30 +223,53 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
         }
         streamBuffer_i++;
     }
-    return end_bytepos - begin_bytepos + reduce_count;
+    // Every discarded byte shortens the data, so the RBSP is the EBSP less reduce_count. Adding
+    // it instead reported more than the EBSP ever held: 00 00 03 01 is 3 bytes of RBSP but was
+    // reported as 5. For a full rbsp_buf_ that told the parse functions the buffer was larger
+    // than it is, which is exactly the kind of bound the rest of this change relies on.
+    *p_rbsp_size = end_bytepos - (begin_bytepos + reduce_count);
+    return PARSER_OK;
 }
 
-void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
-    int offset = 0; // byte offset
-    int payload_type;
-    int payload_size;
+ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
+    size_t offset = 0; // byte offset
+    // Accumulated in size_t so that a long run of ff_bytes cannot wrap the running total before
+    // it is range checked below.
+    size_t payload_type;
+    size_t payload_size;
 
+    // SEI is supplemental and does not affect the decode, so a message running past the end of
+    // the NAL unit stops the parse here and keeps whatever was read cleanly. The result is
+    // reported for the record; the callers log it and carry on with the picture.
     do {
         payload_type = 0;
-        while (nalu[offset] == 0xFF) {
+        while (offset < size && nalu[offset] == 0xFF) {
             payload_type += 255;  // ff_byte
             offset++;
+        }
+        if (offset >= size) {
+            ErrorLog(g_rocdec_logger, "SEI payload type extends past the end of the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
         }
         payload_type += nalu[offset];  // last_payload_type_byte
         offset++;
 
         payload_size = 0;
-        while (nalu[offset] == 0xFF) {
+        while (offset < size && nalu[offset] == 0xFF) {
             payload_size += 255;  // ff_byte
             offset++;
         }
+        if (offset >= size) {
+            ErrorLog(g_rocdec_logger, "SEI payload size extends past the end of the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
+        }
         payload_size += nalu[offset];  // last_payload_size_byte
         offset++;
+
+        if (payload_size > size - offset) {
+            ErrorLog(g_rocdec_logger, "SEI payload size (" + ROCDEC_TOSTR(payload_size) + ") exceeds the " + ROCDEC_TOSTR(size - offset) + " bytes left in the NAL unit.");
+            return PARSER_OUT_OF_RANGE;
+        }
 
         // We start with INIT_SEI_MESSAGE_COUNT. Should be enough for normal use cases. If not, resize.
         if((sei_message_count_ + 1) > sei_message_list_.size()) {
@@ -236,7 +280,20 @@ void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         if (sei_payload_buf_) {
             if ((payload_size + sei_payload_size_) > sei_payload_buf_size_) {
-                uint8_t *tmp_ptr = new uint8_t [payload_size + sei_payload_size_];
+                // Grow geometrically. Fitting the capacity to exactly what is needed leaves it
+                // equal to sei_payload_size_ once the payload below is appended, so every later
+                // message carrying any payload re-enters this branch and copies the whole
+                // accumulated payload again. The messages in one picture are only bounded by the
+                // packet size, so that is quadratic in the packet size.
+                size_t needed = sei_payload_size_ + payload_size;
+                size_t new_size = sei_payload_buf_size_ ? sei_payload_buf_size_ : INIT_SEI_PAYLOAD_BUF_SIZE;
+                while (new_size < needed) {
+                    new_size *= 2;
+                }
+                // sei_payload_size_ is reset per picture and the payloads come out of one packet,
+                // so needed fits in uint32_t even where the doubling has overshot it.
+                sei_payload_buf_size_ = static_cast<uint32_t>(new_size > 0xFFFFFFFFULL ? needed : new_size);
+                uint8_t *tmp_ptr = new uint8_t [sei_payload_buf_size_];
                 memcpy(tmp_ptr, sei_payload_buf_, sei_payload_size_); // save the existing payload
                 delete [] sei_payload_buf_;
                 sei_payload_buf_ = tmp_ptr;
@@ -254,4 +311,5 @@ void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         offset += payload_size;
     } while (offset < size && nalu[offset] != 0x80);
+    return PARSER_OK;
 }

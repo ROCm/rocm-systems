@@ -125,13 +125,16 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         // Parse the NAL unit
         if (nal_unit_size_ >= 4) {
             // start code + NAL unit header = 4 bytes
-            int ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
+            uint32_t ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
 
             nal_unit_header_ = ParseNalUnitHeader(pic_data_buffer_ptr_[curr_start_code_offset_ + 3]);
             switch (nal_unit_header_.nal_unit_type) {
                 case kAvcNalTypeSeq_Parameter_Set: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     if ((ret2 = ParseSps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in SPS parsing. This SPS NAL unit is skipped.");
                     }
@@ -140,7 +143,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                 case kAvcNalTypePic_Parameter_Set: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     if ((ret2 = ParsePps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in PPS parsing. This PPS NAL unit is skipped.");
                     }
@@ -155,7 +161,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     // Parse the slice header into a temporary first, so we can decide whether this
                     // slice begins a new primary coded picture before committing it.
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     AvcSliceHeader curr_slice_header;
                     if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, &curr_slice_header)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in slice header parsing. This slice NAL unit is skipped.");
@@ -252,7 +261,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                 case kAvcNalTypeSEI_Info: {
                     if (pfn_get_sei_message_cb_) {
-                        int sei_ebsp_size = nal_unit_size_ - 4; // copy the entire NAL unit
+                        uint32_t sei_ebsp_size = nal_unit_size_ - 4; // copy the entire NAL unit
                         if (sei_rbsp_buf_) {
                             if (sei_ebsp_size > sei_rbsp_buf_size_) {
                                 delete [] sei_rbsp_buf_;
@@ -264,7 +273,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                             sei_rbsp_buf_ = new uint8_t [sei_rbsp_buf_size_];
                         }
                         memcpy(sei_rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), sei_ebsp_size);
-                        rbsp_size_ = EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size);
+                        if (EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size, &rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                            break;
+                        }
                         ParseSeiMessage(sei_rbsp_buf_, rbsp_size_);
                     }
                     break;
