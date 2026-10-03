@@ -99,10 +99,8 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     if(NOT ARG_VISIBILITY)
         set(ARG_VISIBILITY "hidden")
     endif()
-    if(NOT ARG_CXX_STANDARD AND CMAKE_CXX_STANDARD)
+    if(NOT ARG_CXX_STANDARD)
         set(ARG_CXX_STANDARD ${CMAKE_CXX_STANDARD})
-    elseif(NOT ARG_CXX_STANDARD)
-        set(ARG_CXX_STANDARD 11)
     endif()
     if(ARG_EXCLUDE_FROM_ALL)
         set(exclude_from_all EXCLUDE_FROM_ALL)
@@ -115,6 +113,10 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     # per-version loop in source/python/CMakeLists.txt) to pin which interpreter is
     # found; intentionally not reset by rocprofiler_systems_reset_python3_cache() since
     # it is a find_package() hint, not a cached discovery output.
+    set(Python3_FIND_STRATEGY "LOCATION")
+    set(Python3_FIND_VIRTUALENV "FIRST")
+    set(Python3_ARTIFACTS_INTERACTIVE OFF)
+
     rocprofiler_systems_reset_python3_cache()
     find_package(
         Python3
