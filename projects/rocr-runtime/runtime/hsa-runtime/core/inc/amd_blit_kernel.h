@@ -115,6 +115,18 @@ class BlitKernel : public core::Blit {
   virtual void GangLeader(bool gang_leader) override {}
   virtual bool GangLeader() const override { return false; }
 
+  /// @brief Submit a swap copy command to exchange contents of two buffers.
+  virtual hsa_status_t SubmitSwapCopyCommand(
+      void* addr_a, void* addr_b, size_t size,
+      std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+      std::vector<core::Signal*>& gang_signals) override;
+
+  /// @brief Submit a broadcast copy command (1-to-N copy).
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations,
+      size_t size, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) override;
+
   const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
 
  private:
@@ -150,6 +162,20 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t src_addr;          // Source buffer address
+      uint64_t dst_list_addr;     // GPU-accessible array of destination addresses
+      uint32_t num_destinations;  // Number of destinations (1-1024)
+      uint32_t copy_size;         // Size to copy to each destination
+      uint32_t num_workitems;     // Total workitems for dispatch
+    } broadcast;
+
+    struct __ALIGNED__(16) {
+      uint64_t addr_a;     // First buffer address
+      uint64_t addr_b;     // Second buffer address
+      uint32_t swap_size;  // Size to swap in bytes
+    } swap;
   };
 
   // Index after which bytes will have been written.
@@ -170,6 +196,13 @@ class BlitKernel : public core::Blit {
   void PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                      uint32_t grid_size_x, hsa_signal_t completion_signal);
 
+  /// Emit BARRIER_AND packets to gate the following dispatch on @p dep_signals.
+  /// Packets are written starting at @p barrier_start_index (one packet per up
+  /// to five dependent signals). Shared by the linear, broadcast and swap copy
+  /// submit paths.
+  void SubmitDependentSignalBarriers(uint64_t barrier_start_index,
+                                     std::vector<core::Signal*>& dep_signals);
+
   KernelArgs* ObtainAsyncKernelCopyArg();
 
   void RecordBlitHistory(uint64_t size, uint64_t index);
@@ -179,6 +212,8 @@ class BlitKernel : public core::Blit {
     CopyAligned,
     CopyMisaligned,
     Fill,
+    SwapCopy,
+    BroadcastCopy,
   };
 
   struct KernelCode {
