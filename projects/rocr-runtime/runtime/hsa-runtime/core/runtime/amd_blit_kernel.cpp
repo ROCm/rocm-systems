@@ -750,6 +750,11 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
   const uint32_t total_num_packet = num_barrier_packet + 1;
 
+  // Enough dependencies to need more barrier packets than the ring holds is a
+  // request the queue cannot express. Report it instead of waiting for room
+  // that will never appear.
+  if (!ReservationFits(total_num_packet)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   uint64_t write_index;
   {
     std::lock_guard<std::mutex> lock(reservation_lock_);
@@ -895,16 +900,44 @@ hsa_status_t BlitKernel::EnableProfiling(bool enable) {
   return HSA_STATUS_SUCCESS;
 }
 
+bool BlitKernel::ReservationFits(uint32_t num_packet) const {
+  return uint64_t(num_packet) <= uint64_t(queue_->public_handle()->size);
+}
+
 uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {
-  assert(queue_->public_handle()->size >= num_packet);
+  // A reservation larger than the ring can never be satisfied. Callers check
+  // this with ReservationFits and fail the submission, because there is no
+  // value this function could return that would be correct.
+  assert(ReservationFits(num_packet));
 
-  uint64_t write_index = queue_->AddWriteIndexAcqRel(num_packet);
+  const uint64_t queue_size = queue_->public_handle()->size;
+  uint64_t write_index = queue_->LoadWriteIndexRelaxed();
 
-  while (write_index + num_packet - queue_->LoadReadIndexRelaxed() > queue_->public_handle()->size) {
-    os::YieldThread();
+  while (true) {
+    // Wait for room BEFORE publishing the reservation, not after. Advancing the
+    // write index first leaves it pointing past the end of the ring, at slots
+    // this call has not written yet and which still hold the previous wrap's
+    // packets, headers and all. Two things go wrong there. The packet processor
+    // may consume those stale packets, and - when the write index ends up an
+    // exact multiple of the ring size ahead of the read index - the two indices
+    // are congruent modulo the ring size, which reads as an empty queue. The
+    // packet processor then goes idle with a full ring of work outstanding, so
+    // nothing retires and the drain this thread is waiting for can never
+    // happen. Reserving only space that already exists keeps the write index
+    // within one ring of the read index at all times, which is what makes the
+    // two unambiguous.
+    while (write_index + num_packet - queue_->LoadReadIndexRelaxed() > queue_size) {
+      os::YieldThread();
+      write_index = queue_->LoadWriteIndexRelaxed();
+    }
+
+    // Publish the reservation only once it fits. Every caller holds
+    // reservation_lock_, so this succeeds first time; the retry keeps the
+    // function correct for any future caller that does not.
+    const uint64_t prev = queue_->CasWriteIndexAcqRel(write_index, write_index + num_packet);
+    if (prev == write_index) return write_index;
+    write_index = prev;
   }
-
-  return write_index;
 }
 
 void BlitKernel::ReleaseWriteIndex(uint64_t write_index, uint32_t num_packet) {
@@ -1039,6 +1072,8 @@ hsa_status_t BlitKernel::SubmitEmptyCopyCommand(std::vector<core::Signal*>& dep_
 
   const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
 
+  if (!ReservationFits(num_barrier_packet)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   uint64_t write_index;
   {
     std::lock_guard<std::mutex> lock(reservation_lock_);
@@ -1158,6 +1193,12 @@ hsa_status_t BlitKernel::SubmitSwapCopyCommand(uint32_t num_entries, void* const
       });
     }
   }
+
+  // No reservation the loop takes can be larger than this. Checking it once up
+  // front means the loop cannot fail part way and leave the completion signal
+  // raised for a dispatch that was never submitted.
+  if (!ReservationFits(num_barrier_packet + MaxDispatchesPerReservation(num_barrier_packet)))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   // Every dispatch carries out_signal and so decrements it once on retirement.
   // The caller has set it to 1, so raise it by the extra dispatches before any
