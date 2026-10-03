@@ -514,7 +514,7 @@ create_async_copy_signal(async_copy_data* _data)
     // A released pool entry retains its HSA handle. Only construct empty entries and reset the
     // signal value explicitly before installing this submission's handler.
     if(_pooled_signal.get().value.handle == 0)
-        ensure_hsa_signal(_pooled_signal.get(), 0, 0, nullptr, 0);
+        construct_hsa_signal(_pooled_signal.get(), 0, 0, nullptr, 0);
 
     ROCP_FATAL_IF(!_pooled_signal.in_use() || _pooled_signal.get().value.handle == 0)
         << "acquired an invalid pooled async-copy signal";
@@ -572,7 +572,7 @@ destroy_async_copy_data(async_copy_data* _data)
         {
             ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
             _data->rocp_pooled_signal->get().value = {};
-            ensure_hsa_signal(_data->rocp_pooled_signal->get(), 0, 0, nullptr, 0);
+            construct_hsa_signal(_data->rocp_pooled_signal->get(), 0, 0, nullptr, 0);
         }
 
         release_async_copy_signal(_data);

@@ -50,11 +50,11 @@ reset_hsa_signal(signal_t& signal, hsa_signal_value_t initial_value)
 }  // namespace
 
 signal_t&
-ensure_hsa_signal(signal_t&          signal,
-                  hsa_signal_value_t initial_value,
-                  uint32_t           num_consumers,
-                  const hsa_agent_t* consumers,
-                  uint64_t           attributes)
+construct_hsa_signal(signal_t&          signal,
+                     hsa_signal_value_t initial_value,
+                     uint32_t           num_consumers,
+                     const hsa_agent_t* consumers,
+                     uint64_t           attributes)
 {
     if(signal.value != hsa_signal_t{})
     {
@@ -85,7 +85,7 @@ get_signal_pool()
 
     static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
         std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            if(registration::get_fini_status() == 0) ensure_hsa_signal(signal, 0, 0, nullptr, 0);
+            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
         });
 
     return pool;
