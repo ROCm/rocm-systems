@@ -317,6 +317,7 @@ symbol.
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
+| `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
@@ -346,6 +347,7 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
 | `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
