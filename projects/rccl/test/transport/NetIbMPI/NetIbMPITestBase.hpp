@@ -619,6 +619,41 @@ protected:
         return routable || ethernetPorts == 0;
     }
 
+    // Probe whether the NIC supports multiplane PUEC route programming by reading
+    // /sys/class/infiniband/<devName>/puec_nports.  A non-zero value means the NIC
+    // advertises multiplane support.  Returns false if the sysfs file is absent,
+    // unreadable, or contains zero.
+    static bool HasPuecSupport(const char* devName) {
+        char path[PATH_MAX];
+        if (snprintf(path, sizeof(path), "/sys/class/infiniband/%s/puec_nports", devName)
+            >= (int)sizeof(path))
+            return false;
+        FILE* f = fopen(path, "r");
+        if (!f) return false;
+        int nports = 0;
+        bool ok = (fscanf(f, "%d", &nports) == 1);
+        fclose(f);
+        return ok && nports > 0;
+    }
+
+    // Check whether ANY physical IB device on this node supports PUEC multiplane.
+    // Requires InitNetIb() + GetDeviceCount() to have been called already so the
+    // plugin's device list is populated.  Iterates physical devices, gets their
+    // sysfs name via getProperties, and probes puec_nports.
+    bool AnyDeviceHasPuecSupport() {
+        int ndev = 0;
+        if (GetDeviceCount(&ndev) != ncclSuccess) return false;
+        for (int i = 0; i < ndev; i++) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(i, &props) != ncclSuccess) continue;
+            if (props.vProps.ndevs > 1) continue;  // skip merged vNICs
+            if (!props.name) continue;
+            if (HasPuecSupport(props.name)) return true;
+        }
+        return false;
+    }
+
     // sysfs writes a GID as eight colon-separated 16-bit groups. ibv_gid is those
     // same sixteen bytes in network order, which is what the plugin's subnet
     // comparison expects.
