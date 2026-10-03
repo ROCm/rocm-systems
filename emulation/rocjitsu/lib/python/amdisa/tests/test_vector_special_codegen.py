@@ -608,12 +608,14 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
         is_vop3=True,
         has_abs=has_abs,
     )
-    assert ('std::fabs' in cpp) == has_abs
+    abs_field = 'inst_.abs' if has_abs else '0u'
     for source in (0, 1):
-        assert f'if (inst_.neg & (1u << {source})) s{source} = -s{source};' in cpp
-        assert cpp.index(f'source_modifier::apply_to_float(s{source},') < cpp.index(
-            'util::f32_to_f16_rtz'
+        modifiers = (
+            f's{source} = amdgpu::source_modifier::apply_to_float('
+            f's{source}, {source}, {abs_field}, inst_.neg);'
         )
+        assert modifiers in cpp
+        assert cpp.index(modifiers) < cpp.index('util::f32_to_f16_rtz')
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
@@ -630,17 +632,14 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
         has_abs=has_abs,
     )
     abs_field = 'inst_.abs' if has_abs else '0u'
-    for source in (0, 1):
-        assert (
-            f'source_modifier::apply_to_float(s{source}, {source}, '
-            f'{abs_field}, inst_.neg)'
-        ) in cpp
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f)' in cpp
     for source in (0, 1):
-        negation = cpp.index(f'source_modifier::apply_to_float(s{source},')
-        assert negation < cpp.index('util::rndne_scalar')
-        if has_abs:
-            assert cpp.index(f'std::fabs(s{source})') < negation
+        modifiers = (
+            f's{source} = amdgpu::source_modifier::apply_to_float('
+            f's{source}, {source}, {abs_field}, inst_.neg);'
+        )
+        assert modifiers in cpp
+        assert cpp.index(modifiers) < cpp.index('util::rndne_scalar')
     for prefix in (['pk_norm', 'pknorm'] if dtype == 'f32' else ['pk_norm']):
         probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
         assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
