@@ -75,7 +75,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)
 
 rocprofiler_add_integration_validate_test(

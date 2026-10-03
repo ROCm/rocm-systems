@@ -66,7 +66,7 @@ foreach(_mode IN ITEMS reference truncated mangled)
             ${_output_dir}/naming/${_mode} -o out --output-format csv --
             $<TARGET_FILE:vector-ops>
         DEPENDS vector-ops
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         TIMEOUT 60
         LABELS "counter-collection"
         FIXTURES_SETUP ${_fixture})
@@ -94,7 +94,7 @@ foreach(_mode IN ITEMS absolute relative type-relative)
             ${_mode} -d ${_output_dir}/agent-index/${_mode} -o out --output-format csv
             json -- $<TARGET_FILE:vector-ops>
         DEPENDS vector-ops
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         TIMEOUT 60
         LABELS "counter-collection"
         FIXTURES_SETUP ${_fixture})
@@ -123,7 +123,7 @@ if(TARGET reproducible-dispatch-count)
             --output-format csv json pftrace -- $<TARGET_FILE:reproducible-dispatch-count>
             200 2
         DEPENDS reproducible-dispatch-count
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         TIMEOUT 120
         LABELS "counter-collection"
         FIXTURES_SETUP ${_fixture})
@@ -157,7 +157,7 @@ foreach(_mode IN ITEMS stats summary)
             ${_output_dir}/${_mode} -o out --output-format csv --
             $<TARGET_FILE:vector-ops>
         DEPENDS vector-ops
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         TIMEOUT 60
         LABELS "counter-collection"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}" "COUNTER_COLLECTION"
@@ -183,7 +183,7 @@ rocprofiler_add_integration_execute_test(
         --agent-index relative -d ${_output_dir}/device-qualifier -o out --output-format
         csv json -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     TIMEOUT 60
     LABELS "counter-collection"
     FIXTURES_SETUP ${_fixture})
@@ -209,7 +209,7 @@ if(TARGET openmp-target)
             ${_output_dir}/openmp -o out --output-format csv --
             $<TARGET_FILE:openmp-target>
         DEPENDS openmp-target
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         TIMEOUT 60
         LABELS "counter-collection"
         DISABLED "${_openmp_disabled}"
