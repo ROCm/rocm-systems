@@ -856,10 +856,10 @@ TEST_F(MemoryTest, VMemExportImportShareableHandle) {
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
 }
 
-// Known limitation (see the TODO below): hsa_amd_pointer_info does not recognize AIE allocations,
-// because it queries the KFD thunk. The call succeeds but reports an unknown pointer with no size
-// or agent address, and the test expects exactly that; flip it once pointer info covers XDNA
-// allocations.
+// hsa_amd_pointer_info asks the driver that owns an allocation, so an AIE allocation is reported
+// like any other: as an HSA allocation of its size, owned by the AIE agent, with the address the
+// agent reaches it at. Whether that address differs from the host one depends on the pool, so it
+// is only required to be there; test_dispatch.cc checks the dev pool's in detail.
 TEST_F(MemoryTest, PointerInfo) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
@@ -874,15 +874,14 @@ TEST_F(MemoryTest, PointerInfo) {
             HSA_STATUS_SUCCESS);
   ASSERT_NE(buffer, nullptr);
 
-  // TODO hsa_amd_pointer_info relies on hsaKmtQueryPointerInfo (KFD thunk) which is unaware of
-  // XDNA DRM allocations. The call succeeds but returns HSA_EXT_POINTER_TYPE_UNKNOWN because the
-  // pointer was not registered through the KFD path.
   hsa_amd_pointer_info_t info = {};
   info.size = sizeof(info);
   EXPECT_EQ(hsa_amd_pointer_info(buffer, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
-  EXPECT_NE(info.sizeInBytes, allocation_size);
-  EXPECT_EQ(info.agentBaseAddress, nullptr);
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(info.hostBaseAddress, buffer);
+  EXPECT_EQ(info.sizeInBytes, allocation_size);
+  EXPECT_NE(info.agentBaseAddress, nullptr);
+  EXPECT_EQ(info.agentOwner.handle, aie_agents.front().handle);
 
   // cleanup
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
