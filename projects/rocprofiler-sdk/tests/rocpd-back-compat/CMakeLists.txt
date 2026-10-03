@@ -72,7 +72,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # appropriate changes to make_db.py to insert dummy data into a fake DB to simulate the
 # new schema changes.
 set(ROCPD_COMPAT_TESTED_SCHEMAS "3.0.0" "3.0.1" "3.0.2" "3.0.3" "3.0.4" "3.0.5" "3.0.6"
-                                "3.1.0")
+                                "3.1.0" "3.1.1")
 
 # Derive old schemas (all except the latest) and the latest schema.
 list(LENGTH ROCPD_COMPAT_TESTED_SCHEMAS _num_schemas)
