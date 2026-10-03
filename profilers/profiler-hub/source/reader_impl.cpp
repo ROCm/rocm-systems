@@ -351,11 +351,10 @@ reader_t::impl::add_category_tracks(size_t& next_synthetic_id)
 {
     // optiq-parity category tracks (kernel-dispatch/memory-allocate/
     // memory-copy, per agent+queue and per host-stream): derived directly
-    // from the raw event tables, no rocpd_track row backs them.
-    // Deliberately NOT added to m_track_ptr_to_topology/
-    // m_topology_to_track_ptr/m_track_ptr_to_db_id -- get_events_for_track()
-    // returns an empty list for these until event-fetch support for these
-    // categories is added (see planning/track-discovery-queries.md).
+    // from the raw event tables, no rocpd_track row backs them. Deliberately
+    // NOT added to m_track_ptr_to_topology/m_topology_to_track_ptr/
+    // m_track_ptr_to_db_id -- get_events_for_track() dispatches these by
+    // category to get_category_track_events() instead.
     auto add_agent_queue_track = [&](reader_types::track_kind_t kind,
                                      std::string                name,
                                      size_t                     nid,
@@ -391,6 +390,7 @@ reader_t::impl::add_category_tracks(size_t& next_synthetic_id)
         track_ptr->category    = kind;
         track_ptr->name        = std::move(name);
         track_ptr->stream_id   = stream_id;
+        track_ptr->db_pid      = pid;
         track_ptr->event_count = count;
 
         if(const auto node_it = m_node_info_utility.find(nid);
@@ -925,6 +925,17 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 {
     if(!track) return {};
 
+    switch(track->category)
+    {
+        case reader_types::track_kind_t::kernel_dispatch_agent_queue:
+        case reader_types::track_kind_t::memory_allocate_agent_queue:
+        case reader_types::track_kind_t::memory_copy_agent_queue:
+        case reader_types::track_kind_t::stream:
+            return get_category_track_events(track, filter);
+        case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::pmc_agent: break;
+    }
+
     auto topo_it = m_track_ptr_to_topology.find(track);
     if(topo_it == m_track_ptr_to_topology.end()) return {};
 
@@ -999,6 +1010,132 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
     {
         query_event_type(m_read_statements->memory_copy_statements(),
                          reader_types::event_type_t::memory_copy);
+    }
+
+    apply_pagination(all_events, filter.pagination);
+    return all_events;
+}
+
+reader_types::timeline_event_list_t
+reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& track,
+                                          const reader_types::event_filter_t&   filter)
+{
+    if(!track->node_info) return {};
+    const auto nid = track->node_info->node_id;
+
+    reader_types::timeline_event_list_t all_events;
+
+    bool query_all    = filter.types.empty();
+    auto should_query = [&](reader_types::event_type_t t) {
+        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
+                                filter.types.end();
+    };
+
+    const bool has_time =
+        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+    const auto window_end   = has_time ? filter.time_window.end.value() : 0;
+    const auto window_start = has_time ? filter.time_window.start.value() : 0;
+
+    auto append_events = [&](const auto& results, reader_types::event_type_t type) {
+        auto events = build_timeline_events(results, type);
+        all_events.insert(all_events.end(),
+                          std::make_move_iterator(events.begin()),
+                          std::make_move_iterator(events.end()));
+    };
+
+    auto query_agent_queue =
+        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+                                       stmts,
+            reader_types::event_type_t type) {
+            if(has_time)
+            {
+                if(!stmts.agent_queue_time_filtered) return;
+                append_events(stmts
+                                  .agent_queue_time_filtered(nid,
+                                                             track->agent_id,
+                                                             track->queue_id,
+                                                             window_end,
+                                                             window_start)
+                                  .to_vector(),
+                              type);
+            }
+            else
+            {
+                if(!stmts.agent_queue_filtered) return;
+                append_events(
+                    stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id)
+                        .to_vector(),
+                    type);
+            }
+        };
+
+    auto query_stream =
+        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+                                       stmts,
+            reader_types::event_type_t type) {
+            if(has_time)
+            {
+                if(!stmts.stream_time_filtered) return;
+                append_events(stmts
+                                  .stream_time_filtered(nid,
+                                                        track->db_pid,
+                                                        track->stream_id,
+                                                        window_end,
+                                                        window_start)
+                                  .to_vector(),
+                              type);
+            }
+            else
+            {
+                if(!stmts.stream_filtered) return;
+                append_events(stmts.stream_filtered(nid, track->db_pid, track->stream_id)
+                                  .to_vector(),
+                              type);
+            }
+        };
+
+    switch(track->category)
+    {
+        case reader_types::track_kind_t::kernel_dispatch_agent_queue:
+            if(should_query(reader_types::event_type_t::kernel_dispatch))
+            {
+                query_agent_queue(m_read_statements->kernel_dispatch_statements(),
+                                  reader_types::event_type_t::kernel_dispatch);
+            }
+            break;
+        case reader_types::track_kind_t::memory_allocate_agent_queue:
+            if(should_query(reader_types::event_type_t::memory_allocate))
+            {
+                query_agent_queue(m_read_statements->memory_allocate_statements(),
+                                  reader_types::event_type_t::memory_allocate);
+            }
+            break;
+        case reader_types::track_kind_t::memory_copy_agent_queue:
+            if(should_query(reader_types::event_type_t::memory_copy))
+            {
+                query_agent_queue(m_read_statements->memory_copy_statements(),
+                                  reader_types::event_type_t::memory_copy);
+            }
+            break;
+        case reader_types::track_kind_t::stream:
+            if(should_query(reader_types::event_type_t::kernel_dispatch))
+            {
+                query_stream(m_read_statements->kernel_dispatch_statements(),
+                             reader_types::event_type_t::kernel_dispatch);
+            }
+            if(should_query(reader_types::event_type_t::memory_allocate))
+            {
+                query_stream(m_read_statements->memory_allocate_statements(),
+                             reader_types::event_type_t::memory_allocate);
+            }
+            if(should_query(reader_types::event_type_t::memory_copy))
+            {
+                query_stream(m_read_statements->memory_copy_statements(),
+                             reader_types::event_type_t::memory_copy);
+            }
+            break;
+        case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::pmc_agent: break;
     }
 
     apply_pagination(all_events, filter.pagination);

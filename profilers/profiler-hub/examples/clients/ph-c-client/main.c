@@ -110,27 +110,60 @@ print_agents(const ph_agent_list_t* agents)
 }
 
 static void
+print_processes(const ph_process_list_t* processes)
+{
+    printf("\n=== Processes (%d) ===\n", processes->list_size);
+    printf("%-8s %s\n", "id", "command");
+    for(uint32_t i = 0; i < processes->list_size; ++i)
+    {
+        const ph_process_t* process = &processes->processes[i];
+        printf("%-8d %s\n", process->id, process->command);
+    }
+}
+
+static const char*
+track_category_name(ph_track_category_t category)
+{
+    switch(category)
+    {
+        case PH_TRACK_CATEGORY_THREAD: return "thread";
+        case PH_TRACK_CATEGORY_PMC_AGENT: return "pmc_agent";
+        case PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE: return "kernel_dispatch_aq";
+        case PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE: return "memory_allocate_aq";
+        case PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE: return "memory_copy_aq";
+        case PH_TRACK_CATEGORY_STREAM: return "stream";
+    }
+    return "unknown";
+}
+
+static void
 print_tracks(const ph_track_list_t* tracks)
 {
     printf("\n=== Tracks (%d) ===\n", tracks->list_size);
-    printf("%-4s %-12s %-8s %-8s %-8s %-8s %s\n",
+    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %s\n",
            "id",
            "nid",
            "pid",
            "tid",
            "agent",
            "events",
+           "category",
+           "queue",
+           "stream",
            "name");
     for(uint32_t i = 0; i < tracks->list_size; ++i)
     {
         const ph_track_t* track = &tracks->tracks[i];
-        printf("%-4d %-12d %-8d %-8d %-8d %-8d %s\n",
+        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %s\n",
                track->id,
                track->nid,
                track->pid,
                track->tid,
                track->agent_id,
                track->event_count,
+               track_category_name(track->category),
+               track->queue_id,
+               track->stream_id,
                track->track_name);
     }
 }
@@ -393,6 +426,7 @@ main(int argc, char** argv)
 
     print_node_info(&node.info);
     print_agents(&node.agents);
+    print_processes(&node.process_list);
     print_tracks(&node.track_list);
 
     uint32_t duration_track_id = 0;
