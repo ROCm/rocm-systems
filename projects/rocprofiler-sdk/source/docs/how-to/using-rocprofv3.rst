@@ -1503,7 +1503,7 @@ The following table lists the various fields or the columns in the output CSV fi
             </tr>
             <tr>
                <td>Pipe_Id</td>
-               <td>Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS). Only present in CSV converted from a rocpd database of schema 3.0.5 or later; direct rocprofv3 CSV output does not carry it.</td>
+               <td>Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS). Only present in CSV converted from a rocpd database of schema 3.0.6 or later; direct rocprofv3 CSV output does not carry it.</td>
             </tr>
             <tr>
                <th rowspan="5">Resource usage</th>

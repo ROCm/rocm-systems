@@ -917,6 +917,8 @@ write_perfetto(
                                           ctx, "graph_exec_id", current.graph_exec_id);
                                       rocprofiler::sdk::add_perfetto_annotation(
                                           ctx, "graph_node_id", current.graph_node_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "pipe_id", current.pipe_id);
 
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {
