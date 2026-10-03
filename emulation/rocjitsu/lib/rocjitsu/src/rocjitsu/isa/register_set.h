@@ -523,11 +523,20 @@ private:
   template <size_t Capacity>
   using RegisterBits = Word[(Capacity + Ops::kWordBits - 1) / Ops::kWordBits];
 
-  // Keep the class constant even when this helper is not inlined. Inline the
-  // callback's available callees too: opaque vector/string helpers otherwise
-  // obstruct alias analysis and retain costly membership reloads and checks.
+  // Keep construction and the callback together so the class stays constant.
+  // Clang needs a call-site hint for larger callbacks, such as string formatting.
+  // Their callees still follow the compiler's normal inlining decisions.
+  template <RegClass cls, typename F>
+  [[gnu::always_inline]] static inline void emit_register(F &f, uint16_t index) {
+#if defined(__clang__)
+    [[clang::always_inline]]
+#endif
+    f(RegisterRef{cls, index, 1});
+  }
+
+  // Keep the class constant even when this helper is not inlined.
   template <RegClass cls, size_t Words, typename F>
-  [[gnu::flatten]] static void for_each_bits(const Word (&words)[Words], F &f) {
+  static void for_each_bits(const Word (&words)[Words], F &f) {
 #if defined(__AVX2__)
     if constexpr (wordType == RegisterSetWordType::Avx2M256) {
       for (size_t word = 0; word < Words; ++word) {
@@ -550,7 +559,7 @@ private:
           if (members == ~uint64_t{0}) {
 #pragma GCC unroll 8
             for (; cursor < 64; ++cursor) {
-              f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + cursor), 1});
+              emit_register<cls>(f, static_cast<uint16_t>(word * 256 + lane * 64 + cursor));
               members = load();
               if (members != ~uint64_t{0}) {
                 remaining = members & (~uint64_t{1} << cursor);
@@ -562,7 +571,7 @@ private:
           }
           while (remaining) {
             unsigned bit = std::countr_zero(remaining);
-            f(RegisterRef{cls, static_cast<uint16_t>(word * 256 + lane * 64 + bit), 1});
+            emit_register<cls>(f, static_cast<uint16_t>(word * 256 + lane * 64 + bit));
             // Keep edit recovery on a cold path. In particular, this prevents Clang
             // from putting its shift and mask on the cursor's dependency chain.
             const uint64_t updated = load();
@@ -585,7 +594,7 @@ private:
         Word remaining = members;
         while (remaining) {
           unsigned bit = std::countr_zero(remaining);
-          f(RegisterRef{cls, static_cast<uint16_t>(word * Ops::kWordBits + bit), 1});
+          emit_register<cls>(f, static_cast<uint16_t>(word * Ops::kWordBits + bit));
           Word updated = words[word];
           if (updated == members)
             remaining &= remaining - 1;
