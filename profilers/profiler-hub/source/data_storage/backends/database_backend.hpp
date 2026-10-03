@@ -185,6 +185,18 @@ public:
         } }
         {}
 
+        template <typename Fn>
+        void for_each(Fn&& fn)
+        {
+            auto raw = m_stmt.raw();
+            T    row;
+            while(SqlitePolicy::step(raw) == SqlitePolicy::result_row)
+            {
+                m_extractor(*m_backend, raw, row);
+                fn(std::as_const(row));
+            }
+        }
+
         std::vector<T> to_vector()
         {
             std::vector<T> results;

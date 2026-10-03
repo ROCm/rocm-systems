@@ -15,17 +15,6 @@
 namespace
 {
 
-std::optional<profiler_hub::reader_types::track_info_ptr_t>
-find_track(profiler_hub::reader_t& reader, uint32_t track_id)
-{
-    const auto tracks = reader.get_all_tracks();
-    const auto track  = std::ranges::find_if(tracks, [track_id](const auto& item) {
-        return static_cast<uint32_t>(item->id) == track_id;
-    });
-
-    return track != tracks.end() ? std::make_optional(*track) : std::nullopt;
-}
-
 ph_track_category_t
 to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
 {
@@ -125,17 +114,11 @@ ph_ctx::get_node()
 }
 
 ph_event_list_t
-ph_ctx::core_get_track_events(profiler_hub::common::connection& conn,
-                              uint32_t                          track_id,
-                              uint64_t                          start_ts,
-                              uint64_t                          end_ts)
+ph_ctx::core_get_track_events(profiler_hub::common::connection&                   conn,
+                              const profiler_hub::reader_types::track_info_ptr_t& track,
+                              uint64_t start_ts,
+                              uint64_t end_ts)
 {
-    const auto track = find_track(conn.reader(), track_id);
-    if(!track.has_value())
-    {
-        return ph_event_list_t{ .list_size = 0, .events = nullptr };
-    }
-
     profiler_hub::reader_types::event_filter_t filter;
     if(start_ts != 0 || end_ts != 0)
     {
@@ -146,11 +129,8 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection& conn,
                                 std::numeric_limits<std::int64_t>::max());
     }
 
-    auto events = conn.reader().get_events_for_track(track.value(), filter);
-
-    std::scoped_lock lock{ m_track_results_mutex };
-    auto&            result = m_track_events_results.emplace_back();
-    result.events           = std::move(events);
+    track_events_result_t result;
+    result.events = conn.reader().get_events_for_track(track, filter);
     result.c_events.reserve(result.events.size());
     for(const auto& event : result.events)
     {
@@ -161,23 +141,20 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection& conn,
         });
     }
 
+    std::scoped_lock lock{ m_track_results_mutex };
+    auto&            stored = m_track_events_results.emplace_back(std::move(result));
+
     return ph_event_list_t{ .list_size =
-                                static_cast<std::uint32_t>(result.c_events.size()),
-                            .events = result.c_events.data() };
+                                static_cast<std::uint32_t>(stored.c_events.size()),
+                            .events = stored.c_events.data() };
 }
 
 ph_sample_list_t
-ph_ctx::core_get_track_samples(profiler_hub::common::connection& conn,
-                               uint32_t                          track_id,
-                               uint64_t                          start_ts,
-                               uint64_t                          end_ts)
+ph_ctx::core_get_track_samples(profiler_hub::common::connection&                   conn,
+                               const profiler_hub::reader_types::track_info_ptr_t& track,
+                               uint64_t start_ts,
+                               uint64_t end_ts)
 {
-    const auto track = find_track(conn.reader(), track_id);
-    if(!track.has_value())
-    {
-        return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
-    }
-
     profiler_hub::reader_types::event_filter_t filter;
     if(start_ts != 0 || end_ts != 0)
     {
@@ -188,10 +165,9 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection& conn,
                                 std::numeric_limits<std::int64_t>::max());
     }
 
-    auto samples = conn.reader().get_counter_events_for_track(track.value(), filter);
+    const auto samples = conn.reader().get_counter_events_for_track(track, filter);
 
-    std::scoped_lock lock{ m_track_results_mutex };
-    auto&            c_samples = m_track_samples_results.emplace_back();
+    std::vector<ph_sample_t> c_samples;
     c_samples.reserve(samples.size());
     for(const auto& sample : samples)
     {
@@ -199,8 +175,11 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection& conn,
             ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value });
     }
 
-    return ph_sample_list_t{ .list_size = static_cast<std::uint32_t>(c_samples.size()),
-                             .samples   = c_samples.data() };
+    std::scoped_lock lock{ m_track_results_mutex };
+    auto&            stored = m_track_samples_results.emplace_back(std::move(c_samples));
+
+    return ph_sample_list_t{ .list_size = static_cast<std::uint32_t>(stored.size()),
+                             .samples   = stored.data() };
 }
 
 ph_event_list_t
@@ -210,13 +189,14 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
                  track_id,
                  start_ts,
                  end_ts);
-    if(!m_track_by_id.contains(track_id))
+    const auto track_it = m_track_by_id.find(track_id);
+    if(track_it == m_track_by_id.end())
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
     return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_events(conn, track_id, start_ts, end_ts);
+        return core_get_track_events(conn, track_it->second, start_ts, end_ts);
     });
 }
 
@@ -227,13 +207,14 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
                  track_id,
                  start_ts,
                  end_ts);
-    if(!m_track_by_id.contains(track_id))
+    const auto track_it = m_track_by_id.find(track_id);
+    if(track_it == m_track_by_id.end())
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
 
     return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_samples(conn, track_id, start_ts, end_ts);
+        return core_get_track_samples(conn, track_it->second, start_ts, end_ts);
     });
 }
 

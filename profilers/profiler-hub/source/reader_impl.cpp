@@ -20,6 +20,81 @@
 namespace profiler_hub
 {
 
+namespace
+{
+
+class timeline_event_builder
+{
+public:
+    explicit timeline_event_builder(const reader_catalog_t& catalog)
+    : m_catalog{ catalog }
+    {}
+
+    [[nodiscard]] reader_types::timeline_event_t operator()(
+        const data_storage::schema_v3::timeline_event_result& row,
+        reader_types::event_type_t                            type)
+    {
+        reader_types::timeline_event_t event;
+        event.unique_identifier = { .id = row.id, .type = type };
+        event.start_timestamp   = row.start_timestamp;
+        event.end_timestamp     = row.end_timestamp;
+        event.display_name      = resolve_string(row.display_name_id, m_display_name);
+        event.category          = resolve_string(row.category_id, m_category);
+        event.track             = resolve_track(row);
+        return event;
+    }
+
+private:
+    struct cached_string
+    {
+        std::optional<size_t> id;
+        std::string_view      value;
+    };
+
+    std::string_view resolve_string(const std::optional<size_t>& id,
+                                    cached_string&               cache) const
+    {
+        if(!id.has_value()) return {};
+        if(cache.id == id) return cache.value;
+
+        const auto it = m_catalog.string_utility.find(id.value());
+        cache         = { id,
+                  it != m_catalog.string_utility.end() ? std::string_view{ it->second }
+                                                               : std::string_view{} };
+        return cache.value;
+    }
+
+    reader_types::track_info_ptr_t resolve_track(
+        const data_storage::schema_v3::timeline_event_result& row)
+    {
+        if(row.track_id.has_value())
+        {
+            const auto it = m_catalog.track_utility.find(row.track_id.value());
+            if(it != m_catalog.track_utility.end() && it->second) return it->second;
+        }
+
+        const topology_key_t topology{ row.nid,
+                                       row.pid.value_or(0),
+                                       row.tid.value_or(0) };
+        if(m_last_topology != topology)
+        {
+            const auto it = m_catalog.topology_to_track.find(topology);
+            m_last_topology_track =
+                it != m_catalog.topology_to_track.end() ? it->second : nullptr;
+            m_last_topology = topology;
+        }
+        return m_last_topology_track;
+    }
+
+    const reader_catalog_t&        m_catalog;
+    cached_string                  m_display_name;
+    cached_string                  m_category;
+    std::optional<topology_key_t>  m_last_topology;
+    reader_types::track_info_ptr_t m_last_topology_track;
+};
+
+}  // namespace
+
 reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
 : m_storage(storage ? std::move(storage)
                     : throw std::invalid_argument(
@@ -162,54 +237,10 @@ reader_t::impl::build_timeline_events(
     reader_types::timeline_event_list_t events;
     events.reserve(results.size());
 
+    timeline_event_builder build_event{ *m_catalog };
     for(const auto& result : results)
     {
-        reader_types::timeline_event_t event;
-        event.unique_identifier = { .id = result.id, .type = type };
-        event.start_timestamp   = result.start_timestamp;
-        event.end_timestamp     = result.end_timestamp;
-
-        if(result.display_name_id.has_value())
-        {
-            auto it = m_catalog->string_utility.find(result.display_name_id.value());
-            if(it != m_catalog->string_utility.end())
-            {
-                event.display_name = it->second;
-            }
-        }
-
-        if(result.category_id.has_value())
-        {
-            auto it = m_catalog->string_utility.find(result.category_id.value());
-            if(it != m_catalog->string_utility.end())
-            {
-                event.category = it->second;
-            }
-        }
-
-        // Track resolution: try sample-based track_id first, fall back to topology
-        if(result.track_id.has_value())
-        {
-            auto it = m_catalog->track_utility.find(result.track_id.value());
-            if(it != m_catalog->track_utility.end())
-            {
-                event.track = it->second;
-            }
-        }
-
-        if(!event.track)
-        {
-            topology_key_t topo{ result.nid,
-                                 result.pid.value_or(0),
-                                 result.tid.value_or(0) };
-            auto           it = m_catalog->topology_to_track.find(topo);
-            if(it != m_catalog->topology_to_track.end())
-            {
-                event.track = it->second;
-            }
-        }
-
-        events.push_back(std::move(event));
+        events.push_back(build_event(result, type));
     }
 
     return events;
@@ -342,36 +373,42 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
     bool has_time =
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
+    if(!has_time)
+    {
+        all_events.reserve(track->event_count);
+    }
+
+    timeline_event_builder build_event{ *m_catalog };
+
     auto query_event_type =
         [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
                                        stmts,
             reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            const auto append =
+                [&](const data_storage::schema_v3::timeline_event_result& row) {
+                    all_events.push_back(build_event(row, type));
+                };
+
             if(has_time)
             {
                 const auto window_end   = filter.time_window.end.value();
                 const auto window_start = filter.time_window.start.value();
-                results                 = stmts
-                              .track_and_time_filtered(topo.nid,
-                                                       topo.pid,
-                                                       topo.tid,
-                                                       window_end,
-                                                       window_start,
-                                                       db_id,
-                                                       window_end,
-                                                       window_start)
-                              .to_vector();
+                stmts
+                    .track_and_time_filtered(topo.nid,
+                                             topo.pid,
+                                             topo.tid,
+                                             window_end,
+                                             window_start,
+                                             db_id,
+                                             window_end,
+                                             window_start)
+                    .for_each(append);
             }
             else
             {
-                results =
-                    stmts.track_filtered(topo.nid, topo.pid, topo.tid, db_id).to_vector();
+                stmts.track_filtered(topo.nid, topo.pid, topo.tid, db_id)
+                    .for_each(append);
             }
-
-            auto events = build_timeline_events(results, type);
-            all_events.insert(all_events.end(),
-                              std::make_move_iterator(events.begin()),
-                              std::make_move_iterator(events.end()));
         };
 
     if(should_query(reader_types::event_type_t::region))
@@ -422,11 +459,12 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
     const auto window_end   = has_time ? filter.time_window.end.value() : 0;
     const auto window_start = has_time ? filter.time_window.start.value() : 0;
 
-    auto append_events = [&](const auto& results, reader_types::event_type_t type) {
-        auto events = build_timeline_events(results, type);
-        all_events.insert(all_events.end(),
-                          std::make_move_iterator(events.begin()),
-                          std::make_move_iterator(events.end()));
+    timeline_event_builder build_event{ *m_catalog };
+
+    auto append_events = [&](auto&& rows, reader_types::event_type_t type) {
+        rows.for_each([&](const data_storage::schema_v3::timeline_event_result& row) {
+            all_events.push_back(build_event(row, type));
+        });
     };
 
     auto query_agent_queue =
@@ -436,21 +474,16 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
             if(has_time)
             {
                 if(!stmts.agent_queue_time_filtered) return;
-                append_events(stmts
-                                  .agent_queue_time_filtered(nid,
-                                                             track->agent_id,
-                                                             track->queue_id,
-                                                             window_end,
-                                                             window_start)
-                                  .to_vector(),
-                              type);
+                append_events(
+                    stmts.agent_queue_time_filtered(
+                        nid, track->agent_id, track->queue_id, window_end, window_start),
+                    type);
             }
             else
             {
                 if(!stmts.agent_queue_filtered) return;
                 append_events(
-                    stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id)
-                        .to_vector(),
+                    stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id),
                     type);
             }
         };
@@ -462,20 +495,15 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
             if(has_time)
             {
                 if(!stmts.stream_time_filtered) return;
-                append_events(stmts
-                                  .stream_time_filtered(nid,
-                                                        track->db_pid,
-                                                        track->stream_id,
-                                                        window_end,
-                                                        window_start)
-                                  .to_vector(),
-                              type);
+                append_events(
+                    stmts.stream_time_filtered(
+                        nid, track->db_pid, track->stream_id, window_end, window_start),
+                    type);
             }
             else
             {
                 if(!stmts.stream_filtered) return;
-                append_events(stmts.stream_filtered(nid, track->db_pid, track->stream_id)
-                                  .to_vector(),
+                append_events(stmts.stream_filtered(nid, track->db_pid, track->stream_id),
                               type);
             }
         };
