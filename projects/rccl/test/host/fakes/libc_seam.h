@@ -26,6 +26,11 @@
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
 //
+// malloc/calloc/free are seamed so a unit's out-of-memory arm is reachable on
+// demand; their defaults call real libc, so installing the seam without driving
+// it changes nothing. free() is seamed too so a test can assert the failing
+// path released what it had already taken.
+//
 // fprintf is seamed but not swappable per test: it always forwards to the real vfprintf so stderr output still
 // happens, and only records the call count and the FILE* argument, never the formatted text.
 
@@ -54,6 +59,9 @@ size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
+void* micro_malloc(size_t);
+void* micro_calloc(size_t, size_t);
+void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 }  // extern "C"
 
@@ -71,4 +79,7 @@ int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)))
 #define fflush micro_fflush
 #define perror micro_perror
 #define exit micro_exit
+#define malloc micro_malloc
+#define calloc micro_calloc
+#define free micro_free
 #define fprintf micro_fprintf
