@@ -9,9 +9,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 struct address_multirange
 {
@@ -36,7 +34,7 @@ struct address_multirange
 
 private:
     address_range           m_coarse_range = {};
-    std::set<address_range> m_fine_ranges  = {};
+    std::set<address_range> m_fine_ranges;
 };
 
 template <typename Tp>
@@ -52,5 +50,4 @@ address_multirange::contains(Tp&& _v) const
     return std::any_of(m_fine_ranges.begin(), m_fine_ranges.end(),
                        [_v](auto&& itr) { return itr.contains(_v); });
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary
