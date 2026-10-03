@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -206,6 +207,7 @@ TEST_F(DiagP2pMicrotest, HandleName_MapsEveryHandleAndDefaultsToNone) {
 TEST_F(DiagP2pMicrotest, ReasonName_MapsEveryReasonAndDefaultsToNone) {
   const char* const kNames[] = {"none",          "indirect",   "noDescriptor", "import", "writeLaunch",
                                 "writeMismatch", "readLaunch", "readMismatch", "topo",   "localCuda"};
+  static_assert(std::size(kNames) == ncclDiagP2pReasonLocalCuda + 1, "kNames must cover every reason");
   for (int reason = 0; reason <= ncclDiagP2pReasonLocalCuda; reason++) {
     EXPECT_STREQ(ncclDiagP2pReasonName(reason), kNames[reason]) << "reason " << reason;
   }
@@ -214,6 +216,7 @@ TEST_F(DiagP2pMicrotest, ReasonName_MapsEveryReasonAndDefaultsToNone) {
 
 TEST_F(DiagP2pMicrotest, PathName_IndexesPathTableAndRejectsOutOfRange) {
   const char* const kNames[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+  static_assert(std::size(kNames) == PATH_DIS + 1, "kNames must cover every PATH_* type");
   for (int path = PATH_LOC; path <= PATH_DIS; path++) {
     EXPECT_STREQ(ncclDiagP2pPathName(path), kNames[path]) << "path " << path;
   }
@@ -556,6 +559,7 @@ TEST_F(DiagP2pMicrotest, BuildRankSet_CrossCliqueRejectsDomainSizeMismatch) {
     comm_->nvlDomainSize = domainSize;
     EXPECT_EQ(ncclDiagP2pBuildRankSet(comm_.get(), &ranks, &rank, &nRanks), ncclInternalError) << domainSize;
     EXPECT_EQ(nRanks, domainSize);
+    ASSERT_NE(ranks, nullptr) << domainSize;
     EXPECT_EQ(ranks[domainSize], 0);
     std::free(ranks);
     ranks = nullptr;

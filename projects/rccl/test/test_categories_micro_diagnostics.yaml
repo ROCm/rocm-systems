@@ -1,8 +1,6 @@
 # CTest categories for the host-only src/diagnostics/p2p.cc microtests.
 #
-# gtest's `*` does not match across the literal `.`, so a suite with no pattern
-# here builds and passes locally but never runs under CTest. Keep this in sync
-# with the TEST_F suite names in diag-p2p-test.cc.
+# gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with diag-p2p-test.cc's suites.
 test_categories:
   quick: &micro_diagnostics_quick
     description: "Smoke - host-only src/diagnostics/p2p.cc micro-tests, sub-second."

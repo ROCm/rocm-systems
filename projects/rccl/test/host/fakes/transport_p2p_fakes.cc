@@ -8,14 +8,11 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <vector>
 
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclP2pAllocateShareableBuffer, ncclP2pAllocateShareableBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_ncclP2pImportShareableBuffer, ncclP2pImportShareableBuffer);
-
-static std::vector<void*> g_shareableBuffers;
 
 static ncclResult_t DefaultNcclP2pAllocateShareableBuffer(size_t size, int, ncclIpcDesc* ipcDesc, void** ptr, int,
                                                           struct ncclMemManager*, ncclMemType_t) {
@@ -26,7 +23,6 @@ static ncclResult_t DefaultNcclP2pAllocateShareableBuffer(size_t size, int, nccl
   if (*ptr == nullptr) {
     return ncclSystemError;
   }
-  g_shareableBuffers.push_back(*ptr);
   std::memset(ipcDesc, 0, sizeof(*ipcDesc));
   return ncclSuccess;
 }
@@ -55,10 +51,6 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_
 }
 
 void ResetTransportP2pFakes() {
-  for (void* buffer : g_shareableBuffers) {
-    std::free(buffer);
-  }
-  g_shareableBuffers.clear();
   g_ncclP2pAllocateShareableBuffer = DefaultNcclP2pAllocateShareableBuffer;
   g_ncclP2pImportShareableBuffer = DefaultNcclP2pImportShareableBuffer;
 }
