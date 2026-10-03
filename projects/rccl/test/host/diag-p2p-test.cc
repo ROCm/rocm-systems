@@ -25,6 +25,7 @@
 #include "fakes/diagnostics_p2p_device_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/signature-drift.h"
 #include "fakes/transport_p2p_fakes.h"
 
 #include "alloc.h"
@@ -81,8 +82,14 @@ static ncclResult_t DefaultDiagCudaFree(void* ptr, struct ncclMemManager* manage
 }
 static std::function<ncclResult_t(void*, struct ncclMemManager*)> g_diagCudaFree = DefaultDiagCudaFree;
 
-static ncclResult_t DefaultDiagCuMemFreeAddr(void*) { return ncclSuccess; }
-static std::function<ncclResult_t(void*)> g_diagCuMemFreeAddr = DefaultDiagCuMemFreeAddr;
+static ncclResult_t DefaultDiagCuMemFreeAddr(void*, struct ncclMemManager*, int) {
+  return ncclSuccess;
+}
+static std::function<ncclResult_t(void*, struct ncclMemManager*, int)> g_diagCuMemFreeAddr = DefaultDiagCuMemFreeAddr;
+ASSERT_HOOK_MATCHES_PROD(g_diagCuMemFreeAddr, ncclCuMemFreeAddr);
+static ncclResult_t DiagCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
+  return g_diagCuMemFreeAddr(ptr, manager, numSegments);
+}
 
 #undef ncclCalloc
 #define ncclCalloc(...) DiagCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
@@ -90,7 +97,7 @@ static std::function<ncclResult_t(void*)> g_diagCuMemFreeAddr = DefaultDiagCuMem
 #define ncclCudaCalloc(ptr, nelem, manager, memType) \
   g_diagCudaCalloc(reinterpret_cast<void**>(ptr), (nelem) * sizeof(**(ptr)), manager, memType)
 #define ncclCudaFree(ptr, manager) g_diagCudaFree(ptr, manager)
-#define ncclCuMemFreeAddr(ptr, ...) g_diagCuMemFreeAddr(ptr)
+#define ncclCuMemFreeAddr(...) DiagCuMemFreeAddr(__VA_ARGS__)
 
 #include DIAG_P2P_CC_PATH
 
@@ -693,6 +700,7 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
   paths[kSelf] = {PATH_NVL, PATH_NET, PATH_PIX, PATH_SYS, PATH_PHB};
   BuildTopo({1, 4, 5, 2, 0}, paths);
   peers_[1].pidHash = peers_[4].pidHash;
+  peers_[4].cudaDev = 3;
   std::vector<ncclDiagP2pEdgeInfo> edges(kN * kN);
   std::memset(edges.data(), 0x7f, edges.size() * sizeof(edges[0]));
   const std::vector<ncclDiagP2pEdgeInfo> poison = edges;
@@ -733,7 +741,7 @@ TEST_F(DiagP2pMicrotest, DiscoverLocalEdges_ClassifiesEachPeerInOwnRowOnly) {
     }
   }
   EXPECT_TRUE(LogHas(log,
-                     " Diagnostics P2P skip srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=5 dstCudaDev=5 dstNvmlDev=15 "
+                     " Diagnostics P2P skip srcRank=4 srcCudaDev=3 srcNvmlDev=14 dstRank=5 dstCudaDev=5 dstNvmlDev=15 "
                      "path=PIX handle=LEGACY_CUDA_IPC topoRead=0 reason=indirect\n"))
       << log;
   EXPECT_TRUE(LogHas(log, " Diagnostics P2P topo check failed srcRank=4 dstRank=2 result=2\n")) << log;
@@ -744,6 +752,9 @@ struct DiagP2pInboundScene {
   int inPeers[kGroupN] = {99, 99, 99, 99};
   int inPeerCount = 99;
   bool needsLocalHandle = true;
+  void Run(ncclComm* comm, const int* ranks) {
+    ncclDiagP2pBuildInboundPeers(comm, ranks, kGroupSelf, kGroupN, edges, inPeers, &inPeerCount, &needsLocalHandle);
+  }
 };
 
 TEST_F(DiagP2pMicrotest, BuildInboundPeers_ListsSourcesInOwnColumn) {
@@ -752,8 +763,7 @@ TEST_F(DiagP2pMicrotest, BuildInboundPeers_ListsSourcesInOwnColumn) {
   s.edges[InEdge(0)] = {1, 0, PATH_NVL, 1, ncclDiagP2pHandleDirect};
   s.edges[InEdge(3)] = {1, 0, PATH_NVL, 0, ncclDiagP2pHandleLegacyIpc};
   s.edges[OwnEdge(0)] = {1, 0, PATH_NVL, 1, ncclDiagP2pHandleDirect};
-  ncclDiagP2pBuildInboundPeers(comm_.get(), localRanks_.data(), kGroupSelf, kGroupN, s.edges, s.inPeers,
-                               &s.inPeerCount, &s.needsLocalHandle);
+  s.Run(comm_.get(), localRanks_.data());
   EXPECT_EQ(s.inPeerCount, 2);
   EXPECT_EQ(s.inPeers[0], 0);
   EXPECT_EQ(s.inPeers[1], 3);
@@ -762,19 +772,19 @@ TEST_F(DiagP2pMicrotest, BuildInboundPeers_ListsSourcesInOwnColumn) {
 
 TEST_F(DiagP2pMicrotest, BuildInboundPeers_NeedsHandleOnlyForCuMemSameProcessOtherDevice) {
   BuildGroupComm();
+  peers_[kGroupRank].cudaDev = 3;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   const auto run = [&](int sameProcess, bool expected) {
     DiagP2pInboundScene s;
     s.edges[InEdge(3)] = {1, 0, PATH_NVL, sameProcess, ncclDiagP2pHandleDirect};
     s.needsLocalHandle = !expected;
-    ncclDiagP2pBuildInboundPeers(comm_.get(), localRanks_.data(), kGroupSelf, kGroupN, s.edges, s.inPeers,
-                                 &s.inPeerCount, &s.needsLocalHandle);
+    s.Run(comm_.get(), localRanks_.data());
     EXPECT_EQ(s.inPeerCount, 1);
     return s.needsLocalHandle;
   };
   EXPECT_TRUE(run(1, true));
   EXPECT_FALSE(run(0, false));
-  peers_[2].cudaDev = 4;
+  peers_[2].cudaDev = 3;
   EXPECT_FALSE(run(1, false));
 }
 
@@ -800,7 +810,8 @@ struct DiagP2pMapScene {
 
 TEST_F(DiagP2pMicrotest, MapSameProcess_SameDeviceUsesDirectPointerWithoutPeerAccess) {
   BuildComm(6, 4, {1, 4});
-  peers_[1].cudaDev = 4;
+  comm_->cudaDev = 3;
+  peers_[1].cudaDev = 3;
   DiagP2pMapScene s;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipSuccess; });
@@ -828,6 +839,7 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_CuMemOtherDeviceIsInternalErrorOnRocm) {
 
 TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnablesPeerAccessToDestinationDevice) {
   BuildComm(6, 4, {1, 4});
+  peers_[1].cudaDev = 3;
   DiagP2pMapScene s;
   int enabledDev = -1;
   unsigned enabledFlags = 99;
@@ -837,12 +849,12 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnablesPeerAccessToDestinationDevi
     return hipSuccess;
   });
   EXPECT_EQ(ncclDiagP2pMapSameProcess(comm_.get(), 1, &s.desc, &s.mapping), ncclSuccess);
-  EXPECT_EQ(enabledDev, 1);
+  EXPECT_EQ(enabledDev, 3);
   EXPECT_EQ(enabledFlags, 0u);
   EXPECT_EQ(s.mapping.ptr, static_cast<void*>(s.peerSlots));
   EXPECT_EQ(s.mapping.active, 1);
   EXPECT_EQ(s.mapping.peerAccessEnabled, 1);
-  EXPECT_EQ(s.mapping.peerAccessDev, 1);
+  EXPECT_EQ(s.mapping.peerAccessDev, 3);
 }
 
 TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyAlreadyEnabledMapsWithoutOwningPeerAccess) {
@@ -860,6 +872,7 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyAlreadyEnabledMapsWithoutOwningPee
 
 TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnableFailureLeavesMappingInactive) {
   BuildComm(6, 4, {1, 4});
+  peers_[1].cudaDev = 3;
   DiagP2pMapScene s;
   ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipErrorInvalidDevice; });
   ScopedHook lastError(g_hipGetLastError, [] { return hipSuccess; });
@@ -871,7 +884,7 @@ TEST_F(DiagP2pMicrotest, MapSameProcess_LegacyEnableFailureLeavesMappingInactive
   EXPECT_EQ(s.mapping.ptr, nullptr);
   EXPECT_EQ(s.mapping.active, 0);
   EXPECT_EQ(s.mapping.peerAccessEnabled, 0);
-  EXPECT_TRUE(LogHas(log, " Diagnostics: failed to enable peer access to dev 1: [hip_fake] stub error\n")) << log;
+  EXPECT_TRUE(LogHas(log, " Diagnostics: failed to enable peer access to dev 3: [hip_fake] stub error\n")) << log;
 }
 
 TEST_F(DiagP2pMicrotest, FreeMapping_NullMappingIsNoOp) {
@@ -884,7 +897,9 @@ TEST_F(DiagP2pMicrotest, FreeMapping_ReleasesByMappingKindThenClears) {
   int buffer = 0;
   std::vector<void*> cuMemFreed;
   std::vector<void*> ipcClosed;
-  ScopedHook cuMemFree(g_diagCuMemFreeAddr, [&](void* p) {
+  ScopedHook cuMemFree(g_diagCuMemFreeAddr, [&](void* p, ncclMemManager* manager, int numSegments) {
+    EXPECT_EQ(manager, nullptr);
+    EXPECT_EQ(numSegments, 1);
     cuMemFreed.push_back(p);
     return ncclSuccess;
   });
@@ -961,7 +976,7 @@ TEST_F(DiagP2pMicrotest, FreeMapping_FirstFailureWinsAndCleanupContinues) {
   int buffer = 0;
   ScopedHook lastError(g_hipGetLastError, [] { return hipSuccess; });
   ScopedHook disable(g_hipDeviceDisablePeerAccess, [](int) { return hipErrorInvalidDevice; });
-  ScopedHook cuMemFree(g_diagCuMemFreeAddr, [](void*) { return ncclSystemError; });
+  ScopedHook cuMemFree(g_diagCuMemFreeAddr, [](void*, ncclMemManager*, int) { return ncclSystemError; });
   ncclDiagP2pMapping cuMem = {&buffer, 1, 1, 0, 0, 0, 1, 2};
   EXPECT_EQ(ncclDiagP2pFreeMapping(comm_.get(), &cuMem), ncclSystemError);
   EXPECT_EQ(disable.calls, 1);
@@ -1207,6 +1222,8 @@ TEST_F(DiagP2pMicrotest, PrepareRemoteOps_EachFailureReturnsFalseWithItsWarning)
     const std::string log = CaptureLog([&] { ok = s.Run(comm_.get(), localRanks_.data()); });
     EXPECT_FALSE(ok);
     EXPECT_EQ(copy.calls, 0);
+    EXPECT_NE(s.opsHost, nullptr);
+    EXPECT_EQ(s.opCount, 0);
     EXPECT_TRUE(LogHas(log, " Diagnostics P2P allocate remote op descriptors on device returned 2\n")) << log;
   }
   {
@@ -1216,6 +1233,8 @@ TEST_F(DiagP2pMicrotest, PrepareRemoteOps_EachFailureReturnsFalseWithItsWarning)
     bool ok = true;
     const std::string log = CaptureLog([&] { ok = s.Run(comm_.get(), localRanks_.data()); });
     EXPECT_FALSE(ok);
+    EXPECT_EQ(s.opCount, 2);
+    EXPECT_EQ(failCopy.calls, 1);
     EXPECT_TRUE(LogHas(log, " Diagnostics P2P copy remote op descriptors CUDA failure: [hip_fake] stub error\n"))
         << log;
   }
