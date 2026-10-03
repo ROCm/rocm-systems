@@ -91,7 +91,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
-  - `ras/peers.cc` (`PEERS_CC_PATH`, from `peers-test.cc`); suite
+  - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
     peer formatting.
@@ -739,3 +739,40 @@ cmake --build build -j"$(nproc)"
 
 Disable coverage instrumentation for the standalone host-only test binaries
 with `-DHOST_TEST_COVERAGE=OFF`.
+
+
+### Peers review follow-up
+
+The peers suite is `ras-peers-test.cc`, with the `RAS_PEERS_CC_PATH` source
+definition. `fakes/ras_net_fakes.{h,cc}` owns connection lookup/creation,
+disconnect, and fallback hooks. `fakes/ras_client_support_fakes.{h,cc}` owns
+event notification and synthetic host/device rendering. Both the peers and
+RAS fixtures reset/configure the shared hooks, while the RAS unit's real
+message implementation stays separate from the peers message double in
+`fakes/ras_message_fakes.{h,cc}`. Explicit `RasMessageTest*` wrapper names
+avoid colliding with the existing `RasTestMsg*` adapter API in other PRs.
+
+`fakes/ras_message_test_support.h` provides move-only message ownership;
+callers supply the allocation/free pair matching their unit. Received peers
+updates and RAS send-queue fixtures use it so fatal assertions cannot leak
+messages. Rank sorting, merging, insertion, duplicate/empty filtering, and
+device-bit diffs are exercised through `rasLocalHandleAddRanks`, which owns
+its incoming rank array. Tests assert the resulting registry/hash and sent
+diffs rather than a temporary conversion buffer. The private debug formatter
+has a separate test; synthetic `<host>`/`<devs>` output prevents these tests
+from accidentally asserting a copy of client-support formatting logic.
+
+The dead-only and live-only update cases independently pin checksum state
+when one array is omitted. Fallback tests find a healthy remote process after
+an unusable process on the same node, and previous-link failure uses three
+peers so the next and previous destinations differ.
+
+Review follow-up validation: 56 peers tests and 71 RAS tests pass together
+for 20 shuffled iterations. The peers translation unit and the new shared
+fakes are checked with ASan and UBSan; the RAS translation unit uses ASan
+only because its existing unknown-message fixture contains an out-of-range
+enum value. All 56 peers tests also pass with leak detection enabled.
+Three fresh targeted mutations are killed: removing either sent-hash guard
+or making the remote fallback-index update unconditional. The mutation
+baseline passes. These are focused local runs, not a fresh full-binary CI
+run or coverage measurement.

@@ -23,20 +23,13 @@
 
 // Rename peers.cc symbols that ras-test.cc already supplies in the shared microtest binary.
 #define ncclSocketToString PeersTestNcclSocketToString
-#define ncclSocketToHost PeersTestNcclSocketToHost
-#define rasGpuDevsToString PeersTestRasGpuDevsToString
-#define rasClientsNotifyEvent PeersTestRasClientsNotifyEvent
 #define rasNetListeningSocket PeersTestRasNetListeningSocket
 #define rasLine PeersTestRasLine
 #define rasNextLink PeersTestRasNextLink
 #define rasPrevLink PeersTestRasPrevLink
-#define rasConnCreate PeersTestRasConnCreate
-#define rasConnFind PeersTestRasConnFind
-#define rasConnDisconnect PeersTestRasConnDisconnect
-#define rasConnEnqueueMsg PeersTestRasConnEnqueueMsg
-#define rasLinkAddFallback PeersTestRasLinkAddFallback
-#define rasMsgAlloc PeersTestRasMsgAlloc
-#define rasMsgFree PeersTestRasMsgFree
+#define rasConnEnqueueMsg RasMessageTestEnqueue
+#define rasMsgAlloc RasMessageTestAlloc
+#define rasMsgFree RasMessageTestFree
 #define rasPeers PeersTestRasPeers
 #define nRasPeers PeersTestNRasPeers
 #define rasPeersHash PeersTestRasPeersHash
@@ -47,16 +40,18 @@
 #define rasPeerFind PeersTestRasPeerFind
 #define rasConnSendPeersUpdate PeersTestRasConnSendPeersUpdate
 #define rasMsgHandlePeersUpdate PeersTestRasMsgHandlePeersUpdate
-#define rasLinkCalculatePeer PeersTestRasLinkCalculatePeer
 #define rasPeerDeclareDead PeersTestRasPeerDeclareDead
 #define rasPeerIsDead PeersTestRasPeerIsDead
-#define rasPeerInfoToString PeersTestRasPeerInfoToString
-#define rasPeerToString PeersTestRasPeerToString
 #define ncclSocketsCompare PeersTestNcclSocketsCompare
-#define ncclSocketsSameNode PeersTestNcclSocketsSameNode
 #define rasPeersTerminate PeersTestRasPeersTerminate
 
 #include "ras/ras_internal.h"
+#include "fakes/ras_net_fakes.h"
+#include "fakes/ras_client_support_fakes.h"
+#include "fakes/ras_message_fakes.h"
+#include "fakes/ras_message_test_support.h"
+
+void ConfigurePeerFakes();
 
 const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, int numericHostForm = 1);
 
@@ -89,7 +84,7 @@ ncclResult_t PeersTestRealloc(T** ptr, size_t oldCount, size_t newCount) {
 
 uint64_t PeersTestClockNano();
 
-#include PEERS_CC_PATH
+#include RAS_PEERS_CC_PATH
 
 #undef clockNano
 #undef ncclCalloc
@@ -166,6 +161,17 @@ rasRankInit MakeRank(const ncclSocketAddress& addr, int pid, int cudaDev, int nv
   return rank;
 }
 
+ncclResult_t AddRanks(std::initializer_list<rasRankInit> input) {
+  auto* ranks = static_cast<rasRankInit*>(calloc(input.size(), sizeof(rasRankInit)));
+  if (ranks == nullptr) return ncclSystemError;
+  std::copy(input.begin(), input.end(), ranks);
+  return rasLocalHandleAddRanks(ranks, static_cast<int>(input.size()));
+}
+
+void ExpectRegistryHash() {
+  EXPECT_EQ(getHash(reinterpret_cast<const char*>(rasPeers), nRasPeers * sizeof(*rasPeers)), rasPeersHash);
+}
+
 void SetPeers(std::initializer_list<rasPeerInfo> peers, int selfIdx) {
   free(rasPeers);
   nRasPeers = static_cast<int>(peers.size());
@@ -225,7 +231,7 @@ void FreeLink(rasLink* link) {
   link->lastUpdatePeersTime = 0;
 }
 
-rasMsg* MakePeersUpdate(const std::vector<rasPeerInfo>& peers, const std::vector<ncclSocketAddress>& deadPeers,
+ras_test::OwnedMsg MakePeersUpdate(const std::vector<rasPeerInfo>& peers, const std::vector<ncclSocketAddress>& deadPeers,
                         uint64_t peersHash, uint64_t deadPeersHash) {
   int len = static_cast<int>(rasMsgLength(RAS_MSG_PEERSUPDATE) + peers.size() * sizeof(rasPeerInfo));
   int deadOffset = 0;
@@ -234,8 +240,9 @@ rasMsg* MakePeersUpdate(const std::vector<rasPeerInfo>& peers, const std::vector
     deadOffset = len;
     len += static_cast<int>(deadPeers.size() * sizeof(ncclSocketAddress));
   }
-  rasMsg* msg = nullptr;
-  EXPECT_EQ(ncclSuccess, rasMsgAlloc(&msg, len));
+  ras_test::OwnedMsg owned(len, rasMsgAlloc, rasMsgFree);
+  auto* msg = owned.get();
+  if (msg == nullptr) return owned;
   msg->type = RAS_MSG_PEERSUPDATE;
   msg->peersUpdate.peersHash = peersHash;
   msg->peersUpdate.deadPeersHash = deadPeersHash;
@@ -245,7 +252,7 @@ rasMsg* MakePeersUpdate(const std::vector<rasPeerInfo>& peers, const std::vector
   if (!deadPeers.empty()) {
     memcpy(reinterpret_cast<char*>(msg) + deadOffset, deadPeers.data(), deadPeers.size() * sizeof(ncclSocketAddress));
   }
-  return msg;
+  return owned;
 }
 
 const ncclSocketAddress* DeadPeersInMsg(const rasMsg* msg) {
@@ -280,6 +287,7 @@ void ResetState() {
   g_allocationCalls = 0;
   g_failAllocationCall = 0;
   g_clockNano = 123456;
+  ConfigurePeerFakes();
 }
 
 class RasPeersMicrotest : public ::testing::Test {
@@ -291,16 +299,6 @@ class RasPeersMicrotest : public ::testing::Test {
 }  // namespace
 
 uint64_t PeersTestClockNano() { return static_cast<uint64_t>(g_clockNano); }
-
-const char* ncclSocketToHost(const ncclSocketAddress* addr, char* buf, size_t size) {
-  if (addr->sa.sa_family <= 0) {
-    if (size > 0) buf[0] = '\0';
-    return buf;
-  }
-  const void* source = addr->sa.sa_family == AF_INET ? static_cast<const void*>(&addr->sin.sin_addr)
-                                                     : static_cast<const void*>(&addr->sin6.sin6_addr);
-  return inet_ntop(addr->sa.sa_family, source, buf, size);
-}
 
 const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, const int) {
   if (buf == nullptr || addr == nullptr || (addr->sa.sa_family != AF_INET && addr->sa.sa_family != AF_INET6)) {
@@ -318,30 +316,7 @@ const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, const i
   return buf;
 }
 
-const char* rasGpuDevsToString(uint64_t cudaDevs, uint64_t nvmlDevs, char* buf, size_t size) {
-  bool first = true;
-  buf[0] = '\0';
-  for (int index = 0; index < static_cast<int>(sizeof(cudaDevs) * 8); index++) {
-    if (cudaDevs & (1ULL << index)) {
-      snprintf(buf + strlen(buf), size - strlen(buf), "%s%d", first ? "" : ",", index);
-      first = false;
-    }
-  }
-  if (cudaDevs != nvmlDevs) {
-    snprintf(buf + strlen(buf), size - strlen(buf), " (NVML ");
-    first = true;
-    for (int index = 0; index < static_cast<int>(sizeof(nvmlDevs) * 8); index++) {
-      if (nvmlDevs & (1ULL << index)) {
-        snprintf(buf + strlen(buf), size - strlen(buf), "%s%d", first ? "" : ",", index);
-        first = false;
-      }
-    }
-    snprintf(buf + strlen(buf), size - strlen(buf), ")");
-  }
-  return buf;
-}
-
-void rasClientsNotifyEvent(rasEventGroup, const rasEventNotification* event) {
+static void PeersFakeRasClientsNotifyEvent(rasEventGroup, const rasEventNotification* event) {
   EventRecord record{};
   record.type = event->eventType;
   record.hasPeer = event->peerInfo != nullptr;
@@ -351,41 +326,27 @@ void rasClientsNotifyEvent(rasEventGroup, const rasEventNotification* event) {
   g_events.push_back(record);
 }
 
-ncclResult_t rasMsgAlloc(rasMsg** msg, size_t msgLen) {
-  if (g_msgAllocResult != ncclSuccess) return g_msgAllocResult;
-  const size_t total = offsetof(rasMsgMeta, msg) + msgLen;
-  auto* meta = static_cast<rasMsgMeta*>(calloc(1, total));
-  if (meta == nullptr) return ncclSystemError;
-  *msg = &meta->msg;
-  return ncclSuccess;
-}
-
-void rasMsgFree(rasMsg* msg) {
-  if (msg == nullptr) return;
-  free(reinterpret_cast<char*>(msg) - offsetof(rasMsgMeta, msg));
-}
-
-void rasConnEnqueueMsg(rasConnection* conn, rasMsg* msg, size_t msgLen, bool front) {
+static void PeersFakeRasConnEnqueueMsg(rasConnection* conn, rasMsg* msg, size_t msgLen, bool front) {
   g_enqueuedMsgs.push_back({conn, msg, msgLen, front});
 }
 
-rasConnection* rasConnFind(const ncclSocketAddress* addr) {
+static rasConnection* PeersFakeRasConnFind(const ncclSocketAddress* addr) {
   for (rasConnection* conn : g_connections) {
     if (ncclSocketsCompare(&conn->addr, addr) == 0) return conn;
   }
   return nullptr;
 }
 
-ncclResult_t rasConnCreate(const ncclSocketAddress* addr, rasConnection** conn) {
+static ncclResult_t PeersFakeRasConnCreate(const ncclSocketAddress* addr, rasConnection** conn) {
   g_createdAddrs.push_back(*addr);
   if (g_connCreateResult != ncclSuccess) return g_connCreateResult;
   *conn = AddConnection(*addr, RAS_SOCK_CONNECTING);
   return ncclSuccess;
 }
 
-void rasConnDisconnect(const ncclSocketAddress* addr) { g_disconnectedAddrs.push_back(*addr); }
+static void PeersFakeRasConnDisconnect(const ncclSocketAddress* addr) { g_disconnectedAddrs.push_back(*addr); }
 
-ncclResult_t rasLinkAddFallback(rasLink*, const rasConnection*) {
+static ncclResult_t PeersFakeRasLinkAddFallback(rasLink*, const rasConnection*) {
   ++g_addFallbackCalls;
   return g_addFallbackResult;
 }
@@ -439,101 +400,80 @@ TEST_F(RasPeersMicrotest, SameNodeSupportsIpv6Addresses) {
   EXPECT_FALSE(ncclSocketsSameNode(&a, &other));
 }
 
-TEST_F(RasPeersMicrotest, RankConversionSortsMergesDevicesAndSkipsEmptyEntries) {
-  const ncclSocketAddress a = MakeIpv4("10.0.0.1", 1);
-  const ncclSocketAddress b = MakeIpv4("10.0.0.2", 1);
-  rasRankInit ranks[] = {MakeRank(b, 22, 3, 4), rasRankInit{}, MakeRank(a, 11, 2, 5), MakeRank(a, 11, 0, 1)};
-  rasPeerInfo* rankPeers = nullptr;
-  int nRankPeers = -1;
-  int newCount = -1;
-
-  ASSERT_EQ(ncclSuccess, rasRanksConvertToPeers(ranks, 4, &rankPeers, &nRankPeers, &newCount));
-  ASSERT_EQ(2, nRankPeers);
-  EXPECT_EQ(2, newCount);
-  EXPECT_EQ(0, ncclSocketsCompare(&rankPeers[0].addr, &a));
-  EXPECT_EQ((1ULL << 0) | (1ULL << 2), rankPeers[0].cudaDevs);
-  EXPECT_EQ((1ULL << 1) | (1ULL << 5), rankPeers[0].nvmlDevs);
-  EXPECT_EQ(11, rankPeers[0].pid);
-  EXPECT_EQ(111u, rankPeers[0].hostHash);
-  EXPECT_EQ(211u, rankPeers[0].pidHash);
-  EXPECT_EQ(0, ncclSocketsCompare(&rankPeers[1].addr, &b));
-  EXPECT_EQ(22, rankPeers[1].pid);
-  EXPECT_EQ(122u, rankPeers[1].hostHash);
-  EXPECT_EQ(222u, rankPeers[1].pidHash);
-  free(rankPeers);
-}
-
-TEST_F(RasPeersMicrotest, RankConversionPropagatesAllocationFailure) {
-  rasRankInit rank = MakeRank(MakeIpv4("10.0.0.1", 1), 11, 0, 0);
-  rasPeerInfo* rankPeers = reinterpret_cast<rasPeerInfo*>(0x1);
-  int nRankPeers = -1;
-  int newCount = -1;
-  g_failAllocationCall = 1;
-
-  EXPECT_EQ(ncclSystemError, rasRanksConvertToPeers(&rank, 1, &rankPeers, &nRankPeers, &newCount));
-  EXPECT_EQ(nullptr, rankPeers);
-  EXPECT_EQ(1, g_allocationCalls);
-}
-
-TEST_F(RasPeersMicrotest, RankConversionDropsPidMismatchAgainstExistingPeer) {
-  const ncclSocketAddress addr = MakeIpv4("10.0.0.1", 1);
-  SetPeers({MakePeer(addr, 10)}, 0);
-  rasRankInit rank = MakeRank(addr, 11, 1, 1);
-  rasPeerInfo* rankPeers = nullptr;
-  int nRankPeers = -1;
-  int newCount = -1;
-  ASSERT_EQ(ncclSuccess, rasRanksConvertToPeers(&rank, 1, &rankPeers, &nRankPeers, &newCount));
-  EXPECT_EQ(0, nRankPeers);
-  EXPECT_EQ(1, newCount);
-  free(rankPeers);
-}
-
-TEST_F(RasPeersMicrotest, RankConversionFindsMatchingPeerAfterLowerExistingPeer) {
-  const ncclSocketAddress lower = MakeIpv4("10.0.0.1", 1);
-  const ncclSocketAddress matching = MakeIpv4("10.0.0.2", 1);
-  SetPeers({MakePeer(lower, 10), MakePeer(matching, 20, 1, 1)}, 0);
-  rasRankInit rank = MakeRank(matching, 20, 2, 3);
-  rasPeerInfo* rankPeers = nullptr;
-  int nRankPeers = -1;
-  int newCount = -1;
-
-  ASSERT_EQ(ncclSuccess, rasRanksConvertToPeers(&rank, 1, &rankPeers, &nRankPeers, &newCount));
-  ASSERT_EQ(1, nRankPeers);
-  EXPECT_EQ(2, newCount);
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(rankPeers, &nRankPeers, newCount));
+TEST_F(RasPeersMicrotest, LocalAddRanks_SortsMergesAndSkipsEmptyOrDuplicateRanks) {
+  const auto first = MakeIpv4("10.0.0.1", 1);
+  const auto second = MakeIpv4("10.0.0.2", 1);
+  rasNetListeningSocket.addr = first;
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(second, 22, 3, 4), {}, MakeRank(first, 11, 2, 5),
+                                  MakeRank(first, 11, 0, 1), {}, MakeRank(first, 11, 0, 1)}));
   ASSERT_EQ(2, nRasPeers);
-  EXPECT_EQ((1ULL << 0) | (1ULL << 2), rasPeers[1].cudaDevs);
-  EXPECT_EQ((1ULL << 0) | (1ULL << 3), rasPeers[1].nvmlDevs);
-  free(rankPeers);
+  EXPECT_EQ(0, myPeerIdx);
+  EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[0].addr, &first));
+  EXPECT_EQ(5u, rasPeers[0].cudaDevs);
+  EXPECT_EQ(34u, rasPeers[0].nvmlDevs);
+  EXPECT_EQ(11, rasPeers[0].pid);
+  EXPECT_EQ(111u, rasPeers[0].hostHash);
+  EXPECT_EQ(211u, rasPeers[0].pidHash);
+  EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[1].addr, &second));
+  EXPECT_EQ(22, rasPeers[1].pid);
+  EXPECT_EQ(122u, rasPeers[1].hostHash);
+  EXPECT_EQ(222u, rasPeers[1].pidHash);
+  ExpectRegistryHash();
 }
 
-TEST_F(RasPeersMicrotest, RankConversionCountsIncomingPeerBeforeExistingRegistry) {
-  const ncclSocketAddress incoming = MakeIpv4("10.0.0.1", 1);
-  const ncclSocketAddress existing = MakeIpv4("10.0.0.2", 1);
+TEST_F(RasPeersMicrotest, LocalAddRanks_ConversionAllocationFailureLeavesRegistryEmpty) {
+  rasNetListeningSocket.addr = MakeIpv4("10.0.0.1", 1);
+  g_failAllocationCall = 1;
+  EXPECT_EQ(ncclSystemError, AddRanks({MakeRank(rasNetListeningSocket.addr, 11, 0, 0)}));
+  EXPECT_EQ(nullptr, rasPeers);
+  EXPECT_EQ(0, nRasPeers);
+  EXPECT_EQ(1, g_allocationCalls);
+  EXPECT_TRUE(g_enqueuedMsgs.empty());
+}
+
+TEST_F(RasPeersMicrotest, LocalAddRanks_PidMismatchPreservesExistingPeer) {
+  const auto address = MakeIpv4("10.0.0.1", 1);
+  SetPeers({MakePeer(address, 10)}, 0);
+  const auto oldHash = rasPeersHash;
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(address, 11, 1, 1)}));
+  ASSERT_EQ(1, nRasPeers);
+  EXPECT_EQ(10, rasPeers[0].pid);
+  EXPECT_EQ(1u, rasPeers[0].cudaDevs);
+  EXPECT_EQ(oldHash, rasPeersHash);
+  EXPECT_TRUE(g_enqueuedMsgs.empty());
+}
+
+TEST_F(RasPeersMicrotest, LocalAddRanks_MergesMatchingPeerAfterLowerPeer) {
+  const auto lower = MakeIpv4("10.0.0.1", 1);
+  const auto matching = MakeIpv4("10.0.0.2", 1);
+  SetPeers({MakePeer(lower, 10), MakePeer(matching, 20, 1, 1)}, 0);
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(matching, 20, 2, 3)}));
+  ASSERT_EQ(2, nRasPeers);
+  EXPECT_EQ(5u, rasPeers[1].cudaDevs);
+  EXPECT_EQ(9u, rasPeers[1].nvmlDevs);
+  ExpectRegistryHash();
+}
+
+TEST_F(RasPeersMicrotest, LocalAddRanks_InsertsBeforeExistingRegistry) {
+  const auto incoming = MakeIpv4("10.0.0.1", 1);
+  const auto existing = MakeIpv4("10.0.0.2", 1);
   SetPeers({MakePeer(existing, 20)}, 0);
-  rasRankInit rank = MakeRank(incoming, 10, 0, 0);
-  rasPeerInfo* rankPeers = nullptr;
-  int nRankPeers = -1;
-  int newCount = -1;
-
-  ASSERT_EQ(ncclSuccess, rasRanksConvertToPeers(&rank, 1, &rankPeers, &nRankPeers, &newCount));
-  ASSERT_EQ(1, nRankPeers);
-  EXPECT_EQ(2, newCount);
-  EXPECT_EQ(0, ncclSocketsCompare(&rankPeers[0].addr, &incoming));
-  free(rankPeers);
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(incoming, 10, 0, 0)}));
+  ASSERT_EQ(2, nRasPeers);
+  EXPECT_EQ(1, myPeerIdx);
+  EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[0].addr, &incoming));
+  EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[1].addr, &existing));
+  ExpectRegistryHash();
 }
 
-TEST_F(RasPeersMicrotest, PeersUpdateBuildsInitialSortedRegistryAndFindsSelf) {
+TEST_F(RasPeersMicrotest, LocalAddRanks_InitialRegistryFindsSelfAndNotifies) {
   const ncclSocketAddress self = MakeIpv4("10.0.0.2", 1);
   rasNetListeningSocket.addr = self;
-  rasPeerInfo updates[] = {MakePeer(MakeIpv4("10.0.0.3", 1), 3), MakePeer(self, 2),
-                           MakePeer(MakeIpv4("10.0.0.1", 1), 1)};
-  qsort(updates, 3, sizeof(updates[0]), rasAddrPeerInfoCompare);
-  int count = 3;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(updates, &count));
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(MakeIpv4("10.0.0.3", 1), 3, 0, 0),
+                                  MakeRank(self, 2, 0, 0), MakeRank(MakeIpv4("10.0.0.1", 1), 1, 0, 0)}));
   ASSERT_EQ(3, nRasPeers);
   EXPECT_EQ(1, myPeerIdx);
-  EXPECT_EQ(3, count);
+  ExpectRegistryHash();
   ASSERT_EQ(3u, g_events.size());
   for (size_t index = 0; index < g_events.size(); index++) {
     EXPECT_EQ("PEER_NEW", g_events[index].type);
@@ -546,46 +486,35 @@ TEST_F(RasPeersMicrotest, PeersUpdateBuildsInitialSortedRegistryAndFindsSelf) {
   EXPECT_EQ(1, rasPeerFind(&self));
 }
 
-TEST_F(RasPeersMicrotest, PeersUpdatePropagatesRegistryAllocationFailure) {
-  rasPeerInfo update = MakePeer(MakeIpv4("10.0.0.1", 1), 1);
-  int count = 1;
-  g_failAllocationCall = 1;
-
-  EXPECT_EQ(ncclSystemError, rasPeersUpdate(&update, &count));
-  EXPECT_EQ(nullptr, rasPeers);
-  EXPECT_EQ(0, nRasPeers);
-  EXPECT_EQ(0u, rasPeersHash);
-  EXPECT_EQ(1, count);
-  EXPECT_TRUE(g_events.empty());
-  EXPECT_EQ(1, g_allocationCalls);
-}
-
-TEST_F(RasPeersMicrotest, PeersUpdateMergesOnlyNewDeviceBitsIntoDiff) {
-  const ncclSocketAddress self = MakeIpv4("10.0.0.1", 1);
-  SetPeers({MakePeer(self, 1, 1, 1)}, 0);
-  rasPeerInfo update = MakePeer(self, 1, 5, 3);
-  int count = 1;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(&update, &count));
+TEST_F(RasPeersMicrotest, LocalAddRanks_PropagatesOnlyNewDeviceBits) {
+  const auto self = MakeIpv4("10.0.0.1", 1);
+  const auto observer = MakeIpv4("10.0.0.2", 1);
+  SetPeers({MakePeer(self, 1), MakePeer(observer, 2)}, 0);
+  auto* connection = AddConnection(observer);
+  AddLinkConn(&rasNextLink, connection, 1);
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(self, 1, 2, 1)}));
   EXPECT_EQ(5u, rasPeers[0].cudaDevs);
   EXPECT_EQ(3u, rasPeers[0].nvmlDevs);
-  EXPECT_EQ(4u, update.cudaDevs);
-  EXPECT_EQ(2u, update.nvmlDevs);
-  EXPECT_EQ(1, count);
-
-  update = MakePeer(self, 1, 1, 1);
-  count = 1;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(&update, &count));
-  EXPECT_EQ(0, count);
+  ASSERT_EQ(1u, g_enqueuedMsgs.size());
+  const auto* message = g_enqueuedMsgs[0].msg;
+  ASSERT_EQ(1, message->peersUpdate.nPeers);
+  EXPECT_EQ(4u, message->peersUpdate.peers[0].cudaDevs);
+  EXPECT_EQ(2u, message->peersUpdate.peers[0].nvmlDevs);
+  EXPECT_EQ(rasPeersHash, message->peersUpdate.peersHash);
+  ExpectRegistryHash();
+  const auto oldHash = rasPeersHash;
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(self, 1, 0, 0)}));
+  EXPECT_EQ(1u, g_enqueuedMsgs.size());
+  EXPECT_EQ(oldHash, rasPeersHash);
 }
 
-TEST_F(RasPeersMicrotest, PeersUpdateInsertsAroundExistingSelfAndTracksNewIndex) {
+TEST_F(RasPeersMicrotest, LocalAddRanks_InsertsAroundSelfAndNotifies) {
   const ncclSocketAddress a = MakeIpv4("10.0.0.1", 1);
   const ncclSocketAddress self = MakeIpv4("10.0.0.2", 1);
   const ncclSocketAddress c = MakeIpv4("10.0.0.3", 1);
   SetPeers({MakePeer(self, 2)}, 0);
-  rasPeerInfo updates[] = {MakePeer(a, 1), MakePeer(c, 3)};
-  int count = 2;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(updates, &count));
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(a, 1, 0, 0), MakeRank(c, 3, 0, 0)}));
+  ExpectRegistryHash();
   ASSERT_EQ(3, nRasPeers);
   EXPECT_EQ(1, myPeerIdx);
   EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[0].addr, &a));
@@ -599,28 +528,34 @@ TEST_F(RasPeersMicrotest, PeersUpdateInsertsAroundExistingSelfAndTracksNewIndex)
   EXPECT_EQ(0, ncclSocketsCompare(&g_events[1].peer.addr, &c));
 }
 
-TEST_F(RasPeersMicrotest, PeersUpdateCopiesTrailingExistingPeers) {
+TEST_F(RasPeersMicrotest, LocalAddRanks_PreservesTrailingExistingPeers) {
   const ncclSocketAddress inserted = MakeIpv4("10.0.0.1", 1);
   const ncclSocketAddress self = MakeIpv4("10.0.0.2", 1);
   const ncclSocketAddress trailing = MakeIpv4("10.0.0.3", 1);
   SetPeers({MakePeer(self, 2), MakePeer(trailing, 3)}, 0);
-  rasPeerInfo update = MakePeer(inserted, 1);
-  int count = 1;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(&update, &count));
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(inserted, 1, 0, 0)}));
+  ExpectRegistryHash();
   ASSERT_EQ(3, nRasPeers);
   EXPECT_EQ(1, myPeerIdx);
   EXPECT_EQ(0, ncclSocketsCompare(&rasPeers[2].addr, &trailing));
 }
 
-TEST_F(RasPeersMicrotest, PeersUpdateCompactsDiffAfterUnchangedEntry) {
-  const ncclSocketAddress self = MakeIpv4("10.0.0.1", 1);
-  const ncclSocketAddress remote = MakeIpv4("10.0.0.2", 1);
-  SetPeers({MakePeer(self, 1, 1, 1)}, 0);
-  rasPeerInfo updates[] = {MakePeer(self, 1, 1, 1), MakePeer(remote, 2, 2, 2)};
-  int count = 2;
-  ASSERT_EQ(ncclSuccess, rasPeersUpdate(updates, &count));
-  ASSERT_EQ(1, count);
-  EXPECT_EQ(0, ncclSocketsCompare(&updates[0].addr, &remote));
+TEST_F(RasPeersMicrotest, LocalAddRanks_PropagatesChangedEntriesAfterUnchangedOnes) {
+  const auto self = MakeIpv4("10.0.0.1", 1);
+  const auto remote = MakeIpv4("10.0.0.2", 1);
+  const auto observer = MakeIpv4("10.0.0.3", 1);
+  SetPeers({MakePeer(self, 1), MakePeer(observer, 3)}, 0);
+  auto* connection = AddConnection(observer);
+  AddLinkConn(&rasNextLink, connection, 1);
+  ASSERT_EQ(ncclSuccess, AddRanks({MakeRank(self, 1, 0, 0), MakeRank(remote, 2, 1, 1)}));
+  ASSERT_EQ(3, nRasPeers);
+  ASSERT_EQ(1u, g_enqueuedMsgs.size());
+  const auto* message = g_enqueuedMsgs[0].msg;
+  ASSERT_EQ(1, message->peersUpdate.nPeers);
+  EXPECT_EQ(0, ncclSocketsCompare(&message->peersUpdate.peers[0].addr, &remote));
+  EXPECT_EQ(2u, message->peersUpdate.peers[0].cudaDevs);
+  EXPECT_EQ(rasPeersHash, message->peersUpdate.peersHash);
+  ExpectRegistryHash();
 }
 
 TEST_F(RasPeersMicrotest, LocalAddRanksMergesAndReinitializesLinks) {
@@ -790,12 +725,13 @@ TEST_F(RasPeersMicrotest, LinkReinitPropagatesConnectionCreationFailure) {
 TEST_F(RasPeersMicrotest, LinkReinitPreviousPropagatesConnectionCreationFailure) {
   const rasPeerInfo self = MakePeer(MakeIpv4("10.0.0.1", 1), 1);
   const rasPeerInfo remote = MakePeer(MakeIpv4("10.0.0.2", 1), 2);
-  SetPeers({self, remote}, 0);
+  const auto previous = MakePeer(MakeIpv4("10.0.0.3", 1), 3);
+  SetPeers({self, remote, previous}, 0);
   g_connCreateResult = ncclSystemError;
 
   EXPECT_EQ(ncclSystemError, rasLinkReinitConns(&rasPrevLink));
   ASSERT_EQ(1u, g_createdAddrs.size());
-  EXPECT_EQ(0, ncclSocketsCompare(&g_createdAddrs[0], &remote.addr));
+  EXPECT_EQ(0, ncclSocketsCompare(&g_createdAddrs[0], &previous.addr));
 }
 
 TEST_F(RasPeersMicrotest, NetUpdatePeersPropagatesNextLinkConnectionCreationFailure) {
@@ -848,13 +784,12 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesReplyAllocationFailure) {
   const ncclSocketAddress remote = MakeIpv4("10.0.0.2", 2);
   SetPeers({MakePeer(self, 1)}, 0);
   rasConnection* conn = AddConnection(remote);
-  rasMsg* msg = MakePeersUpdate({MakePeer(remote, 2)}, {}, 1234, rasDeadPeersHash);
+  auto msg = MakePeersUpdate({MakePeer(remote, 2)}, {}, 1234, rasDeadPeersHash);
   g_msgAllocResult = ncclSystemError;
 
-  EXPECT_EQ(ncclSystemError, rasMsgHandlePeersUpdate(msg, conn->sock));
+  EXPECT_EQ(ncclSystemError, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   EXPECT_EQ(1, nRasPeers);
   EXPECT_TRUE(g_enqueuedMsgs.empty());
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesConnectionCreationFailure) {
@@ -864,10 +799,10 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesConnectionCreationFailure) 
   rasConnection* conn = AddConnection(MakeIpv4("10.0.0.3", 3));
   const rasPeerInfo merged[] = {rasPeers[0], incoming};
   const uint64_t mergedHash = getHash(reinterpret_cast<const char*>(merged), sizeof(merged));
-  rasMsg* msg = MakePeersUpdate({incoming}, {}, mergedHash, rasDeadPeersHash);
+  auto msg = MakePeersUpdate({incoming}, {}, mergedHash, rasDeadPeersHash);
   g_connCreateResult = ncclSystemError;
 
-  EXPECT_EQ(ncclSystemError, rasMsgHandlePeersUpdate(msg, conn->sock));
+  EXPECT_EQ(ncclSystemError, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   EXPECT_EQ(2, nRasPeers);
   ASSERT_EQ(1u, g_createdAddrs.size());
   EXPECT_EQ(0, ncclSocketsCompare(&g_createdAddrs[0], &incoming.addr));
@@ -875,26 +810,23 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdatePropagatesConnectionCreationFailure) 
   EXPECT_EQ(nullptr, rasNextLink.conns->conn);
   EXPECT_EQ(nullptr, rasPrevLink.conns);
   EXPECT_TRUE(g_enqueuedMsgs.empty());
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateRejectsSocketWithoutConnection) {
-  rasMsg* msg = MakePeersUpdate({}, {}, 0, 0);
+  auto msg = MakePeersUpdate({}, {}, 0, 0);
   rasSocket sock{};
-  EXPECT_EQ(ncclInternalError, rasMsgHandlePeersUpdate(msg, &sock));
-  rasMsgFree(msg);
+  EXPECT_EQ(ncclInternalError, rasMsgHandlePeersUpdate(msg.get(), &sock));
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateWithMatchingHashesOnlyRecordsReceipt) {
   rasPeersHash = 10;
   rasDeadPeersHash = 20;
   rasConnection* conn = AddConnection(MakeIpv4("10.0.0.2", 2));
-  rasMsg* msg = MakePeersUpdate({}, {}, 10, 20);
-  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg, conn->sock));
+  auto msg = MakePeersUpdate({}, {}, 10, 20);
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   EXPECT_EQ(10u, conn->lastRecvPeersHash);
   EXPECT_EQ(20u, conn->lastRecvDeadPeersHash);
   EXPECT_TRUE(g_enqueuedMsgs.empty());
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateMergesNewPeerWithoutEchoWhenHashMatches) {
@@ -905,14 +837,13 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateMergesNewPeerWithoutEchoWhenHashMatch
   const rasPeerInfo newPeer = MakePeer(remote, 2);
   const rasPeerInfo merged[] = {rasPeers[0], newPeer};
   const uint64_t mergedHash = getHash(reinterpret_cast<const char*>(merged), sizeof(merged));
-  rasMsg* msg = MakePeersUpdate({newPeer}, {}, mergedHash, rasDeadPeersHash);
+  auto msg = MakePeersUpdate({newPeer}, {}, mergedHash, rasDeadPeersHash);
 
-  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg, conn->sock));
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   EXPECT_EQ(2, nRasPeers);
   EXPECT_EQ(1, msg->peersUpdate.nPeers);
   EXPECT_TRUE(g_enqueuedMsgs.empty());
   EXPECT_EQ(mergedHash, rasPeersHash);
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateMergesDeadPeersAndDisconnectsNewEntries) {
@@ -921,9 +852,9 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateMergesDeadPeersAndDisconnectsNewEntri
   SetPeers({MakePeer(self, 1)}, 0);
   rasConnection* conn = AddConnection(MakeIpv4("10.0.0.2", 2));
   const uint64_t expectedHash = getHash(reinterpret_cast<const char*>(&dead), sizeof(dead));
-  rasMsg* msg = MakePeersUpdate({}, {dead}, rasPeersHash, expectedHash);
+  auto msg = MakePeersUpdate({}, {dead}, rasPeersHash, expectedHash);
 
-  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg, conn->sock));
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   EXPECT_EQ(1, nRasDeadPeers);
   ASSERT_EQ(1u, g_disconnectedAddrs.size());
   EXPECT_EQ(0, ncclSocketsCompare(&g_disconnectedAddrs[0], &dead));
@@ -932,7 +863,6 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateMergesDeadPeersAndDisconnectsNewEntri
   ASSERT_TRUE(g_events[0].hasAddr);
   EXPECT_EQ(0, ncclSocketsCompare(&g_events[0].addr, &dead));
   EXPECT_TRUE(g_enqueuedMsgs.empty());
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateEchoesDeadPeersWhenHashStillDiffers) {
@@ -940,16 +870,15 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateEchoesDeadPeersWhenHashStillDiffers) 
   const ncclSocketAddress dead = MakeIpv4("10.0.0.3", 3);
   SetPeers({MakePeer(self, 1)}, 0);
   rasConnection* conn = AddConnection(MakeIpv4("10.0.0.2", 2));
-  rasMsg* msg = MakePeersUpdate({}, {dead}, rasPeersHash, 1234);
+  auto msg = MakePeersUpdate({}, {dead}, rasPeersHash, 1234);
 
-  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg, conn->sock));
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   ASSERT_EQ(1u, g_enqueuedMsgs.size());
   EXPECT_EQ(0, g_enqueuedMsgs[0].msg->peersUpdate.nPeers);
   EXPECT_EQ(1, g_enqueuedMsgs[0].msg->peersUpdate.nDeadPeers);
   EXPECT_EQ(rasDeadPeersHash, g_enqueuedMsgs[0].msg->peersUpdate.deadPeersHash);
   EXPECT_EQ(0, ncclSocketsCompare(DeadPeersInMsg(g_enqueuedMsgs[0].msg), &dead));
   EXPECT_EQ(rasDeadPeersHash, conn->lastSentDeadPeersHash);
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, HandlePeersUpdateEchoesLocalStateWhenHashesStillDiffer) {
@@ -957,14 +886,13 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateEchoesLocalStateWhenHashesStillDiffer
   const ncclSocketAddress remote = MakeIpv4("10.0.0.2", 2);
   SetPeers({MakePeer(self, 1)}, 0);
   rasConnection* conn = AddConnection(remote);
-  rasMsg* msg = MakePeersUpdate({MakePeer(remote, 2)}, {}, 1234, rasDeadPeersHash);
+  auto msg = MakePeersUpdate({MakePeer(remote, 2)}, {}, 1234, rasDeadPeersHash);
 
-  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg, conn->sock));
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
   ASSERT_EQ(1u, g_enqueuedMsgs.size());
   EXPECT_EQ(rasPeersHash, g_enqueuedMsgs[0].msg->peersUpdate.peersHash);
   ASSERT_EQ(1, g_enqueuedMsgs[0].msg->peersUpdate.nPeers);
   EXPECT_EQ(0, ncclSocketsCompare(&g_enqueuedMsgs[0].msg->peersUpdate.peers[0].addr, &self));
-  rasMsgFree(msg);
 }
 
 TEST_F(RasPeersMicrotest, LinkCalculatePeerMovesByDirectionAndSkipsDeadPeers) {
@@ -983,27 +911,28 @@ TEST_F(RasPeersMicrotest, LinkCalculatePeerMovesByDirectionAndSkipsDeadPeers) {
 TEST_F(RasPeersMicrotest, FallbackSkipsAnUnresponsiveRemoteNode) {
   const rasPeerInfo self = MakePeer(MakeIpv4("10.0.0.1", 1), 1);
   const rasPeerInfo first = MakePeer(MakeIpv4("10.0.0.2", 1), 2);
-  const rasPeerInfo sameNode = MakePeer(MakeIpv4("10.0.0.2", 2), 3);
   const rasPeerInfo nextNode = MakePeer(MakeIpv4("10.0.0.3", 1), 4);
-  SetPeers({self, first, sameNode, nextNode}, 0);
-  rasConnection* sameNodeConn = AddConnection(sameNode.addr, RAS_SOCK_CONNECTING);
-  EXPECT_EQ(3, rasLinkCalculatePeer(&rasNextLink, 1, true));
+  const auto unusable = MakePeer(MakeIpv4("10.0.0.2", 2), 5);
+  const auto healthy = MakePeer(MakeIpv4("10.0.0.2", 3), 6);
+  SetPeers({self, first, unusable, healthy, nextNode}, 0);
+  rasConnection* sameNodeConn = AddConnection(healthy.addr, RAS_SOCK_CONNECTING);
+  EXPECT_EQ(4, rasLinkCalculatePeer(&rasNextLink, 1, true));
 
   free(sameNodeConn->sock);
   sameNodeConn->sock = nullptr;
-  EXPECT_EQ(3, rasLinkCalculatePeer(&rasNextLink, 1, true));
+  EXPECT_EQ(4, rasLinkCalculatePeer(&rasNextLink, 1, true));
 
   sameNodeConn->sock = static_cast<rasSocket*>(calloc(1, sizeof(rasSocket)));
   sameNodeConn->sock->conn = sameNodeConn;
   sameNodeConn->sock->status = RAS_SOCK_READY;
   sameNodeConn->experiencingDelays = true;
-  EXPECT_EQ(3, rasLinkCalculatePeer(&rasNextLink, 1, true));
+  EXPECT_EQ(4, rasLinkCalculatePeer(&rasNextLink, 1, true));
 
   sameNodeConn->experiencingDelays = false;
   EXPECT_EQ(2, rasLinkCalculatePeer(&rasNextLink, 1, true));
 
-  SetDeadPeers({sameNode.addr});
-  EXPECT_EQ(3, rasLinkCalculatePeer(&rasNextLink, 1, true));
+  SetDeadPeers({healthy.addr});
+  EXPECT_EQ(4, rasLinkCalculatePeer(&rasNextLink, 1, true));
 }
 
 TEST_F(RasPeersMicrotest, FallbackCanSelectCandidateOnLocalNode) {
@@ -1203,48 +1132,25 @@ TEST_F(RasPeersMicrotest, PeerFormattingUsesInventoryOrFallsBackToAddress) {
   SetPeers({peer}, 0);
   char buf[256];
   EXPECT_EQ(buf, rasPeerInfoToString(&peer, buf, sizeof(buf)));
-  EXPECT_STREQ("Process 77 on node 10.0.0.1 managing GPUs 0,1 (NVML 0,2)", buf);
+  EXPECT_STREQ("Process 77 on node <host> managing GPUs <devs>", buf);
   EXPECT_EQ(buf, rasPeerInfoToString(&singleGpu, buf, sizeof(buf)));
-  EXPECT_STREQ("Process 78 on node 10.0.0.2 managing GPU 0", buf);
+  EXPECT_STREQ("Process 78 on node <host> managing GPU <devs>", buf);
   EXPECT_EQ(buf, rasPeerToString(&addr, buf, sizeof(buf)));
-  EXPECT_STREQ("Process 77 on node 10.0.0.1 managing GPUs 0,1 (NVML 0,2)", buf);
+  EXPECT_STREQ("Process 77 on node <host> managing GPUs <devs>", buf);
 
   const ncclSocketAddress unknown = MakeIpv4("10.0.0.9", 9);
   EXPECT_EQ(buf, rasPeerToString(&unknown, buf, sizeof(buf)));
   EXPECT_NE(std::string::npos, std::string(buf).find("10.0.0.9"));
 }
 
-TEST_F(RasPeersMicrotest, RankComparatorAndPeerDumpCoverDiagnosticCases) {
-  const ncclSocketAddress addr = MakeIpv4("10.0.0.1", 1);
-  const ncclSocketAddress laterAddr = MakeIpv4("10.0.0.2", 1);
-  rasRankInit emptyA{};
-  rasRankInit emptyB{};
-  EXPECT_EQ(0, rasRanksCompare(&emptyA, &emptyB));
-
-  rasRankInit lower = MakeRank(addr, 10, 0, 0);
-  rasRankInit higher = MakeRank(addr, 11, 1, 1);
-  EXPECT_LT(rasRanksCompare(&lower, &higher), 0);
-  EXPECT_GT(rasRanksCompare(&higher, &lower), 0);
-  higher.cudaDev = lower.cudaDev;
-  EXPECT_EQ(0, rasRanksCompare(&lower, &higher));
-
-  rasRankInit laterRank = MakeRank(laterAddr, 12, 0, 0);
-  EXPECT_LT(rasAddrRankInitCompare(&addr, &laterRank), 0);
-  EXPECT_GT(rasAddrRankInitCompare(&laterAddr, &lower), 0);
-  EXPECT_EQ(0, rasAddrRankInitCompare(&addr, &lower));
-
-  rasPeerInfo laterPeer = MakePeer(laterAddr, 12);
-  rasPeerInfo matchingPeer = MakePeer(addr, 10);
-  EXPECT_LT(rasAddrPeerInfoCompare(&addr, &laterPeer), 0);
-  EXPECT_GT(rasAddrPeerInfoCompare(&laterAddr, &matchingPeer), 0);
-  EXPECT_EQ(0, rasAddrPeerInfoCompare(&addr, &matchingPeer));
-
+TEST_F(RasPeersMicrotest, PeerDump_FormatsPeerDetails) {
+  const auto addr = MakeIpv4("10.0.0.1", 1);
   const rasPeerInfo peer = MakePeer(addr, 10, 1, 1);
   char buf[256];
   EXPECT_EQ(buf, rasPeerDump(&peer, buf, sizeof(buf)));
   EXPECT_NE(std::string::npos, std::string(buf).find("socket 10.0.0.1<1>"));
   EXPECT_NE(std::string::npos, std::string(buf).find("pid 10"));
-  EXPECT_NE(std::string::npos, std::string(buf).find("GPU 0"));
+  EXPECT_NE(std::string::npos, std::string(buf).find("GPU <devs>"));
 }
 
 TEST_F(RasPeersMicrotest, TerminateClearsPeerAndDeadPeerState) {
@@ -1259,4 +1165,54 @@ TEST_F(RasPeersMicrotest, TerminateClearsPeerAndDeadPeerState) {
   EXPECT_EQ(0, rasDeadPeersSize);
   EXPECT_EQ(0u, rasDeadPeersHash);
   EXPECT_EQ(-1, myPeerIdx);
+}
+
+void ConfigurePeerFakes() {
+  ResetRasNetFakes();
+  ResetRasClientSupportFakes();
+  ResetRasMessageFakes();
+  g_rasConnFind = PeersFakeRasConnFind;
+  g_rasConnCreate = PeersFakeRasConnCreate;
+  g_rasConnDisconnect = PeersFakeRasConnDisconnect;
+  g_rasLinkAddFallback = PeersFakeRasLinkAddFallback;
+  g_rasClientsNotifyEvent = PeersFakeRasClientsNotifyEvent;
+  const auto allocate = g_rasMessageAlloc;
+  g_rasMessageAlloc = [allocate](rasMsg** message, size_t length) {
+    if (g_msgAllocResult != ncclSuccess) return g_msgAllocResult;
+    return allocate(message, length);
+  };
+  g_rasMessageEnqueue = PeersFakeRasConnEnqueueMsg;
+}
+
+TEST_F(RasPeersMicrotest, SendPeersUpdate_DeadPeersOnlyPreservesSentPeersHash) {
+  const auto dead = MakeIpv4("10.0.0.9", 9);
+  SetDeadPeers({dead});
+  rasPeersHash = 100;
+  rasConnection connection{};
+  connection.lastSentPeersHash = 10;
+  connection.lastRecvPeersHash = 20;
+  rasPeerInfo unused{};
+  ASSERT_EQ(ncclSuccess, rasConnSendPeersUpdate(&connection, &unused, 0));
+  ASSERT_EQ(1u, g_enqueuedMsgs.size());
+  const auto* message = g_enqueuedMsgs[0].msg;
+  EXPECT_EQ(0, message->peersUpdate.nPeers);
+  EXPECT_EQ(1, message->peersUpdate.nDeadPeers);
+  EXPECT_EQ(0, ncclSocketsCompare(DeadPeersInMsg(message), &dead));
+  EXPECT_EQ(10u, connection.lastSentPeersHash);
+  EXPECT_EQ(rasDeadPeersHash, connection.lastSentDeadPeersHash);
+}
+
+TEST_F(RasPeersMicrotest, SendPeersUpdate_LivePeersOnlyPreservesSentDeadPeersHash) {
+  const auto peer = MakePeer(MakeIpv4("10.0.0.2", 2), 2);
+  rasPeersHash = 100;
+  rasDeadPeersHash = 200;
+  rasConnection connection{};
+  connection.lastSentDeadPeersHash = 10;
+  connection.lastRecvDeadPeersHash = 20;
+  ASSERT_EQ(ncclSuccess, rasConnSendPeersUpdate(&connection, &peer, 1));
+  ASSERT_EQ(1u, g_enqueuedMsgs.size());
+  EXPECT_EQ(1, g_enqueuedMsgs[0].msg->peersUpdate.nPeers);
+  EXPECT_EQ(0, g_enqueuedMsgs[0].msg->peersUpdate.nDeadPeers);
+  EXPECT_EQ(100u, connection.lastSentPeersHash);
+  EXPECT_EQ(10u, connection.lastSentDeadPeersHash);
 }
