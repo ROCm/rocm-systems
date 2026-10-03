@@ -31,11 +31,8 @@ class EventCommands:
         print("EVENT LISTENING:\n")
         print("Press q and hit ENTER when you want to stop.")
         self.stop = False
-        threads = []
-        for device_handle in range(len(args.gpu)):
-            x = threading.Thread(target=self._event_thread, args=(self, device_handle))
-            threads.append(x)
-            x.start()
+        event_thread = threading.Thread(target=self._event_thread, args=(self, args.gpu))
+        event_thread.start()
 
         previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
         system_exit_exc = None
@@ -62,8 +59,7 @@ class EventCommands:
             system_exit_exc = exc
         finally:
             self.stop = True
-            for thread in threads:
-                thread.join()
+            event_thread.join()
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
         if system_exit_exc is not None:
@@ -73,8 +69,7 @@ class EventCommands:
         self.stop = True
         raise SystemExit(128 + signum)
 
-    def _event_thread(self, commands, i):
-        devices = commands.device_handles
+    def _event_thread(self, commands, devices):
         if len(devices) == 0:
             print("No GPUs on machine")
             return
@@ -84,31 +79,34 @@ class EventCommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        device = devices[i]
-        listener = amdsmi_interface.AmdSmiEventReader(
-            device, amdsmi_interface.AmdSmiEvtNotificationType
-        )
+        listeners = [
+            amdsmi_interface.AmdSmiEventReader(device, amdsmi_interface.AmdSmiEvtNotificationType)
+            for device in devices
+        ]
         values_dict = {}
 
-        while not self.stop:
-            try:
-                events = listener.read(2000)
-                for event in events:
-                    values_dict["event"] = event["event"]
-                    # parse message as it's own dictionary
-                    message_list = event["message"].split("  ")
-                    message_dict = {}
-                    for item in message_list:
-                        if not item == "":
-                            item_list = item.split(": ")
-                            message_dict.update({item_list[0]: item_list[1]})
-                    values_dict["message"] = message_dict
-                    commands.logger.store_output(event["processor_handle"], "values", values_dict)
-                    commands.logger.print_output()
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
+        try:
+            while not self.stop:
+                try:
+                    events = listeners[0].read(2000)
+                    for event in events:
+                        values_dict["timestamp"] = event["timestamp"]
+                        values_dict["event"] = event["event"]
+                        # parse message as it's own dictionary
+                        message_list = event["message"].split("  ")
+                        message_dict = {}
+                        for item in message_list:
+                            if not item == "":
+                                item_list = item.split(": ")
+                                message_dict.update({item_list[0]: item_list[1]})
+                        values_dict["message"] = message_dict
+                        commands.logger.store_event_output(event["processor_handle"], values_dict)
+                        commands.logger.print_event_output()
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
+                        print(e)
+                except Exception as e:
                     print(e)
-            except Exception as e:
-                print(e)
-
-        listener.stop()
+        finally:
+            for listener in listeners:
+                listener.stop()
