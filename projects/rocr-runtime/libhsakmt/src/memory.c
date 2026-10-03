@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <time.h>
 
 #include <amdgpu.h>
 #include "hsakmt/drm/amdgpu_drm.h"
@@ -1147,6 +1148,76 @@ HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
   }
 }
 
+/* An amdgpu that predates vm_timeline_point/vm_timeline_syncobj_out in
+ * struct drm_amdgpu_gem_va still accepts the larger struct, but installs no
+ * fence, so the point is never submitted and an unbounded wait never returns.
+ */
+enum {
+	VM_TIMELINE_UNKNOWN = -1,
+	VM_TIMELINE_ABSENT,
+	VM_TIMELINE_PRESENT,
+};
+
+static int vm_timeline_state = VM_TIMELINE_UNKNOWN;
+
+#define VM_TIMELINE_WAIT_TIMEOUT_NS (10ULL * 1000000000ULL)
+
+static HSAKMT_STATUS wait_vm_timeline_point(int drm_fd, uint32_t syncobj,
+						uint64_t point, const char *op)
+{
+	struct drm_syncobj_timeline_wait tw;
+	uint64_t submitted = 0;
+	struct timespec ts;
+	int state, ret;
+
+	if (!syncobj)
+		return HSAKMT_STATUS_SUCCESS;
+
+	state = __atomic_load_n(&vm_timeline_state, __ATOMIC_RELAXED);
+	if (state == VM_TIMELINE_ABSENT)
+		return HSAKMT_STATUS_SUCCESS;
+
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&syncobj;
+	tw.points = (uintptr_t)&point;
+	tw.count_handles = 1;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+	/* timeout_nsec is an absolute CLOCK_MONOTONIC value, so bound the wait
+	 * with a deadline until the kernel is known to install fences.
+	 */
+	tw.timeout_nsec = INT64_MAX;
+	if (state != VM_TIMELINE_PRESENT && !clock_gettime(CLOCK_MONOTONIC, &ts))
+		tw.timeout_nsec = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec +
+				  VM_TIMELINE_WAIT_TIMEOUT_NS;
+
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+	if (!ret) {
+		__atomic_store_n(&vm_timeline_state, VM_TIMELINE_PRESENT, __ATOMIC_RELAXED);
+		return HSAKMT_STATUS_SUCCESS;
+	}
+
+	if (errno != ETIME) {
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after %s: %d\n",
+			__func__, op, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	/* A fence that was installed but has not signalled is a real failure, so
+	 * only waive the wait once the timeline confirms nothing was submitted.
+	 */
+	if (drmSyncobjQuery2(drm_fd, &syncobj, &submitted, 1,
+			     DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED) || submitted >= point) {
+		pr_err("[%s] timed out after %s waiting for page table update at point %lu\n",
+			__func__, op, point);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	pr_warn_once("[%s] kernel installs no VM page table fence, skipping timeline waits\n",
+		     __func__);
+	__atomic_store_n(&vm_timeline_state, VM_TIMELINE_ABSENT, __ATOMIC_RELAXED);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
 						HsaMemoryMapFlags flags, HSAuint32 NodeId)
@@ -1188,21 +1259,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 	}
 
 	// Wait on timeline syncobj to indicate page table update completion
-	struct drm_syncobj_timeline_wait tw;
-	memset(&tw, 0, sizeof(tw));
-	tw.handles = (uintptr_t)&vm_timeline_syncobj;
-	tw.points = (uintptr_t)&vm_timeline_seqnum;
-	tw.count_handles = 1;
-	tw.timeout_nsec = INT64_MAX;
-	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
-
-	if (ret) {
-		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
-		return HSAKMT_STATUS_ERROR;
-	}
-
-	return HSAKMT_STATUS_SUCCESS;
+	return wait_vm_timeline_point(drm_fd, vm_timeline_syncobj, vm_timeline_seqnum, "MAP");
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
@@ -1246,21 +1303,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 	}
 
 	// Wait on timeline syncobj to indicate page table update completion
-	struct drm_syncobj_timeline_wait tw;
-	memset(&tw, 0, sizeof(tw));
-	tw.handles = (uintptr_t)&vm_timeline_syncobj;
-	tw.points = (uintptr_t)&vm_timeline_seqnum;
-	tw.count_handles = 1;
-	tw.timeout_nsec = INT64_MAX;
-	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
-
-	if (ret) {
-		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
-		return HSAKMT_STATUS_ERROR;
-	}
-
-	return HSAKMT_STATUS_SUCCESS;
+	return wait_vm_timeline_point(drm_fd, vm_timeline_syncobj, vm_timeline_seqnum, "UNMAP");
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
