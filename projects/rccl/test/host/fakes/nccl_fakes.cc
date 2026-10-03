@@ -43,6 +43,8 @@ ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientQueryFdBlocking, ncclProxyClientQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientBatchQueryFdBlocking, ncclProxyClientBatchQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_strongStreamRelease,       ncclStrongStreamRelease);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamWaitStream,      ncclStreamWaitStream);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
 ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
@@ -373,18 +375,32 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph,
     return g_strongStreamAcquire(graph, ss, concurrent, stream);
 }
 
-ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     /*graph*/,
-                                     struct ncclStrongStream* /*ss*/,
-                                     bool                     /*concurrent*/)
+static ncclResult_t DefaultStrongStreamRelease(struct ncclCudaGraph, struct ncclStrongStream*, bool)
 {
     return ncclSuccess;
 }
 
-ncclResult_t ncclStreamWaitStream(hipStream_t /*a*/,
-                                  hipStream_t /*b*/,
-                                  hipEvent_t  /*ev*/)
+std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool)>
+    g_strongStreamRelease = DefaultStrongStreamRelease;
+
+ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     graph,
+                                     struct ncclStrongStream* ss,
+                                     bool                     concurrent)
+{
+    return g_strongStreamRelease(graph, ss, concurrent);
+}
+
+static ncclResult_t DefaultStreamWaitStream(hipStream_t, hipStream_t, hipEvent_t)
 {
     return ncclSuccess;
+}
+
+std::function<ncclResult_t(hipStream_t, hipStream_t, hipEvent_t)> g_ncclStreamWaitStream =
+    DefaultStreamWaitStream;
+
+ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
+{
+    return g_ncclStreamWaitStream(a, b, ev);
 }
 
 ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
@@ -542,6 +558,8 @@ void ResetNcclFakes()
 {
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
+    g_strongStreamRelease          = DefaultStrongStreamRelease;
+    g_ncclStreamWaitStream         = DefaultStreamWaitStream;
     g_proxyConnect                 = DefaultProxyConnect;
     g_proxyCallBlocking            = DefaultProxyCallBlocking;
     g_loadParam                    = DefaultLoadParam;
