@@ -32,10 +32,12 @@ THE SOFTWARE.
 //
 // The demo must be launched by an MPI/PMI launcher (mpirun / mpiexec / srun) that exposes
 // the node-local rank via an environment variable; it uses that to pin each process to a
-// GPU before rocshmem_init(). If launched without one, exit cleanly with status 0 so the
-// validator interprets the trace as "unavailable" and skips rather than reporting a hard
-// failure. rocSHMEM itself is not tied to Open MPI -- it bootstraps against whatever MPI it
-// was built with (OpenMPI, MPICH, MVAPICH); the lookup below just covers common launchers.
+// GPU before rocshmem_init(). When it cannot run at all -- no launcher, or no visible GPU --
+// it prints kUnavailableMarker and exits 0. The integration tests match that marker with
+// ctest's SKIP_REGULAR_EXPRESSION so such a run is reported as skipped instead of passing
+// while exercising nothing. rocSHMEM itself is not tied to Open MPI -- it bootstraps against
+// whatever MPI it was built with (OpenMPI, MPICH, MVAPICH); the lookup below just covers
+// common launchers.
 
 #include <hip/hip_runtime.h>
 #include <rocshmem/rocshmem.hpp>
@@ -64,6 +66,11 @@ THE SOFTWARE.
 
 using namespace rocshmem;
 
+// Printed on every path that returns without exercising rocSHMEM. Both rocshmem-trace
+// integration tests match this via SKIP_REGULAR_EXPRESSION, so keep it in sync with
+// tests/rocshmem-trace/CMakeLists.txt and tests/rocprofv3/rocshmem-trace/CMakeLists.txt.
+constexpr auto kUnavailableMarker = "rocSHMEM demo unavailable";
+
 int
 main(int /*argc*/, char** /*argv*/)
 {
@@ -81,11 +88,11 @@ main(int /*argc*/, char** /*argv*/)
     if(local_rank == nullptr)
     {
         std::fprintf(stderr,
-                     "[rocshmem-demo] no node-local rank env var set (checked "
+                     "[rocshmem-demo] %s: no node-local rank env var set (checked "
                      "OMPI_COMM_WORLD_LOCAL_RANK, MV2_COMM_WORLD_LOCAL_RANK, MPI_LOCALRANKID, "
                      "SLURM_LOCALID); this demo must be launched via an MPI/PMI launcher "
-                     "(mpirun/mpiexec/srun). Exiting without exercising the rocSHMEM API so the "
-                     "integration test reports tracing as unavailable.\n");
+                     "(mpirun/mpiexec/srun).\n",
+                     kUnavailableMarker);
         return 0;
     }
 
@@ -93,14 +100,16 @@ main(int /*argc*/, char** /*argv*/)
     // is the identity (rank 0 -> device 0, rank 1 -> device 1, ...). On CI runners
     // where HIP_VISIBLE_DEVICES limits visibility to a single device, the modulo
     // makes ranks share the GPU instead of failing with "invalid device ordinal".
-    int device_count = 0;
-    CHECK_HIP(hipGetDeviceCount(&device_count));
-    if(device_count <= 0)
+    int  device_count = 0;
+    auto device_err   = hipGetDeviceCount(&device_count);
+    // Depending on driver state, "no GPU" surfaces either as a zero count or as an explicit
+    // hipErrorNoDevice; treat both as unavailable so the outcome does not depend on which.
+    if(device_err == hipErrorNoDevice || (device_err == hipSuccess && device_count <= 0))
     {
-        std::fprintf(stderr,
-                     "[rocshmem-demo] no HIP devices visible; skipping rocSHMEM exercise.\n");
+        std::fprintf(stderr, "[rocshmem-demo] %s: no HIP devices visible\n", kUnavailableMarker);
         return 0;
     }
+    CHECK_HIP(device_err);
     CHECK_HIP(hipSetDevice(std::atoi(local_rank) % device_count));
 
     rocshmem_init();
