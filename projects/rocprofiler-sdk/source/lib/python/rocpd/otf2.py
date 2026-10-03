@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -175,6 +175,11 @@ def write_otf2(importData, config):
                         name="kernel_dispatch_count",
                         description="kernel dispatch packets written during a HIP graph launch",
                     )
+                    pipe_id_attribute = archive.definitions.attribute(
+                        name="pipe_id",
+                        description="hardware pipe the kernel ran on; -1 if unknown",
+                        type=Type.INT32,
+                    )
                     hip_event_attributes = {perfetto_category: "hip_event"}
                     # OTF2 attributes default to Type.STRING; both of these carry
                     # integer identifiers, so the type must be declared explicitly or
@@ -204,12 +209,29 @@ def write_otf2(importData, config):
                             ret[graph_node_attribute] = graph_node_id
                         return ret
 
+                    # one shared attribute set per pipe, not a copy per kernel
+                    kernel_pipe_attributes = {}
+
+                    def get_kernel_attributes(pipe_id):
+                        if pipe_id is None:
+                            return kernel_attributes
+                        if pipe_id not in kernel_pipe_attributes:
+                            kernel_pipe_attributes[pipe_id] = {
+                                **kernel_attributes,
+                                pipe_id_attribute: pipe_id,
+                            }
+                        return kernel_pipe_attributes[pipe_id]
+
                     kernel_rename = getattr(config, "kernel_rename")
                     agent_index_value = getattr(config, "agent_index_value")
 
                     hip_graph_fields = ()
                     if "graph_launch" in importData.supported_features:
                         hip_graph_fields = ("graph_exec_id", "graph_node_id")
+
+                    pipe_id_field = "NULL AS pipe_id"
+                    if "pipe_id" in importData.supported_features:
+                        pipe_id_field = "pipe_id"
 
                     cursor = conn.cursor()
                     cursor.execute("SELECT DISTINCT guid, id FROM rocpd_info_node")
@@ -296,7 +318,7 @@ def write_otf2(importData, config):
                             cursor = conn.cursor()
                             cursor.execute(
                                 f"""SELECT tid, agent_abs_index, queue_id,
-                                start, end, name, region
+                                start, end, name, region, {pipe_id_field}
                                 {(',' + ','.join(hip_graph_fields)) if hip_graph_fields else ''}
                                 FROM kernels WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
@@ -311,15 +333,16 @@ def write_otf2(importData, config):
                                     end,
                                     name,
                                     region,
+                                    pipe_id,
                                     *_hip_graph_values,
                                 ) = row
                                 if kernel_rename and region:
                                     kernel_dispatches[(tid, agent, queue)].append(
-                                        (start, end, region, *_hip_graph_values)
+                                        (start, end, region, pipe_id, *_hip_graph_values)
                                     )
                                 else:
                                     kernel_dispatches[(tid, agent, queue)].append(
-                                        (start, end, name, *_hip_graph_values)
+                                        (start, end, name, pipe_id, *_hip_graph_values)
                                     )
 
                             if "graph_launch" in importData.supported_features:
@@ -725,6 +748,7 @@ def write_otf2(importData, config):
                                     start,
                                     end,
                                     name,
+                                    pipe_id,
                                     *hip_graph_fields,
                                 ) in data:
                                     region = archive.definitions.region(
@@ -733,7 +757,8 @@ def write_otf2(importData, config):
                                         paradigm=Paradigm.HIP,
                                     )
                                     attributes = add_graph_attributes(
-                                        kernel_attributes, *hip_graph_fields
+                                        get_kernel_attributes(pipe_id),
+                                        *hip_graph_fields,
                                     )
                                     kernel_events.append(
                                         (start, "enter", region, attributes)

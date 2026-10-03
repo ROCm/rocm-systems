@@ -299,6 +299,7 @@ struct kernel_dispatch
     uint64_t                queue_id            = 0;
     std::optional<uint64_t> graph_exec_id       = std::nullopt;
     std::optional<uint64_t> graph_node_id       = std::nullopt;
+    std::optional<int32_t>  pipe_id             = std::nullopt;
     std::string             queue               = {};
     std::string             stream              = {};
     rocprofiler_timestamp_t start               = 0;
@@ -815,6 +816,7 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     LOAD_DATA_FIELD(stream_id);
     LOAD_DATA_FIELD(graph_exec_id);
     LOAD_DATA_FIELD(graph_node_id);
+    LOAD_DATA_FIELD(pipe_id);
     LOAD_DATA_FIELD(queue);
     LOAD_DATA_FIELD(stream);
     LOAD_DATA_FIELD(start);
