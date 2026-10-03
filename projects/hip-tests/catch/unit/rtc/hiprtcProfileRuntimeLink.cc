@@ -8,7 +8,9 @@
 
 #include <hip/hiprtc.h>
 
+#include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 static constexpr auto profileKernel = R"(
@@ -29,13 +31,31 @@ HIP_TEST_CASE(Unit_hiprtc_ProfileRuntimeLink) {
   std::string archOption = std::string("--offload-arch=") + props.gcnArchName;
   const char* options[] = {archOption.c_str(), "-fprofile-generate"};
   hiprtcResult compileResult = hiprtcCompileProgram(program, 2, options);
+  std::string log;
   if (compileResult != HIPRTC_SUCCESS) {
     size_t logSize = 0;
     HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &logSize));
     if (logSize > 1) {
-      std::string log(logSize, '\0');
+      log.resize(logSize, '\0');
       HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
-      INFO(log);
+      log.resize(logSize - 1);
+    }
+    HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+  }
+  INFO(log);
+  if (compileResult == HIPRTC_ERROR_COMPILATION) {
+    // COMGR may use an installed or embedded runtime; inspect its diagnostic
+    // instead of guessing the compiler's resource directory.
+    const std::string missingArchive =
+        "libclang_rt.profile.a: " +
+        std::make_error_code(std::errc::no_such_file_or_directory).message();
+    std::istringstream logStream(log);
+    std::string line;
+    while (std::getline(logStream, line)) {
+      if (line.find("ld.lld: error: cannot open ") != std::string::npos &&
+          line.find(missingArchive) != std::string::npos) {
+        HIP_SKIP_TEST("AMDGPU profiling runtime archive is unavailable.");
+      }
     }
   }
   REQUIRE(compileResult == HIPRTC_SUCCESS);
