@@ -94,7 +94,11 @@ public:
 
 private:
   void publish(int value) {
-    state_.store(value, std::memory_order_release);
+    // Keep publication ordered before notify's waiter-count check. A release
+    // store alone permits Store->Load reordering on x86: the notifier can see
+    // no registered waiter while a waiter still sees the old state and sleeps.
+    // Use the same ordering for job, completion, and shutdown publication.
+    state_.store(value, std::memory_order_seq_cst);
     state_.notify_one();
   }
 
@@ -105,8 +109,8 @@ private:
         return;
       relax_cpu();
     }
-    // There is one waiter per helper: the issuer during execution, or the
-    // helper while idle. Atomic waiting rechecks the value before sleeping.
+    // Atomic waiting rechecks the value before sleeping. Publication must also
+    // be ordered before the notification's waiter-registration check.
     state_.wait(expected, std::memory_order_acquire);
   }
 
