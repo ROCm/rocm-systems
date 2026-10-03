@@ -206,6 +206,7 @@ extern bool IbCastUseInline;
 #define WR_IMM_BYID_COMM_ID_MASK  (((1u << WR_IMM_BYID_COMM_ID_BITS) - 1) << WR_IMM_BYID_COMM_ID_BIT_POS)
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
+extern bool IbCastMultiplaneEnable;
 extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
