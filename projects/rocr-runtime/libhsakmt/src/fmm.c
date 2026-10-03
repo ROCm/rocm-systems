@@ -4875,17 +4875,24 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 			obj = NULL;
 		}
 	}
-	pthread_mutex_unlock(&aperture->fmm_mutex);
-	if (!obj)
+	if (!obj) {
+		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
+	// Keep lock held during ioctl to prevent the object from being freed
+	// while we're exporting it. This prevents a race where another thread
+	// could free the memory and invalidate the handle between when we look
+	// it up and when the kernel processes the export ioctl.
 	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_EXPORT_DMABUF, (void *)&exportArgs);
-	if (r)
+	if (r){
+		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_ERROR;
+	}
 
 	*DMABufFd = exportArgs.dmabuf_fd;
 	*Offset = offset;
-
+	pthread_mutex_unlock(&aperture->fmm_mutex);
 	return HSAKMT_STATUS_SUCCESS;
 }
 

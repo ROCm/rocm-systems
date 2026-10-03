@@ -407,14 +407,12 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
     auto it = ipc_sock_server_conns_.find(reinterpret_cast<uint64_t>(ptr));
     if (it != ipc_sock_server_conns_.end()) {
-      // Warn if freeing memory that was exported for IPC. Importers that have
-      // not yet attached will fail. This is not a bug - it's the expected IPC
-      // contract that exporters must keep memory alive until importers are done.
-      // However, this warning helps catch accidental early-free bugs.
-      debug_warning(false &&
-                    "Freeing memory with active IPC export. "
-                    "Pending importers will fail to attach.");
+      // Exporter is freeing memory with active IPC export. This is safe with the
+      // dmabuf fix - the held dmabuf fd keeps the BO alive for pending importers.
+      // Close the held fd and remove from map.
+      int fd = it->second.dmabuf_fd;
       ipc_sock_server_conns_.erase(it);
+      if (fd >= 0) os::DmaBufClose(&fd);
     }
   }
 
@@ -1450,14 +1448,20 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       void* ptr = NULL;
       size_t len = 0;
       MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); })
-      std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-      for (auto& conns : ipc_sock_server_conns_) {
-        if (conn_handle == conns.first) {
-          ptr = reinterpret_cast<void*>(conn_handle);
-          len = conns.second;
-          break;
+
+      // Search the map and copy out the length under lock, then release lock
+      // before doing the blocking ioctl/socket operations to avoid holding
+      // the lock for extended periods.
+      {
+        std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+        for (auto& conns : ipc_sock_server_conns_) {
+          if (conn_handle == conns.first) {
+            ptr = reinterpret_cast<void*>(conn_handle);
+            len = conns.second.len;
+            break;
+          }
         }
-      }
+      }  // Release lock before ioctl
 
       if (!ptr) continue;
 
@@ -1470,7 +1474,16 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
     }
   }
 
-  ipc_sock_server_conns_.clear();
+  // Cleanup: close all held dmabuf fds and clear the map.
+  // Must hold lock to prevent races with IPCCreate and FreeMemory.
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    for (auto& conns : ipc_sock_server_conns_) {
+      if (conns.second.dmabuf_fd >= 0)
+        os::DmaBufClose(&conns.second.dmabuf_fd);
+    }
+    ipc_sock_server_conns_.clear();
+  }
   os::CloseIPCSocket(ipc_sock_server_fd_);
 }
 
@@ -1488,11 +1501,17 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   PtrInfoBlockData block = {};
   hsa_amd_pointer_info_t info = {};
   info.size = sizeof(info);
-  if (PtrInfo(ptr, &info, nullptr, nullptr, nullptr, &block) != HSA_STATUS_SUCCESS)
+  if (PtrInfo(ptr, &info, nullptr, nullptr, nullptr, &block) != HSA_STATUS_SUCCESS){
+    fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed : ptr=%p, info=%zu\n",
+            os::GetProcessId(), (long)pthread_self(), ptr, info.size);
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
-  if (info.agentBaseAddress != ptr || info.sizeInBytes != len)
+  if (info.agentBaseAddress != ptr || info.sizeInBytes != len){
+    fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed : ptr=%p, info.agentBaseAddress=%p info.sizeInBytes=%zu\n",
+            os::GetProcessId(), (long)pthread_self(), ptr, info.agentBaseAddress, info.sizeInBytes);
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   bool useFrag = (block.base != ptr || block.length != len);
   // Assume all pointers and blocks are 4Kb aligned.
@@ -1500,6 +1519,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       (reinterpret_cast<uint8_t*>(ptr) - reinterpret_cast<uint8_t*>(block.base)) / pageSize;
   if (useFrag) {
     if (!IsMultipleOf(block.base, 2 * 1024 * 1024)) {
+      fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed : ptr=%p, block.base=%p \n",
+              os::GetProcessId(), (long)pthread_self(), ptr, block.base);
       assert(false && "Fragment's block not aligned to 2MB!");
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -1507,8 +1528,11 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle* sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS){
+      fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed hsaKmtShareMemory: block.base=%p \n",
+              os::GetProcessId(), (long)pthread_self(), ptr, block.base);
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
     hsa_status_t err = HSA_STATUS_SUCCESS;
     if (useFrag) {
@@ -1518,6 +1542,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       err = allocation_map_[ptr].region->IPCFragmentExport(ptr);
       assert(err == HSA_STATUS_SUCCESS && "Region inconsistent with address map.");
     }
+    if(err != HSA_STATUS_SUCCESS)
+      fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed IPCFragmentExport \n",
+              os::GetProcessId(), (long)pthread_self());
     return err;
   }
 
@@ -1531,7 +1558,11 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   Agent* agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
   // System sub allocations are not supported for now.
-  if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (handle->handle[3] && useFrag){
+    fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed handle->handle[3] && useFrag \n",
+            os::GetProcessId(), (long)pthread_self());
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   handle->handle[4] = agent->node_id();
   if (useFrag) handle->handle[6] |= 0x80000000 | fragOffset;
 
@@ -1543,9 +1574,41 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   int dmabuf_fd;
   uint64_t dmabufOffset;
 
+  // Check if this ptr is already exported (should not happen in normal flow)
+  size_t num_open_exports = 0;
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    num_open_exports = ipc_sock_server_conns_.size();
+    auto it = ipc_sock_server_conns_.find(reinterpret_cast<uint64_t>(ptr));
+    if (it != ipc_sock_server_conns_.end()) {
+      fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate WARNING: ptr=%p already exported! fd=%d len=%zu (trying to re-export with len=%zu)\n",
+              os::GetProcessId(), (long)pthread_self(), ptr, it->second.dmabuf_fd, it->second.len, len);
+    }
+  }
+
+//  fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate calling hsaKmtExportDMABufHandle: ptr=%p len=%zu agent_type=%d node_id=%u is_system_mem=%d num_open_exports=%zu\n",
+//          os::GetProcessId(), (long)pthread_self(), ptr, len, agent->device_type(), agent->node_id(), (agent->device_type() == Agent::kAmdCpuDevice), num_open_exports);
+
   auto err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset));
   assert(dmabufOffset / pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
-  if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (err != HSAKMT_STATUS_SUCCESS){
+    fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed hsaKmtExportDMABufHandle: ptr=%p len=%zu err=%d (1=ERROR, 3=INVALID_PARAM, 6=NO_MEMORY, 11=NOT_SUPPORTED)\n",
+            os::GetProcessId(), (long)pthread_self(), ptr, len, err);
+
+    // Check if ptr is still valid in allocation map
+    {
+      std::shared_lock<std::shared_mutex> lock(memory_lock_);
+      auto alloc_it = allocation_map_.find(ptr);
+      if (alloc_it == allocation_map_.end()) {
+        fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx   -> ptr=%p NOT FOUND in allocation_map (already freed?)\n",
+                os::GetProcessId(), (long)pthread_self(), ptr);
+      } else {
+        fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx   -> ptr=%p found in allocation_map, region=%p\n",
+                os::GetProcessId(), (long)pthread_self(), ptr, alloc_it->second.region);
+      }
+    }
+    return HSA_STATUS_ERROR;
+  }
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
     AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
@@ -1568,6 +1631,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status != HSAKMT_STATUS_SUCCESS) {
+      fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed hsaKmtHandleImport \n",
+              os::GetProcessId(), (long)pthread_self());
       os::DmaBufClose(&dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
@@ -1579,7 +1644,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
   }
 
-  os::DmaBufClose(&dmabuf_fd);
+  // Keep dmabuf_fd open -- it holds a kernel reference on the BO that prevents
+  // the BO from being destroyed if the exporter frees its allocation before
+  // importers finish mapping. The fd is closed when the entry is removed
+  // from ipc_sock_server_conns_ (in FreeMemory or cleanup).
 
   std::unique_lock<std::mutex> lock(ipc_sock_server_lock_);
 
@@ -1626,18 +1694,23 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE &&
              "DMA buffer could not"
              "be exported for IPC!");
-      if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
-
+      if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) {
+        fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed CreateIPCServer \n",
+                os::GetProcessId(), (long)pthread_self());
+        return HSA_STATUS_ERROR;
+      }
       ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
       if (!ipc_sock_server_thread_) {
         ipc_sock_server_conns_.clear();
         os::CloseIPCSocket(ipc_sock_server_fd_);
         ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
+        fprintf(stderr, "[IPC_TRACE] PID=%d TID=%lx IPCCreate failed CreateThread \n",
+                os::GetProcessId(), (long)pthread_self());
         return HSA_STATUS_ERROR;
       }
     }
   }
-  ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
+  ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = {len, dmabuf_fd};
 
   // TODO: fragment block discard for better memory performance causes memory violations
   // with DMABuf export even when synchronously called. Bypass for now.
@@ -1659,7 +1732,8 @@ void Runtime::ReleaseImportHandles(HsaMemoryObjectHandle owner,
 
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                              HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
-                             bool isDmabufSysmem, uint32_t shared_handle) {
+                             bool isDmabufSysmem, uint32_t shared_handle,
+                             int* out_dmabuf_fd) {
   char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
   snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
   std::chrono::milliseconds timeout(10000);
@@ -1683,7 +1757,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
 
   int dmabuf_fd = static_cast<int>(os::IPCRecvHandle(socket_fd));
   if (dmabuf_fd == -1) return -1;
-  MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (dmabuf_fd >= 0) os::DmaBufClose(&dmabuf_fd);
+  });
 
   HsaGraphicsResourceInfo info{};
   HSA_REGISTER_MEM_FLAGS regFlags{0};
@@ -1711,7 +1787,8 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
     HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status != HSAKMT_STATUS_SUCCESS) {
-      fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n", shared_handle,
+      fprintf(stderr, "[IPC] PID=%d TID=%lx IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
+              os::GetProcessId(), (long)pthread_self(), shared_handle,
               res.metadata);
       return -1;
     }
@@ -1759,7 +1836,8 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
           HsaHandleImportResult peerRes = {};
           if (HSAKMT_CALL(hsaKmtHandleImport(&peerDesc, &peerRes, &peerFlags)) !=
               HSAKMT_STATUS_SUCCESS) {
-            fprintf(stderr, "IPC Client Import: dma-buf import failed on node %u\n",
+            fprintf(stderr, "[IPC] PID=%d TID=%lx IPC Client Import: dma-buf import failed on node %u\n",
+                    os::GetProcessId(), (long)pthread_self(),
                     peer->node_id());
             ReleaseImportHandles(res.buf_handle, peerImports);
             return -1;
@@ -1784,6 +1862,14 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
 
   // Ping socket server to close exporter
   if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
+
+  // Pass the dmabuf fd back to the caller so it can hold the kernel BO ref
+  // until MAP_MEMORY_TO_GPU completes. Setting dmabuf_fd to -1 prevents the
+  // scope guard from closing it.
+  if (out_dmabuf_fd && err == HSAKMT_STATUS_SUCCESS) {
+    *out_dmabuf_fd = dmabuf_fd;
+    dmabuf_fd = -1;
+  }
   return err;
 }
 
@@ -1793,6 +1879,10 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   void* importAddress;
   HSAuint64 importSize;
   uint64_t dmaBufFDHandle = 0;
+  int importedDmabufFd = -1;
+  MAKE_SCOPE_GUARD([&]() {
+    if (importedDmabufFd >= 0) os::DmaBufClose(&importedDmabufFd);
+  });
   hsa_amd_ipc_memory_t importHandle = *handle;
 
   // Extract fragment info
@@ -1829,7 +1919,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto importMemory = [&](unsigned int numNodes, HSAuint32* nodes, bool isSysMem) {
     int ret = ipc_dmabuf_supported_
         ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes, nodes, &importAddress,
-                          &importSize, isSysMem, importHandle.handle[7])
+                          &importSize, isSysMem, importHandle.handle[7],
+                          &importedDmabufFd)
         : HSAKMT_CALL(hsaKmtRegisterSharedHandle(
               reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle), &importAddress,
               &importSize));
@@ -1936,7 +2027,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
                                              reinterpret_cast<HSAuint64>(cpuPtr),
                                              HSA_MEMORY_ACCESS_RW, peer.node_id));
       if (status != HSAKMT_STATUS_SUCCESS) {
-        fprintf(stderr, "IPC Attach: dma-buf mapping failed on node %u\n", peer.node_id);
+        fprintf(stderr, "[IPC] PID=%d TID=%lx IPC Attach: dma-buf mapping failed on node %u\n",
+                os::GetProcessId(), (long)pthread_self(), peer.node_id);
         return errCleanup();
       }
     }
