@@ -96,6 +96,47 @@ def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
     return [part.strip() for part in match.group(1).split(",") if part.strip()]
 
 
+_COLLECT_RATIO_CALL_RE = re.compile(
+    r"^COLLECT_RATIO\s*\(\s*(.+)\s*\)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | None:
+    """Parse COLLECT_RATIO(n1 + n2, d1 + d2) into (numerator_refs, denominator_refs)."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_RATIO_CALL_RE.match(formula.strip())
+    if not match:
+        return None
+    inner = match.group(1).strip()
+    # Split on top-level comma (only one separator between num and den groups).
+    depth = 0
+    split_at = -1
+    for i, ch in enumerate(inner):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            split_at = i
+            break
+    if split_at < 0:
+        return None
+    num_part = inner[:split_at].strip()
+    den_part = inner[split_at + 1 :].strip()
+    if not num_part or not den_part:
+        return None
+
+    def _refs(part: str) -> list[str]:
+        return [p.strip() for p in part.split("+") if p.strip()]
+
+    nums, dens = _refs(num_part), _refs(den_part)
+    if not nums or not dens:
+        return None
+    return nums, dens
+
+
 def is_composite_avg_formula(formula: str) -> bool:
     if not formula or not isinstance(formula, str):
         return False
@@ -103,6 +144,7 @@ def is_composite_avg_formula(formula: str) -> bool:
     return (
         parse_weighted_avg_submetrics(text) is not None
         or parse_collect_sum_submetrics(text) is not None
+        or parse_collect_ratio_parts(text) is not None
     )
 
 
@@ -344,6 +386,8 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     counters: list[str] = []
     if not isinstance(formula, str):
         return visited, counters
+    if is_composite_avg_formula(formula):
+        return True, []
     try:
         tree = ast.parse(
             formula

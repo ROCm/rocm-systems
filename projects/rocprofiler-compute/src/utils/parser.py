@@ -20,6 +20,7 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.collectable import (
+    COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_IDS_ATTR,
     WEIGHTED_AVG_ATTR,
@@ -28,6 +29,7 @@ from utils.metrics.collectable import (
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
     gen_counter_list,
+    parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
     parse_weighted_avg_submetrics,
 )
@@ -236,6 +238,7 @@ def _build_metric_table_df(
     weighted_avg_subs: dict[str, list[str]] = {}
     collectable_ids: dict[str, str] = {}
     collect_sum_specs: dict[str, list[str]] = {}
+    collect_ratio_specs: dict[str, dict[str, list[str]]] = {}
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
@@ -253,14 +256,24 @@ def _build_metric_table_df(
         if isinstance(collectable_id, str) and collectable_id:
             collectable_ids[metric_idx] = collectable_id
 
-        avg_entry = entries.get("avg")
-        if isinstance(avg_entry, str):
-            weighted_subs = parse_weighted_avg_submetrics(avg_entry)
+        # Composites may appear in avg or value (SOL/roofline use value→Avg/Value).
+        composite_entry = entries.get("avg")
+        if not isinstance(composite_entry, str):
+            composite_entry = entries.get("value")
+        if isinstance(composite_entry, str):
+            weighted_subs = parse_weighted_avg_submetrics(composite_entry)
             if weighted_subs:
                 weighted_avg_subs[metric_idx] = weighted_subs
-            sum_refs = parse_collect_sum_submetrics(avg_entry)
+            sum_refs = parse_collect_sum_submetrics(composite_entry)
             if sum_refs:
                 collect_sum_specs[metric_idx] = sum_refs
+            ratio_parts = parse_collect_ratio_parts(composite_entry)
+            if ratio_parts is not None:
+                nums, dens = ratio_parts
+                collect_ratio_specs[metric_idx] = {
+                    "numerator": nums,
+                    "denominator": dens,
+                }
         weighted_meta = entries.get("_weighted_avg")
         if isinstance(weighted_meta, dict):
             weighted_avg_specs[metric_idx] = weighted_meta
@@ -311,6 +324,7 @@ def _build_metric_table_df(
     df.attrs[WEIGHTED_AVG_SUBS_ATTR] = weighted_avg_subs
     df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
     df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
+    df.attrs[COLLECT_RATIO_SPECS_ATTR] = collect_ratio_specs
     return df, expressions
 
 
@@ -753,6 +767,7 @@ def load_table_data(
         workload.roofline_peaks,
         apply_filters(workload, dir_path, args.debug),
         args.debug,
+        pass_layout=getattr(workload, "pmc_pass_layout", None),
     )
 
 

@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
 
 from utils.logger import console_warning
 from utils.metrics.aggregation import (
+    merge_dispatch_collect_ratio,
     merge_dispatch_collect_sum,
     merge_dispatch_weighted_avg,
 )
@@ -20,11 +21,16 @@ from utils.metrics.expression import (
     is_composite_avg_formula,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.pass_provenance import resolve_weight_counter_column
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 METRIC_EVAL_GRAPH_ATTR = "metric_eval_graph"
 COLLECTABLE_EXPR_CACHE_ATTR = "collectable_expr_cache"
 COLLECTABLE_IDS_ATTR = "collectable_ids"
 COLLECT_SUM_SPECS_ATTR = "collect_sum_specs"
+COLLECT_RATIO_SPECS_ATTR = "collect_ratio_specs"
 WEIGHTED_AVG_ATTR = "weighted_avg_specs"
 WEIGHTED_AVG_SUBS_ATTR = "weighted_avg_subs"
 METRIC_NAME_COLUMN = "Metric"
@@ -33,6 +39,7 @@ METRIC_NAME_COLUMN = "Metric"
 class CompositeKind(str, Enum):
     WEIGHTED_AVG = "weighted_avg"
     COLLECT_SUM = "collect_sum"
+    COLLECT_RATIO = "collect_ratio"
 
 
 @dataclass
@@ -64,7 +71,7 @@ def _metric_column_name(df: pd.DataFrame) -> str | None:
 
 
 def _avg_column_name(df: pd.DataFrame) -> str | None:
-    for candidate in ("Avg", "Average"):
+    for candidate in ("Avg", "Average", "Value"):
         if candidate in df.columns:
             return candidate
     return None
@@ -114,6 +121,26 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     metric_id=metric_id,
                     kind=CompositeKind.COLLECT_SUM,
                     refs=refs,
+                )
+            )
+
+    collect_ratio_specs = df.attrs.get(COLLECT_RATIO_SPECS_ATTR)
+    if isinstance(collect_ratio_specs, dict):
+        for metric_id, parts in collect_ratio_specs.items():
+            if not isinstance(parts, dict) or metric_id not in df.index:
+                continue
+            nums = parts.get("numerator")
+            dens = parts.get("denominator")
+            if not isinstance(nums, list) or not isinstance(dens, list):
+                continue
+            graph.collectable_row_names.update(nums)
+            graph.collectable_row_names.update(dens)
+            graph.composites.append(
+                CompositeDef(
+                    metric_id=metric_id,
+                    kind=CompositeKind.COLLECT_RATIO,
+                    refs=list(nums) + list(dens),
+                    weight_meta={"numerator": nums, "denominator": dens},
                 )
             )
 
@@ -226,6 +253,7 @@ def _evaluate_weighted_composite(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, Any],
     empirical_peaks: dict[str, Any],
+    pass_layout: Optional[PassLayout] = None,
 ) -> float | str:
     avg_col = _avg_column_name(df)
     if avg_col is None:
@@ -253,11 +281,14 @@ def _evaluate_weighted_composite(
             )
             return "N/A"
 
+        bound_weight = resolve_weight_counter_column(
+            weight_counter, ref_name, df, pass_layout
+        )
         ratio_series_list.append(
             per_dispatch_ratio_series(built_avg, raw_pmc_df, sys_vars, empirical_peaks)
         )
         weight_series_list.append(
-            _weight_counter_per_dispatch(weight_counter, raw_pmc_df)
+            _weight_counter_per_dispatch(bound_weight, raw_pmc_df)
         )
 
     merged = merge_dispatch_weighted_avg(ratio_series_list, weight_series_list)
@@ -295,12 +326,59 @@ def _evaluate_collect_sum_composite(
     return float(merged)
 
 
+def _evaluate_collect_ratio_composite(
+    composite: CompositeDef,
+    df: pd.DataFrame,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
+) -> float | str:
+    avg_col = _avg_column_name(df)
+    if avg_col is None:
+        return "N/A"
+
+    nums = composite.weight_meta.get("numerator")
+    dens = composite.weight_meta.get("denominator")
+    if not isinstance(nums, list) or not isinstance(dens, list):
+        console_warning("COLLECT_RATIO: missing numerator/denominator metadata.")
+        return "N/A"
+
+    num_series: list[pd.Series] = []
+    den_series: list[pd.Series] = []
+    for ref_name in nums:
+        built = _lookup_collectable_built_avg(df, ref_name, avg_col)
+        if built is None:
+            console_warning(
+                f"COLLECT_RATIO: numerator collectable '{ref_name}' not found."
+            )
+            return "N/A"
+        num_series.append(
+            per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+        )
+    for ref_name in dens:
+        built = _lookup_collectable_built_avg(df, ref_name, avg_col)
+        if built is None:
+            console_warning(
+                f"COLLECT_RATIO: denominator collectable '{ref_name}' not found."
+            )
+            return "N/A"
+        den_series.append(
+            per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+        )
+
+    merged = merge_dispatch_collect_ratio(num_series, den_series)
+    if pd.isna(merged):
+        return "N/A"
+    return float(merged)
+
+
 def apply_composite_metrics(
     dfs: dict[int, pd.DataFrame],
     dfs_type: dict[int, str],
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, Any],
     empirical_peaks: dict[str, Any],
+    pass_layout: Optional[PassLayout] = None,
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
     for df_id, df in dfs.items():
@@ -318,10 +396,19 @@ def apply_composite_metrics(
                 continue
             if composite.kind is CompositeKind.WEIGHTED_AVG:
                 result = _evaluate_weighted_composite(
-                    composite, df, raw_pmc_df, sys_vars, empirical_peaks
+                    composite,
+                    df,
+                    raw_pmc_df,
+                    sys_vars,
+                    empirical_peaks,
+                    pass_layout=pass_layout,
                 )
             elif composite.kind is CompositeKind.COLLECT_SUM:
                 result = _evaluate_collect_sum_composite(
+                    composite, df, raw_pmc_df, sys_vars, empirical_peaks
+                )
+            elif composite.kind is CompositeKind.COLLECT_RATIO:
+                result = _evaluate_collect_ratio_composite(
                     composite, df, raw_pmc_df, sys_vars, empirical_peaks
                 )
             else:
