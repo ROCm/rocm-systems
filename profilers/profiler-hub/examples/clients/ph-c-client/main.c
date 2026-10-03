@@ -345,7 +345,10 @@ read_track_samples_task(void* user_data)
 }
 
 static void
-read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
+read_all_tracks_async(ph_ctx_t               ctx,
+                      const ph_track_list_t* tracks,
+                      const char*            run_name,
+                      const char*            bench_label)
 {
     const uint32_t       n            = tracks->list_size;
     ph_future_t*         futures      = malloc(sizeof(ph_future_t) * n);
@@ -398,9 +401,9 @@ read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
 
     const double read_ms =
         (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
-    record_bench("read all tracks (async)", read_ms);
+    record_bench(bench_label, read_ms);
 
-    printf("\n=== Read all tracks (async), all data ===\n");
+    printf("\n=== Read all tracks (async), all data: %s ===\n", run_name);
     printf("tracks:          %d (%lu duration, %lu counter)\n",
            n,
            duration_tracks,
@@ -448,7 +451,9 @@ main(int argc, char** argv)
         demo_track_samples(ctx, counter_track_id);
     }
 
-    read_all_tracks_async(ctx, &node.track_list);
+    read_all_tracks_async(
+        ctx, &node.track_list, "1st run (cold)", "read all tracks 1st (cold)");
+    read_all_tracks_async(ctx, &node.track_list, "2nd run", "read all tracks 2nd run");
 
     TIME_CALL("ph_ctx_free", ph_ctx_free(ctx));
 
