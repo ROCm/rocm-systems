@@ -1310,7 +1310,12 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
     }
 
     // Process only one queue error.
-    if (error_code & 0x401) {  // insufficient scratch, wave64 or wave32
+    // 0x1000 is written by the WSL PM4 translator when scratch cannot be
+    // allocated. It is not a CP scratch fault: do not reduce occupancy or
+    // retry. The status stays HSA_STATUS_ERROR_OUT_OF_RESOURCES.
+    if ((error_code & 0x1000) == 0x1000) {
+      errorCode = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    } else if (error_code & 0x401) {  // insufficient scratch, wave64 or wave32
       queue->HandleInsufficientScratch(error_code, waitVal, changeWait);
 
       // Out of scratch - promote error

@@ -131,6 +131,12 @@ struct hsakmtRuntime {
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
   std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
+
+  /* AQL-to-PM4 dispatch watchdog, in ms. 0 disables it. The default follows KFD's 9s queue
+     preemption timeout and stays clear of the 2s TDR. When TDR is disabled the fence never
+     becomes UINT64_MAX, so a ring that stops moving takes the device-lost exit. */
+  uint32_t dispatch_timeout_ms_ = 10000;
+
   union {
     struct {
       uint64_t use_pm4_ : 1;
