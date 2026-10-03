@@ -40,6 +40,12 @@ set_target_properties(oclgl PROPERTIES
     CXX_EXTENSIONS OFF
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/ocltst
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/ocltst)
+if(UNIX AND NOT APPLE)
+  set_target_properties(oclgl PROPERTIES
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
+  # Use RUNPATH (not RPATH) so LD_LIBRARY_PATH can override
+  target_link_options(oclgl PRIVATE "LINKER:--enable-new-dtags")
+endif()
 
 target_compile_definitions(oclgl
     PRIVATE
@@ -90,5 +96,9 @@ foreach(TEST ${TESTS})
         USES_TERMINAL)
 endforeach()
 
-INSTALL(TARGETS oclgl DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
+INSTALL(TARGETS oclgl
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT ocltst)
 INSTALL(FILES oclgl.exclude DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
