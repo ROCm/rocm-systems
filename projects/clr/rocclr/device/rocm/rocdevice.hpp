@@ -80,6 +80,12 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   } Flags;
 
   Flags flags_;
+  //! Native prewait metadata stamped by the producer when this signal was attached:
+  //! the HW queue id and the queue index of the oldest of its newest
+  //! kNativeWaitMinDispatches kernels. Advisory only: a consumer rechecks the
+  //! producer queue's read index before it admits a native prewait.
+  std::atomic<uint64_t> native_threshold_index_{std::numeric_limits<uint64_t>::max()};
+  std::atomic<uint64_t> native_producer_queue_id_{std::numeric_limits<uint64_t>::max()};
 
   //! Cached timing data - populated when signal completes, avoids repeated HSA calls
   struct CachedTiming {
@@ -465,6 +471,9 @@ class Device : public NullDevice {
                           const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
+  //! Allocates uncached, executable host memory for CPU-written GPU command buffers
+  void* hostExecutableAlloc(size_t size) const;
+
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                         uint64_t* size_copied, int32_t* status) override;
   virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -684,6 +693,11 @@ class Device : public NullDevice {
 
   // Returns the number of allocated queues for a given priority on this device
   uint32_t NumQueues(uint qIndex) const { return num_queues_[qIndex].load(); }
+
+  //! Reads the read index of a pooled HW queue by its id. Never waits for the queue pool
+  //! lock: an unknown or released queue, lock contention, or an unusually large pool
+  //! return false, and the caller keeps the ordinary AQL wait.
+  bool TryNativeQueueReadIndex(uint64_t queue_id, uint64_t* read_index);
 
   //! enum for keeping the total and available queue priorities
   enum QueuePriority : uint { Low = 0, Normal = 1, High = 2, Total = 3 };
