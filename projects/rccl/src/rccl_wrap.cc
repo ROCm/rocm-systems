@@ -1914,16 +1914,19 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (5) CE via registered symmetric windows / force (enqueue finishes the launch).
-    // Float8 has no CE reduce kernel; rcclUseCeReduceScatter already rejects it
-    // on the early arms. Shard length is not checked: pipeline chunks are 16-byte
-    // aligned and the tail is scalar. CE intentionally has priority over symk
-    // when both are eligible; symk remains the fallback when CE is unavailable.
+    // Opt-in same as the early arms: RCCL_CE_REDUCESCATTER=0 must keep this path
+    // closed even with -R 2 + CTAPolicy ZERO. Float8 has no CE reduce kernel;
+    // rcclUseCeReduceScatter already rejects it on the early arms. Shard length
+    // is not checked: pipeline chunks are 16-byte aligned and the tail is scalar.
+    // CE intentionally has priority over symk when both are eligible; symk remains
+    // the fallback when CE is unavailable.
     bool ceAvailable = ceArGraphAllowed && !hasSysmemSegment && symReg;
+    if (!rcclParamCeReduceScatter()) ceAvailable = false;
     const bool ceReduceScatterOpSupported =
       (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-    const bool ceReduceScatterKernelOk = datatype != ncclFloat8e4m3 && datatype != ncclFloat8e5m2;
-    if (!ceReduceScatterOpSupported || !ceReduceScatterKernelOk || !rcclParamCeReduceScatter()) ceAvailable = false;
-    if (ceAvailable && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+    const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncReduceScatter);
+    const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || totalBytes <= ceArRegMax;
+    if (ceAvailable && ceRegInWindow && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
