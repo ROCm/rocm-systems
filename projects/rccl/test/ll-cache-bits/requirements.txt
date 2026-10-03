@@ -1,0 +1,4 @@
+# Testing dependencies for the LL cache-bit guard.
+# The guard itself only uses the Python standard library plus the ROCm LLVM
+# tools; pytest is the only external dependency.
+pytest
