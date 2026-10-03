@@ -4,8 +4,8 @@
 """Bounded systems-component selections on native gfx942 or rocJITsu.
 
 Selection conventions follow TheRock at THEROCK_REF. This is a prototype:
-RCCL covers one simulated or two native GPUs; rocSHMEM covers host units in
-simulation or four native GPUs. These topology differences are recorded.
+RCCL covers one simulated or two native GPUs; rocSHMEM covers self-targeted
+host atomics in simulation or two native GPUs. These differences are recorded.
 """
 
 import argparse
@@ -22,6 +22,7 @@ import rocjitsu_suite_runner as runner
 THEROCK_REF = "e0e238c0323f76aeabdd348cfd3798a653820fdc"
 SUITES = ("aqlprofile", "rocprofiler-sdk", "rocprofiler-compute", "amdsmi",
           "kfdtest", "hipfile", "rccl", "rocshmem", "rocprofiler-systems")
+ROCSHMEM_NATIVE_TESTS = ("init_n2_w1_z1_uuid", "p_n2_w1_z1_128B_uuid")
 
 
 def require_file(path: Path) -> Path:
@@ -65,13 +66,22 @@ def suite_command(suite: str, root: Path, therock: Path,
         return [str(require_file(root / "bin/all_reduce_perf")), "-b", "8", "-e", "1M",
                 "-f", "2", "-g", gpu_count, "-n", "1", "-w", "1", "-c", "1"], f"{gpu_count}-GPU all-reduce correctness smoke; topology differs between backends"
     if suite == "rocshmem":
+        binary = require_file(root / "bin/rocshmem_functional_tests")
         if backend == "native-gfx942":
             directory = root / "bin/rocshmem"
             require_file(directory / "CTestTestfile.cmake")
-            return ["ctest", "--test-dir", str(directory), "-R", "^unit_tests_n4$",
-                    "--no-tests=error", "--output-on-failure", "--timeout", "900", "-V"], "four-GPU MPI unit_tests_n4; topology differs from simulator host units"
-        return [str(require_file(root / "bin/rocshmem_unit_tests")),
-                "--gtest_filter=EnvVar*"], "singleton host EnvVar unit tests; no GPU communication coverage"
+            require_file(root / "share/rocshmem/test_wrapper.sh")
+            selection = "^(" + "|".join(ROCSHMEM_NATIVE_TESTS) + ")$"
+            command = ["ctest", "--test-dir", str(directory), "-R", selection]
+            manifest = json.loads(subprocess.check_output(
+                command + ["--show-only=json-v1"], text=True, timeout=30))
+            names = [test["name"] for test in manifest.get("tests", [])]
+            if sorted(names) != sorted(ROCSHMEM_NATIVE_TESTS):
+                raise RuntimeError(f"Required rocSHMEM functional tests are missing: {names}")
+            return command + ["--no-tests=error", "--output-on-failure", "--parallel", "1",
+                              "--timeout", "300", "-V"], "two-GPU SLR initialization and 128-byte put; topology differs from simulator self-targeted host atomics"
+        return [str(binary), "-a", "130", "-w", "1", "-z", "1", "-s", "8",
+                "-n", "1", "-nskip", "0", "-localbuftype", "heap"], "one-PE SLR IPC Host_Amo_Self functional correctness; no inter-GPU communication coverage"
     if suite == "rocprofiler-sdk":
         script = pinned_script(therock, "test_rocprofiler_sdk.py")
         require_file(root / "share/rocprofiler-sdk/tests/CMakeLists.txt")
@@ -83,7 +93,18 @@ def suite_command(suite: str, root: Path, therock: Path,
     raise ValueError(f"Unknown suite: {suite}")
 
 
-def has_executed_tests(log: str, suite: str) -> bool:
+def has_executed_tests(log: str, suite: str, backend: str = "rocjitsu") -> bool:
+    if suite == "rocshmem":
+        if backend == "native-gfx942":
+            return all(re.search(r"^\d+:.*\bTest\s+#\d+:\s*" + re.escape(name)
+                                 + r"\s+\.+\s+Passed\b", log, re.MULTILINE)
+                       for name in ROCSHMEM_NATIVE_TESTS)
+        # The factory can return no testers for an unsupported backend. Require
+        # the requested tester and its post-verification measurement, not exit 0 alone.
+        marker = r"### Creating Test:\s*Host_Amo_Self\s+B=ipc PE=1\s"
+        number = r"(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|-?inf|-?nan)"
+        row = r"^\d+:\s+[1-9]\d*\s+8\s+1\s+" + number + r"\s+" + number + r"\s+" + number + r"\s*$"
+        return bool(re.search(marker, log) and re.search(row, log, re.MULTILINE))
     # Match test output, never the wrapper's own synthetic Passed summary.
     patterns = [r"\[\s*PASSED\s*\]\s+[1-9]\d*\s+tests?",
                 r"^\d+:.*\bTest\s+#\d+:.*\bPassed\b",
@@ -166,6 +187,10 @@ def main() -> int:
                    OMPI_ALLOW_RUN_AS_ROOT="1", OMPI_ALLOW_RUN_AS_ROOT_CONFIRM="1")
         if (root / "bin/mpirun").is_file():
             env.update(OPAL_PREFIX=str(root), PRTE_PREFIX=str(root), PMIX_PREFIX=str(root))
+        if args.suite == "rocshmem" and args.backend == "rocjitsu":
+            env.update(ROCSHMEM_BACKEND="ipc", ROCSHMEM_SLR_NP="1",
+                       ROCSHMEM_TEST_UUID="1", ROCSHMEM_MAX_NUM_CONTEXTS="1",
+                       ROCSHMEM_HEAP_SIZE="67108864")
         env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), str(root / "bin"), env.get("PATH", "")))
         libraries = [root / "lib", root / "lib/rocm_sysdeps/lib",
                      root / "lib/rocprofiler-systems",
@@ -178,7 +203,7 @@ def main() -> int:
             result = runner.run_command(command, args.suite, args.timeout_seconds,
                 runner.native_test_env(env), str(root))
         log = "\n".join(result["log_lines"]) + "\n"
-        if result["passed"] and has_executed_tests(log, args.suite):
+        if result["passed"] and has_executed_tests(log, args.suite, args.backend):
             status = "passed"
         elif result["passed"]:
             log += "FAILED: no evidence of executed tests; empty or all-skipped selections cannot pass.\n"

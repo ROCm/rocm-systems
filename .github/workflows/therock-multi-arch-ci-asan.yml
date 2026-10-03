@@ -39,8 +39,8 @@ on:
         default: "1"
       rocjitsu_suites:
         type: choice
-        description: "Systems suites: runtime HIP/ROCr, five additional core components, or all nine additional components"
-        options: [runtime, additional, all-additional]
+        description: "Systems suites: runtime HIP/ROCr, five additional core components, all nine additional components, or rocshmem only"
+        options: [runtime, additional, all-additional, rocshmem]
         default: runtime
       linux_amdgpu_families:
         type: string
@@ -85,7 +85,7 @@ jobs:
       build_variant: ${{ inputs.run_rocjitsu && 'host-asan' || 'asan' }}
       # Additional storage, communication and profiler suites need their stages.
       # RCCL also depends on emulation. Math-library stages stay excluded.
-      build_stages: ${{ inputs.run_rocjitsu && (inputs.rocjitsu_suites == 'all-additional' && 'compiler-runtime,runtime-tests,emulation,comm-libs,storage-libs,profiler-apps' || 'compiler-runtime,runtime-tests') || '' }}
+      build_stages: ${{ inputs.run_rocjitsu && (inputs.rocjitsu_suites == 'rocshmem' && 'compiler-runtime,runtime-tests,emulation,comm-libs' || inputs.rocjitsu_suites == 'all-additional' && 'compiler-runtime,runtime-tests,emulation,comm-libs,storage-libs,profiler-apps' || 'compiler-runtime,runtime-tests') || '' }}
       build_native_linux: ${{ !inputs.run_rocjitsu }}
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
@@ -153,7 +153,7 @@ jobs:
     if: >-
       ${{
         always() && !cancelled() && inputs.run_rocjitsu &&
-        inputs.rocjitsu_suites == 'all-additional' && !inputs.rocjitsu_native_comparison &&
+        (inputs.rocjitsu_suites == 'all-additional' || inputs.rocjitsu_suites == 'rocshmem') && !inputs.rocjitsu_native_comparison &&
         (
           (inputs.rocjitsu_artifacts_run_id != '' &&
            needs.setup.result == 'skipped' && needs.linux_build_and_test.result == 'skipped') ||
@@ -168,7 +168,7 @@ jobs:
       artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
       native_gpu: true
       hsa_xnack: ${{ inputs.rocjitsu_hsa_xnack || '1' }}
-      suites: all-additional
+      suites: ${{ inputs.rocjitsu_suites }}
 
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary

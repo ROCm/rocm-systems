@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -41,7 +43,8 @@ class AdditionalSuitesTest(unittest.TestCase):
     def test_topology_specific_selections(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for path in ("bin/all_reduce_perf", "bin/rocshmem_unit_tests", "bin/rocshmem/CTestTestfile.cmake"):
+            for path in ("bin/all_reduce_perf", "bin/rocshmem_functional_tests",
+                         "bin/rocshmem/CTestTestfile.cmake", "share/rocshmem/test_wrapper.sh"):
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.touch()
@@ -50,16 +53,59 @@ class AdditionalSuitesTest(unittest.TestCase):
                 self.assertEqual(command[command.index("-g") + 1], count)
                 self.assertIn("topology differs", scope)
             command, scope = suites.suite_command("rocshmem", root, root, "rocjitsu")
-            self.assertIn("--gtest_filter=EnvVar*", command)
-            self.assertIn("no GPU communication", scope)
-            command, scope = suites.suite_command("rocshmem", root, root, "native-gfx942")
-            self.assertIn("^unit_tests_n4$", command)
+            self.assertEqual(command[command.index("-a") + 1], "130")
+            self.assertIn("no inter-GPU communication", scope)
+            manifest = json.dumps({"tests": [{"name": name} for name in suites.ROCSHMEM_NATIVE_TESTS]})
+            with mock.patch.object(suites.subprocess, "check_output", return_value=manifest) as discover:
+                command, scope = suites.suite_command("rocshmem", root, root, "native-gfx942")
+            self.assertIn("--show-only=json-v1", discover.call_args.args[0])
+            self.assertIn("^(init_n2_w1_z1_uuid|p_n2_w1_z1_128B_uuid)$", command)
             self.assertIn("--no-tests=error", command)
+            for tests in ([], [{"name": "unit_tests_n4"}], [{"name": suites.ROCSHMEM_NATIVE_TESTS[0]}]):
+                with mock.patch.object(suites.subprocess, "check_output", return_value=json.dumps({"tests": tests})):
+                    with self.assertRaises(RuntimeError):
+                        suites.suite_command("rocshmem", root, root, "native-gfx942")
+
+    def test_rocshmem_requires_actual_selected_test_execution(self):
+        marker = "1: ### Creating Test:\tHost_Amo_Self\tB=ipc PE=1 W=1 Z=1 ###\n"
+        row = "1: 8              8              1                  0.00                inf                inf\n"
+        self.assertTrue(suites.has_executed_tests(marker + row, "rocshmem"))
+        for log in ("", marker, row, marker.replace("B=ipc", "B=gda") + row,
+                    marker + row.replace("8              1", "8              0")):
+            self.assertFalse(suites.has_executed_tests(log, "rocshmem"))
+        passed = [f"1: 1/2 Test #1: {name} .... Passed 0.2 sec\n" for name in suites.ROCSHMEM_NATIVE_TESTS]
+        self.assertTrue(suites.has_executed_tests("".join(passed), "rocshmem", "native-gfx942"))
+        self.assertFalse(suites.has_executed_tests(passed[0], "rocshmem", "native-gfx942"))
+        self.assertFalse(suites.has_executed_tests(passed[0] + passed[1].replace("Passed", "***Skipped"),
+                                                 "rocshmem", "native-gfx942"))
 
     def test_missing_artifact_is_not_silently_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):
                 suites.suite_command("hipfile", Path(tmp), Path(tmp))
+
+    def test_rocshmem_simulator_environment_and_failed_child(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "bin/rocshmem_functional_tests").touch()
+            argv = ["adapter", "--suite", "rocshmem", "--backend", "rocjitsu",
+                    "--rocm-root", tmp, "--log-dir", str(root / "logs"),
+                    "--rocjitsu", "simulator", "--config", "gfx942"]
+            result = {"passed": False, "log_lines": [
+                "1: ### Creating Test: Host_Amo_Self B=ipc PE=1 W=1 Z=1 ###",
+                "1: 8 8 1 0.00 inf inf"]}
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.dict(os.environ, {"ROCSHMEM_BACKEND": "gda", "ROCSHMEM_SLR_NP": "8"}), \
+                    mock.patch.object(suites.runner, "run_under_rocjitsu", return_value=result) as run:
+                self.assertEqual(suites.main(), 1)
+                env = run.call_args.args[5]
+                self.assertEqual(env["ROCSHMEM_BACKEND"], "ipc")
+                self.assertEqual(env["ROCSHMEM_SLR_NP"], "1")
+                self.assertEqual(env["ROCSHMEM_TEST_UUID"], "1")
+                self.assertEqual(env["ROCSHMEM_HEAP_SIZE"], "67108864")
+                self.assertEqual(os.environ["ROCSHMEM_BACKEND"], "gda")
+            self.assertEqual((root / "logs/rocshmem.result").read_text(), "failed\n")
 
     def test_wrong_therock_revision_rejected(self):
         with mock.patch.object(suites.subprocess, "check_output", return_value="wrong\n"):
