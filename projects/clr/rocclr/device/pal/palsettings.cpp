@@ -287,6 +287,17 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   enableExtension(ClKhrD3d9Sharing);
   enableExtension(ClKhrD3d10Sharing);
   enableExtension(ClKhrD3d11Sharing);
+
+  // External memory/semaphore interop. The counterpart of the block in
+  // roc::Settings::create(); PAL reaches the same D3DKMT objects, but through
+  // OpenExternalSharedGpuMemory/OpenExternalSharedQueueSemaphore rather than
+  // libhsakmt, which is why the semaphore handle list in PalDevice can include the
+  // KMT flavour that the ROCr path has to leave out.
+  enableExtension(ClKhrSemaphore);
+  enableExtension(ClKhrExternalMemory);
+  enableExtension(ClKhrExternalSemaphore);
+  enableExtension(ClKhrExternalMemoryWin32);
+  enableExtension(ClKhrExternalSemaphoreWin32);
 #endif  // _WIN32
 
   // Enable some OpenCL 2.0 extensions

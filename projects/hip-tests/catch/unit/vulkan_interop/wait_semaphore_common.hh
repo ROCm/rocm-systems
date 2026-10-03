@@ -12,8 +12,10 @@
 
 constexpr bool enable_validation = false;
 
-template <typename F> void WaitExternalSemaphoreCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void WaitExternalSemaphoreCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
 
   constexpr uint32_t count = 1;
   const auto src_storage = vkt.CreateMappedStorage<int>(count, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
@@ -65,8 +67,10 @@ template <typename F> void WaitExternalSemaphoreCommon(F f) {
 }
 
 #if HT_NVIDIA
-template <typename F> void WaitExternalTimelineSemaphoreCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void WaitExternalTimelineSemaphoreCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
 
   const auto [wait_value, signal_value] =
       GENERATE(std::make_pair(2, 2), std::make_pair(2, 3), std::make_pair(3, 2));
@@ -100,8 +104,10 @@ template <typename F> void WaitExternalTimelineSemaphoreCommon(F f) {
 }
 #endif
 
-template <typename F> void WaitExternalMultipleSemaphoresCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void WaitExternalMultipleSemaphoresCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
 
 #if HT_AMD
   constexpr auto second_semaphore_type = VK_SEMAPHORE_TYPE_BINARY;

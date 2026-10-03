@@ -25,8 +25,10 @@
 #include "platform/external_memory.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -311,18 +313,21 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   // Check if this is D3D interop (vs GL interop)
   amd::InteropObject* interopObj = owner()->getInteropObj();
+
+  const bool querySrd = isImage;
+
   // SRD and size are only needed for images; pass nullptr for plain buffers.
-  void* srdPtr = isImage ? amdImageDesc_->data : nullptr;
-  UINT srdSize = isImage ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
+  void* srdPtr = querySrd ? amdImageDesc_->data : nullptr;
+  UINT srdSize = querySrd ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
   size_t sizeHint = 0;
   // The *Interop::Export calls below fill a full driver SRD into data[0..7], so mark the descriptor
   // as carrying an SRD (version 1) before interopMapBuffer, which then skips the metadata query.
-  if (isImage) amdImageDesc_->version = 1;
+  if (querySrd) amdImageDesc_->version = 1;
   if (interopObj->asD3D11Object()) {
     // D3D11 interop
     D3D11Object* d3d11Obj = interopObj->asD3D11Object();
     if (!D3D11Interop::Export(this, d3d11Obj, &handle, &offset,
-                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
+                              srdPtr, querySrd ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
       LogError("D3D11Interop::Export failed for buffer");
       return false;
     }
@@ -334,6 +339,20 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
       LogError("D3D10Interop::Export failed for buffer");
       return false;
     }
+  } else if (interopObj->asD3D9Object()) {
+    // D3D9 media surface sharing interop. Query the driver SRD the same way the D3D10/D3D11
+    // branches above do: ROCr's addrlib differs from the one PAL rebuilds tiling with in
+    // Resource::CreateInterop, so only the UMD can describe the surface correctly here.
+    D3D9Object* d3d9Obj = interopObj->asD3D9Object();
+    if (!D3D9Interop::Export(this, d3d9Obj, &handle, &offset,
+                             srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
+      LogError("D3D9Interop::Export failed for buffer");
+      return false;
+    }
+    // Export zeroes srdSize when the DXX extension could not describe the surface - a plain,
+    // non-Ex D3D9 device, or a driver that declines this format. Unstamp the descriptor so
+    // interopMapBuffer falls back to the WDDM surface-metadata path.
+    if (isImage && srdSize == 0) amdImageDesc_->version = 0;
   } else if (interopObj->asGLObject()) {
     // GL interop
     if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset,
@@ -348,6 +367,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   if (mapStatus != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
+
 
   if (interopObj->asGLObject()) {
     if(!GlInterop::Detach(owner(), resHandle)) {
@@ -1044,8 +1064,15 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     return (success = (deviceMemory_ != nullptr));
   }
 
-  // Interop buffer
-  if (owner()->isInterop()) {
+  // Interop buffer.
+  //
+  // Views must be excluded explicitly. In OpenCL mode amd::Memory's child constructor
+  // inherits interopObj_ from the parent (memory.cpp, guarded by amd::IS_HIP), so a
+  // sub-buffer of an ExternalBuffer also reports isInterop(). Without this guard it
+  // would reach interopMapBuffer and map the external handle a second time instead of
+  // falling through to the sub-buffer branch below. Image::create already orders its
+  // parent check first; this keeps Buffer::create consistent with it.
+  if (owner()->isInterop() && (owner()->parent() == nullptr)) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
     if (ext_memory != nullptr) {
@@ -1533,8 +1560,10 @@ bool Image::createInteropImage() {
     }
   }
 #ifdef _WIN32
-  // Handle D3D interop images (D3D11/D3D10 supported)
-  else if (owner()->getInteropObj()->asD3D11Object() || owner()->getInteropObj()->asD3D10Object()) {
+  // Handle D3D interop images (D3D11/D3D10/D3D9 supported)
+  else if (owner()->getInteropObj()->asD3D11Object() ||
+           owner()->getInteropObj()->asD3D10Object() ||
+           owner()->getInteropObj()->asD3D9Object()) {
     // For D3D, we use targetType=0 and miplevel from D3D object
     // The createInteropBuffer will detect D3D object type and handle appropriately
     if (!createInteropBuffer(0, 0)) {
@@ -1557,20 +1586,25 @@ bool Image::createInteropImage() {
     return (err == HSA_STATUS_SUCCESS);
   }
 
-  // For D3D and other GL textures, use metadata descriptor
-  image_metadata desc;
-  if (!desc.create(amdImageDesc_)) {
-    return false;
-  }
+  // For D3D and other GL textures, use metadata descriptor. image_metadata only accepts a full
+  // driver SRD (version 1); D3D9 instead carries an opaque WDDM surface-metadata blob, exactly
+  // like the ExternalMemory path above, and the image manager reconstructs the SRD from it. The
+  // patching below is GL-only anyway, so skip the whole block when there is no SRD to patch.
+  if (amdImageDesc_->version == 1) {
+    image_metadata desc;
+    if (!desc.create(amdImageDesc_)) {
+      return false;
+    }
 
-  // Set mip level if GL object
-  if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
-    return false;
-  }
+    // Set mip level if GL object
+    if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
+      return false;
+    }
 
-  // Set cubemap face if GL cubemap
-  if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
-    desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
+    // Set cubemap face if GL cubemap
+    if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
+      desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
+    }
   }
 
   hsa_status_t err =
