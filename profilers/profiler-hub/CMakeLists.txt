@@ -22,6 +22,11 @@ option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PH_USE_NOMUTEX_OPTIMIZATION
+    "Open SQLite connections without the per-connection mutex. Faster, but every connection must then be used by one thread at a time (pooled connections are; a standalone reader_t or writer shared between threads is not)."
+    ON
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
@@ -56,6 +61,13 @@ target_compile_definitions(
     PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
 )
+
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub-objects
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
 
 target_compile_options(
     profiler-hub-objects
