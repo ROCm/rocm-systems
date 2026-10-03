@@ -1,11 +1,11 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-name: Host-ASAN runtime tests under rocJITsu
+name: Host-ASAN systems comparison tests
 
-# Runtime-only prototype: HIP smoke (excluding the three printf stress cases
-# from #12666) and the ROCr QUICK_TESTS selection. This is not full systems
-# coverage. Runtime, tests, compiler and ASAN runtime all come from one build.
+# Paired systems subsets on rocJITsu and native gfx942. Runtime, component
+# tests, compiler and ASAN runtime all come from the same source build.
+# Additional suites are exploratory and do not imply simulator support.
 on:
   workflow_call:
     inputs:
@@ -15,6 +15,9 @@ on:
       artifacts_run_id:
         required: true
         type: string
+      suites:
+        type: string
+        default: runtime
       native_gpu:
         type: boolean
         default: false
@@ -29,16 +32,16 @@ permissions:
 jobs:
   simulator:
     name: Host-ASAN ${{ inputs.native_gpu && 'native gfx942' || 'rocJITsu' }} / ${{ matrix.suite }}
-    runs-on: ${{ inputs.native_gpu && 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' || 'aws-linux-scale-rocm-large' }}
+    runs-on: ${{ inputs.native_gpu && ((matrix.suite == 'rccl' || matrix.suite == 'rocshmem') && 'linux-gfx942-8gpu-ossci-rocm' || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm') || 'aws-linux-scale-rocm-large' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        suite: [hip-tests, rocrtst]
+        suite: ${{ fromJSON(inputs.suites == 'all-additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest","hipfile","rccl","rocshmem","rocprofiler-systems"]' || inputs.suites == 'additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest"]' || '["hip-tests","rocrtst"]') }}
     container:
       image: ubuntu:24.04
       # Use the native CI device allocation; do not override its GPU isolation.
-      options: ${{ inputs.native_gpu && '--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST' || '' }}
+      options: ${{ inputs.native_gpu && '--cap-add SYS_PTRACE --cap-add PERFMON --ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST' || '' }}
     defaults:
       run:
         shell: bash
@@ -57,7 +60,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential binutils ca-certificates cmake curl git ninja-build \
-            pkg-config python3 python3-venv xz-utils zstd
+            pkg-config python3 python3-venv python3-dev xz-utils zstd libnuma-dev libdrm-dev libelf-dev libdw-dev libpci-dev libopenmpi-dev openmpi-bin libgtest-dev libgmock-dev
 
       - name: Checkout systems branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -109,6 +112,13 @@ jobs:
             --artifact-group gfx94X --amdgpu-targets gfx942 \
             --output-dir "$ROCM_ROOT" --flatten \
             '^core-hiptests_test_' '^amd-llvm_dev_' 2>&1 | tee logs/fetch-tests.log
+          if [[ "$SUITE" != hip-tests && "$SUITE" != rocrtst ]]; then
+            .venv/bin/python TheRock/build_tools/fetch_artifacts.py \
+              --run-id "$ARTIFACTS_RUN_ID" --run-github-repo "$GITHUB_REPOSITORY" \
+              --artifact-group gfx94X --amdgpu-targets gfx942 \
+              --output-dir "$ROCM_ROOT" --flatten --delete-after-extract \
+              '_(lib|run|dev|test)_' 2>&1 | tee logs/fetch-components.log
+          fi
           test -f "$ROCM_ROOT/share/hip/catch_tests/CTestTestfile.cmake"
           test -x "$ROCM_ROOT/bin/rocrtst64"
           test -x "$ROCM_ROOT/llvm/bin/clang"
@@ -160,6 +170,10 @@ jobs:
           timeout 120 env LD_PRELOAD="$ASAN_RUNTIME_PATH" \
             "$ROCM_ROOT/bin/rocminfo" > logs/rocminfo.log 2>&1
           grep -Eq 'Name: +gfx942' logs/rocminfo.log
+          visible_gpus=$(grep -Ec 'Name: +gfx942[[:space:]]*$' logs/rocminfo.log)
+          echo "Visible gfx942 agents: $visible_gpus" | tee logs/gpu-topology.log
+          if [[ "$SUITE" == rccl ]]; then test "$visible_gpus" -ge 2; fi
+          if [[ "$SUITE" == rocshmem ]]; then test "$visible_gpus" -ge 4; fi
 
       - name: Record effective runtime XNACK mode
         run: |
@@ -177,6 +191,20 @@ jobs:
           python3 .github/scripts/rocjitsu_suite_runner.py "${backend_args[@]}" \
             --name xnack-mode --cwd "$PWD" --timeout-seconds 120 \
             --log logs/xnack-mode.log -- "$PWD/print-hsa-xnack"
+
+      - name: Install selected component Python requirements
+        run: |
+          set -euo pipefail
+          case "$SUITE" in
+            rocprofiler-sdk) requirements=("$ROCM_ROOT/share/rocprofiler-sdk/tests/requirements.txt") ;;
+            rocprofiler-compute) requirements=("$ROCM_ROOT/libexec/rocprofiler-compute"/requirements*.txt) ;;
+            rocprofiler-systems) requirements=("$ROCM_ROOT/share/rocprofiler-systems/tests/requirements.txt") ;;
+            *) requirements=() ;;
+          esac
+          for requirement in "${requirements[@]}"; do
+            test -f "$requirement"
+            .venv/bin/pip install -r "$requirement" 2>&1 | tee -a logs/python-requirements.log
+          done
 
       - name: Run selected systems suite
         env:
@@ -202,7 +230,7 @@ jobs:
                 -L '^smoke$' \
                 --exclude-regex 'Unit_NonHost_Printf_(loop|multiple_Threads|BufferAvailability)' \
                 --no-tests=error --output-on-failure --parallel 1 --timeout 3600 -V
-          else
+          elif [[ "$SUITE" == rocrtst ]]; then
             python3 .github/scripts/rocjitsu_suite_runner.py \
               "${backend_args[@]}" --name rocrtst-quick \
               --cwd "$ROCM_ROOT/bin" --timeout-seconds 7200 \
@@ -210,6 +238,11 @@ jobs:
               "$ROCM_ROOT/bin/rocrtst64" "--gtest_filter=$ROCRTST_FILTER"
             # GoogleTest exits zero when a stale filter selects no tests.
             grep -Eq '\[ +PASSED +\] [1-9][0-9]* tests?\.' logs/rocrtst.log
+          else
+            .venv/bin/python .github/scripts/rocjitsu_additional_suites.py \
+              --suite "$SUITE" --backend "$TEST_BACKEND" --rocm-root "$ROCM_ROOT" \
+              --log-dir "$PWD/logs" --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+              --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json"
           fi
           echo passed > "logs/$SUITE.result"
 
@@ -226,7 +259,7 @@ jobs:
             echo "Backend: $TEST_BACKEND; runner: $RUNNER_NAME"
             echo "Requested HSA_XNACK=$REQUESTED_HSA_XNACK"
             if [[ -f logs/xnack-mode.log ]]; then cat logs/xnack-mode.log; fi
-            echo 'Subset: HIP smoke excluding three printf stress cases, or ROCr QUICK_TESTS.'
+            echo 'Selection: ${{ inputs.suites }}; see suite log for exact command and test selection.'
             echo 'Math-library suites are excluded. Missing artifacts, empty selections and timeouts fail.'
           } >> "$GITHUB_STEP_SUMMARY"
           test "$result" = passed

@@ -5,7 +5,7 @@
 #
 # Presubmit and on-demand ASAN builds. The ci:host-asan PR label selects
 # host-only instrumentation; ci:asan selects full ASAN. Dispatch defaults to
-# full ASAN, while run_rocjitsu selects host-ASAN HIP/ROCr tests on CPU.
+# full ASAN, while run_rocjitsu selects host-ASAN systems component tests.
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -22,7 +22,7 @@ on:
     inputs:
       run_rocjitsu:
         type: boolean
-        description: "Build host-ASAN runtime stages only, then run HIP smoke and ROCr quick suites under rocJITsu on CPU"
+        description: "Build host-ASAN systems stages without math libraries, then run selected suites under rocJITsu or natively"
         default: false
       rocjitsu_artifacts_run_id:
         type: string
@@ -37,6 +37,11 @@ on:
         description: "Requested XNACK mode for the host-ASAN comparison"
         options: ["0", "1"]
         default: "1"
+      rocjitsu_suites:
+        type: choice
+        description: "Systems suites: runtime HIP/ROCr, five additional core components, or all nine additional components"
+        options: [runtime, additional, all-additional]
+        default: runtime
       linux_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
@@ -78,9 +83,9 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
     with:
       build_variant: ${{ inputs.run_rocjitsu && 'host-asan' || 'asan' }}
-      # The simulator only consumes HIP/ROCr runtime suites. Excluded stages
-      # are skipped outright; no math-library baseline artifacts are copied.
-      build_stages: ${{ inputs.run_rocjitsu && 'compiler-runtime,runtime-tests' || '' }}
+      # Additional storage, communication and profiler suites need their stages.
+      # RCCL also depends on emulation. Math-library stages stay excluded.
+      build_stages: ${{ inputs.run_rocjitsu && (inputs.rocjitsu_suites == 'all-additional' && 'compiler-runtime,runtime-tests,emulation,comm-libs,storage-libs,profiler-apps' || 'compiler-runtime,runtime-tests') || '' }}
       build_native_linux: ${{ !inputs.run_rocjitsu }}
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
@@ -141,6 +146,29 @@ jobs:
       artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
       native_gpu: ${{ inputs.rocjitsu_native_comparison || false }}
       hsa_xnack: ${{ inputs.rocjitsu_hsa_xnack || '1' }}
+      suites: ${{ inputs.rocjitsu_suites || 'runtime' }}
+
+  additional_native_tests:
+    needs: [setup, linux_build_and_test]
+    if: >-
+      ${{
+        always() && !cancelled() && inputs.run_rocjitsu &&
+        inputs.rocjitsu_suites == 'all-additional' && !inputs.rocjitsu_native_comparison &&
+        (
+          (inputs.rocjitsu_artifacts_run_id != '' &&
+           needs.setup.result == 'skipped' && needs.linux_build_and_test.result == 'skipped') ||
+          (inputs.rocjitsu_artifacts_run_id == '' &&
+           needs.setup.result == 'success' && needs.linux_build_and_test.result == 'success' &&
+           needs.setup.outputs.enable_build_jobs == 'true')
+        )
+      }}
+    uses: ./.github/workflows/host-asan-rocjitsu-tests.yml
+    with:
+      therock_ref: e0e238c0323f76aeabdd348cfd3798a653820fdc
+      artifacts_run_id: ${{ inputs.rocjitsu_artifacts_run_id || github.run_id }}
+      native_gpu: true
+      hsa_xnack: ${{ inputs.rocjitsu_hsa_xnack || '1' }}
+      suites: all-additional
 
   multi_arch_ci_asan_summary:
     name: Multi-Arch CI ASAN Summary
@@ -150,6 +178,7 @@ jobs:
       - setup
       - linux_build_and_test
       - rocjitsu_tests
+      - additional_native_tests
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
