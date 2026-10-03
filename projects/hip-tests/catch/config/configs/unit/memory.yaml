@@ -850,6 +850,12 @@ memory:
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Misaligned:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Offsets:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast:
     <<: *level_2
     tags: [transfer]
@@ -910,6 +916,9 @@ memory:
     <<: *level_2
     tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_ExtOp_Negative:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_TooLarge:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
