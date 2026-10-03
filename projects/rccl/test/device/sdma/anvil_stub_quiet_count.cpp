@@ -12,4 +12,8 @@
 
 namespace sdma_anvil {
 __device__ unsigned long long g_sdmaStubQuietCount = 0;
+__device__ uint64_t* g_sdmaStubMarkDirtyOnQuiet = nullptr;
+__device__ uint64_t g_sdmaStubMarkBitOnQuiet = 0;
+__device__ uint64_t* g_sdmaStubObserveDirtyOnQuiet = nullptr;
+__device__ unsigned long long g_sdmaStubDirtyAtQuiet = 0;
 }

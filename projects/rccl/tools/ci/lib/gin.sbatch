@@ -122,6 +122,7 @@ rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
 rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_mpi_ut_bin="${rccl_build}/test/rccl-UnitTestsMPI"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -200,19 +201,30 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, and GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
-  cmake . \
+  # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
+  # CMakeLists.txt gates add_executable on it) and it defaults OFF. It also
+  # switches librccl to -fvisibility=default, because the MPI tests link
+  # internal symbols, so turning it on here forces librccl to recompile.
+  # install.sh cannot carry it: --enable-mpi-tests is refused on a release
+  # build, and the visibility branch only applies once BUILD_TESTS is on,
+  # which first happens at this step. MPI_PATH is read from the environment
+  # by test/CMakeLists.txt.
+  MPI_PATH="${MPI_HOME}" cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
+    -DENABLE_MPI_TESTS=ON \
+    -DMPI_PATH="${MPI_HOME}" \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
   make -j"${build_jobs}" \
     rccl-UnitTestsFixtures \
     rccl-UnitTestsGinAnvilPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
-    rccl-UnitTestsGinAnvilSdmaFactory
+    rccl-UnitTestsGinAnvilSdmaFactory \
+    rccl-UnitTestsMPI
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -229,10 +241,16 @@ if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
   ls -la "${rccl_build}/test" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsMPI not built at ${rccl_mpi_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_mpi_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
 echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
 echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
+echo "    rccl-UnitTestsMPI: ${rccl_mpi_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
