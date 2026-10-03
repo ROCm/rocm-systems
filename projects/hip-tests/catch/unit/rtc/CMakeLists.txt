@@ -36,6 +36,7 @@ set(AMD_TEST_SRC
     hipRtcSpirvCompilation.cc
     hiprtc_fp4.cc
     hiprtc_fp6.cc
+    hiprtcProfileRuntimeLink.cc
 )
 
 add_custom_target(copyRtcHeaders ALL
@@ -60,8 +61,7 @@ if(UNIX)
   set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
        RtcUtility.cpp
-       hiprtcComplrOptnTesting.cc
-       hiprtcProfileRuntimeLink.cc)
+       hiprtcComplrOptnTesting.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "nvidia")
