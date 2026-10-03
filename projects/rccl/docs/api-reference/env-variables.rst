@@ -314,6 +314,23 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``NCCL_GIN_MLOPART``
+        | Allows GPU-initiated networking (GIN) on a communicator that contains
+          a rank running on a GPU partition. An MI300X CPX partition is exposed
+          as PCI function ``.1`` through ``.7`` of the physical device, and
+          RCCL marks every such rank as partitioned; without this variable one
+          partitioned rank turns GIN off for the whole communicator. Doing so
+          can also clear symmetric memory support, which sends
+          ``ncclCommWindowRegister`` down a non-symmetric path. A partition
+          reaches xGMI and the network over the physical device's paths, so GIN
+          is as available to a partition as it is to the whole GPU. This
+          mirrors ``NCCL_NET_GDR_MLOPART``, which already lets a partition keep
+          GDR. See :ref:`device-api-gin` and :ref:`nps4_cpx_mi300_rccl`.
+      - | ``1``: Allow GIN on partitions (default).
+        | ``0``: Disable GIN whenever any rank of the communicator runs on a
+          partition, restoring the behavior from before this variable existed.
+        | A communicator with no partitioned rank is unaffected by either value.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
         | When unset, RCCL auto-selects an interface in this order:
