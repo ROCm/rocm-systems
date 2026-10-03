@@ -400,9 +400,14 @@ namespace RcclUnitTesting
   // Init + AllReduce across all devices, then check the RCCL log (NCCL_DEBUG_FILE) for NVLS activity.
   static void RunAllReduceAndCheckNoNvls()
   {
-    const char* logPathEnv = std::getenv("NCCL_DEBUG_FILE");
-    ASSERT_NE(logPathEnv, nullptr);
-    std::string const logPath = logPathEnv;
+    // A unique file created here, before RCCL reads NCCL_DEBUG_FILE at first init, so another
+    // local user cannot pre-create the log and make the checks below read planted content.
+    char logTemplate[] = "/tmp/rccl_nvls_enable_XXXXXX";
+    int const logFd = mkstemp(logTemplate);
+    ASSERT_GE(logFd, 0) << "mkstemp failed";
+    close(logFd);
+    std::string const logPath = logTemplate;
+    ASSERT_EQ(setenv("NCCL_DEBUG_FILE", logPath.c_str(), 1), 0);
 
     int numDevices;
     HIPCALL(hipGetDeviceCount(&numDevices));
@@ -481,13 +486,12 @@ namespace RcclUnitTesting
     }
 
     using Config = ProcessIsolatedTestRunner::TestConfig;
-    std::string const logPrefix = "/tmp/rccl_nvls_enable_" + std::to_string(getpid()) + "_";
-    auto nvlsEnableIs = [&logPrefix](const char* value) {
+    auto nvlsEnableIs = [](const char* value) {
       return Config(std::string("NvlsEnable_NoEffect_") + value, RunAllReduceAndCheckNoNvls)
         .withEnvironment({{"NCCL_NVLS_ENABLE", value},
                           {"NCCL_DEBUG", "INFO"},
-                          {"NCCL_DEBUG_SUBSYS", "INIT,NVLS,REG"},
-                          {"NCCL_DEBUG_FILE", logPrefix + value + ".log"}});
+                          {"NCCL_DEBUG_SUBSYS", "INIT,NVLS,REG"}})
+        .withTimeout(std::chrono::seconds(60));
     };
     RUN_ISOLATED_TESTS(nvlsEnableIs("0"), nvlsEnableIs("1"), nvlsEnableIs("2"));
   }
