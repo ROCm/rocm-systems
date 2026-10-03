@@ -70,13 +70,13 @@ TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
     };
 
     ::rocprofiler::common::container::pool<hsa::signal_t> pool{
-        std::piecewise_construct, 1, [](auto& signal) { hsa::ensure_hsa_signal(signal); }};
+        std::piecewise_construct, 1, [](auto& signal) { hsa::construct_hsa_signal(signal); }};
 
     constexpr auto iterations = size_t{1000};
     auto           last       = hsa_signal_t{};
     for(size_t i = 0; i < iterations; ++i)
     {
-        auto& slot = pool.acquire(hsa::ensure_hsa_signal, 7, 0, nullptr, 0);
+        auto& slot = pool.acquire(hsa::construct_hsa_signal, 7, 0, nullptr, 0);
         last       = slot.get().value;
         EXPECT_EQ(signal_value, 7);
         signal_value = -1;
