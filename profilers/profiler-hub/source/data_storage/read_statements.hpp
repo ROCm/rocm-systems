@@ -1283,7 +1283,9 @@ private:
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + " UNION ALL " +
-                unfiltered_sql + " WHERE S.track_id = ?",
+                unfiltered_sql +
+                " WHERE S.track_id = ?4 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+                "track_id = ?4)",
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
@@ -1300,7 +1302,10 @@ private:
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + time_where + " UNION ALL " +
-                unfiltered_sql + " WHERE S.track_id = ?" + time_where,
+                unfiltered_sql +
+                " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+                "track_id = ?6)" +
+                time_where,
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
@@ -1333,7 +1338,7 @@ private:
         out.stream_filtered =
             m_backend->create_read_statement_executor<timeline_event_result,
                                                       bind_types<size_t, size_t, size_t>>(
-                unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " +
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " +
                     a + ".stream_id = ?",
                 &timeline_event_result::id,
                 &timeline_event_result::start_timestamp,
@@ -1363,7 +1368,7 @@ private:
         out.stream_time_filtered = m_backend->create_read_statement_executor<
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t, size_t>>(
-            unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " + a +
+            unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " + a +
                 ".stream_id = ?" + time_where,
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
