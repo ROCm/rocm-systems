@@ -1224,6 +1224,24 @@ hsa_signal_value_t hsa_signal_wait_relaxed(hsa_signal_t hsa_signal,
   CATCHRET(hsa_signal_value_t);
 }
 
+
+void hsa_signal_silent_store_relaxed(hsa_signal_t hsa_signal, hsa_signal_value_t value) {
+  TRY;
+  core::Signal* signal = core::Signal::Convert(hsa_signal);
+  assert(IsValid(signal));
+  signal->SilentStoreRelaxed(value);
+  CATCHRET(void);
+}
+
+void hsa_signal_silent_store_screlease(hsa_signal_t hsa_signal, hsa_signal_value_t value) {
+  TRY;
+  core::Signal* signal = core::Signal::Convert(hsa_signal);
+  assert(IsValid(signal));
+  signal->SilentStoreRelease(value);
+  CATCHRET(void);
+}
+
+
 hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t hsa_signal,
                                              hsa_signal_condition_t condition,
                                              hsa_signal_value_t compare_value,

@@ -74,6 +74,16 @@ void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
 }
 
+void BusyWaitSignal::SilentStoreRelaxed(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  // BusyWaitSignal has no event, so silent and regular stores are identical
+}
+
+void BusyWaitSignal::SilentStoreRelease(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  // BusyWaitSignal has no event, so silent and regular stores are identical
+}
+
 hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
                                                hsa_signal_value_t compare_value, uint64_t timeout,
                                                hsa_wait_state_t wait_hint) {
