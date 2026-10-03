@@ -60,17 +60,12 @@ union LibraryCreateFlags
     {
         uint32 clientInternal               : 1;  ///< Internal library not created by the application.
         uint32 isGraphics                   : 1;  ///< Whether it is a graphics library
-#if PAL_BUILD_CODE_OBJECT_INTERFACE
-        uint32 disableCodeObjectReferencing : 1;  ///< Indicates that this library will not manage the reference
-                                                  ///  counter for the pCodeObject.
-                                                  ///  It's the client's responsibility to ensure the pCodeObject stay
-                                                  ///  alive during library creation and execution.
-                                                  ///  This is useful for clients who want to manage the lifetime of the
-                                                  ///  code objects separately from the library.
+        uint32 condDebugUser                : 1;  ///< If set, waves launched from this library's shaders have debugging
+                                                  ///  unconditionally enabled: the DebugBreak() shader intrinsic always
+                                                  ///  triggers and code guarded by IsDebuggingEnabled() runs,
+                                                  ///  regardless of whether a debugger is attached (work-graph node
+                                                  ///  compute).
         uint32 reserved                     : 29; ///< Reserved for future use.
-#else
-        uint32 reserved                     : 30; ///< Reserved for future use.
-#endif
     };
     uint32 u32All;                  ///< Flags packed as 32-bit uint.
 };
