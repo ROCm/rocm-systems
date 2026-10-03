@@ -753,7 +753,6 @@ TEST_F(DiagP2pMicrotest, BuildInboundPeers_NeedsHandleOnlyForCuMemSameProcessOth
   EXPECT_TRUE(run(1));
   EXPECT_FALSE(run(0));
   peers_[2].cudaDev = 4;
-  peers_[3].cudaDev = 3;
   EXPECT_FALSE(run(1));
 }
 
@@ -1059,7 +1058,7 @@ TEST_F(DiagP2pMicrotest, ImportMappings_FailedOrEmptyImportIsImportReason) {
   DiagP2pImportScene s;
   ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipErrorInvalidDevice; });
   ScopedHook importHook(g_ncclP2pImportShareableBuffer,
-                        [&](ncclComm*, int peer, size_t, ncclIpcDesc*, void** ptr, void*, ncclMemType_t) {
+                        [&](ncclComm*, int peer, size_t, ncclIpcDesc*, void**, void*, ncclMemType_t) {
                           return peer == 2 ? ncclSystemError : ncclSuccess;
                         });
   s.Run(comm_.get(), localRanks_.data(), true, kStream);
