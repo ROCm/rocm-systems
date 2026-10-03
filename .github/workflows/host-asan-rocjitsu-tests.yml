@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.suites == 'rocshmem' && '["rocshmem"]' || inputs.suites == 'all-additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest","hipfile","rccl","rocshmem","rocprofiler-systems"]' || inputs.suites == 'additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest"]' || '["hip-tests","rocrtst"]') }}
+        suite: ${{ fromJSON(inputs.suites == 'sdk-rocshmem' && '["rocprofiler-sdk","rocshmem"]' || inputs.suites == 'rocshmem' && '["rocshmem"]' || inputs.suites == 'all-additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest","hipfile","rccl","rocshmem","rocprofiler-systems"]' || inputs.suites == 'additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest"]' || '["hip-tests","rocrtst"]') }}
     container:
       image: ubuntu:24.04
       # Use the native CI device allocation; do not override its GPU isolation.
