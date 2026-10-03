@@ -12,8 +12,10 @@
 
 constexpr bool enable_validation = false;
 
-template <typename F> void SignalExternalSemaphoreCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void SignalExternalSemaphoreCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
 
   constexpr uint32_t count = 1;
   const auto src_storage = vkt.CreateMappedStorage<int>(count, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
@@ -57,8 +59,10 @@ template <typename F> void SignalExternalSemaphoreCommon(F f) {
 }
 
 #if HT_NVIDIA
-template <typename F> void SignalExternalTimelineSemaphoreCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void SignalExternalTimelineSemaphoreCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
   constexpr uint64_t signal_value = 2;
 
   const auto semaphore = vkt.CreateExternalSemaphore(VK_SEMAPHORE_TYPE_TIMELINE);
@@ -81,8 +85,10 @@ template <typename F> void SignalExternalTimelineSemaphoreCommon(F f) {
   HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
 }
 
-template <typename F> void SignalExternalMultipleSemaphoresCommon(F f) {
-  VulkanTest vkt(enable_validation);
+template <typename F>
+void SignalExternalMultipleSemaphoresCommon(F f, VkExternalSemaphoreHandleTypeFlagBits sem_handle_type =
+                                VulkanTest::GetVkSemHandlePlatformType()) {
+  VulkanTest vkt(enable_validation, sem_handle_type);
 
   constexpr uint32_t count = 1;
   const auto src_storage = vkt.CreateMappedStorage<int>(count, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);

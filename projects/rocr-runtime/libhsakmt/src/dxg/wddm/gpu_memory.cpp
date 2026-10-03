@@ -16,6 +16,63 @@ using namespace std;
 namespace wsl {
 namespace thunk {
 
+// Base-address alignment a tiled surface requires, derived from its swizzle mode.
+//
+// An imported graphics surface keeps whatever tiling the exporting driver chose, and the hardware
+// addresses a tiled surface in swizzle blocks measured from the base address. If the base is not
+// block-aligned the block address computation walks past the end of the mapping, which faults as
+// HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION even though every field of the SRD is correct.
+//
+// hsakmtRuntime::ReserveGpuVirtualAddress defaults to 64KB when no alignment is requested. That was
+// sufficient while 64KB was the largest block any ASIC used, but GFX12's ADDR3 encoding added
+// 256KB_2D/256KB_3D, which the GL driver picks for larger render targets -- so a 256KB-swizzled
+// renderbuffer could land 64KB-aligned but not 256KB-aligned and fault (OpenCL CTS test_gl
+// redirect_renderbuffer_read on gfx1201). ADDR2 also has 256KB modes (28..31 on GFX11), so the
+// same hazard exists there; it is handled below rather than assumed away.
+//
+// The two encodings are different and overlapping, so the gfx major version selects which to use.
+// Unknown values deliberately return the largest alignment: over-aligning only costs virtual
+// address space, under-aligning corrupts addressing.
+static gpusize SwizzleModeAlignment(uint32_t swizzle_mode, int gfx_major) {
+  constexpr gpusize k256B = 256;
+  constexpr gpusize k4KB = 4 * 1024;
+  constexpr gpusize k64KB = 64 * 1024;
+  constexpr gpusize k256KB = 256 * 1024;
+
+  if (gfx_major >= 12) {
+    // Addr3SwizzleMode (GFX12+).
+    switch (swizzle_mode) {
+      case 0:  return 0;      // ADDR3_LINEAR - no block, caller's default applies
+      case 1:  return k256B;  // ADDR3_256B_2D
+      case 2:            // ADDR3_4KB_2D
+      case 5:  return k4KB;   // ADDR3_4KB_3D
+      case 3:            // ADDR3_64KB_2D
+      case 6:  return k64KB;  // ADDR3_64KB_3D
+      case 4:            // ADDR3_256KB_2D
+      case 7:  return k256KB; // ADDR3_256KB_3D
+      default: return k256KB;
+    }
+  }
+
+  // AddrSwizzleMode (ADDR2, GFX9..GFX11).
+  switch (swizzle_mode) {
+    case 0:                 // ADDR_SW_LINEAR
+    case 32: return 0;      // ADDR_SW_LINEAR_GENERAL
+    case 1: case 2: case 3:
+      return k256B;         // ADDR_SW_256B_{S,D,R}
+    case 4:  case 5:  case 6:  case 7:   // ADDR_SW_4KB_{Z,S,D,R}
+    case 20: case 21: case 22: case 23:  // ADDR_SW_4KB_{Z,S,D,R}_X
+      return k4KB;
+    case 8:  case 9:  case 10: case 11:  // ADDR_SW_64KB_{Z,S,D,R}
+    case 16: case 17: case 18: case 19:  // ADDR_SW_64KB_{Z,S,D,R}_T
+    case 24: case 25: case 26: case 27:  // ADDR_SW_64KB_{Z,S,D,R}_X
+      return k64KB;
+    case 28: case 29: case 30: case 31:  // ADDR_SW_256KB_*_X (ADDR_SW_VAR_*_X pre-GFX11)
+      return k256KB;
+    default: return k256KB;
+  }
+}
+
 size_t GpuMemory::CalcChunkNumbers(gpusize size) {
   const auto chunk_size = WDDMDevice::GpuMemoryChunkSize;
   return (size + chunk_size - 1) / chunk_size;
@@ -763,7 +820,15 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     desc_.flags.is_va_required = create_info.flags.alloc_va;
     if (desc_.flags.is_va_required) {
       desc_.flags.is_imported_vram_ipc = 1;
-      ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, create_info.alignment);
+      // Honour the alignment the imported surface's tiling demands; see SwizzleModeAlignment.
+      // When the swizzle could not be read (foreign private data) leave the caller's value alone:
+      // such resources fall back to the linear system-memory path, for which 64KB is sufficient.
+      gpusize va_alignment = create_info.alignment;
+      if (desc_.swizzle_valid) {
+        const gpusize needed = SwizzleModeAlignment(desc_.swizzle_mode, device_->Major());
+        if (needed > va_alignment) va_alignment = needed;
+      }
+      ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, va_alignment);
       if (ret != ErrorCode::Success)
         pr_err("failed to allocate svm range, error:%d\n", static_cast<int>(ret));
 
