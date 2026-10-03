@@ -510,6 +510,7 @@ Purpose: One GPU kernel launch: agent, kernel, queue, stream, start/end timestam
 | group_segment_size | LDS size for this dispatch. |
 | workgroup_size_x, workgroup_size_y, workgroup_size_z | Workgroup dimensions. |
 | grid_size_x, grid_size_y, grid_size_z | Grid dimensions. |
+| pipe_id | Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS`). Added in schema 3.0.5. |
 | region_name_id | References rocpd_string.id for the API region name (may be null). |
 | event_id | References rocpd_event.id (may be null). |
 | extdata | JSON for any extra data. |
