@@ -14,5 +14,6 @@ ncclResult_t wrap_ionicdv_symbols(void);
 ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* ibqp, bool enable_send, bool enable_recv);
 ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mask);
 ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, uint8_t plane_idx, struct ionic_dv_puec_route* route);
+uint8_t wrap_ionicdv_ctx_get_udma_count(struct ibv_context* ibctx);
 
 #endif // NCCL_IONICDVWRAP_H_
