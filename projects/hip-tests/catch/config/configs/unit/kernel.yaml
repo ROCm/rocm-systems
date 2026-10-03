@@ -11,8 +11,9 @@ kernel:
     tags: [attributes, P1]
   Unit_hipDynamicShared:
     <<: *level_2
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
     tags: [memory, P0]
   Unit_hipDynamicShared2:
     <<: *level_2
@@ -85,7 +86,9 @@ kernel:
     tags: [launch, P1]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_2
-    disabled: [amd_windows, amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_linux, amd_wsl]
+      reason: "gfx1030 (amd_linux) FAIL 3/3: expected hipErrorInvalidConfiguration not returned for oversize grid. AIRUNTIME-2862 Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_2
@@ -102,7 +105,9 @@ kernel:
   Unit_KernelStackSize:
     <<: *level_2
     tags: [P0]
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "Source hipKernelStackSize.cc is arch-gated to gfx1250/gfx1251 (unit/kernel/CMakeLists.txt); it compiles into the fat multi-arch build (arch list includes gfx1250) and runs/passes on gfx1030, but is intended for gfx1250/gfx1251. Needs to be triaged on gfx1250/gfx1251. AIRUNTIME-2744"
   Unit_Validate_User_Sgpr_Count:
     <<: *level_2
   Unit_hipGridLaunch_MaxGridDim_DeviceProperties:

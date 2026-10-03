@@ -3,23 +3,26 @@ multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
     <<: *level_2
     tags: [memory, P1]
-    # AIRUNTIME-2291: temporarily disabled (hangs in CI 942)
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_2
     tags: [device_mgmt, P0]
   Unit_hipMultiThreadDevice_SerialPyramid:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged AIRUNTIME-2744"
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_ParallelPyramid:
     <<: *level_2
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_NearZero:
     <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadStreams1_AsyncSync:
     <<: *level_2

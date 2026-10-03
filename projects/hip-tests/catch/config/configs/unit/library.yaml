@@ -12,8 +12,9 @@ library:
   Unit_hip_library_load_rtc:
     <<: *level_2
     tags: [module]
-    # AIRUNTIME-2410
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_2
     tags: [module]

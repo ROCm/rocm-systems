@@ -20,8 +20,9 @@ event:
     tags: [lifecycle, P1]
   Unit_hipEvent:
     <<: *level_2
-    # SWDEV-411303 fails in WSL. Profiling not support in WSL
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-411303 fails in WSL. Profiling not support in WSL Needs to be re-triaged AIRUNTIME-2744"
     tags: [synchronization, P0]
   Unit_hipEventElapsedTime_NullCheck:
     <<: *level_2
@@ -34,8 +35,9 @@ event:
     tags: [multigpu, synchronization, P1]
   Unit_hipEventElapsedTime_NotReady_Negative:
     <<: *level_2
-    # SWDEV-411303 fails in WSL. Profiling not support in WSL
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-411303 fails in WSL. Profiling not support in WSL Needs to be re-triaged AIRUNTIME-2744"
     tags: [synchronization, P1]
   Unit_hipEventElapsedTime:
     <<: *level_2
@@ -45,28 +47,33 @@ event:
     tags: [synchronization]
   Unit_hipEventRecord:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [synchronization, smoke, P0]
   Unit_hipEventRecord_Negative:
     <<: *level_2
     tags: [synchronization, P1]
   Unit_hipEventIpc:
     <<: *level_2
-    # (amd_wsl) Below tests fail in stress test on 24/07/23
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "(amd_wsl) Below tests fail in stress test on 24/07/23 Needs to be re-triaged AIRUNTIME-2744"
     tags: [ipc, P1]
   Unit_hipEventIpc_DestroyNonBlocking:
     <<: *level_2
     tags: [ipc, lifecycle]
   Unit_hipEventDestroy_Unfinished:
     <<: *level_2
-    # SWDEV-411303 fails in WSL. Profiling not support in WSL
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "SWDEV-411303 fails in WSL. Profiling not support in WSL Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P0]
   Unit_hipEventDestroy_WithWaitingStream:
     <<: *level_2
-    # SWDEV-402054 fails in external github build
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "SWDEV-402054 fails in external github build Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventDestroy_Negative:
     <<: *level_2
@@ -85,34 +92,39 @@ event:
     tags: [lifecycle, P0]
   Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P0]
   Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem:
     <<: *level_2
-    # (amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.
-    # (amd_windows) Note: intermittent Seg fault failure
-    disabled: [gfx1200, gfx1201, amdgcnspirv, amd_windows, amd_wsl]
+    disabled:
+      targets: [gfx1200, gfx1201, amdgcnspirv, amd_windows, amd_wsl]
+      reason: "(amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.; (amd_windows) Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
     <<: *level_2
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_Verify_Capture:
     <<: *level_2

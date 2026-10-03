@@ -38,13 +38,15 @@ warp:
     tags: [deviceLib, vote]
   Unit_Warp_Shfl_Positive_Basic:
     <<: *level_2
-    # === SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 ===
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "=== SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 === Needs to be re-triaged AIRUNTIME-2744"
     tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_XOR_Positive_Basic:
     <<: *level_2
-    # === SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 ===
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "=== SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 === Needs to be re-triaged AIRUNTIME-2744"
     tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_Up_Positive_Basic:
     <<: *level_2

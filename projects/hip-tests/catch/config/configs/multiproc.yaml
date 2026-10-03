@@ -9,8 +9,9 @@ multiproc:
   Unit_hipDeviceGetPCIBusId_MaskedDevices: *level_2
   Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci:
     <<: *level_2
-    # Note: no valid pci bdf in wsl
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Note: no valid pci bdf in wsl Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipDeviceTotalMem_MaskedDevices: *level_2
   Unit_hipDeviceGetAttribute_MaskedDevices: *level_2
   Unit_hipGetDeviceCount_MaskedDevices: *level_2
@@ -19,12 +20,14 @@ multiproc:
   Unit_hipIpcEventHandle_ParameterValidation: *level_2
   Unit_hipIpcMemAccess_Semaphores:
     <<: *level_2
-    # Below tests soft hang in stress test on 13/09/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Below tests soft hang in stress test on 13/09/23 Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcMemAccess_ParameterValidation:
     <<: *level_2
-    # Below tests fail in stress test on 23/06/23
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Below tests fail in stress test on 23/06/23 Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMalloc_ChildConcurrencyDefaultGpu: *level_2
   Unit_hipMalloc_ChildConcurrencyMultiGpu: *level_2
   Unit_malloc_CoherentTst: *level_2
@@ -35,23 +38,26 @@ multiproc:
   Unit_hipHostMalloc_WthEnv0Flg2: *level_2
   Unit_hipHostMalloc_WthEnv0Flg3:
     <<: *level_2
-    # Note: CONFIG_NUMA disabled
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Note: CONFIG_NUMA disabled Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipHostMalloc_WthEnv0Flg4: *level_2
   Unit_hipHostMalloc_WthEnv1: *level_2
   Unit_hipHostMalloc_WthEnv1Flg1: *level_2
   Unit_hipHostMalloc_WthEnv1Flg2: *level_2
   Unit_hipHostMalloc_WthEnv1Flg3:
     <<: *level_2
-    # Note: CONFIG_NUMA disabled
-    disabled: [amd_wsl]
+    disabled:
+      targets: [amd_wsl]
+      reason: "Note: CONFIG_NUMA disabled Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetInfo_Functional_Scenario1: *level_2
   Unit_hipMemGetInfo_Functional_Scenario2: *level_2
   Unit_hipMemGetInfo_Functional_Scenario3: *level_2
   Unit_hipMemGetInfo_Functional_scenario4:
     <<: *level_2
-    # Test does not play well with Asan.
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "Test does not play well with Asan. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5: *level_2
   Unit_hipMemGetInfo_SetHiddenFreeMemFromChild: *level_2
   Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu: *level_2

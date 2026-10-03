@@ -27,6 +27,7 @@ def main():
 
     missing = []
     invalid_skip_fields = []
+    missing_reasons = []
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
@@ -37,18 +38,25 @@ def main():
                     continue
                 value = case_config[field]
                 # A skip field is either a flat list of targets, or a mapping
-                # with a 'targets' list plus an optional 'reason' scalar. The
-                # reason is metadata and is intentionally NOT enforced yet —
-                # deferred to a later phase (AIRUNTIME-2744):
-                # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
-                # We only guard that the targets are a list, since a scalar
-                # breaks tag generation (a string is iterated char-by-char) and
-                # a malformed mapping fails the parser's list concatenation.
+                # with a 'targets' list plus a 'reason' scalar. We guard that the
+                # targets are a list, since a scalar breaks tag generation (a
+                # string is iterated char-by-char) and a malformed mapping fails
+                # the parser's list concatenation.
                 if isinstance(value, list):
+                    targets = value
+                    reason = ""
+                elif isinstance(value, dict) and isinstance(value.get("targets"), list):
+                    targets = value["targets"]
+                    reason = value.get("reason", "")
+                else:
+                    invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
-                if isinstance(value, dict) and isinstance(value.get("targets"), list):
-                    continue
-                invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
+                # A populated skip section (non-empty targets) must record why
+                # the case is skipped (AIRUNTIME-2744 — now enforced). An empty
+                # section (targets: []) is a no-op and needs no reason, so the
+                # flat-list form is only valid when it is empty.
+                if targets and not str(reason).strip():
+                    missing_reasons.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -65,6 +73,15 @@ def main():
             file=sys.stderr,
         )
         for entry in invalid_skip_fields:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if missing_reasons:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field with targets but no 'reason'. Use the mapping form ({{targets: [...], reason: \"...\"}}) and record why the case is skipped:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in missing_reasons:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 
