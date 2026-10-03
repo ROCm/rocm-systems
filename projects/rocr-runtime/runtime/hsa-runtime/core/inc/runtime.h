@@ -163,6 +163,19 @@ class Runtime {
   };
 
   /// @brief Open connection to kernel driver and increment reference count.
+  ///
+  /// @details An initialization that did not finish is fatal for the process
+  /// rather than something to attempt again: it can leave the singleton half
+  /// built, and nothing gives that state back. This latches the first such
+  /// failure - error return or exception, from the singleton's construction
+  /// as much as from ::Load() - and returns the same error to every later
+  /// call instead of building on what the failed one left behind, so the only
+  /// correct response to an hsa_init() error is for the caller to terminate
+  /// the process.
+  ///
+  /// A call that only takes another reference on a runtime already up is not
+  /// an initialization and latches nothing, so nested hsa_init() and a fresh
+  /// hsa_init() after a balanced hsa_shut_down() are unaffected.
   static hsa_status_t Acquire();
 
   /// @brief Decrement reference count and close connection to kernel driver.
@@ -534,7 +547,7 @@ class Runtime {
   const Flag& flag() const { return flag_; }
   Flag& flag() { return flag_; }
 
-  const ThunkLoader* thunkLoader() const { return thunkLoader_; }
+  const ThunkLoader* thunkLoader() const { return thunkLoader_.get(); }
 
   ExtensionEntryPoints extensions_;
 
@@ -1008,10 +1021,16 @@ class Runtime {
   // Holds reference count to runtime object.
   std::atomic<uint32_t> ref_count_;
 
+  // Set when Load() fails, and never cleared. Read and written under
+  // bootstrap_lock(); see Acquire().
+  static bool load_failed_;
+
   // Track environment variables.
   Flag flag_;
 
-  ThunkLoader* thunkLoader_;
+  // Owned: Unload() is the only thing that closes the shared thunk, so the
+  // loader holding it open has to belong to the runtime that runs Unload().
+  std::unique_ptr<ThunkLoader> thunkLoader_;
 
   // Pools memory for SharedSignal (Signal ABI blocks)
   SharedSignalPool_t SharedSignalPool;
