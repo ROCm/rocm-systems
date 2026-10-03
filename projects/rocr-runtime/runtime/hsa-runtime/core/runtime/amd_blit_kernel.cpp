@@ -1227,6 +1227,12 @@ hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const
     }
   }
 
+  // No reservation the loop takes can be larger than this. Checking it once up
+  // front means the loop cannot fail part way and leave the completion signal
+  // raised for a dispatch that was never submitted.
+  if (!ReservationFits(num_barrier_packet + MaxDispatchesPerReservation(num_barrier_packet)))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   // Every dispatch carries out_signal and so decrements it once on retirement.
   // The caller has set it to 1, so raise it by the extra dispatches before any
   // packet is made visible to the packet processor. Relaxed is sufficient: the
