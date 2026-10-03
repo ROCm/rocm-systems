@@ -1360,6 +1360,23 @@ def amdsmi_get_cpu_prochot_status(processor_handle: processor_handle_t) -> int:
     return prochot.value
 
 
+def amdsmi_get_cpu_apb_status(processor_handle: processor_handle_t) -> dict:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    apb_status = ctypes.c_uint8()
+    pstate = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_apb_status(
+            processor_handle, ctypes.byref(apb_status), ctypes.byref(pstate)
+        )
+    )
+
+    # apb_status: 0 = APB enabled (auto P-state), 1 = APB disabled (fixed P-state)
+    # pstate is only meaningful when APB is disabled.
+    return {"apb_disabled": apb_status.value, "pstate": pstate.value}
+
+
 def amdsmi_get_cpu_fclk_mclk(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -1694,6 +1711,22 @@ def amdsmi_set_cpu_xgmi_width(processor_handle: processor_handle_t, min_width: i
     _check_res(amdsmi_wrapper.amdsmi_set_cpu_xgmi_width(processor_handle, min_width_8, max_width_8))
 
 
+def amdsmi_get_cpu_xgmi_width(processor_handle: processor_handle_t) -> dict:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    min_width = ctypes.c_uint8()
+    max_width = ctypes.c_uint8()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_xgmi_width(
+            processor_handle, ctypes.byref(min_width), ctypes.byref(max_width)
+        )
+    )
+
+    return {"min_width": min_width.value, "max_width": max_width.value}
+
+
 def amdsmi_set_cpu_gmi3_link_width_range(
     processor_handle: processor_handle_t, min_link_width: int, max_link_width: int
 ):
@@ -1808,6 +1841,22 @@ def amdsmi_set_cpu_df_pstate_range(
     _check_res(
         amdsmi_wrapper.amdsmi_set_cpu_df_pstate_range(processor_handle, min_pstate_8, max_pstate_8)
     )
+
+
+def amdsmi_get_cpu_df_pstate_range(processor_handle: processor_handle_t) -> dict:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    min_pstate = ctypes.c_uint8()
+    max_pstate = ctypes.c_uint8()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_df_pstate_range(
+            processor_handle, ctypes.byref(min_pstate), ctypes.byref(max_pstate)
+        )
+    )
+
+    return {"min_pstate": min_pstate.value, "max_pstate": max_pstate.value}
 
 
 def amdsmi_get_cpu_current_io_bandwidth(
