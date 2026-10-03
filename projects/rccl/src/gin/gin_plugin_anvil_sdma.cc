@@ -22,6 +22,7 @@
 #include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -40,6 +41,10 @@ static std::set<struct ncclComm*> ginAnvilConnCheckedComms;
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
 };
+
+// Live ginAnvilInitCtx allocations. Only observable surface a test has for the
+// finalize path, which is otherwise reached through ncclCommDestroy.
+static std::atomic<int> ginAnvilLiveInitCtxs{0};
 
 struct ginAnvilCollCtx {
   int nranks;
@@ -142,11 +147,16 @@ void ncclGinAnvilPluginTestResetHostState(void) {
   ginAnvilConnCheckedComms.clear();
 }
 
+int ncclGinAnvilPluginTestLiveInitCtxCount(void) {
+  return ginAnvilLiveInitCtxs.load(std::memory_order_relaxed);
+}
+
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return ncclInternalError;
   if (gin_anvil_sdma_probe() <= 0) return ncclInternalError;
   auto* ictx = new ginAnvilInitCtx{};
+  ginAnvilLiveInitCtxs.fetch_add(1, std::memory_order_relaxed);
   *ctx = ictx;
   return ncclSuccess;
 }
@@ -305,6 +315,7 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
+  if (ctx) ginAnvilLiveInitCtxs.fetch_sub(1, std::memory_order_relaxed);
   delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }

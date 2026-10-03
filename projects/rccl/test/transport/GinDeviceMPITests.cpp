@@ -16,6 +16,9 @@
 
 #include "nccl_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -2379,6 +2382,47 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
 
   MPI_Barrier(MPI_COMM_WORLD);
 }
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// AICOMRCCL-2739: ncclGinHostFinalize used to memset ginState, so the later
+// ncclGinFinalize saw no active backend and skipped ncclGinPluginFinalize --
+// the only delete of the Anvil init context and the only refCount decrement.
+// The data path is unaffected, so the live context count is the only observable.
+TEST_F(GinMPIDeviceTests, CommDestroy_FreesAnvilInitContext) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Anvil-SDMA init context requires NCCL_GIN_TYPE=" +
+                        std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  // Contexts held by comms from earlier tests in this process are not ours.
+  const int liveBefore = ncclGinAnvilPluginTestLiveInitCtxCount();
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  // ncclDevCommCreate is what drives ncclGinConnectOnce. Without a connected
+  // backend the destroy path never reaches the branch under test.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  ASSERT_TRUE(comm->sharedRes->ginState.connected);
+  ASSERT_GT(ncclGinAnvilPluginTestLiveInitCtxCount(), liveBefore);
+
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &devComm));
+  ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+  EXPECT_EQ(liveBefore, ncclGinAnvilPluginTestLiveInitCtxCount());
+
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+#endif  // ENABLE_ROCSHMEM_GIN
 
 // AICOMRCCL-2241: registering a symmetric window after ncclDevCommCreate is
 // legal. Anvil SDMA resolves the user VA via ncclDevrGetLsaSelfAddr, which
