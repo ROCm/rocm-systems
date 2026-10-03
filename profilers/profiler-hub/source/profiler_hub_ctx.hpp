@@ -65,6 +65,13 @@ private:
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
 
+    ph_sample_list_t get_cached_track_samples(
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_sample_t> build_sorted_track_samples(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
     ph_event_list_t get_cached_track_events(
         const profiler_hub::reader_types::track_info_ptr_t& track);
 
@@ -111,7 +118,14 @@ private:
     };
     std::mutex m_track_cache_mutex;
     std::unordered_map<uint32_t, std::unique_ptr<track_events_entry>>
-                                         m_track_events_cache;
+        m_track_events_cache;
+    struct track_samples_entry
+    {
+        std::once_flag           once;
+        std::vector<ph_sample_t> samples;
+    };
+    std::unordered_map<uint32_t, std::unique_ptr<track_samples_entry>>
+                                         m_track_samples_cache;
     std::mutex                           m_track_results_mutex;
     std::deque<track_events_result_t>    m_track_events_results;
     std::deque<std::vector<ph_sample_t>> m_track_samples_results;

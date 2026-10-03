@@ -322,6 +322,53 @@ ph_ctx::build_sorted_track_events(
     return sorted;
 }
 
+std::vector<ph_sample_t>
+ph_ctx::build_sorted_track_samples(
+    profiler_hub::common::connection&                   conn,
+    const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    const auto samples = conn.reader().get_counter_events_for_track(track, {});
+
+    std::vector<ph_sample_t> sorted;
+    sorted.reserve(samples.size());
+    for(const auto& sample : samples)
+    {
+        sorted.push_back(
+            ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value });
+    }
+
+    profiler_hub::common::natural_merge_sort(
+        sorted.begin(), sorted.end(), [](const ph_sample_t& lhs, const ph_sample_t& rhs) {
+            return lhs.timestamp < rhs.timestamp;
+        });
+
+    return sorted;
+}
+
+ph_sample_list_t
+ph_ctx::get_cached_track_samples(
+    const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    track_samples_entry* entry = nullptr;
+    {
+        std::scoped_lock lock{ m_track_cache_mutex };
+        auto&            slot = m_track_samples_cache[static_cast<uint32_t>(track->id)];
+        if(!slot) slot = std::make_unique<track_samples_entry>();
+        entry = slot.get();
+    }
+
+    std::call_once(entry->once, [&] {
+        entry->samples =
+            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
+                return build_sorted_track_samples(conn, track);
+            });
+    });
+
+    return ph_sample_list_t{ .list_size =
+                                 static_cast<std::uint32_t>(entry->samples.size()),
+                             .samples = entry->samples.data() };
+}
+
 ph_event_list_t
 ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr_t& track)
 {
@@ -411,6 +458,11 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     if(track_it == m_track_by_id.end())
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
+    }
+
+    if(start_ts == 0 && end_ts == 0)
+    {
+        return get_cached_track_samples(track_it->second);
     }
 
     return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
