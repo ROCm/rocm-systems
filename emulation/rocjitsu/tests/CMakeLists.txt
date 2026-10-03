@@ -650,6 +650,7 @@ add_executable(
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
     gfx12_dot_test.cpp
+    rdna_wmma_simd_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp

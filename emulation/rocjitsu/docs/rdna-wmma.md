@@ -1,0 +1,48 @@
+# Bit-exact RDNA WMMA execution
+
+F32-output F16/BF16 K16 WMMA has integer SIMD implementations for RDNA3,
+RDNA3.5 and RDNA4, in wave32 and wave64. SIMD lanes represent independent
+outputs. GFX11 retains its eight DOT2 steps, accumulator sign frame and
+subnormal flushing; GFX12 retains four DOT4 steps and its different alignment
+and underflow rules. The unchanged scalar helpers remain the reference and
+fallback. Packed-output WMMA retains its existing implementation.
+
+The portable backend uses `std::experimental::simd` through `util::stdx`.
+It is enabled for native widths of eight or sixteen 32-bit lanes. All arithmetic,
+including special values, is vectorized with integer operations. Narrower native
+SIMD widths retain scalar execution. This follows the codebase's existing
+`util::stdx` and `RJ_FORCE_SCALAR` conventions without a new backend selector.
+
+The implementation acquires observed register regions, gathers operands with
+the architecture's wave layout, and stages every output before writing any
+register. Source/destination aliasing, sign modifiers and inline accumulators
+retain the scalar behavior. Integer arithmetic does not depend on host rounding
+modes or modify floating-point exception flags.
+
+`RJ_FORCE_SCALAR=1` retains the original scalar execution, consistent with the
+other SIMD instruction paths. It is read once per linked module at load time.
+
+## Async interaction
+
+Both wave sizes are eligible for optional async execution of these WMMA shapes.
+The ordinary full-EXEC, register-footprint, plugin and execution-mode checks
+still apply. Helpers execute the same portable SIMD implementation. The arithmetic backend
+does not change admission policy: an independent instruction must be available
+on the issuer, and unavailable helper capacity falls back to inline execution.
+Use the JSON thread controls documented in [asynchronous MMA](async-instructions.md).
+
+Faster individual instructions can reduce the benefit of offloading them.
+Thread allocation must therefore be measured with SIMD enabled rather
+than copied from scalar-WMMA measurements. Three-repetition application results
+and the selected thread policy are recorded with the production qualification.
+
+## Qualification
+
+`RdnaWmmaSimd` compares raw arithmetic and full decoded register results with the
+scalar implementation. It covers F16/BF16, both wave sizes, all sign modifiers,
+inline C, D overlapping A/B/C, partial EXEC, arbitrary raw words, nonfinite values
+and host rounding/exception state. `Gfx11Dot2`, `Gfx12Dot` and `PackedWmma` retain
+the existing hardware-derived arithmetic fixtures. Async tests compare issue
+against synchronous execution, including dependent registers and synchronous
+fallbacks on RDNA3, RDNA3.5 and RDNA4. These are simulator comparisons and replay
+of existing hardware fixtures, not new physical-GPU qualification.

@@ -11,6 +11,11 @@ thread granule includes helpers. Other shipped targets and multi-GPU presets
 keep helpers disabled. This accelerates host execution; it does not model GPU
 MMA latency or validate application memory hazards.
 
+RDNA3, RDNA3.5 and RDNA4 support opt-in helpers for wave32 and wave64 F32-output FP16/BF16 K16 WMMA,
+including the bit-exact arithmetic paths. Their shipped thread tables retain zero
+helpers. Partial-EXEC waves execute synchronously. See [RDNA WMMA execution](rdna-wmma.md)
+for SIMD backends and their interaction with helper allocation.
+
 ## Thread policy
 
 The retained execution-thread allocation is **E + sum(D - 1) + H**: engine
@@ -95,6 +100,7 @@ Both targets use [cached lookahead admission](mma-admission.md) to require an
 independent MMA that can remain on the issuer. Scaled instructions require
 vector or inline scale operands; scalar-register scales execute synchronously.
 Encoding filters bypass ineligible instructions before queue construction.
+The opt-in RDNA paths uses the same admission and register dependency checks.
 
 The adapter requires functional execution, the target wave size, full EXEC,
 ordinary register addressing, and no active debugger or trap handler. An ISA

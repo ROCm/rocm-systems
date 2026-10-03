@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_dot_simd.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
@@ -1816,6 +1817,78 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
     writes.set_lane(r.reg, r.lane, r.val);
 }
 
+// Gather through observed regions, then stage all results before any writes.
+// GFX11 replicates operands per lane group; GFX12 distributes K across lanes.
+template <bool Gfx12, bool Bf16>
+bool try_exec_rdna_wmma_f32_simd(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0,
+                                 uint32_t s1, uint32_t s2, std::optional<uint32_t> const_acc,
+                                 uint32_t neg, uint32_t neg_hi) {
+  if (util::force_scalar())
+    return false;
+  constexpr bool stdx_available = util::has_stdx_simd && (util::native<uint32_t>::size() == 8 ||
+                                                          util::native<uint32_t>::size() == 16);
+  if constexpr (!stdx_available)
+    return false;
+  const uint64_t lanes = wave_size == 64 ? ~uint64_t{0} : 0xffffffffu;
+  uint64_t a_lanes = lanes;
+  if constexpr (!Gfx12) {
+    a_lanes = 0;
+    for (unsigned row = 0; row < 16; ++row)
+      a_lanes |= uint64_t{1} << (row + 16 * (row % (wave_size / 16)));
+  }
+  RegisterAccess regs(cu);
+  const unsigned input_regs = Gfx12 ? 128 / wave_size : 8;
+  const unsigned output_regs = 256 / wave_size;
+  const auto ar = regs.read_vgpr_region(s0, input_regs, a_lanes);
+  const auto br = regs.read_vgpr_region(s1, input_regs, lanes);
+  const auto cr =
+      const_acc ? std::nullopt : std::make_optional(regs.read_vgpr_region(s2, output_regs, lanes));
+  uint16_t a[16][16], b[Gfx12 ? 1 : 4][16][16];
+  uint32_t result[16][16];
+  for (unsigned index = 0; index < 16; ++index) {
+    for (unsigned k = 0; k < 16; ++k) {
+      const unsigned physical_k =
+          Gfx12 && wave_size == 32 ? (k & 3) | ((k & 4) << 1) | ((k & 8) >> 1) : k;
+      const auto al = Gfx12 ? gfx12_wmma_input_loc(wave_size, 16, 16, index, physical_k, 16)
+                            : gfx11_wmma_input_loc(16, 16, index, k, 16, index % (wave_size / 16));
+      a[index][k] = uint16_t(ar.lane(al.vgpr_offset, al.lane) >> (16 * al.sub_element));
+      if ((al.sub_element ? neg_hi : neg) & 1)
+        a[index][k] ^= 0x8000;
+      for (unsigned group = 0; group < (Gfx12 ? 1 : wave_size / 16); ++group) {
+        const auto bl = Gfx12 ? gfx12_wmma_input_loc(wave_size, 16, 16, index, physical_k, 16)
+                              : gfx11_wmma_input_loc(16, 16, index, k, 16, group);
+        b[group][k][index] = uint16_t(br.lane(bl.vgpr_offset, bl.lane) >> (16 * bl.sub_element));
+        if ((bl.sub_element ? neg_hi : neg) & 2)
+          b[group][k][index] ^= 0x8000;
+      }
+    }
+  }
+  for (unsigned row = 0; row < 16; ++row) {
+    for (unsigned col = 0; col < 16; ++col) {
+      const auto out = Gfx12 ? gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col)
+                             : gfx11_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      uint32_t acc = const_acc ? *const_acc : cr->lane(out.reg, out.lane);
+      if (neg_hi & 4)
+        acc &= 0x7fffffff;
+      if (neg & 4)
+        acc ^= 0x80000000;
+      result[row][col] = acc;
+    }
+#if __has_include(<experimental/simd>)
+    if constexpr (stdx_available)
+      rdna_dot_simd::row<Gfx12, Bf16>(a[row], b[Gfx12 ? 0 : row % (wave_size / 16)], result[row]);
+#endif
+  }
+  auto writes = regs.write_vgpr_region(dst, output_regs, lanes);
+  for (unsigned row = 0; row < 16; ++row)
+    for (unsigned col = 0; col < 16; ++col) {
+      const auto out = Gfx12 ? gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col)
+                             : gfx11_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      writes.set_lane(out.reg, out.lane, result[row][col]);
+    }
+  return true;
+}
+
 // GFX11 F16/BF16 WMMA executes adjacent K pairs as DOT2, starting at K=0.
 // Packed outputs narrow after every pair. Preserve raw NaN bits and stage all
 // outputs before writes, including D overlap with A, B or C.
@@ -1824,6 +1897,10 @@ void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
                           uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
                           uint32_t neg_hi, uint32_t opsel = 0, bool fp16_ovfl = false) {
   require_gfx11_wmma_wave_size(wave_size);
+  if constexpr (!Packed)
+    if (try_exec_rdna_wmma_f32_simd<false, Bf16>(cu, wave_size, dst, s0, s1, s2, const_acc, neg,
+                                                 neg_hi))
+      return;
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
   for (uint32_t row = 0; row < 16; ++row) {
@@ -1875,6 +1952,10 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
                           uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
                           uint32_t neg_hi, bool fp16_ovfl = false) {
   require_gfx12_wmma_wave_size(wave_size);
+  if constexpr (!Packed)
+    if (try_exec_rdna_wmma_f32_simd<true, Bf16>(cu, wave_size, dst, s0, s1, s2, const_acc, neg,
+                                                neg_hi))
+      return;
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
   for (uint32_t row = 0; row < 16; ++row) {
