@@ -64,9 +64,10 @@ concept GpuIsa = requires {
 };
 
 /// @brief ISA has an opt-in host asynchronous MMA adapter.
-/// @details Missing ASYNC_MMA_WAVE_SIZE means unsupported.
+/// @details ASYNC_MMA_WAVE_SIZES is a mask of supported widths (32 and 64).
+/// A missing or zero mask means unsupported.
 template <typename Isa>
-concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZE != 0; };
+concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZES != 0; };
 
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///

@@ -7,6 +7,9 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -19,7 +22,9 @@ namespace rocjitsu::amdgpu::async_mma_policy {
 
 // Only the instruction families qualified for the production async adapter.
 constexpr bool supported(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
 inline bool candidate(std::string_view name) {
@@ -27,7 +32,8 @@ inline bool candidate(std::string_view name) {
        (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
         name.ends_with("bf8_bf8"))) ||
       name == "v_wmma_f32_32x16x128_f4" || name == "v_wmma_scale_f32_16x16x128_f8f6f4" ||
-      name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16")
+      name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16" ||
+      name == "v_wmma_f32_16x16x16_f16" || name == "v_wmma_f32_16x16x16_bf16")
     return true;
   if (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4" ||
       name == "v_mfma_f32_16x16x128_f8f6f4" || name == "v_mfma_f32_32x32x64_f8f6f4")
@@ -40,12 +46,24 @@ inline bool candidate(std::string_view name) {
          name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16";
 }
 
-// Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
+// Reject non-MFMA encodings on CDNA4, and non-candidates in the WMMA allowlists.
 // This is only a hint: decoded eligibility remains authoritative.
 inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     // VOP3P_MFMA, including the scaled-MFMA extension prefix.
     return word >> 23 == 423;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    static_assert(rdna3::kVWmmaF3216x16x16F16Vop3p == rdna3_5::kVWmmaF3216x16x16F16Vop3p);
+    static_assert(rdna3::kVWmmaF3216x16x16Bf16Vop3p == rdna3_5::kVWmmaF3216x16x16Bf16Vop3p);
+    const uint32_t opcode = word >> 16;
+    return opcode == 0xcc00 + rdna3::kVWmmaF3216x16x16F16Vop3p ||
+           opcode == 0xcc00 + rdna3::kVWmmaF3216x16x16Bf16Vop3p;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    const uint32_t opcode = word >> 16;
+    return opcode == 0xcc00 + rdna4::kVWmmaF3216x16x16F16Vop3p ||
+           opcode == 0xcc00 + rdna4::kVWmmaF3216x16x16Bf16Vop3p;
+  }
   if (arch != ROCJITSU_CODE_ARCH_CDNA5)
     return true;
   const uint32_t opcode = word >> 16;

@@ -1142,7 +1142,7 @@ protected:
   void issue_instruction(Wavefront *wf);
   /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
-  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
+  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_sizes,
                                bool has_accvgprs);
   struct NoAsyncWindow {};
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
@@ -1153,7 +1153,7 @@ protected:
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
   template <bool EnableAsync>
-  bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,
+  bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_sizes = 0,
                  bool has_accvgprs = false);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.

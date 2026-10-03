@@ -67,7 +67,8 @@ public:
 /// per-counter S_WAITCNT_VMCNT etc.
 /// Overrides `WAITCNT_LGKMCNT_MASK = 0x3F` (6-bit lgkmcnt at bits [9:4]).
 struct Isa : amdgpu::RdnaIsaBase {
-  static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x3F; ///< lgkmcnt mask in S_WAITCNT [9:4].
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZES = 32 | 64; ///< Qualified async WMMA wave sizes.
+  static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x3F;     ///< lgkmcnt mask in S_WAITCNT [9:4].
 
   using Decoder = rdna3_5::Decoder;
   using MachineInst = rdna3_5::MachineInst;

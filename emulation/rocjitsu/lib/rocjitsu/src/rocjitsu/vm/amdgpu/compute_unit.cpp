@@ -205,7 +205,7 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
       using Base::Base;
       MmaAdmissionCache admission;
       bool step() override {
-        return this->template step_impl<true>(&admission, Isa::ASYNC_MMA_WAVE_SIZE,
+        return this->template step_impl<true>(&admission, Isa::ASYNC_MMA_WAVE_SIZES,
                                               HasAccVgpr<Isa>);
       }
     };
@@ -1353,8 +1353,8 @@ void AsyncInstructionWindow::materialize() {
 }
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
-                                              uint32_t wave_size, bool has_accvgprs) {
-  // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
+                                              uint32_t wave_sizes, bool has_accvgprs) {
+  // Qualified MFMA and WMMA families have cheap encoding filters.
   // On a cache hit,
   // non-candidates use the ordinary issue body, including its fetchability and
   // debugger checks. A cache miss uses full decoding below.
@@ -1370,10 +1370,11 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
       }
     }
   }
+  const uint32_t wave_size = active->wf_size();
   const uint64_t full_exec = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
-  if (active->wf_size() != wave_size || active->exec() != full_exec ||
-      active->vgpr_msb_mode() != 0 || active->gpr_idx_en() || debug_active() ||
-      active->debug_single_step() || active->in_trap_handler() ||
+  if ((wave_size != 32 && wave_size != 64) || !(wave_sizes & wave_size) ||
+      active->exec() != full_exec || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
+      debug_active() || active->debug_single_step() || active->in_trap_handler() ||
       !plugin_group_->supports_async_instructions()) {
     issue_instruction_impl<true>(active);
     return;
@@ -1981,7 +1982,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
 template <bool EnableAsync>
 [[gnu::always_inline]] inline bool ComputeUnitCore::step_impl(MmaAdmissionCache *admission,
-                                                              uint32_t async_wave_size,
+                                                              uint32_t async_wave_sizes,
                                                               bool has_accvgprs) {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
@@ -2005,7 +2006,7 @@ template <bool EnableAsync>
       }
       const bool single_step = wf->debug_single_step();
       if constexpr (EnableAsync) {
-        issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
+        issue_async_instruction(wf.get(), admission, async_wave_sizes, has_accvgprs);
         if (wf->is_halted()) {
           if (admission)
             admission->flush();

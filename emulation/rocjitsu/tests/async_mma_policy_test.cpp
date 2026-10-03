@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -51,9 +52,55 @@ TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
       EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0]));
     }
   }
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA4})
-    EXPECT_TRUE(policy::encoding_may_be_candidate(arch, 0));
+  EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA3, 0));
   EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, 0));
+  EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_RDNA4, 0));
+}
+
+TEST(AsyncMmaPolicyTest, Rdna4EncodingHintCoversQualifiedWmmaAndOperandModifiers) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  for (unsigned opcode = 0; opcode != 128; ++opcode) {
+    for (uint8_t neg : {uint8_t{0}, uint8_t{7}}) {
+      const auto encoding = rdna4::build_vop3p(opcode, {.vdst = 64,
+                                                        .neg_hi = neg,
+                                                        .src0 = 256,
+                                                        .src1 = 288,
+                                                        .src2 = 320,
+                                                        .opsel_hi = 3,
+                                                        .neg = neg});
+      const std::array<uint32_t, 4> words = {encoding[0], encoding[1], 0, 0};
+      auto decoded = decoder->decode(words.data());
+      if (decoded.failed())
+        continue;
+      SCOPED_TRACE(decoded.value()->mnemonic());
+      if (policy::candidate(decoded.value()->mnemonic()))
+        EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_RDNA4, words[0]));
+    }
+  }
+}
+
+TEST(AsyncMmaPolicyTest, Gfx11EncodingHintCoversQualifiedWmmaAndOperandModifiers) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    auto decoder = Decoder::create(arch);
+    for (unsigned opcode = 0; opcode != 128; ++opcode) {
+      for (uint8_t neg : {uint8_t{0}, uint8_t{7}}) {
+        const auto encoding = rdna3::build_vop3p(opcode, {.vdst = 64,
+                                                          .neg_hi = neg,
+                                                          .src0 = 256,
+                                                          .src1 = 288,
+                                                          .src2 = 320,
+                                                          .op_sel_hi = 3,
+                                                          .neg = neg});
+        const std::array<uint32_t, 4> words = {encoding[0], encoding[1], 0, 0};
+        auto decoded = decoder->decode(words.data());
+        if (decoded.failed())
+          continue;
+        SCOPED_TRACE(decoded.value()->mnemonic());
+        if (policy::candidate(decoded.value()->mnemonic()))
+          EXPECT_TRUE(policy::encoding_may_be_candidate(arch, words[0]));
+      }
+    }
+  }
 }
 
 TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
@@ -82,16 +129,18 @@ TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
   EXPECT_TRUE(policy::supported(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_TRUE(policy::supported(ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_RDNA3));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(policy::supported(ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(policy::supported(ROCJITSU_CODE_ARCH_RDNA3_5));
+  EXPECT_TRUE(policy::supported(ROCJITSU_CODE_ARCH_RDNA4));
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-  for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaI3216x16x32Iu4Vop3p,
-                      rdna4::kVSwmmacF3216x16x32F16Vop3p}) {
+  for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaF3216x16x16Bf16Vop3p,
+                      rdna4::kVWmmaI3216x16x32Iu4Vop3p, rdna4::kVSwmmacF3216x16x32F16Vop3p}) {
     const auto words = rdna4::build_vop3p(
         opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    EXPECT_FALSE(policy::candidate(inst->mnemonic()));
+    EXPECT_EQ(policy::candidate(inst->mnemonic()), opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ||
+                                                       opcode == rdna4::kVWmmaF3216x16x16Bf16Vop3p);
   }
 }
 
@@ -112,7 +161,7 @@ TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
         "v_wmma_f32_16x16x128_fp8_fp8", "v_wmma_scale_f32_16x16x128_f8f6f4"}) {
     EXPECT_TRUE(policy::candidate(name));
   }
-  EXPECT_FALSE(policy::candidate("v_wmma_f32_16x16x16_f16"));
+  EXPECT_FALSE(policy::candidate("v_wmma_f16_16x16x16_f16"));
 }
 
 TEST(AsyncMmaPolicyTest, ScaledWmmaHintAndFootprintIncludeBothScaleRegisters) {

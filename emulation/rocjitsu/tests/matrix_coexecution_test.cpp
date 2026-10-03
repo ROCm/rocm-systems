@@ -11,9 +11,12 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -148,8 +151,8 @@ TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
               pc + (hazard ? 16 : 24));
   }
 }
-static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa>);
-static_assert(!HasAsyncMma<cdna3::Isa> && !HasAsyncMma<rdna3::Isa> && !HasAsyncMma<rdna4::Isa>);
+static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa> && HasAsyncMma<rdna4::Isa>);
+static_assert(!HasAsyncMma<cdna3::Isa> && HasAsyncMma<rdna3::Isa> && HasAsyncMma<rdna3_5::Isa>);
 static_assert(
     std::is_same_v<
         decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>::step),
@@ -165,8 +168,8 @@ static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                          cdna4::Isa>::supports_async_execution);
 static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                           cdna3::Isa>::supports_async_execution);
-static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
-                                          rdna4::Isa>::supports_async_execution);
+static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                         rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
   EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
@@ -658,6 +661,12 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
         rdna4::build_vop3p(opcode,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
         opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 16);
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (auto opcode : {rdna3::kVWmmaF3216x16x16F16Vop3p, rdna3::kVWmmaF3216x16x16Bf16Vop3p})
+      add(arch,
+          rdna3::build_vop3p(opcode,
+                             {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .op_sel_hi = 3}),
+          opcode == rdna3::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 16);
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
     for (auto opcode : {cdna4::kVMfmaF3232x32x42bF16Vop3pMfma,
                         cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
@@ -725,9 +734,12 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
-    const bool expect_async = c.mfma
-                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
-                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32;
+    const bool expect_async =
+        c.mfma ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
+               : (c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32) ||
+                     ((c.arch == ROCJITSU_CODE_ARCH_RDNA3 || c.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                       c.arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+                      c.wmma_k == 16);
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {
@@ -815,4 +827,136 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
   }
 }
 
+TEST(MatrixCoexecutionTest, RdnaWmmaPreservesRawBitsAndSynchronousFallbacks) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    constexpr uint64_t pc = 0x260000;
+    for (bool bf16 : {false, true}) {
+      const auto opcode =
+          gfx12 ? (bf16 ? rdna4::kVWmmaF3216x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16F16Vop3p)
+                : (bf16 ? rdna3::kVWmmaF3216x16x16Bf16Vop3p : rdna3::kVWmmaF3216x16x16F16Vop3p);
+      for (bool special_values : {false, true}) {
+        // Exercise helpers, disabled helpers, partial EXEC, clocked issue and one helper.
+        for (unsigned wave_size : {32u, 64u}) {
+          SCOPED_TRACE(wave_size);
+          for (unsigned fallback = 0; fallback != 5; ++fallback) {
+            SCOPED_TRACE(bf16);
+            SCOPED_TRACE(special_values);
+            SCOPED_TRACE(fallback);
+            std::vector<uint32_t> program;
+            auto append = [&](auto words) {
+              program.insert(program.end(), words.begin(), words.end());
+            };
+            for (uint8_t dst : {64, 80, 96, 112}) {
+              const uint16_t accumulator = 256 + dst;
+              const uint8_t neg = dst == 80 ? 1 : 0;
+              append(gfx12 ? rdna4::build_vop3p(opcode, {.vdst = dst,
+                                                         .src0 = 256,
+                                                         .src1 = 288,
+                                                         .src2 = accumulator,
+                                                         .opsel_hi = 3,
+                                                         .neg = neg})
+                           : rdna3::build_vop3p(opcode, {.vdst = dst,
+                                                         .src0 = 256,
+                                                         .src1 = 288,
+                                                         .src2 = accumulator,
+                                                         .op_sel_hi = 3,
+                                                         .neg = neg}));
+              if (dst == 64)
+                append(gfx12 ? rdna4::build_sopp(rdna4::kSWaitDscntSopp, {.simm16 = 0})
+                             : rdna3::build_sopp(rdna3::kSWaitcntSopp, {.simm16 = 0}));
+            }
+            // Reuse a shared input and a destination after the independent group.
+            append(gfx12 ? rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 320, .vdst = 124})
+                         : rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = 320, .vdst = 124}));
+            append(gfx12 ? rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 128, .vdst = 0})
+                         : rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
+            append(gfx12 ? rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 128, .vdst = 64})
+                         : rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = 128, .vdst = 64}));
+            auto execute = [&](bool issue) {
+              amdgpu::GpuMemory memory("rdna_matrix_memory");
+              amdgpu::L2Cache l2("rdna_matrix_l2");
+              amdgpu::ComputeUnitCore::Config config{};
+              config.arch = arch;
+              config.num_wf_slots = 1;
+              config.sgprs_per_wf = 106;
+              config.vgprs_per_wf = 128;
+              config.async_resources =
+                  std::make_shared<mc::ExecutionResources>(fallback == 1   ? 0
+                                                           : fallback == 4 ? 1
+                                                                           : 4);
+              auto cu = amdgpu::ComputeUnitCore::create(
+                  "rdna_matrix_cu", config, &memory, &l2,
+                  fallback == 3 ? simdojo::ExecMode::CLOCKED : simdojo::ExecMode::FUNCTIONAL);
+              auto *wf = cu->dispatch_wf(0, pc, 106, 128, wave_size);
+              EXPECT_NE(wf, nullptr);
+              if (!wf)
+                return std::vector<uint32_t>{};
+              wf->set_exec(fallback == 2     ? 0x55555555u
+                           : wave_size == 64 ? ~uint64_t{0}
+                                             : 0xffffffffu);
+              const uint32_t base = wf->vgpr_alloc().base;
+              // Finite normals, signed zero, subnormals, infinities and NaN payloads.
+              const std::array<uint16_t, 8> halves = {
+                  0,
+                  0x8000,
+                  1,
+                  static_cast<uint16_t>(bf16 ? 0x3f80 : 0x3c00),
+                  static_cast<uint16_t>(bf16 ? 0xbf00 : 0xb800),
+                  static_cast<uint16_t>(bf16 ? 0x7f80 : 0x7c00),
+                  static_cast<uint16_t>(bf16 ? 0x7fc1 : 0x7e01),
+                  static_cast<uint16_t>(bf16 ? 0xffc3 : 0xfe03)};
+              const std::array<uint32_t, 6> accumulators = {0,          0x80000000, 1,
+                                                            0x3f123456, 0x7fc12345, 0xffc23456};
+              for (unsigned reg = 0; reg != 128; ++reg)
+                for (unsigned lane = 0; lane != wave_size; ++lane) {
+                  uint32_t value = 0x3f000000u + ((reg + lane) << 12);
+                  if (reg < 48) {
+                    const unsigned count = special_values ? halves.size() : 5;
+                    value = halves[(reg + lane) % count] |
+                            (uint32_t{halves[(reg * 3 + lane + 1) % count]} << 16);
+                  } else if (special_values) {
+                    value = accumulators[(reg + lane) % accumulators.size()];
+                  }
+                  cu->write_vgpr(base + reg, lane, value);
+                }
+              const auto end = pc + program.size() * 4;
+              for (size_t i = 0; i != program.size(); ++i)
+                memory.write32(pc + 4 * i, program[i]);
+              memory.write32(end,
+                             gfx12 ? rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 0xffff})[0]
+                                   : rdna3::build_sopp(rdna3::kSBranchSopp, {.simm16 = 0xffff})[0]);
+              if (issue) {
+                for (size_t steps = 0; wf->pc < end && steps != program.size(); ++steps)
+                  cu->step();
+                EXPECT_EQ(wf->pc, end);
+              } else {
+                auto decoder = Decoder::create(arch);
+                for (size_t i = 0; i != program.size();) {
+                  std::unique_ptr<Instruction> inst(decode_valid(*decoder, program.data() + i));
+                  i += inst->size() / 4;
+                  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+                }
+              }
+              std::vector<uint32_t> values;
+              for (unsigned reg = 0; reg != 128; ++reg)
+                for (unsigned lane = 0; lane != wave_size; ++lane)
+                  values.push_back(cu->read_vgpr(base + reg, lane));
+              return values;
+            };
+            const auto expected = execute(false);
+            const auto before = amdgpu::async_execution::stats.mma;
+            EXPECT_EQ(execute(true), expected);
+            const auto offloads = amdgpu::async_execution::stats.mma - before;
+            if (fallback == 0 || fallback == 4)
+              EXPECT_GT(offloads, 0u);
+            else
+              EXPECT_EQ(offloads, 0u);
+          }
+        }
+      }
+    }
+  }
+}
 } // namespace
