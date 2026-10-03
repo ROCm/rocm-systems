@@ -2420,13 +2420,9 @@ TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking)
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
-// AICOMRCCL-2428: GIN register succeeds, then RMA register fails. That is the
-// only way to reach fail_mem's free(mem->ginSegmentInfos) with a live array --
-// GinRegisterFails never allocates one that survives to fail_mem, and
-// RmaRegisterFails leaves ginEnabled false. deregister is the observable
-// witness that symMemoryUnregister saw ginSegmentInfos; free runs on the same
-// path before Obtain returns (mem is gone by then so the pointer cannot be
-// checked). rmaHostWins[0] stays null, so the RMA deregister arm is skipped.
+// Label fail_mem: AICOMRCCL-2428. GIN succeeding then RMA failing is the only way to reach
+// free(mem->ginSegmentInfos) with a live array; the sibling cases never build one that survives.
+// ginDereg is the witness that symMemoryUnregister saw it, since mem is gone before Obtain returns.
 TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnlinks) {
   PushTeam();
   comm->devrState.ginEnabled = true;
