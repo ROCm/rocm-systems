@@ -51,14 +51,16 @@ private:
     void initialize_node_agents();
     void initialize_node_processes();
 
-    ph_event_list_t  core_get_track_events(profiler_hub::common::connection& conn,
-                                           uint32_t                          track_id,
-                                           uint64_t                          start_ts,
-                                           uint64_t                          end_ts);
-    ph_sample_list_t core_get_track_samples(profiler_hub::common::connection& conn,
-                                            uint32_t                          track_id,
-                                            uint64_t                          start_ts,
-                                            uint64_t                          end_ts);
+    ph_event_list_t core_get_track_events(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track,
+        uint64_t                                            start_ts,
+        uint64_t                                            end_ts);
+    ph_sample_list_t core_get_track_samples(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track,
+        uint64_t                                            start_ts,
+        uint64_t                                            end_ts);
 
     static size_t default_thread_pool_size();
 
