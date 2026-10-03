@@ -47,31 +47,19 @@ function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
         set(${_VAR}_ROOT_DIR "" PARENT_SCOPE)
         set(${_VAR}_VERSION "" PARENT_SCOPE)
         return()
-    else()
-        set(${_VAR}_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
-        execute_process(
-            COMMAND
-                "${Python3_EXECUTABLE}" "-c"
-                "import sys; print('.'.join(str(v) for v in [sys.version_info[0], sys.version_info[1]])); print(sys.prefix);"
-            RESULT_VARIABLE _PYTHON_SUCCESS
-            OUTPUT_VARIABLE _PYTHON_VALUES
-            ERROR_VARIABLE _PYTHON_ERROR_VALUE
-        )
-
-        if(_PYTHON_SUCCESS MATCHES 0)
-            # Convert the process output into a list
-            string(REGEX REPLACE ";" "\\\\;" _PYTHON_VALUES ${_PYTHON_VALUES})
-            string(REGEX REPLACE "\n" ";" _PYTHON_VALUES ${_PYTHON_VALUES})
-            list(GET _PYTHON_VALUES 0 _PYTHON_VERSION_LIST)
-            list(GET _PYTHON_VALUES 1 _PYTHON_PREFIX)
-            set(${_VAR}_ROOT_DIR "${_PYTHON_PREFIX}" PARENT_SCOPE)
-            set(${_VAR}_VERSION "${_PYTHON_VERSION_LIST}" PARENT_SCOPE)
-        else()
-            rocprofiler_systems_message(WARNING "${_PYTHON_ERROR_VALUE}")
-            set(${_VAR}_ROOT_DIR "" PARENT_SCOPE)
-            set(${_VAR}_VERSION "" PARENT_SCOPE)
-        endif()
     endif()
+
+    set(${_VAR}_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
+    set(${_VAR}_VERSION "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}" PARENT_SCOPE)
+
+    # Derive the interpreter's root dir (sys.prefix) from its path rather than spawning a
+    # Python subprocess: the directory containing bin/<executable> is sys.prefix for every
+    # layout this project builds against (system install, conda env, venv). TheRock's
+    # superbuild relies on this same derivation when forwarding Python root dirs to this
+    # project, so this is a proven equivalence, not a new assumption.
+    cmake_path(GET Python3_EXECUTABLE PARENT_PATH _bin_dir)
+    cmake_path(GET _bin_dir PARENT_PATH _root_dir)
+    set(${_VAR}_ROOT_DIR "${_root_dir}" PARENT_SCOPE)
 endfunction()
 #
 # Internal: unset cached Python3 discovery variables so a subsequent find_package(Python3)
