@@ -38,32 +38,6 @@ const char *class_prefix(RegClass cls) {
   }
 }
 
-// M0 displaces the encoded SGPR index at runtime, so the operand names one
-// register and the hardware reads another. `LivenessAnalysis` tracks the
-// indirect *VGPR* forms (global_vgpr_usage_is_complete()) but has no scalar
-// equivalent, so this scan stands in for one.
-//
-// Prefix rather than an enumeration: it covers the load, the store
-// (s_movreld_*, whose indirect def is likewise absent from the clobber summary)
-// and the RDNA s_movrelsd_2_b32 pair form. Enumerating exact mnemonics is how
-// the scalar family slipped past the v_movrel* gate to begin with.
-//
-// Named for what it matches, not for the property it stands in for: any other
-// scalar indirection would need its own scan. Decoded instruction metadata is
-// the mechanism that would subsume both, per the TODO in
-// may_access_vgprs_indirectly().
-[[nodiscard]] bool accesses_sgprs_indirectly_via_movrel(const std::vector<BasicBlock *> &scope) {
-  for (BasicBlock *block : scope) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic().starts_with("s_movrel"))
-        return true;
-    }
-  }
-  return false;
-}
-
 } // namespace
 
 std::string format_register_set(const RegisterSet &regs) {
