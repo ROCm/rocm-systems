@@ -14,7 +14,33 @@
 
 #include "CL/cl_ext.h"
 
-#include <cstdlib>  // for alloca
+#include <algorithm>  // for std::find
+#include <cstdlib>    // for alloca
+#include <cstring>
+#include <vector>
+
+namespace {
+
+//! clGetInfo for a variable-length array. Unlike amd::clGetInfo this accepts an empty
+//! list - several cl_khr_external_* queries legitimately report zero handle types - and
+//! reports it as a zero param_value_size_ret rather than CL_INVALID_VALUE.
+template <typename T>
+cl_int clGetInfoVector(const std::vector<T>& values, size_t param_value_size, void* param_value,
+                       size_t* param_value_size_ret) {
+  const size_t valueSize = values.size() * sizeof(T);
+  *not_null(param_value_size_ret) = valueSize;
+  if (param_value != nullptr) {
+    if (param_value_size < valueSize) {
+      return CL_INVALID_VALUE;
+    }
+    if (valueSize != 0) {
+      ::memcpy(param_value, values.data(), valueSize);
+    }
+  }
+  return CL_SUCCESS;
+}
+
+}  // namespace
 
 /*! \addtogroup API
  *  @{
@@ -68,6 +94,28 @@ RUNTIME_ENTRY(cl_int, clGetPlatformIDs,
 }
 RUNTIME_EXIT
 
+//! Union of one of the per-device interop handle-type lists across the platform.
+//
+// These used to be fixed tables here, which was only correct while ROCr was the sole
+// backend. Which handle types can actually be imported depends on the backend that
+// initialized: ROCr routes through libhsakmt, which rejects KMT semaphore handles,
+// while PAL opens them via OpenExternalSharedQueueSemaphore and accepts both. So the
+// platform answer has to be assembled from the devices rather than decided at compile
+// time. Order is preserved and duplicates dropped; the lists are a handful of entries,
+// so the linear search costs nothing.
+template <typename T, typename Selector>
+static std::vector<T> unionOfDeviceHandleTypes(Selector select) {
+  std::vector<T> types;
+  for (const auto* device : amd::Device::getDevices(CL_DEVICE_TYPE_ALL, false)) {
+    for (const T type : *select(device->info())) {
+      if (std::find(types.begin(), types.end(), type) == types.end()) {
+        types.push_back(type);
+      }
+    }
+  }
+  return types;
+}
+
 /*! \brief Get specific information about the OpenCL platform.
  *
  *  \param param_name is an enum that identifies the platform information being
@@ -119,7 +167,16 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
           "cl_khr_d3d10_sharing "
           "cl_khr_d3d11_sharing "
           "cl_khr_dx9_media_sharing "
+          "cl_khr_external_memory_win32 "
+          "cl_khr_external_semaphore_win32 "
+          // Kept under the same guard as the backends: rocsettings.cpp and palsettings.cpp only
+          // enableExtension() these inside _WIN32, so advertising them at platform level
+          // elsewhere would promise capabilities no device on the platform reports.
+          "cl_khr_semaphore "
+          "cl_khr_external_memory "
+          "cl_khr_external_semaphore "
 #endif  //_WIN32
+          "cl_khr_device_uuid "
           "cl_amd_event_callback "
           ;
       break;
@@ -130,6 +187,34 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
       cl_ulong resolution = (cl_ulong)amd::Os::timerResolutionNanos();
       return amd::clGetInfo(resolution, param_value_size, param_value, param_value_size_ret);
     }
+
+    // cl_khr_semaphore / cl_khr_external_* platform-level capability lists. All devices
+    // on this platform share one backend, so these mirror the per-device lists.
+    case CL_PLATFORM_SEMAPHORE_TYPES_KHR: {
+      // An array, like the handle-type lists below, and empty where cl_khr_semaphore is not
+      // enabled - reporting BINARY there would contradict the extension string.
+      std::vector<cl_semaphore_type_khr> types;
+#ifdef _WIN32
+      types.push_back(CL_SEMAPHORE_TYPE_BINARY_KHR);
+#endif  //_WIN32
+      return clGetInfoVector(types, param_value_size, param_value, param_value_size_ret);
+    }
+    case CL_PLATFORM_EXTERNAL_MEMORY_IMPORT_HANDLE_TYPES_KHR: {
+      const auto types = unionOfDeviceHandleTypes<cl_external_memory_handle_type_khr>(
+          [](const device::Info& i) { return &i.externalMemoryImportHandleTypes_; });
+      return clGetInfoVector(types, param_value_size, param_value, param_value_size_ret);
+    }
+    case CL_PLATFORM_SEMAPHORE_IMPORT_HANDLE_TYPES_KHR: {
+      const auto types = unionOfDeviceHandleTypes<cl_external_semaphore_handle_type_khr>(
+          [](const device::Info& i) { return &i.semaphoreImportHandleTypes_; });
+      return clGetInfoVector(types, param_value_size, param_value, param_value_size_ret);
+    }
+    case CL_PLATFORM_SEMAPHORE_EXPORT_HANDLE_TYPES_KHR: {
+      const auto types = unionOfDeviceHandleTypes<cl_external_semaphore_handle_type_khr>(
+          [](const device::Info& i) { return &i.semaphoreExportHandleTypes_; });
+      return clGetInfoVector(types, param_value_size, param_value, param_value_size_ret);
+    }
+
     default:
       break;
   }
@@ -441,6 +526,84 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         cl_uint numVersion = atoi(drvVersion.c_str());
         return amd::clGetInfo(numVersion, param_value_size, param_value, param_value_size_ret);
       }
+
+      // cl_khr_device_uuid.
+      //
+      // The UUID must be byte-identical to the one AMD's Vulkan driver reports in
+      // VkPhysicalDeviceIDProperties::deviceUUID, otherwise CL-Vulkan interop clients
+      // cannot pair up the two handles for the same GPU. That driver builds it from the
+      // PCI address as four little-endian uint32s - domain, bus, device, function - so
+      // this must too. ROCr's own HSA_AMD_AGENT_INFO_UUID is an ASCII string and would
+      // never match, so info_.uuid_ is deliberately not used here.
+      case CL_DEVICE_UUID_KHR: {
+        const auto& info = as_amd(device)->info();
+        const uint32_t pciAddress[4] = {info.pciDomainID,
+                                        info.deviceTopology_.pcie.bus,
+                                        info.deviceTopology_.pcie.device,
+                                        info.deviceTopology_.pcie.function};
+        cl_uchar uuid[CL_UUID_SIZE_KHR];
+        ::memcpy(uuid, pciAddress, sizeof(uuid));
+        return amd::clGetInfo(uuid, param_value_size, param_value, param_value_size_ret);
+      }
+      case CL_DRIVER_UUID_KHR: {
+        // Matches VkPhysicalDeviceIDProperties::driverUUID for this driver: the
+        // zero-padded ASCII tag, not a binary UUID.
+        cl_uchar driverUuid[CL_UUID_SIZE_KHR] = {0};
+#if defined(_WIN32)
+        static constexpr char kDriverUuid[] = "AMD-WIN-DRV";
+#else
+        static constexpr char kDriverUuid[] = "AMD-LINUX-DRV";
+#endif
+        static_assert(sizeof(kDriverUuid) <= CL_UUID_SIZE_KHR,
+                      "driver UUID tag does not fit in CL_UUID_SIZE_KHR");
+        ::memcpy(driverUuid, kDriverUuid, sizeof(kDriverUuid) - 1);
+        return amd::clGetInfo(driverUuid, param_value_size, param_value, param_value_size_ret);
+      }
+      case CL_DEVICE_LUID_VALID_KHR: {
+        const auto& info = as_amd(device)->info();
+        cl_bool luidValid =
+            ((info.luidLowPart_ != 0) || (info.luidHighPart_ != 0)) ? CL_TRUE : CL_FALSE;
+        return amd::clGetInfo(luidValid, param_value_size, param_value, param_value_size_ret);
+      }
+      case CL_DEVICE_LUID_KHR: {
+        const auto& info = as_amd(device)->info();
+        // CL_LUID_SIZE_KHR is the Windows LUID layout: low DWORD first, then high.
+        cl_uchar luid[CL_LUID_SIZE_KHR];
+        const uint32_t low = info.luidLowPart_;
+        const uint32_t high = info.luidHighPart_;
+        ::memcpy(&luid[0], &low, sizeof(low));
+        ::memcpy(&luid[sizeof(low)], &high, sizeof(high));
+        return amd::clGetInfo(luid, param_value_size, param_value, param_value_size_ret);
+      }
+        CASE(CL_DEVICE_NODE_MASK_KHR, luidDeviceNodeMask_);
+
+      // cl_khr_semaphore. An array, and empty where the backend does not enable the
+      // extension, so it agrees with this device's extension string.
+      case CL_DEVICE_SEMAPHORE_TYPES_KHR: {
+        std::vector<cl_semaphore_type_khr> types;
+#ifdef _WIN32
+        types.push_back(CL_SEMAPHORE_TYPE_BINARY_KHR);
+#endif  //_WIN32
+        return clGetInfoVector(types, param_value_size, param_value, param_value_size_ret);
+      }
+
+      // cl_khr_external_memory / cl_khr_external_semaphore handle-type lists. All four
+      // are plain arrays and may legitimately be empty, which clGetInfoVector reports as
+      // a zero size rather than an error.
+      case CL_DEVICE_EXTERNAL_MEMORY_IMPORT_HANDLE_TYPES_KHR:
+        return clGetInfoVector(as_amd(device)->info().externalMemoryImportHandleTypes_,
+                               param_value_size, param_value, param_value_size_ret);
+      case CL_DEVICE_EXTERNAL_MEMORY_IMPORT_ASSUME_LINEAR_IMAGES_HANDLE_TYPES_KHR:
+        return clGetInfoVector(
+            as_amd(device)->info().externalMemoryImportAssumeLinearImagesHandleTypes_,
+            param_value_size, param_value, param_value_size_ret);
+      case CL_DEVICE_SEMAPHORE_IMPORT_HANDLE_TYPES_KHR:
+        return clGetInfoVector(as_amd(device)->info().semaphoreImportHandleTypes_, param_value_size,
+                               param_value, param_value_size_ret);
+      case CL_DEVICE_SEMAPHORE_EXPORT_HANDLE_TYPES_KHR:
+        return clGetInfoVector(as_amd(device)->info().semaphoreExportHandleTypes_, param_value_size,
+                               param_value, param_value_size_ret);
+
       default:
         break;
     }

@@ -8,7 +8,11 @@
 #include "signal_semaphore_common.hh"
 
 HIP_TEST_CASE(Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Binary_Semaphore) {
-  SignalExternalSemaphoreCommon(hipSignalExternalSemaphoresAsync);
+  for (const auto handle_type : VulkanTest::SupportedSemHandleTypes()) {
+    DYNAMIC_SECTION("semaphore handle type " << handle_type) {
+      SignalExternalSemaphoreCommon(hipSignalExternalSemaphoresAsync, handle_type);
+    }
+  }
 }
 
 // Timeline semaphores unsupported on AMD
@@ -18,7 +22,15 @@ HIP_TEST_CASE(Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Timeline_Sem
 }
 
 HIP_TEST_CASE(Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Multiple_Semaphores) {
+#if HT_AMD
+  for (const auto handle_type : VulkanTest::SupportedSemHandleTypes()) {
+    DYNAMIC_SECTION("semaphore handle type " << handle_type) {
+      SignalExternalMultipleSemaphoresCommon(hipSignalExternalSemaphoresAsync, handle_type);
+    }
+  }
+#else
   SignalExternalMultipleSemaphoresCommon(hipSignalExternalSemaphoresAsync);
+#endif
 }
 #endif
 

@@ -104,9 +104,10 @@ operator&()
 
 class VulkanTest {
  public:
-  VulkanTest(bool enable_validation)
+  VulkanTest(bool enable_validation,
+             VkExternalSemaphoreHandleTypeFlagBits sem_handle_type = GetVkSemHandlePlatformType())
       : _enable_validation{enable_validation},
-        _sem_handle_type{GetVkSemHandlePlatformType()},
+        _sem_handle_type{sem_handle_type},
         _mem_handle_type{GetVkMemHandlePlatformType()} {
     CreateInstance();
     CreateDevice();
@@ -114,6 +115,12 @@ class VulkanTest {
   }
 
   ~VulkanTest() {
+#ifdef _WIN64
+    for (const auto h : _exported_nt_handles) {
+      CloseHandle(h);
+    }
+#endif
+
     for (const auto s : _semaphores) {
       vkDestroySemaphore(_device, s, nullptr);
     }
@@ -204,6 +211,13 @@ class VulkanTest {
 
   VkExternalMemoryHandleTypeFlagBits GetMemHandleType() const { return _mem_handle_type; }
 
+  VkExternalSemaphoreHandleTypeFlagBits GetSemHandleType() const { return _sem_handle_type; }
+
+  /// Handle type used when the caller does not ask for a specific one.
+  static VkExternalSemaphoreHandleTypeFlagBits GetVkSemHandlePlatformType();
+
+  static std::vector<VkExternalSemaphoreHandleTypeFlagBits> SupportedSemHandleTypes();
+
  private:
   void CreateInstance();
 
@@ -239,7 +253,17 @@ class VulkanTest {
   int GetMemoryHandle(VkDeviceMemory memory);
 #endif
 
-  VkExternalSemaphoreHandleTypeFlagBits GetVkSemHandlePlatformType() const;
+#ifdef _WIN64
+  // Collects an exported handle for destructor cleanup, but only when it is an NT handle:
+  // a KMT handle is a global D3DKMT_HANDLE with no reference count and no ownership, and
+  // closing it would be wrong. Returns the handle so callers can use it inline.
+  HANDLE TrackExportedHandle(HANDLE handle, bool is_nt_handle) {
+    if (is_nt_handle && (handle != nullptr)) {
+      _exported_nt_handles.push_back(handle);
+    }
+    return handle;
+  }
+#endif
 
   VkExternalMemoryHandleTypeFlagBits GetVkMemHandlePlatformType() const;
 
@@ -265,6 +289,10 @@ class VulkanTest {
   std::vector<VkSemaphore> _semaphores;
   std::vector<VkFence> _fences;
   std::vector<Storage> _stores;
+#ifdef _WIN64
+  // NT handles exported from Vulkan, closed in the destructor. KMT handles are excluded.
+  std::vector<HANDLE> _exported_nt_handles;
+#endif
 
   std::vector<const char*> _required_instance_extensions{
       VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,

@@ -367,6 +367,12 @@ class ThunkLoader {
                                       void* NtHandle, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtCreateExternalSemaphore))(HSAuint32 NodeId, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
+                                      HSAuint64 InitialValue, \
+                                      HSAuint32 Timeline, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle, \
+                                      void** OutNtHandle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore))(HSA_EXTERNAL_SEMAPHORE_HANDLE Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore))(HSA_QUEUEID QueueId, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
@@ -568,6 +574,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtQueryDmaBufInfo)* HSAKMT_PFN(hsaKmtQueryDmaBufInfo);
     HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
+    HSAKMT_DEF(hsaKmtCreateExternalSemaphore)* HSAKMT_PFN(hsaKmtCreateExternalSemaphore);
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore);

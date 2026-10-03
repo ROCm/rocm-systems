@@ -683,6 +683,13 @@ class Device : public NullDevice {
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) override;
 
+  virtual bool createExtSemaphore(void** extSemaphore,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type,
+                                  bool timeline) override;
+
+  virtual bool exportExtSemaphore(amd::Os::FileDesc* handle, void* extSemaphore,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+
   virtual void DestroyExtSemaphore(void* extSemaphore);
 #if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUrilocator() const { return nullptr; }

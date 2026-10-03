@@ -58,6 +58,12 @@ class Context : public RuntimeObject {
     EGLDeviceKhr = 1 << EGLDeviceKhrIdx,        //!< EGL device
   };
 
+  //! Every D3D interop flavour. These binds receive the amd::Context* so that the
+  //! DXX extension object can be cached per graphics device inside the OpenCL
+  //! context; GL instead passes the API-level context handle in Info::hCtx_.
+  static constexpr uint kD3DDeviceFlags = D3D10DeviceKhr | D3D11DeviceKhr | D3D9DeviceKhr |
+                                          D3D9DeviceEXKhr | D3D9DeviceVAKhr;
+
   //! Context info structure
   struct Info {
     uint flags_;                     //!< Context info flags
@@ -244,6 +250,31 @@ class Context : public RuntimeObject {
     d3d10ExtCache_.erase(it);
     return true;
   }
+  // Keyed by IDirect3DDevice9Ex* (as void*). Unlike D3D10/D3D11, the key is not the
+  // device handed to clCreateContext: a DXVA adapter supplies an IDXVAHD_Device and a
+  // plain D3D9 adapter an IDirect3DDevice9, neither of which AmdDxExtCreate9 accepts.
+  // Entries are therefore populated lazily from the surface's own owning device, and
+  // drained wholesale at dissociate time rather than by key.
+  void setD3D9Ext(void* d3d9Device, void* pExt, void* pCLExt) {
+    std::lock_guard<std::mutex> lock(d3d9ExtCacheLock_);
+    d3d9ExtCache_[d3d9Device] = {pExt, pCLExt};
+  }
+  void* getD3D9Ext(void* d3d9Device) const {
+    std::lock_guard<std::mutex> lock(d3d9ExtCacheLock_);
+    auto it = d3d9ExtCache_.find(d3d9Device);
+    return (it != d3d9ExtCache_.end()) ? it->second.pCLExt : nullptr;
+  }
+  //! Removes and returns every cached D3D9 extension entry. The caller releases them.
+  std::vector<D3D11ExtEntry> drainD3D9Ext() {
+    std::lock_guard<std::mutex> lock(d3d9ExtCacheLock_);
+    std::vector<D3D11ExtEntry> entries;
+    entries.reserve(d3d9ExtCache_.size());
+    for (const auto& it : d3d9ExtCache_) {
+      entries.push_back(it.second);
+    }
+    d3d9ExtCache_.clear();
+    return entries;
+  }
 #endif  // _WIN32
 
  private:
@@ -259,6 +290,8 @@ class Context : public RuntimeObject {
   mutable std::mutex d3d11ExtCacheLock_;
   std::unordered_map<void*, D3D11ExtEntry> d3d10ExtCache_;
   mutable std::mutex d3d10ExtCacheLock_;
+  std::unordered_map<void*, D3D11ExtEntry> d3d9ExtCache_;
+  mutable std::mutex d3d9ExtCacheLock_;
 #endif
 };
 

@@ -286,7 +286,9 @@ VulkanTest::GetSemaphoreHandle(VkSemaphore semaphore) {
     throw std::runtime_error("Failed to retrieve handle for buffer!");
   }
 
-  return handle;
+  // NT handles carry a reference we own and must release; KMT handles must not be closed.
+  return TrackExportedHandle(
+      handle, _sem_handle_type == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT);
 }
 #else
 int VulkanTest::GetSemaphoreHandle(VkSemaphore semaphore) {
@@ -332,7 +334,9 @@ VulkanTest::GetMemoryHandle(VkDeviceMemory memory) {
     throw std::runtime_error("Failed to retrieve memory handle");
   }
 
-  return handle;
+  // Same ownership rule as GetSemaphoreHandle: NT handles are ours to close, KMT are not.
+  return TrackExportedHandle(
+      handle, _mem_handle_type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT);
 }
 #else
 int VulkanTest::GetMemoryHandle(VkDeviceMemory memory) {
@@ -356,13 +360,24 @@ int VulkanTest::GetMemoryHandle(VkDeviceMemory memory) {
 }
 #endif
 
-VkExternalSemaphoreHandleTypeFlagBits VulkanTest::GetVkSemHandlePlatformType() const {
+VkExternalSemaphoreHandleTypeFlagBits VulkanTest::GetVkSemHandlePlatformType() {
 #ifdef _WIN64
   return IsWindows8OrGreater() ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
                                : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
 #else
   return VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 #endif
+}
+
+std::vector<VkExternalSemaphoreHandleTypeFlagBits> VulkanTest::SupportedSemHandleTypes() {
+#ifdef _WIN64
+  if (IsWindows8OrGreater()) {
+    // All supported handle types on Windows 8 or greater are returned here.
+    return {VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+            VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT};
+  }
+#endif
+  return {GetVkSemHandlePlatformType()};
 }
 
 VkExternalMemoryHandleTypeFlagBits VulkanTest::GetVkMemHandlePlatformType() const {

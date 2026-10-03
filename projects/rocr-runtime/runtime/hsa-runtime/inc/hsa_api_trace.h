@@ -298,6 +298,10 @@ struct AmdExtTable {
   decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
   decltype(hsa_amd_signal_batch_create)* hsa_amd_signal_batch_create_fn;
   decltype(hsa_amd_signal_batch_destroy)* hsa_amd_signal_batch_destroy_fn;
+  // Appended at the end: this table is extended only by appending, so an
+  // older consumer built against a shorter table stays binary compatible.
+  // HSA_AMD_EXT_API_TABLE_STEP_VERSION is bumped alongside.
+  decltype(hsa_amd_external_semaphore_handle_create)* hsa_amd_external_semaphore_handle_create_fn;
 };
 
 // Table to export HSA Core Runtime Apis
