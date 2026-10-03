@@ -417,6 +417,22 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
            {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
+       }},
+      {"FillBytes",
+       {
+           // gfx7 and gfx8 blit shaders are checked in as pre-built blobs and
+           // are not regenerated, so byte fill is not available there.  The
+           // caller falls back to SDMA on those targets.
+           {NULL, 0, 0, 0},                                                 // gfx7
+           {NULL, 0, 0, 0},                                                 // gfx8
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx9
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx90a
+           {kCodeFillBytes9, sizeof(kCodeFillBytes9), 17, 8},               // gfx942
+           {kCodeFillBytes1010, sizeof(kCodeFillBytes1010), 17, 8},         // gfx1010
+           {kCodeFillBytes10, sizeof(kCodeFillBytes10), 17, 8},             // gfx10
+           {kCodeFillBytes11, sizeof(kCodeFillBytes11), 17, 8},             // gfx11
+           {kCodeFillBytes12, sizeof(kCodeFillBytes12), 17, 8},             // gfx12
+           {kCodeFillBytes1250, sizeof(kCodeFillBytes1250), 17, 8},         // gfx1250
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -2280,46 +2296,13 @@ hsa_status_t GpuAgent::DmaFill(void* ptr, uint32_t value, size_t count) {
 }
 
 hsa_status_t GpuAgent::DmaFillBytes(void* ptr, uint8_t value, size_t size) {
-  if (size == 0) return HSA_STATUS_SUCCESS;
+  // gfx7 and gfx8 have no byte fill blit shader.  Their blit shaders are
+  // checked in as pre-built blobs that the build does not regenerate, and
+  // neither target can back a blit with SDMA either: user SDMA queues are
+  // disabled on gfx8 and CreateBlitSdma has no gfx7 case.  Refuse on those
+  // agents the same way DmaCopyRect does.
+  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // Check if fill has unaligned prefix or suffix bytes that require CPU writes
-  // in the BlitKernel path. If so, and the memory is coarse-grained (not CPU
-  // accessible), we must use SDMA which has native byte fill support.
-  uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-  size_t prefix_bytes = (addr & 0x3) ? (4 - (addr & 0x3)) : 0;
-  if (prefix_bytes > size) prefix_bytes = size;
-  size_t aligned_size = size - prefix_bytes;
-  size_t suffix_bytes = aligned_size % sizeof(uint32_t);
-
-  bool needs_byte_handling = (prefix_bytes > 0) || (suffix_bytes > 0);
-
-  // If the fill is dword-aligned and dword-sized, BlitKernel is optimal
-  if (!needs_byte_handling) {
-    return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
-  }
-
-  // For unaligned fills, check if memory is coarse-grained (not CPU accessible).
-  // Query pointer info to determine memory type.
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  hsa_status_t err =
-      core::Runtime::runtime_singleton_->PtrInfo(ptr, &info, nullptr, nullptr, nullptr);
-  if (err != HSA_STATUS_SUCCESS) {
-    // If we can't determine memory type, fall back to BlitKernel
-    // (will work for fine-grained, may fault for coarse-grained)
-    return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
-  }
-
-  // If memory is coarse-grained (no fine-grained flag), use SDMA
-  bool is_coarse_grained = !(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED);
-
-  if (is_coarse_grained) {
-    // Use SDMA engine (BlitHostToDev or BlitDevToHost) which has native byte fill support
-    lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
-    return blit->SubmitLinearFillCommandBytes(ptr, value, size);
-  }
-
-  // Fine-grained memory: BlitKernel can safely do CPU writes for prefix/suffix
   return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
 }
 

@@ -276,6 +276,42 @@ void MemoryFillBytesTest::TestLargeFill(hsa_agent_t agent, hsa_amd_memory_pool_t
   err = hsa_amd_memory_pool_free(ptr);
   RET_IF_HSA_ERR(err);
 
+  // The fill above is dword aligned and a multiple of four, so it is served by
+  // the dword fill shader.  Repeat it unaligned and large enough that the byte
+  // fill shader has to run its vector phase and then loop in its scalar phase,
+  // which the small unaligned cases above never reach.
+  const size_t big_alloc = 16 * 1024 * 1024;
+  const size_t big_offset = 1;
+  const size_t big_fill = big_alloc - big_offset - 2;
+
+  void* big_ptr = nullptr;
+  err = hsa_amd_memory_pool_allocate(pool, big_alloc, 0, &big_ptr);
+  RET_IF_HSA_ERR(err);
+
+  err = hsa_amd_memory_fill_bytes(big_ptr, 0x00, big_alloc);
+  RET_IF_HSA_ERR(err);
+
+  const uint8_t big_value = 0x5A;
+  err = hsa_amd_memory_fill_bytes(static_cast<char*>(big_ptr) + big_offset, big_value, big_fill);
+  RET_IF_HSA_ERR(err);
+
+  std::vector<uint8_t> big_buf(big_alloc);
+  err = hsa_memory_copy(big_buf.data(), big_ptr, big_alloc);
+  RET_IF_HSA_ERR(err);
+
+  for (size_t i = 0; i < big_alloc; i++) {
+    const uint8_t expect =
+        (i >= big_offset && i < big_offset + big_fill) ? big_value : uint8_t(0x00);
+    if (big_buf[i] != expect) {
+      FAIL() << "TestLargeFill: unaligned mismatch at index " << i << " expected 0x" << std::hex
+             << (int)expect << " got 0x" << (int)big_buf[i] << std::dec;
+      break;
+    }
+  }
+
+  err = hsa_amd_memory_pool_free(big_ptr);
+  RET_IF_HSA_ERR(err);
+
   std::cout << "  TestLargeFill: PASSED" << std::endl;
 }
 
