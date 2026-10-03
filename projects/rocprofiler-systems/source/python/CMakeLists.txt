@@ -126,7 +126,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     # add_library(libpyrocprofsys MODULE ${pysources} ${pyheaders})
     list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)
     rocprofiler_systems_pybind11_add_module(
-        libpyrocprofiler-systems-${_VERSION} MODULE
+        libpyrocprofiler-systems-${_VERSION}
         PYTHON_VERSION ${_VERSION}
         VISIBILITY "hidden" ${pysources} ${pyheaders}
     )
