@@ -48,7 +48,6 @@ struct handle_hasher
 
 namespace std
 {
-
 #define ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(TYPE)                                             \
     template <>                                                                                    \
     struct hash<TYPE> : public rocprofiler::sdk::hash::handle_hasher<TYPE>                         \
