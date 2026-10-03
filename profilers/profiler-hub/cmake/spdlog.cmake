@@ -3,6 +3,17 @@
 
 include_guard(DIRECTORY)
 
+# roc-optiq vendoring: an in-tree "spdlog" target from roc-optiq's own
+# thirdparty/spdlog (added before this file runs) takes priority over
+# find_package()/FetchContent - both would otherwise try to add_library() a
+# target of the same name and fail with a CMake target-collision error.
+if(TARGET spdlog::spdlog)
+    return()
+elseif(TARGET spdlog)
+    add_library(spdlog::spdlog ALIAS spdlog)
+    return()
+endif()
+
 set(SPDLOG_VERSION "1.15.3" CACHE STRING "spdlog version")
 
 find_package(spdlog ${SPDLOG_VERSION} QUIET)
