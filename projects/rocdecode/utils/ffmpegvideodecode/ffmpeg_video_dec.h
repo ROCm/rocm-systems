@@ -112,7 +112,11 @@ class FFMpegVideoDecoder: public RocVideoDecoder {
         /**
         *   @brief  This function is used to get the current frame size based on pixel format.
         */
-        virtual int GetFrameSize() override {CHECK_ZERO("Display width", disp_width_); return ((disp_width_ * disp_height_) + ((chroma_height_ * chroma_width_) * num_chroma_planes_)) * byte_per_pixel_; }
+        virtual int GetFrameSize() override {
+            CHECK_ZERO("Display width", disp_width_);
+            return CalculateFrameSize(disp_width_, disp_height_, chroma_width_, chroma_height_,
+                                      num_chroma_planes_, byte_per_pixel_);
+        }
 
         /**
          *   @brief  This function reconfigure decoder if there is a change in sequence params.
