@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/sh
+set -e
 
 TEST_SOURCE=${PWD}/deduce-sanitizer-lib.cpp
 TEST_BINARY=${PWD}/deduce-sanitizer-lib.out
@@ -19,7 +20,7 @@ main(int argc, char** argv)
 }
 EOF
 
-${@} ${TEST_SOURCE} -o ${TEST_BINARY} &> /dev/stderr
+"$@" "${TEST_SOURCE}" -o "${TEST_BINARY}" > /dev/stderr 2>&1
 
 ldd ${TEST_BINARY} | grep ${LIBNAME} | sed -E 's/.* => //g' | awk '{print $1}' > ${TEST_RESULT}
 cat ${TEST_RESULT}
