@@ -518,6 +518,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PROGRAMS scripts/rocjitsu-pretranslate.py
         DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+
+    # Python wheel inputs: lib/python3/site-packages/ and share/rocjitsu/python/.
+    # This version-independent staging directory is not on Python's import
+    # path; source installs still need `pip install ./python`.
+    install(
+        DIRECTORY python/rocjitsu
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/python3/site-packages
+        FILES_MATCHING
+        PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # Wheel builders consume the same metadata as the standalone Python package.
+    install(
+        FILES python/pyproject.toml python/README.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/python
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/
