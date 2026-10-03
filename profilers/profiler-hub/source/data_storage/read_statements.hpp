@@ -1256,7 +1256,9 @@ private:
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + " UNION ALL " +
-                unfiltered_sql + " WHERE S.track_id = ?",
+                unfiltered_sql +
+                " WHERE S.track_id = ?4 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+                "track_id = ?4)",
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
@@ -1273,7 +1275,10 @@ private:
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + time_where + " UNION ALL " +
-                unfiltered_sql + " WHERE S.track_id = ?" + time_where,
+                unfiltered_sql +
+                " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+                "track_id = ?6)" +
+                time_where,
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
