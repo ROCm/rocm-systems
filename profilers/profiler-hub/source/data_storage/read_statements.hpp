@@ -1339,7 +1339,7 @@ private:
         out.stream_filtered =
             m_backend->create_read_statement_executor<timeline_event_result,
                                                       bind_types<size_t, size_t, size_t>>(
-                unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " +
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " +
                     a + ".stream_id = ?",
                 &timeline_event_result::id,
                 &timeline_event_result::start_timestamp,
@@ -1369,7 +1369,7 @@ private:
         out.stream_time_filtered = m_backend->create_read_statement_executor<
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t, size_t>>(
-            unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " + a +
+            unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " + a +
                 ".stream_id = ?" + time_where,
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
