@@ -43,13 +43,29 @@ using RcclUnitTesting::ScopedDebugLogging;
 static std::size_t g_diagCallocFailBytes = 0;
 static int g_diagCallocFailNth = 0;
 static bool g_diagCallocPad = false;
+static std::vector<void*> g_diagHostLive;
 template <typename T>
 static ncclResult_t DiagCalloc(const char* file, int line, const char* fn, T** ptr, std::size_t nelem) {
   if (g_diagCallocFailBytes != 0 && nelem * sizeof(T) == g_diagCallocFailBytes && --g_diagCallocFailNth == 0) {
     g_diagCallocFailBytes = 0;
     return ncclSystemError;
   }
-  return ncclCallocDebug(ptr, g_diagCallocPad && nelem != 0 ? nelem + 1 : nelem, file, line, fn, true);
+  const ncclResult_t ret =
+      ncclCallocDebug(ptr, g_diagCallocPad && nelem != 0 ? nelem + 1 : nelem, file, line, fn, true);
+  if (ret == ncclSuccess && *ptr != nullptr) {
+    g_diagHostLive.push_back(*ptr);
+  }
+  return ret;
+}
+
+static std::vector<void*> g_diagHostFrees;
+static void DiagFree(void* ptr) {
+  g_diagHostFrees.push_back(ptr);
+  auto it = std::find(g_diagHostLive.begin(), g_diagHostLive.end(), ptr);
+  if (it != g_diagHostLive.end()) {
+    g_diagHostLive.erase(it);
+  }
+  std::free(ptr);
 }
 
 // Device memory is host heap; frees release only what the alloc seam made.
@@ -98,6 +114,7 @@ static ncclResult_t DiagCuMemFreeAddr(void* ptr, struct ncclMemManager* manager,
   g_diagCudaCalloc(reinterpret_cast<void**>(ptr), (nelem) * sizeof(**(ptr)), manager, memType)
 #define ncclCudaFree(ptr, manager) g_diagCudaFree(ptr, manager)
 #define ncclCuMemFreeAddr(...) DiagCuMemFreeAddr(__VA_ARGS__)
+#define free(ptr) DiagFree(ptr)
 
 #include DIAG_P2P_CC_PATH
 
@@ -105,6 +122,7 @@ static ncclResult_t DiagCuMemFreeAddr(void* ptr, struct ncclMemManager* manager,
 #undef ncclCudaCalloc
 #undef ncclCudaFree
 #undef ncclCuMemFreeAddr
+#undef free
 
 namespace {
 
@@ -162,6 +180,8 @@ class DiagP2pMicrotest : public ::testing::Test {
     g_diagCallocFailBytes = 0;
     g_diagCallocFailNth = 0;
     g_diagCallocPad = false;
+    g_diagHostLive.clear();
+    g_diagHostFrees.clear();
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     ResetDevRuntimeMicroFakes();
     ResetDiagnosticsP2pDeviceFakes();
@@ -199,6 +219,10 @@ class DiagP2pMicrotest : public ::testing::Test {
 
   void BuildGroupComm() {
     BuildComm(kGroupWorld, kGroupRank, std::vector<int>(std::begin(kGroupRanks), std::end(kGroupRanks)));
+  }
+
+  void BuildLeaderComm() {
+    BuildComm(4, 0, {0, 3, 1, 2});
   }
 
   // GPU node i holds rank gpuRanks[i]; paths[i][j] is node i to node j.
@@ -1238,6 +1262,828 @@ TEST_F(DiagP2pMicrotest, PrepareRemoteOps_EachFailureReturnsFalseWithItsWarning)
     EXPECT_TRUE(LogHas(log, " Diagnostics P2P copy remote op descriptors CUDA failure: [hip_fake] stub error\n"))
         << log;
   }
+}
+
+template <typename Hook>
+using HookOf = ScopedHook<rccl_test_host::FnSigOf_t<Hook>>;
+
+constexpr int kSavedDevice = 7;
+
+// Declared in call order: a stage's ordinal is the number of collectives reached.
+enum class DiagP2pStage { kNone, kSetup, kEdges, kDescs, kWrote, kObs, kResults, kSummary, kReported, kFreed };
+enum class DiagP2pLaunch { kNone, kInit, kWrite, kVerify, kRead };
+// Stream syncs in happy-path order.
+enum class DiagP2pSync { kNone, kInit, kWrite, kVerify, kRead, kCleanup };
+
+bool IsDeviceBuffer(const void* ptr) {
+  return std::count(g_diagDeviceLive.begin(), g_diagDeviceLive.end(), ptr) == 1;
+}
+
+int CountOf(const std::string& text, const std::string& needle) {
+  int count = 0;
+  for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) {
+    count++;
+  }
+  return count;
+}
+
+// One real rank; the scene plays every peer's side of each collective.
+struct DiagP2pRunScene {
+  DiagP2pRunScene(ncclComm* runComm, std::vector<int> runRanks)
+      : comm(runComm),
+        ranks(std::move(runRanks)),
+        n(static_cast<int>(ranks.size())),
+        self(static_cast<int>(std::find(ranks.begin(), ranks.end(), comm->rank) - ranks.begin())),
+        peerSlots(n, std::vector<ncclDiagP2pSlot>(n)),
+        peerSetup(comm->nRanks, ncclSuccess),
+        zeroObs(n, false) {
+    for (int p = 0; p < n; p++) {
+      for (int q = 0; q < n; q++) {
+        peerSlots[p][q].readPattern = ncclDiagP2pReadPattern(ranks[p], ranks[q]);
+      }
+    }
+  }
+
+  ncclResult_t Run() {
+    ncclResult_t ret = ncclNumResults;
+    out = CaptureStdout([&] { ret = ncclDiagP2pRun(comm); });
+    return ret;
+  }
+
+  std::vector<int> Reasons() const {
+    std::vector<int> reasons;
+    for (const auto& r : myResults) {
+      reasons.push_back(r.reason);
+    }
+    return reasons;
+  }
+
+  // Every outbound edge carries `reason`; the self edge stays clean.
+  std::vector<int> RowOf(int reason) const {
+    std::vector<int> row(n, reason);
+    row[self] = ncclDiagP2pReasonNone;
+    return row;
+  }
+
+  ncclResult_t Collective(DiagP2pStage stage) {
+    stages.push_back(stage);
+    return stage == failStage ? ncclRemoteError : ncclSuccess;
+  }
+
+  ncclResult_t Gather(void* buf, int bytes) {
+    if (bytes == sizeof(ncclResult_t)) {
+      auto* results = static_cast<ncclResult_t*>(buf);
+      mySetup = results[comm->rank];
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r != comm->rank) {
+          results[r] = peerSetup[r];
+        }
+      }
+      return Collective(DiagP2pStage::kSetup);
+    }
+    EXPECT_EQ(bytes, static_cast<int>(sizeof(ncclDiagP2pSummary)));
+    mySummary = static_cast<ncclDiagP2pSummary*>(buf)[comm->rank];
+    return Collective(DiagP2pStage::kSummary);
+  }
+
+  static DiagP2pStage NextIntraGather(DiagP2pStage last) {
+    switch (last) {
+      case DiagP2pStage::kSetup:
+        return DiagP2pStage::kEdges;
+      case DiagP2pStage::kEdges:
+        return DiagP2pStage::kDescs;
+      case DiagP2pStage::kWrote:
+        return DiagP2pStage::kObs;
+      case DiagP2pStage::kObs:
+        return DiagP2pStage::kResults;
+      default:
+        ADD_FAILURE() << "unexpected intra-node gather";
+        return DiagP2pStage::kNone;
+    }
+  }
+
+  template <typename T>
+  T* Mine(DiagP2pStage want, DiagP2pStage stage, void* buf, int bytes, int perRank, std::vector<T>* mine) {
+    if (stage != want) {
+      return nullptr;
+    }
+    EXPECT_EQ(bytes, static_cast<int>(perRank * sizeof(T)));
+    T* all = static_cast<T*>(buf);
+    mine->assign(all + self * perRank, all + (self + 1) * perRank);
+    return all;
+  }
+
+  ncclResult_t IntraGather(int* gatherRanks, int gatherSelf, int gatherN, void* buf, int bytes) {
+    rankSet = gatherRanks;
+    EXPECT_EQ(std::vector<int>(gatherRanks, gatherRanks + gatherN), ranks);
+    EXPECT_EQ(gatherSelf, self);
+    EXPECT_FALSE(stages.empty());
+    if (stages.empty()) {
+      return ncclInternalError;
+    }
+    const DiagP2pStage stage = NextIntraGather(stages.back());
+    std::vector<ncclDiagP2pMemDesc> desc;
+    auto* edges = Mine(DiagP2pStage::kEdges, stage, buf, bytes, n, &myEdges);
+    auto* descs = Mine(DiagP2pStage::kDescs, stage, buf, bytes, 1, &desc);
+    auto* obs = Mine(DiagP2pStage::kObs, stage, buf, bytes, n, &myObs);
+    auto* results = Mine(DiagP2pStage::kResults, stage, buf, bytes, n, &myResults);
+    if (descs != nullptr) {
+      myDesc = desc[0];
+    }
+    for (int p = 0; p < n; p++) {
+      if (descs != nullptr) {
+        descs[p] = p == self ? myDesc : ncclDiagP2pMemDesc{1, n * sizeof(ncclDiagP2pSlot),
+                                                           reinterpret_cast<uintptr_t>(peerSlots[p].data()), {}};
+      }
+      if (p == self) {
+        continue;
+      }
+      for (int q = 0; q < n; q++) {
+        const uint64_t seen = zeroObs[p] ? 0 : peerSlots[p][q].writeValue;
+        if (edges != nullptr) {
+          edges[p * n + q] = {p != q && (inboundP2p || q != self), 0, PATH_DIS,
+                              ncclDiagP2pSameProcess(comm, ranks[p], ranks[q]), ncclDiagP2pHandleLegacyIpc};
+        } else if (obs != nullptr) {
+          obs[p * n + q] = {p == writeFlipPeer ? seen ^ 2 : seen, p == verifyFlipPeer ? seen ^ 1 : seen};
+        } else if (results != nullptr) {
+          results[p * n + q] = {p != q, ncclDiagP2pReasonNone, 0, 0, 0};
+        }
+      }
+    }
+    return Collective(stage);
+  }
+
+  // Peers write into this rank's slots before the barrier releases it.
+  ncclResult_t IntraBarrier(void* bootstrap, int* barrierRanks, int barrierSelf, int barrierN, int tag) {
+    EXPECT_EQ(bootstrap, comm->bootstrap);
+    EXPECT_EQ(std::vector<int>(barrierRanks, barrierRanks + barrierN), ranks);
+    EXPECT_EQ(barrierSelf, self);
+    if (tag != kDiagP2pBarrierWrote) {
+      EXPECT_EQ(tag, kDiagP2pBarrierImportsFreed);
+      closedAtFreed = ipcClose.calls;
+      slotsLiveAtFreed = IsDeviceBuffer(reinterpret_cast<void*>(myDesc.directPtr));
+      return Collective(DiagP2pStage::kFreed);
+    }
+    auto* slots = reinterpret_cast<ncclDiagP2pSlot*>(myDesc.directPtr);
+    if (slots != nullptr) {
+      mySlots.assign(slots, slots + n);
+      for (int p = 0; p < n; p++) {
+        if (p != self) {
+          slots[p].writeValue = ncclDiagP2pWritePattern(ranks[p], comm->rank);
+        }
+      }
+    }
+    return Collective(DiagP2pStage::kWrote);
+  }
+
+  ncclComm* const comm;
+  const std::vector<int> ranks;
+  const int n;
+  const int self;
+  std::vector<std::vector<ncclDiagP2pSlot>> peerSlots;
+  std::vector<ncclResult_t> peerSetup;
+  std::vector<bool> zeroObs;
+
+  DiagP2pStage failStage = DiagP2pStage::kNone;
+  DiagP2pLaunch failLaunch = DiagP2pLaunch::kNone;
+  DiagP2pSync failSync = DiagP2pSync::kNone;
+  hipMemcpyKind failCopyKind = hipMemcpyDefault;
+  size_t failCopyBytes = 0;
+  size_t failDeviceAllocBytes = 0;
+  int failDeviceFreeNth = 0;
+  bool failShareableAlloc = false;
+  bool failGetDevice = false;
+  int failSetDeviceCall = 0;
+  bool failStreamCreate = false;
+  bool failStreamDestroy = false;
+  bool failIpcClose = false;
+  int savedDevice = kSavedDevice;
+  int outboundP2p = 1;
+  bool inboundP2p = true;
+  uint64_t writeCorruption = 0;
+  uint64_t verifyCorruption = 0;
+  int writeFlipPeer = -1;
+  int verifyFlipPeer = -1;
+
+  std::vector<DiagP2pStage> stages;
+  std::string out;
+  ncclResult_t mySetup = ncclNumResults;
+  ncclDiagP2pMemDesc myDesc{};
+  std::vector<ncclDiagP2pEdgeInfo> myEdges;
+  std::vector<ncclDiagP2pWriteObs> myObs;
+  std::vector<ncclDiagP2pEdgeResult> myResults;
+  std::vector<ncclDiagP2pSlot> mySlots;
+  ncclDiagP2pSummary mySummary{};
+  std::vector<int> setDevices;
+  const int* rankSet = nullptr;
+  int directMap = -1;
+  int syncs = 0;
+  int deviceFrees = 0;
+  int closedAtFreed = -1;
+  bool slotsLiveAtFreed = false;
+
+  HookOf<decltype(g_devrBootstrapAllGather)> gather{
+      g_devrBootstrapAllGather, [this](void* bootstrap, void* buf, int bytes) {
+        EXPECT_EQ(bootstrap, comm->bootstrap);
+        return Gather(buf, bytes);
+      }};
+  HookOf<decltype(g_devrBootstrapIntraNodeAllGather)> intraGather{
+      g_devrBootstrapIntraNodeAllGather,
+      [this](void* bootstrap, int* r, int s, int c, void* buf, int bytes) {
+        EXPECT_EQ(bootstrap, comm->bootstrap);
+        return IntraGather(r, s, c, buf, bytes);
+      }};
+  HookOf<decltype(g_devrBootstrapIntraNodeBarrier)> intraBarrier{
+      g_devrBootstrapIntraNodeBarrier,
+      [this](void* b, int* r, int s, int c, int tag) { return IntraBarrier(b, r, s, c, tag); }};
+  HookOf<decltype(g_devrBootstrapBarrier)> barrier{
+      g_devrBootstrapBarrier, [this](void* bootstrap, int rank, int nRanks, int tag) {
+        EXPECT_EQ(bootstrap, comm->bootstrap);
+        EXPECT_EQ(rank, comm->rank);
+        EXPECT_EQ(nRanks, comm->nRanks);
+        EXPECT_EQ(tag, kDiagP2pBarrierReported);
+        return Collective(DiagP2pStage::kReported);
+      }};
+  HookOf<decltype(g_ncclTopoCheckP2p)> topo{
+      g_ncclTopoCheckP2p, [this](int, int, int* p2p, int* read, int* inter, int*, int*) {
+        *p2p = outboundP2p;
+        *read = 0;
+        *inter = -1;
+        return ncclSuccess;
+      }};
+  HookOf<decltype(g_ncclP2pAllocateShareableBuffer)> alloc{
+      g_ncclP2pAllocateShareableBuffer,
+      [this](size_t size, int map, ncclIpcDesc*, void** ptr, int peer, ncclMemManager* manager, ncclMemType_t type) {
+        EXPECT_EQ(peer, -1);
+        EXPECT_EQ(manager, comm->memManager);
+        EXPECT_EQ(type, ncclMemScratch);
+        directMap = map;
+        return failShareableAlloc ? ncclSystemError : g_diagCudaCalloc(ptr, size, manager, type);
+      }};
+  HookOf<decltype(g_diagCudaCalloc)> deviceAlloc{
+      g_diagCudaCalloc, [this](void** ptr, std::size_t bytes, ncclMemManager* manager, ncclMemType_t type) {
+        EXPECT_EQ(manager, comm->memManager);
+        EXPECT_EQ(type, ncclMemScratch);
+        if (failDeviceAllocBytes != 0 && bytes == failDeviceAllocBytes) {
+          return ncclSystemError;
+        }
+        return DefaultDiagCudaCalloc(ptr, bytes, manager, type);
+      }};
+  HookOf<decltype(g_diagCudaFree)> deviceFree{
+      g_diagCudaFree, [this](void* ptr, ncclMemManager* manager) {
+        const ncclResult_t ret = DefaultDiagCudaFree(ptr, manager);
+        return ++deviceFrees == failDeviceFreeNth ? ncclSystemError : ret;
+      }};
+  HookOf<decltype(g_hipGetDevice)> getDevice{
+      g_hipGetDevice, [this](int* dev) {
+        *dev = savedDevice;
+        return failGetDevice ? hipErrorNoDevice : hipSuccess;
+      }};
+  HookOf<decltype(g_hipSetDevice)> setDevice{
+      g_hipSetDevice, [this](int dev) {
+        setDevices.push_back(dev);
+        return static_cast<int>(setDevices.size()) == failSetDeviceCall ? hipErrorInvalidDevice : hipSuccess;
+      }};
+  HookOf<decltype(g_hipStreamCreateWithFlags)> streamCreate{
+      g_hipStreamCreateWithFlags, [this](hipStream_t* stream, unsigned flags) {
+        EXPECT_EQ(flags, hipStreamNonBlocking);
+        *stream = failStreamCreate ? nullptr : kStream;
+        return failStreamCreate ? hipErrorOutOfMemory : hipSuccess;
+      }};
+  HookOf<decltype(g_hipStreamDestroy)> streamDestroy{
+      g_hipStreamDestroy, [this](hipStream_t stream) {
+        EXPECT_EQ(stream, kStream);
+        return failStreamDestroy ? hipErrorInvalidHandle : hipSuccess;
+      }};
+  HookOf<decltype(g_hipStreamSynchronize)> sync{
+      g_hipStreamSynchronize, [this](hipStream_t stream) {
+        EXPECT_EQ(stream, kStream);
+        return ++syncs == static_cast<int>(failSync) ? hipErrorLaunchFailure : hipSuccess;
+      }};
+  HookOf<decltype(g_hipMemcpyAsync)> copy{
+      g_hipMemcpyAsync, [this](void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
+        EXPECT_EQ(stream, kStream);
+        if (kind == failCopyKind && bytes == failCopyBytes) {
+          return hipErrorInvalidValue;
+        }
+        return HonestMemcpyAsync(dst, src, bytes, kind, stream);
+      }};
+  HookOf<decltype(g_hipIpcCloseMemHandle)> ipcClose{
+      g_hipIpcCloseMemHandle, [this](void*) { return failIpcClose ? hipErrorInvalidValue : hipSuccess; }};
+  HookOf<decltype(g_ncclDiagP2pInitSlots)> initLaunch{
+      g_ncclDiagP2pInitSlots, [this](ncclDiagP2pSlot* slots, const int* slotRanks, int count, int dst, hipStream_t s) {
+        EXPECT_EQ(s, kStream);
+        EXPECT_TRUE(IsDeviceBuffer(slots));
+        EXPECT_TRUE(IsDeviceBuffer(slotRanks));
+        return failLaunch == DiagP2pLaunch::kInit ? ncclUnhandledCudaError
+                                                  : EmulateDiagP2pInitSlots(slots, slotRanks, count, dst, s);
+      }};
+  HookOf<decltype(g_ncclDiagP2pRemoteWrite)> writeLaunch{
+      g_ncclDiagP2pRemoteWrite, [this](const ncclDiagP2pRemoteOp* ops, int count, hipStream_t s) {
+        EXPECT_EQ(s, kStream);
+        EXPECT_TRUE(IsDeviceBuffer(ops));
+        EXPECT_GT(count, 0);
+        if (failLaunch == DiagP2pLaunch::kWrite || count <= 0) {
+          return ncclUnhandledCudaError;
+        }
+        const ncclResult_t ret = EmulateDiagP2pRemoteWrite(ops, count, s);
+        ops[0].remoteSlots[ops[0].srcSlot].writeValue ^= writeCorruption;
+        return ret;
+      }};
+  HookOf<decltype(g_ncclDiagP2pVerifyWrites)> verifyLaunch{
+      g_ncclDiagP2pVerifyWrites, [this](ncclDiagP2pSlot* slots, int count, hipStream_t s) {
+        EXPECT_EQ(s, kStream);
+        EXPECT_TRUE(IsDeviceBuffer(slots));
+        if (failLaunch == DiagP2pLaunch::kVerify) {
+          return ncclUnhandledCudaError;
+        }
+        const ncclResult_t ret = EmulateDiagP2pVerifyWrites(slots, count, s);
+        for (int i = 0; i < count; i++) {
+          slots[i].verifyValue ^= verifyCorruption;
+        }
+        return ret;
+      }};
+  HookOf<decltype(g_ncclDiagP2pRemoteRead)> readLaunch{
+      g_ncclDiagP2pRemoteRead, [this](const ncclDiagP2pRemoteOp* ops, int count, uint64_t* readback, hipStream_t s) {
+        EXPECT_EQ(s, kStream);
+        EXPECT_TRUE(IsDeviceBuffer(ops));
+        EXPECT_TRUE(IsDeviceBuffer(readback));
+        return failLaunch == DiagP2pLaunch::kRead ? ncclUnhandledCudaError
+                                                  : EmulateDiagP2pRemoteRead(ops, count, readback, s);
+      }};
+};
+
+TEST_F(DiagP2pMicrotest, Run_HappyPathOnRankZero_PrintsOkAndReleasesEverything) {
+  BuildLeaderComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.out, DiagLine("NCCL DIAG [OK]   p2p: all 12 directed GPU P2P edges verified"));
+  EXPECT_EQ(run.stages, (std::vector<DiagP2pStage>{DiagP2pStage::kSetup, DiagP2pStage::kEdges, DiagP2pStage::kDescs,
+                                                   DiagP2pStage::kWrote, DiagP2pStage::kObs, DiagP2pStage::kResults,
+                                                   DiagP2pStage::kSummary, DiagP2pStage::kReported,
+                                                   DiagP2pStage::kFreed}));
+  EXPECT_EQ(run.mySetup, ncclSuccess);
+  EXPECT_EQ(run.mySummary.tested, 12u);
+  EXPECT_EQ(run.mySummary.passed, 12u);
+  EXPECT_EQ(run.mySummary.skipped, 0u);
+  EXPECT_EQ(run.setDevices, (std::vector<int>{0, kSavedDevice}));
+  EXPECT_EQ(run.streamDestroy.calls, 1);
+  EXPECT_EQ(run.ipcClose.calls, run.n - 1);
+  EXPECT_EQ(run.closedAtFreed, run.n - 1);
+  EXPECT_TRUE(run.slotsLiveAtFreed);
+  EXPECT_EQ(run.directMap, 0);
+  ASSERT_EQ(g_diagDeviceFrees.size(), 4u);
+  for (const auto& f : g_diagDeviceFrees) {
+    EXPECT_EQ(f.manager, comm_->memManager);
+  }
+  EXPECT_TRUE(g_diagDeviceLive.empty());
+  EXPECT_TRUE(g_diagHostLive.empty());
+  EXPECT_EQ(std::count(g_diagHostFrees.begin(), g_diagHostFrees.end(), run.rankSet), 0);
+}
+
+TEST_F(DiagP2pMicrotest, Run_CrossClique_FreesTheRankSetItBuilt) {
+  BuildComm(4, 2, {0, 1, 2, 3});
+  comm_->p2pCrossClique = true;
+  comm_->nvlDomainSize = 4;
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_NE(run.rankSet, localRanks_.data());
+  EXPECT_EQ(std::count(g_diagHostFrees.begin(), g_diagHostFrees.end(), run.rankSet), 1);
+  EXPECT_TRUE(g_diagHostLive.empty());
+}
+
+TEST_F(DiagP2pMicrotest, Run_HappyPathOnOtherSlot_ContributesExactRowsAndLogsEachEdge) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.savedDevice = kGroupRank;
+  ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
+  const std::string log = CaptureLog([&] { EXPECT_EQ(run.Run(), ncclSuccess); });
+  EXPECT_EQ(run.out, "");
+  EXPECT_TRUE(run.setDevices.empty());
+  EXPECT_EQ(run.myDesc.valid, 1);
+  EXPECT_EQ(run.myDesc.bytes, kGroupN * sizeof(ncclDiagP2pSlot));
+  EXPECT_EQ(run.mySummary.tested, 0u);
+  EXPECT_EQ(run.ipcClose.calls, kGroupN - 1);
+  const std::string fields = "srcRank=4 srcCudaDev=4 srcNvmlDev=14 dstRank=1 dstCudaDev=1 dstNvmlDev=11 path=DIS "
+                             "handle=LEGACY_CUDA_IPC topoRead=0\n";
+  EXPECT_EQ(CountOf(log, " Diagnostics P2P write "), 3) << log;
+  EXPECT_EQ(CountOf(log, " Diagnostics P2P read "), 3) << log;
+  EXPECT_TRUE(LogHas(log, (" Diagnostics P2P write " + fields).c_str())) << log;
+  EXPECT_TRUE(LogHas(log, (" Diagnostics P2P read " + fields).c_str())) << log;
+  ASSERT_EQ(run.myResults.size(), static_cast<size_t>(kGroupN));
+  ASSERT_EQ(run.myEdges.size(), static_cast<size_t>(kGroupN));
+  ASSERT_EQ(run.myObs.size(), static_cast<size_t>(kGroupN));
+  ASSERT_EQ(run.mySlots.size(), static_cast<size_t>(kGroupN));
+  for (int q = 0; q < kGroupN; q++) {
+    const ncclDiagP2pEdgeResult& r = run.myResults[q];
+    const bool peer = q != kGroupSelf;
+    const uint64_t wrote = peer ? ncclDiagP2pWritePattern(kGroupRank, kGroupRanks[q]) : 0;
+    const uint64_t seen = peer ? ncclDiagP2pWritePattern(kGroupRanks[q], kGroupRank) : 0;
+    EXPECT_EQ(run.myEdges[q].p2p, peer) << q;
+    EXPECT_EQ(r.tested, peer) << q;
+    EXPECT_EQ(r.reason, ncclDiagP2pReasonNone) << q;
+    EXPECT_EQ(r.writeGot, wrote) << q;
+    EXPECT_EQ(r.verifyGot, wrote) << q;
+    EXPECT_EQ(r.readGot, peer ? ncclDiagP2pReadPattern(kGroupRanks[q], kGroupRank) : 0) << q;
+    EXPECT_EQ(run.peerSlots[q][kGroupSelf].writeValue, wrote) << q;
+    EXPECT_EQ(run.myObs[q].writeValue, seen) << q;
+    EXPECT_EQ(run.myObs[q].verifyValue, seen) << q;
+    EXPECT_EQ(run.mySlots[q].readPattern, ncclDiagP2pReadPattern(kGroupRank, kGroupRanks[q])) << q;
+    EXPECT_EQ(run.mySlots[q].writeValue, 0u) << q;
+  }
+}
+
+TEST_F(DiagP2pMicrotest, Run_GroupLeaderOnNonZeroRank_StoresSummaryAtOwnRankSilently) {
+  BuildComm(4, 3, {3, 0, 1, 2});
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.out, "");
+  EXPECT_EQ(run.mySummary.tested, 12u);
+  EXPECT_EQ(run.mySummary.passed, 12u);
+}
+
+TEST_F(DiagP2pMicrotest, Run_PeerSetupFailures_ReportedThenLastReturnedBeforeEdgeWork) {
+  {
+    BuildLeaderComm();
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.peerSetup[2] = ncclSystemError;
+    run.peerSetup[3] = ncclInvalidUsage;
+    EXPECT_EQ(run.Run(), ncclInvalidUsage);
+    EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
+    EXPECT_EQ(run.out, DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 2 result=2") +
+                           DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 3 result=5"));
+    EXPECT_EQ(run.streamDestroy.calls, 1);
+  }
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.peerSetup[0] = ncclSystemError;
+  EXPECT_EQ(run.Run(), ncclSystemError);
+  EXPECT_EQ(run.out, "");
+}
+
+TEST_F(DiagP2pMicrotest, Run_LocalSetupFailure_IsSharedThroughAgreementGather) {
+  BuildLeaderComm();
+  comm_->p2pCrossClique = true;
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  EXPECT_EQ(run.Run(), ncclInternalError);
+  EXPECT_EQ(run.mySetup, ncclInternalError);
+  EXPECT_EQ(run.stages, std::vector<DiagP2pStage>{DiagP2pStage::kSetup});
+  EXPECT_EQ(run.out, DiagLine("NCCL DIAG [INFO] p2p: setup failed on rank 0 result=3"));
+}
+
+// Pins a hang: this failure skips the gather the other ranks wait in.
+TEST_F(DiagP2pMicrotest, Run_SetupResultsCallocFailure_ReturnsWithoutAgreementGather) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  FailCallocOf(kGroupWorld * sizeof(ncclResult_t), 1);
+  EXPECT_EQ(run.Run(), ncclSystemError);
+  EXPECT_TRUE(run.stages.empty());
+}
+
+TEST_F(DiagP2pMicrotest, Run_CollectiveFailure_AbortsAndSkipsImportsFreedBarrier) {
+  BuildGroupComm();
+  for (DiagP2pStage stage : {DiagP2pStage::kSetup, DiagP2pStage::kEdges, DiagP2pStage::kDescs, DiagP2pStage::kWrote,
+                             DiagP2pStage::kObs, DiagP2pStage::kResults, DiagP2pStage::kSummary,
+                             DiagP2pStage::kReported}) {
+    SCOPED_TRACE(static_cast<int>(stage));
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.failStage = stage;
+    EXPECT_EQ(run.Run(), ncclRemoteError);
+    EXPECT_EQ(run.stages.back(), stage);
+    EXPECT_EQ(run.stages.size(), static_cast<size_t>(stage));
+    EXPECT_EQ(run.ipcClose.calls, stage >= DiagP2pStage::kWrote ? kGroupN - 1 : 0);
+    EXPECT_EQ(run.streamDestroy.calls, 1);
+    EXPECT_EQ(run.setDevices, (std::vector<int>{kGroupRank, kSavedDevice}));
+    EXPECT_TRUE(g_diagDeviceLive.empty());
+    EXPECT_TRUE(g_diagHostLive.empty());
+  }
+}
+
+struct DiagP2pFault {
+  const char* name;
+  std::function<void(DiagP2pRunScene*)> arm;
+};
+
+void ExpectEachFaultMarksOutboundEdges(ncclComm* comm, const std::vector<int>& ranks, int reason,
+                                       const std::vector<DiagP2pFault>& faults,
+                                       const std::function<void(const DiagP2pRunScene&)>& check = nullptr) {
+  for (const auto& f : faults) {
+    SCOPED_TRACE(f.name);
+    DiagP2pRunScene run(comm, ranks);
+    f.arm(&run);
+    EXPECT_EQ(run.Run(), ncclSuccess);
+    EXPECT_EQ(run.Reasons(), run.RowOf(reason));
+    EXPECT_TRUE(g_diagDeviceLive.empty());
+    EXPECT_TRUE(g_diagHostLive.empty());
+    if (check) {
+      check(run);
+    }
+    FailCallocOf(0, 0);
+  }
+}
+
+TEST_F(DiagP2pMicrotest, Run_LocalCudaSetupFaults_MarkOutboundEdgesLocalCuda) {
+  BuildGroupComm();
+  ExpectEachFaultMarksOutboundEdges(
+      comm_.get(), localRanks_, ncclDiagP2pReasonLocalCuda,
+      {
+          {"getDevice", [](DiagP2pRunScene* r) { r->failGetDevice = true; }},
+          {"setDevice", [](DiagP2pRunScene* r) { r->failSetDeviceCall = 1; }},
+          {"streamCreate", [](DiagP2pRunScene* r) { r->failStreamCreate = true; }},
+          {"rankMapAlloc", [](DiagP2pRunScene* r) { r->failDeviceAllocBytes = r->n * sizeof(int); }},
+          {"rankMapCopy",
+           [](DiagP2pRunScene* r) {
+             r->failCopyKind = hipMemcpyHostToDevice;
+             r->failCopyBytes = r->n * sizeof(int);
+           }},
+          {"initLaunch", [](DiagP2pRunScene* r) { r->failLaunch = DiagP2pLaunch::kInit; }},
+          {"initSync", [](DiagP2pRunScene* r) { r->failSync = DiagP2pSync::kInit; }},
+      });
+}
+
+TEST_F(DiagP2pMicrotest, Run_LocalCudaSetupFault_SkipsStreamAndRestoresOnlyKnownDevice) {
+  BuildGroupComm();
+  {
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.failGetDevice = true;
+    EXPECT_EQ(run.Run(), ncclSuccess);
+    EXPECT_TRUE(run.setDevices.empty());
+    EXPECT_EQ(run.streamCreate.calls, 0);
+    EXPECT_EQ(run.myDesc.valid, 0);
+    EXPECT_EQ(run.myDesc.bytes, kGroupN * sizeof(ncclDiagP2pSlot));
+  }
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failSetDeviceCall = 1;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.setDevices, (std::vector<int>{kGroupRank, kSavedDevice}));
+  EXPECT_EQ(run.streamCreate.calls, 0);
+  EXPECT_EQ(run.streamDestroy.calls, 0);
+}
+
+TEST_F(DiagP2pMicrotest, Run_ShareableAllocFailure_KeepsOutboundEdgesButPublishesNoBuffer) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failShareableAlloc = true;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonNone));
+  EXPECT_EQ(run.myDesc.valid, 0);
+  EXPECT_EQ(run.verifyLaunch.calls, 0);
+  EXPECT_EQ(run.readLaunch.calls, 1);
+}
+
+TEST_F(DiagP2pMicrotest, Run_WritePhaseFaults_MarkWriteLaunch) {
+  BuildGroupComm();
+  ExpectEachFaultMarksOutboundEdges(
+      comm_.get(), localRanks_, ncclDiagP2pReasonWriteLaunch,
+      {
+          {"writeLaunch", [](DiagP2pRunScene* r) { r->failLaunch = DiagP2pLaunch::kWrite; }},
+          {"writeSync", [](DiagP2pRunScene* r) { r->failSync = DiagP2pSync::kWrite; }},
+          {"remoteOpsAlloc",
+           [](DiagP2pRunScene* r) { r->failDeviceAllocBytes = (r->n - 1) * sizeof(ncclDiagP2pRemoteOp); }},
+      });
+}
+
+// A local verify failure zeroes this rank's view; peers then blame their writes.
+TEST_F(DiagP2pMicrotest, Run_VerifyFaults_ZeroOwnObservationsAndSkipRead) {
+  BuildGroupComm();
+  ExpectEachFaultMarksOutboundEdges(
+      comm_.get(), localRanks_, ncclDiagP2pReasonReadLaunch,
+      {
+          {"hostSlotsCalloc", [](DiagP2pRunScene* r) { FailCallocOf(r->n * sizeof(ncclDiagP2pSlot), 1); }},
+          {"verifyLaunch", [](DiagP2pRunScene* r) { r->failLaunch = DiagP2pLaunch::kVerify; }},
+          {"verifyCopy",
+           [](DiagP2pRunScene* r) {
+             r->failCopyKind = hipMemcpyDeviceToHost;
+             r->failCopyBytes = r->n * sizeof(ncclDiagP2pSlot);
+           }},
+          {"verifySync", [](DiagP2pRunScene* r) { r->failSync = DiagP2pSync::kVerify; }},
+      },
+      [](const DiagP2pRunScene& run) {
+        for (const auto& o : run.myObs) {
+          EXPECT_EQ(o.writeValue, 0u);
+          EXPECT_EQ(o.verifyValue, 0u);
+        }
+        EXPECT_EQ(run.readLaunch.calls, 0);
+      });
+}
+
+TEST_F(DiagP2pMicrotest, Run_ReadPhaseFaults_MarkReadLaunch) {
+  BuildGroupComm();
+  ExpectEachFaultMarksOutboundEdges(
+      comm_.get(), localRanks_, ncclDiagP2pReasonReadLaunch,
+      {
+          {"readbackAlloc", [](DiagP2pRunScene* r) { r->failDeviceAllocBytes = (r->n - 1) * sizeof(uint64_t); }},
+          {"readbackCalloc", [](DiagP2pRunScene* r) { FailCallocOf((r->n - 1) * sizeof(uint64_t), 2); }},
+          {"readLaunch", [](DiagP2pRunScene* r) { r->failLaunch = DiagP2pLaunch::kRead; }},
+          {"readCopy",
+           [](DiagP2pRunScene* r) {
+             r->failCopyKind = hipMemcpyDeviceToHost;
+             r->failCopyBytes = (r->n - 1) * sizeof(uint64_t);
+           }},
+          {"readSync", [](DiagP2pRunScene* r) { r->failSync = DiagP2pSync::kRead; }},
+      });
+}
+
+TEST_F(DiagP2pMicrotest, Run_WriteAndReadMismatches_ReportObservedValues) {
+  BuildLeaderComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.writeCorruption = 0x10;
+  run.peerSlots[3][0].readPattern = 0xbad;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonWriteMismatch, 0, ncclDiagP2pReasonReadMismatch}));
+  const std::string head = "srcRank=0 srcCudaDev=0 srcNvmlDev=10 dstRank=";
+  const std::string tail = " path=DIS handle=LEGACY_CUDA_IPC";
+  EXPECT_EQ(run.out,
+            DiagLine("NCCL DIAG [INFO] p2p: 10/12 directed GPU P2P edges verified") +
+                DiagLine("NCCL DIAG [INFO] p2p: write mismatch " + head + "3 dstCudaDev=3 dstNvmlDev=13" + tail +
+                         " expected=0x4000000000000003 got=0x4000000000000013 verify=0x4000000000000013; " +
+                         kGenericAdvice) +
+                DiagLine("NCCL DIAG [INFO] p2p: read mismatch " + head + "2 dstCudaDev=2 dstNvmlDev=12" + tail +
+                         " expected=0x8000000100000000 got=0x0000000000000bad; " + kGenericAdvice));
+}
+
+// Pins misattribution: a destination-local failure reads as a write mismatch.
+TEST_F(DiagP2pMicrotest, Run_DestinationLocalFailure_IsBlamedOnSourceWrite) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.zeroObs[2] = true;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.peerSlots[2][kGroupSelf].writeValue, ncclDiagP2pWritePattern(kGroupRank, kGroupRanks[2]));
+  EXPECT_EQ(run.Reasons(), (std::vector<int>{0, 0, ncclDiagP2pReasonWriteMismatch, 0}));
+  ASSERT_EQ(run.myResults.size(), static_cast<size_t>(kGroupN));
+  EXPECT_EQ(run.myResults[2].writeGot, 0u);
+  EXPECT_EQ(run.myResults[2].verifyGot, 0u);
+}
+
+TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunError) {
+  BuildLeaderComm();
+  const std::string okLine = DiagLine("NCCL DIAG [OK]   p2p: all 12 directed GPU P2P edges verified");
+  const auto cleanupLine = [](int result) {
+    return DiagLine("NCCL DIAG [INFO] p2p: resource cleanup failed rank=0 result=" + std::to_string(result) +
+                    "; some temporary resources may remain");
+  };
+  const std::vector<DiagP2pFault> faults = {
+      {"streamDestroy", [](DiagP2pRunScene* r) { r->failStreamDestroy = true; }},
+      {"cleanupSync", [](DiagP2pRunScene* r) { r->failSync = DiagP2pSync::kCleanup; }},
+      {"ipcClose", [](DiagP2pRunScene* r) { r->failIpcClose = true; }},
+      {"restoreDevice", [](DiagP2pRunScene* r) { r->failSetDeviceCall = 2; }},
+  };
+  for (const auto& f : faults) {
+    SCOPED_TRACE(f.name);
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    f.arm(&run);
+    EXPECT_EQ(run.Run(), ncclUnhandledCudaError);
+    EXPECT_EQ(run.out, okLine + cleanupLine(ncclUnhandledCudaError));
+    EXPECT_EQ(run.stages.back(), DiagP2pStage::kFreed);
+  }
+  for (int nth = 1; nth <= 4; nth++) {
+    SCOPED_TRACE(nth);
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.failDeviceFreeNth = nth;
+    EXPECT_EQ(run.Run(), ncclSystemError);
+    EXPECT_EQ(run.out, okLine + cleanupLine(ncclSystemError));
+    EXPECT_EQ(run.deviceFrees, 4);
+  }
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failStreamDestroy = true;
+  run.failStage = DiagP2pStage::kReported;
+  EXPECT_EQ(run.Run(), ncclRemoteError);
+  EXPECT_EQ(run.out, okLine + cleanupLine(ncclUnhandledCudaError));
+}
+
+// ROCm gaps: cuMem same-process import and handle release fail; fix flips this.
+TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
+  BuildLeaderComm();
+  peers_[3].pidHash = peers_[0].pidHash;
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failStreamDestroy = true;
+  run.failSetDeviceCall = 2;
+  EXPECT_EQ(run.Run(), ncclInternalError);
+  EXPECT_EQ(run.directMap, 1);
+  EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonImport, 0, 0}));
+  EXPECT_EQ(run.out,
+            DiagLine("NCCL DIAG [INFO] p2p: 11/12 directed GPU P2P edges verified") +
+                DiagLine("NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 srcCudaDev=0 srcNvmlDev=10 "
+                         "dstRank=3 dstCudaDev=3 dstNvmlDev=13 path=DIS handle=DIRECT reason=import; inspect "
+                         "preceding CUDA peer-access or virtual-memory mapping errors on the source rank") +
+                DiagLine("NCCL DIAG [INFO] p2p: resource cleanup failed rank=0 result=3; some temporary resources "
+                         "may remain"));
+}
+
+TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisablesIt) {
+  BuildLeaderComm();
+  peers_[2].pidHash = peers_[0].pidHash;
+  ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipSuccess; });
+  std::vector<int> disabled;
+  ScopedHook disable(g_hipDeviceDisablePeerAccess, [&](int dev) {
+    disabled.push_back(dev);
+    return hipSuccess;
+  });
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonNone));
+  EXPECT_EQ(disabled, std::vector<int>{2});
+  EXPECT_EQ(run.ipcClose.calls, run.n - 2);
+  EXPECT_EQ(run.out,
+            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=0 cudaDev=0; "
+                     "avoid concurrent CUDA use on this context until diagnostics completes") +
+                DiagLine("NCCL DIAG [OK]   p2p: all 12 directed GPU P2P edges verified"));
+}
+
+TEST_F(DiagP2pMicrotest, Run_RankMapCopyFailure_WarnsAsSlotInitFailure) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failCopyKind = hipMemcpyHostToDevice;
+  run.failCopyBytes = kGroupN * sizeof(int);
+  const std::string log = CaptureLog([&] { EXPECT_EQ(run.Run(), ncclSuccess); });
+  EXPECT_TRUE(LogHas(log, " Diagnostics P2P copy P2P rank map CUDA failure: [hip_fake] stub error\n")) << log;
+  EXPECT_TRUE(LogHas(log, " Diagnostics P2P initialize local slots returned 1\n")) << log;
+  EXPECT_EQ(run.initLaunch.calls, 0);
+}
+
+TEST_F(DiagP2pMicrotest, Run_NoInboundPeers_PublishesEmptyDescriptorWithoutSlots) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.inboundP2p = false;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonNone));
+  EXPECT_EQ(run.myDesc.valid, 0);
+  EXPECT_EQ(run.myDesc.bytes, 0u);
+  EXPECT_EQ(run.alloc.calls, 0);
+  EXPECT_EQ(run.verifyLaunch.calls, 0);
+  for (const auto& o : run.myObs) {
+    EXPECT_EQ(o.writeValue, 0u);
+    EXPECT_EQ(o.verifyValue, 0u);
+  }
+}
+
+TEST_F(DiagP2pMicrotest, Run_NoOutboundOrNoImports_LaunchesNothingRemote) {
+  BuildGroupComm();
+  {
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.outboundP2p = 0;
+    EXPECT_EQ(run.Run(), ncclSuccess);
+    for (const auto& r : run.myResults) {
+      EXPECT_EQ(r.tested, 0);
+    }
+    EXPECT_EQ(run.writeLaunch.calls, 0);
+    EXPECT_EQ(run.readLaunch.calls, 0);
+  }
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  ScopedHook importHook(g_ncclP2pImportShareableBuffer, [](ncclComm*, int, size_t, ncclIpcDesc*, void**, void*,
+                                                           ncclMemType_t) { return ncclSystemError; });
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonImport));
+  EXPECT_EQ(run.writeLaunch.calls, 0);
+  EXPECT_EQ(run.readLaunch.calls, 0);
+}
+
+TEST_F(DiagP2pMicrotest, Run_EitherObservedValueWrong_IsWriteMismatch) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.verifyFlipPeer = 2;
+  run.writeFlipPeer = 3;
+  run.verifyCorruption = 4;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  ASSERT_EQ(run.myObs.size(), static_cast<size_t>(kGroupN));
+  ASSERT_EQ(run.myResults.size(), static_cast<size_t>(kGroupN));
+  for (int q = 0; q < kGroupN; q++) {
+    const uint64_t seen = q == kGroupSelf ? 0 : ncclDiagP2pWritePattern(kGroupRanks[q], kGroupRank);
+    EXPECT_EQ(run.myObs[q].writeValue, seen) << q;
+    EXPECT_EQ(run.myObs[q].verifyValue, q == kGroupSelf ? 0 : seen ^ 4) << q;
+  }
+  const int kMismatch = ncclDiagP2pReasonWriteMismatch;
+  EXPECT_EQ(run.Reasons(), (std::vector<int>{0, 0, kMismatch, kMismatch}));
+  const uint64_t to2 = ncclDiagP2pWritePattern(kGroupRank, kGroupRanks[2]);
+  const uint64_t to3 = ncclDiagP2pWritePattern(kGroupRank, kGroupRanks[3]);
+  EXPECT_EQ(run.myResults[2].writeGot, to2);
+  EXPECT_EQ(run.myResults[2].verifyGot, to2 ^ 1);
+  EXPECT_EQ(run.myResults[3].writeGot, to3 ^ 2);
+  EXPECT_EQ(run.myResults[3].verifyGot, to3);
+}
+
+TEST_F(DiagP2pMicrotest, Run_WriteSyncVsLaunchFailure_OnlySyncStopsLaterPhases) {
+  BuildGroupComm();
+  for (const bool syncFails : {true, false}) {
+    SCOPED_TRACE(syncFails);
+    DiagP2pRunScene run(comm_.get(), localRanks_);
+    run.failSync = syncFails ? DiagP2pSync::kWrite : DiagP2pSync::kNone;
+    run.failLaunch = syncFails ? DiagP2pLaunch::kNone : DiagP2pLaunch::kWrite;
+    EXPECT_EQ(run.Run(), ncclSuccess);
+    EXPECT_EQ(run.verifyLaunch.calls, syncFails ? 0 : 1);
+    EXPECT_EQ(run.readLaunch.calls, syncFails ? 0 : 1);
+    const int writeSync = static_cast<int>(DiagP2pSync::kWrite);
+    EXPECT_EQ(run.syncs, syncFails ? writeSync + 1 : static_cast<int>(DiagP2pSync::kCleanup));
+  }
+}
+
+TEST_F(DiagP2pMicrotest, Run_InitLaunchFailure_SyncsOnlyWritePhaseAndCleanup) {
+  BuildGroupComm();
+  DiagP2pRunScene run(comm_.get(), localRanks_);
+  run.failLaunch = DiagP2pLaunch::kInit;
+  EXPECT_EQ(run.Run(), ncclSuccess);
+  EXPECT_EQ(run.syncs, 2);
 }
 
 }  // namespace
