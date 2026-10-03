@@ -1672,8 +1672,9 @@ TEST_F(DiagP2pMicrotest, Run_CrossClique_FreesTheRankSetItBuilt) {
 
 TEST_F(DiagP2pMicrotest, Run_HappyPathOnOtherSlot_ContributesExactRowsAndLogsEachEdge) {
   BuildGroupComm();
+  comm_->cudaDev = 3;
   DiagP2pRunScene run(comm_.get(), localRanks_);
-  run.savedDevice = kGroupRank;
+  run.savedDevice = 3;
   ScopedDebugLogging debug(NCCL_LOG_INFO, NCCL_INIT);
   const std::string log = CaptureLog([&] { EXPECT_EQ(run.Run(), ncclSuccess); });
   EXPECT_EQ(run.out, "");
@@ -1752,12 +1753,13 @@ TEST_F(DiagP2pMicrotest, Run_LocalSetupFailure_IsSharedThroughAgreementGather) {
 // Pins a hang: this failure skips the gather the other ranks wait in.
 TEST_F(DiagP2pMicrotest, Run_SetupResultsCallocFailure_ReturnsWithoutAgreementGather) {
   BuildGroupComm();
+  comm_->cudaDev = 3;
   DiagP2pRunScene run(comm_.get(), localRanks_);
   FailCallocOf(kGroupWorld * sizeof(ncclResult_t), 1);
   EXPECT_EQ(run.Run(), ncclSystemError);
   EXPECT_TRUE(run.stages.empty());
   EXPECT_EQ(run.streamDestroy.calls, 1);
-  EXPECT_EQ(run.setDevices, (std::vector<int>{kGroupRank, kSavedDevice}));
+  EXPECT_EQ(run.setDevices, (std::vector<int>{3, kSavedDevice}));
 }
 
 TEST_F(DiagP2pMicrotest, Run_CollectiveFailure_AbortsAndSkipsImportsFreedBarrier) {
@@ -1903,19 +1905,23 @@ TEST_F(DiagP2pMicrotest, Run_ReadPhaseFaults_MarkReadLaunch) {
 
 TEST_F(DiagP2pMicrotest, Run_WriteAndReadMismatches_ReportObservedValues) {
   BuildLeaderComm();
+  // Shift every cudaDev off its rank so a cudaDev/rank swap in the report changes the text.
+  for (auto& peer : peers_) {
+    peer.cudaDev = (peer.rank + 1) % 4;
+  }
   DiagP2pRunScene run(comm_.get(), localRanks_);
   run.writeCorruption = 0x10;
   run.peerSlots[3][0].readPattern = 0xbad;
   EXPECT_EQ(run.Run(), ncclSuccess);
   EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonWriteMismatch, 0, ncclDiagP2pReasonReadMismatch}));
-  const std::string head = "srcRank=0 srcCudaDev=0 srcNvmlDev=10 dstRank=";
+  const std::string head = "srcRank=0 srcCudaDev=1 srcNvmlDev=10 dstRank=";
   const std::string tail = " path=DIS handle=LEGACY_CUDA_IPC";
   EXPECT_EQ(run.out,
             DiagLine("NCCL DIAG [INFO] p2p: 10/12 directed GPU P2P edges verified") +
-                DiagLine("NCCL DIAG [INFO] p2p: write mismatch " + head + "3 dstCudaDev=3 dstNvmlDev=13" + tail +
+                DiagLine("NCCL DIAG [INFO] p2p: write mismatch " + head + "3 dstCudaDev=0 dstNvmlDev=13" + tail +
                          " expected=0x4000000000000003 got=0x4000000000000013 verify=0x4000000000000013; " +
                          kGenericAdvice) +
-                DiagLine("NCCL DIAG [INFO] p2p: read mismatch " + head + "2 dstCudaDev=2 dstNvmlDev=12" + tail +
+                DiagLine("NCCL DIAG [INFO] p2p: read mismatch " + head + "2 dstCudaDev=3 dstNvmlDev=12" + tail +
                          " expected=0x8000000100000000 got=0x0000000000000bad; " + kGenericAdvice));
 }
 
@@ -1991,6 +1997,8 @@ TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
 
 TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisablesIt) {
   BuildLeaderComm();
+  comm_->cudaDev = 5;
+  peers_[2].cudaDev = 6;
   peers_[2].pidHash = peers_[0].pidHash;
   ScopedHook enable(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipSuccess; });
   std::vector<int> disabled;
@@ -2001,10 +2009,10 @@ TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisables
   DiagP2pRunScene run(comm_.get(), localRanks_);
   EXPECT_EQ(run.Run(), ncclSuccess);
   EXPECT_EQ(run.Reasons(), run.RowOf(ncclDiagP2pReasonNone));
-  EXPECT_EQ(disabled, std::vector<int>{2});
+  EXPECT_EQ(disabled, std::vector<int>{6});
   EXPECT_EQ(run.ipcClose.calls, run.n - 2);
   EXPECT_EQ(run.out,
-            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=0 cudaDev=0; "
+            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=0 cudaDev=5; "
                      "avoid concurrent CUDA use on this context until diagnostics completes") +
                 DiagP2pOkLine(12));
 }
