@@ -192,8 +192,14 @@ class BlitKernel : public core::Blit {
     uint64_t bytes;
   };
 
+  /// True when the ring is large enough to hold num_packet packets at once.
+  /// A reservation that fails this can never be satisfied, so the submission
+  /// has to be rejected rather than waited on.
+  bool ReservationFits(uint32_t num_packet) const;
+
   /// Reserve a slot in the queue buffer. The call will wait until the queue
-  /// buffer has a room.
+  /// buffer has a room. Must only be called for a reservation that satisfies
+  /// ReservationFits.
   uint64_t AcquireWriteIndex(uint32_t num_packet);
 
   /// Update the queue doorbell register with ::write_index. This
