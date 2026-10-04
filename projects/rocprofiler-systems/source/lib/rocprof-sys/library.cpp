@@ -1058,6 +1058,11 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
     });
 
+    // Verify the runtime SDK version matches the compile-time version before any
+    // SDK-dependent initialisation (e.g. metadata_registry construction in
+    // set_metadata_process_start_timestamp). A version mismatch would otherwise
+    // produce a cryptic std::out_of_range crash there.
+    rocprofiler_sdk::check_sdk_version_compatibility();
     set_metadata_process_start_timestamp(comp::wall_clock::record());
 
     if(get_debug_env() || get_verbose_env() > 2)

@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc.
+﻿// Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -52,4 +52,7 @@ reset_sdk_session_guards();
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();
+
+void
+check_sdk_version_compatibility();
 }  // namespace rocprofsys::rocprofiler_sdk
