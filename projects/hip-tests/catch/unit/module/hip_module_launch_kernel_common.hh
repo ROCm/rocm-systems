@@ -141,24 +141,6 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                     expectedErrorLaunchParam);
   }
 
-  SECTION("gridDimX > maxGridDimX") {
-    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
-  SECTION("gridDimY > maxGridDimY") {
-    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
-  SECTION("gridDimZ > maxGridDimZ") {
-    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
   SECTION("blockDimX > maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
@@ -233,5 +215,31 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
     void* extra[0] = {};
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0u),
                     hipErrorInvalidValue);
+  }
+}
+
+template <ExtModuleLaunchKernelSig* func>
+void ModuleLaunchKernelNegativeMaxGridDim(bool extLaunch = false) {
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+  hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
+  hipError_t expectedErrorLaunchParam =
+      (extLaunch == true) ? hipErrorInvalidConfiguration : hipErrorInvalidValue;
+
+  SECTION("gridDimX > maxGridDimX") {
+    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
+  }
+
+  SECTION("gridDimY > maxGridDimY") {
+    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
+  }
+
+  SECTION("gridDimZ > maxGridDimZ") {
+    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
   }
 }

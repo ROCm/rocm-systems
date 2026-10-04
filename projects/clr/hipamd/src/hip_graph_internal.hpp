@@ -1895,6 +1895,14 @@ class GraphKernelNode : public GraphNode {
     launchFlags_ = launchFlags;
   }
 
+  //! Build a launch config for \a params under \a cluster, using this node's stored remainders.
+  LaunchConfig MakeConfig(const hipKernelNodeParams& params, const amd::Device& device,
+                          const dim3& cluster) const {
+    return MakeLaunchConfigFromGrid(
+        params.gridDim, params.blockDim, params.sharedMemBytes, device, cluster,
+        dim3(globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_));
+  }
+
   ~GraphKernelNode() { freeParams(); }
 
   hipError_t GetParamCopyStatus() const { return paramCopyStatus_; }
@@ -2007,16 +2015,12 @@ class GraphKernelNode : public GraphNode {
     uint32_t flags = launchFlags_;
 
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
-    amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
-                                       kernelParams_.gridDim.z, kernelParams_.blockDim.x,
-                                       kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                       kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
+    LaunchConfig config = MakeConfig(kernelParams_, *device, clusterDim_);
+    IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
-    status = ihipLaunchKernelCommand(
-        command, func, launch_params, stream, kernelParams_.kernelParams, kernelParams_.extra,
-        kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
+    status = ihipLaunchKernelCommand(command, func, config, stream, kernelParams_.kernelParams,
+                                     kernelParams_.extra, kernelEvents_.startEvent_,
+                                     kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
       command->SetProfiling();
@@ -2107,16 +2111,9 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidConfiguration;
       }
       const amd::Device* device = g_devices[dev_id_]->devices()[0];
-      amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
-                                         kernelParams_.gridDim.z, kernelParams_.blockDim.x,
-                                         kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                         kernelParams_.sharedMemBytes, *device,
-                                         globalWorkSizeX_remainder_, globalWorkSizeY_remainder_,
-                                         globalWorkSizeZ_remainder_, clusterDim.x, clusterDim.y,
-                                         clusterDim.z);
-      if (!launch_params.IsValidConfig()) {
-        return hipErrorInvalidConfiguration;
-      }
+      // Built purely as a predicate on the proposed cluster dims; the config is discarded.
+      IHIP_RETURN_ONFAIL(
+          MakeConfig(kernelParams_, *device, clusterDim).Status(kUnlaunchableConfigRules));
       clusterDim_ = clusterDim;
       return hipSuccess;
     } else {
@@ -2186,23 +2183,11 @@ class GraphKernelNode : public GraphNode {
                                   hipFunction_t func, int devId) {
 
     const amd::Device* device = g_devices[devId]->devices()[0];
-    amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
-                                       pNodeParams->gridDim.z, pNodeParams->blockDim.x,
-                                       pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                       pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
+    const LaunchConfig config = MakeConfig(*pNodeParams, *device, clusterDim_);
+    IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
-    if (!launch_params.IsValidConfig()) {
-      HIP_RETURN(hipErrorInvalidConfiguration);
-    }
-
-    hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
-                                                  pNodeParams->extra, devId, coopKernel_);
-    if (status != hipSuccess) {
-      return status;
-    }
-    return hipSuccess;
+    return ihipLaunchKernel_validate(func, config, pNodeParams->kernelParams, pNodeParams->extra,
+                                     devId, coopKernel_);
   }
 
   virtual bool GraphCaptureEnabled() override {
