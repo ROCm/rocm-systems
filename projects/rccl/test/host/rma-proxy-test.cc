@@ -259,6 +259,14 @@ protected:
         g_hipStreamSynchronize       = [](hipStream_t) { return hipSuccess; };
         // Keep ncclCudaCalloc off the cuMem arm, which needs a real driver.
         g_cuMemEnable = [] { return 0; };
+        // FreeGraph()'s GDR arm reaches ncclCudaFree, which queries the
+        // allocation range for its accounting before calling cudaFree.
+        g_hipMemGetAddressRange = [](hipDeviceptr_t* pbase, std::size_t* psize,
+                                     hipDeviceptr_t dptr) {
+            if (pbase != nullptr) *pbase = dptr;
+            if (psize != nullptr) *psize = 0;
+            return hipSuccess;
+        };
 
         hostMallocHook_ = std::make_unique<ScopedHook<hipError_t(void**, std::size_t, unsigned)>>(
             g_hipHostMalloc, [this](void** ptr, std::size_t size, unsigned) {
@@ -288,7 +296,50 @@ protected:
         rma_ = rmaNet_.vtable();
     }
 
+    // Undo ncclRmaProxyCtxAllocGraph's heap allocations. Production's
+    // counterpart is ncclRmaProxyDestroyContext, which cannot be used here: it
+    // ends in free(rmaProxyCtx), and ctx_ is owned by a unique_ptr. So the four
+    // allocations are released by hand, in reverse order, each null-guarded so
+    // a partially completed (failed) AllocGraph is still cleaned up. Called
+    // from TearDown and between the arms of the two looping tests, which would
+    // otherwise overwrite these pointers on their second AllocGraph() call.
+    void FreeGraph() {
+        if (ctx_->flushBufMhandle != nullptr) {
+            rma_.deregMrSym(ctx_->rmaCollComm, ctx_->flushBufMhandle);
+            ctx_->flushBufMhandle = nullptr;
+        }
+        if (ctx_->cpuAccessSignalsMhandle != nullptr) {
+            rma_.deregMrSym(ctx_->rmaCollComm, ctx_->cpuAccessSignalsMhandle);
+            ctx_->cpuAccessSignalsMhandle = nullptr;
+        }
+        if (ctx_->flushBufDev != nullptr) {
+            EXPECT_EQ(hipSuccess, hipFree(ctx_->flushBufDev));
+            ctx_->flushBufDev = nullptr;
+        }
+        std::free(ctx_->cpuAccessSignalsHost);
+        ctx_->cpuAccessSignalsHost = nullptr;
+        if (ctx_->cpuAccessSignals != nullptr) {
+            // The real counterpart of the real allocator: hipHostFree on the
+            // host arm, ncclGdrCudaFree on the GDR arm, selected by the same
+            // handle the unit under test branches on.
+            EXPECT_EQ(ncclSuccess, freeMemCPUAccessible(ctx_->cpuAccessSignals,
+                                                        ctx_->cpuAccessSignalsGdrHandle,
+                                                        comm_->memManager));
+            // Drop the provenance record too: the allocator may hand the same
+            // address back on the next arm, and a stale entry would then make
+            // the GDR-arm "not host memory" check fail for the wrong reason.
+            hostAddrs_.erase(ctx_->cpuAccessSignalsDev);
+            ctx_->cpuAccessSignals          = nullptr;
+            ctx_->cpuAccessSignalsDev       = nullptr;
+            ctx_->cpuAccessSignalsGdrHandle = nullptr;
+        }
+        // The registration log now refers to freed pointers.
+        rmaNet_.regs.clear();
+    }
+
     void TearDown() override {
+        FreeGraph();
+        // persistentQueues / inProgressQueues live on this stack, not the heap.
         ncclMemoryStackDestruct(&comm_->memPermanent);
         hostMallocHook_.reset();
         ncclGdrCopy = savedGdrCopy_;
@@ -381,7 +432,10 @@ TEST_F(RmaProxyAllocGraphTest, StrictPluginRejectsWrongMemoryType_AllocGraphStil
 TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
         ncclGdrCopy = gdr;
-        rmaNet_.regs.clear();
+        // Release the previous arm's allocations before they are overwritten.
+        // A no-op on the first pass; if an assertion below returns early,
+        // TearDown's FreeGraph() covers the rest.
+        FreeGraph();
 
         ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
 
@@ -401,7 +455,10 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
 TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
         ncclGdrCopy = gdr;
-        rmaNet_.regs.clear();
+        // Release the previous arm's allocations before they are overwritten.
+        // A no-op on the first pass; if an assertion below returns early,
+        // TearDown's FreeGraph() covers the rest.
+        FreeGraph();
 
         ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
 
