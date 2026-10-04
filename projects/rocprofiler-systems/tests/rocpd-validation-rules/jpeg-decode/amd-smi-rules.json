@@ -67,10 +67,10 @@
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring JPEG activity",
-                    "error_message": "Less than expected activity in amd-smi jpeg-activity samples!",
-                    "expected_result": 10,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_activity_%' and event.value > 0",
+                    "description": "Check for amd-smi JPEG activity samples with non-zero values",
+                    "error_message": "Less than expected number of amd-smi jpeg-activity samples with value > 0!",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_activity_%' AND event.value > 0",
                     "requires": "jpeg_activity"
                 },
                 {

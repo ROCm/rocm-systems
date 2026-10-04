@@ -37,10 +37,19 @@ def jpeg_decode_env() -> dict[str, str]:
 def jpeg_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
     """Get validation rules for JPEG decode tests."""
     rules_dir = validation_rules_dir / "jpeg-decode"
+    # gfx1250 uses VCN hardware-accelerated JPEG decode which
+    # dispatches few or no HIP compute kernels and produces fewer API trace
+    # entries than the compute-based path on older GPUs.
+    if gpu_info._is_gfx1250:
+        validation_rules = rules_dir / "gfx1250-validation-rules.json"
+        sdk_metrics_rules = rules_dir / "gfx1250-sdk-metrics-rules.json"
+    else:
+        validation_rules = rules_dir / "validation-rules.json"
+        sdk_metrics_rules = rules_dir / "sdk-metrics-rules.json"
     rules = [
         validation_rules_dir / "default-rules.json",
-        rules_dir / "validation-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        validation_rules,
+        sdk_metrics_rules,
     ]
     if "instinct" in gpu_info.categories:
         rules.append(rules_dir / "amd-smi-rules.json")
@@ -67,6 +76,7 @@ def require_jpeg_data(rocprof_config) -> None:
             f"No rocJPEG sample images found in {images_dir}; "
             "possibly built against a non-test build which doesn't have those files."
         )
+
 
 
 # =============================================================================
