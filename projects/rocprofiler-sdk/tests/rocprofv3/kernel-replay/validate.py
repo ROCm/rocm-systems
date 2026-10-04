@@ -352,7 +352,9 @@ def test_one_thread_trace_per_dispatch(json_data, expect_thread_trace):
         assert match, f"unexpected thread trace file name: {name}"
         keys.append(tuple(int(group) for group in match.groups()))
 
-    repeated = sorted(key for key, count in collections.Counter(keys).items() if count > 1)
+    repeated = sorted(
+        key for key, count in collections.Counter(keys).items() if count > 1
+    )
     assert not repeated, (
         "dispatches traced more than once, as (agent, shader_engine, dispatch_id): "
         f"{repeated}"
@@ -480,7 +482,7 @@ def test_replayed_kernels_present(json_data):
         assert any(kernel in (n or "") for n in names), f"{kernel} not found in {names}"
 
 
-def test_expected_counters_present(json_data):
+def test_expected_counters_present(json_data, expected_counters):
     sdk = _sdk(json_data)
     id_to_name = _counter_id_to_name(sdk)
     seen = set()
@@ -489,7 +491,7 @@ def test_expected_counters_present(json_data):
             name = id_to_name.get(int(sub["counter_id"]["handle"]))
             if name:
                 seen.add(name)
-    for counter in EXPECTED_COUNTERS:
+    for counter in expected_counters or EXPECTED_COUNTERS:
         assert counter in seen, f"counter {counter} not collected; seen={sorted(seen)}"
 
 

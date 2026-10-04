@@ -250,7 +250,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att/out_results.json --passes 2
-        --common-counters SQ_WAVES SQ_INSTS_VALU --thread-trace)
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE --thread-trace)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-att-validate
@@ -268,9 +269,10 @@ set_tests_properties(
                ${KERNEL_REPLAY_ATT_DISABLED})
 
 # With --att and no --kernel-iteration-range, only each kernel's first launch is profiled.
-# Three launches per kernel therefore leave three profiled dispatches: the later launches
-# must be neither traced nor replayed, and each profiled one still carries both counter
-# passes.
+# The app launches its three kernels several times each, and the HIP runtime adds one copy
+# kernel for hipMemcpyToSymbol, so four dispatches are a kernel's first launch: the later
+# launches must be neither traced nor replayed, and each profiled one still carries both
+# counter passes.
 add_test(
     NAME rocprofv3-test-kernel-replay-att-first-iteration-generate
     COMMAND
@@ -303,7 +305,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration/out_results.json
-        --passes 2 --expected-dispatch-count 3 --common-counters SQ_WAVES SQ_INSTS_VALU
+        --passes 2 --expected-dispatch-count 4 --common-counters SQ_WAVES SQ_INSTS_VALU
         --thread-trace -k
         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or one_thread_trace_per_dispatch"
     )
