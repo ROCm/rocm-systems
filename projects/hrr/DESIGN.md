@@ -103,6 +103,20 @@ processes. Every HIP-owning process writes an independent sub-archive at
 `writer_state.json`, and per-process `manifest.json`. This avoids interleaving
 two live writers into one `events.bin` without needing an advisory lock.
 
+On POSIX the archive is private to the user who captures it. Directories the writer
+creates from the base directory down are 0700 and its files 0600, and an existing
+`pid-<pid>/`, `blobs/` or `code_objects/` is tightened to 0700; parents it has to create
+above the base directory get 0777 minus the umask. The writer refuses a `pid-<pid>/`,
+`blobs/` or `code_objects/` that is a symbolic link or belongs to another user, and an
+existing `events.bin` that is not a regular file with a single link owned by that user.
+These directory checks run when the archive is opened and each later open resolves the
+path again, so every directory on the path to the archive should belong to the capturing
+user or to root, and any that other users can write to should have the sticky bit. When
+the archive cannot be set up, capture is disabled with a
+`[HRR capture] Capture disabled` line on stderr and the application runs on without the
+runtime capture shims. Reading an archive needs the capturing user or root, so a capture
+taken as root in a container needs `chown` before another user can replay it.
+
 `writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
 PID directory. A `fork()` child re-opens from the base dir in `atfork_child`, so
 the child naturally switches to its own `pid-<childpid>/` sub-archive. The root
@@ -659,6 +673,9 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 
 ## Init / Shutdown
 
+If `writer::open()` fails, init takes the runtime shims out again and sets up nothing
+else, and a forked child whose own `open()` fails does the same in `atfork_child`.
+
 `hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
 and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
 snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
@@ -755,7 +772,8 @@ written by a producer outside `libamdhip64`. Nothing is exported for this, no
 capture-side code runs, and a producer needs neither `dlopen` nor a symbol.
 `HIP_HRR_CAPTURE_OUTPUT` is a plain environment variable and the writer's layout
 is `$HIP_HRR_CAPTURE_OUTPUT/pid-<getpid()>/`, so a producer computes the path
-itself; "is capture active" reduces to whether that directory exists.
+itself; "is capture active" reduces to whether that directory's `events.bin`
+exists, since a directory refused by the writer is left in place.
 
 A sidecar is an ordinary HRR record stream — `hrr_file_header` + repeated
 `hrr_event_header` + payload — carrying its own magic (`HRR_REGION_MAGIC`,

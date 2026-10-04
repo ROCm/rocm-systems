@@ -2348,6 +2348,11 @@ void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
   std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
               &g_real_table, sizeof(HipDispatchTable));
+  // The compiler shims go as well, or a forked child whose archive failed to
+  // open keeps running them with capture off.
+  if (g_compiler_installed.exchange(false))
+    std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
+                &g_real_compiler_table, sizeof(HipCompilerDispatchTable));
 }
 
 // ---------------------------------------------------------------------------
@@ -2462,7 +2467,12 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // Without a writer the shims would only cost time, and the D2H ones still
+    // synchronize streams, so take them out again.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) {
+      hip_capture_uninstall();
+      return;
+    }
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

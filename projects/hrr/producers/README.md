@@ -34,16 +34,38 @@ $HIP_HRR_CAPTURE_OUTPUT/pid-<pid>/regions/<producer-name>.hrrr
 Pick a name that identifies the producer, so several can run at once; the
 replayer merges every `*.hrrr` it finds and orders the records by timestamp.
 
-**Checking whether capture is active** reduces to checking that directory
-exists. There is no symbol to resolve and nothing to `dlopen`:
+On Linux that directory is 0700 and belongs to the user running the capture, so
+a producer has to run as that user, as it does inside the captured process.
+Create `regions/` with mode 0700 and the files in it with 0600 so the archive
+stays private.
+
+**Checking whether capture is active** reduces to checking that the archive's
+`events.bin` is there and is a file the writer would open: a regular file of
+this user with one name, reached through no link. There is no symbol to resolve
+and nothing to `dlopen`:
 
 ```python
-active = "HIP_HRR_CAPTURE_OUTPUT" in os.environ and os.path.isdir(
-    os.path.join(os.environ["HIP_HRR_CAPTURE_OUTPUT"], f"pid-{os.getpid()}"))
+import os, stat
+
+def capture_active():
+    root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
+    if not root:
+        return False
+    d = os.path.join(root, f"pid-{os.getpid()}")
+    try:
+        ds = os.lstat(d)
+        fs = os.lstat(os.path.join(d, "events.bin"))
+    except OSError:
+        return False
+    return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
+            and stat.S_ISREG(fs.st_mode) and fs.st_uid == os.geteuid()
+            and fs.st_nlink == 1)
 ```
 
-The runtime creates the directory when capture starts, which may be after your
-producer loads, so re-check rather than deciding once at import time.
+The directory alone is not enough: one that was already there stays when the
+writer refuses to open it, and capture is then off. The runtime creates both
+when capture starts, which may be after your producer loads, so re-check rather
+than deciding once at import time.
 
 ## What to write
 
