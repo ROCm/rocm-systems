@@ -53,6 +53,7 @@ test_categories:
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
+      - "NetIbCastUdma.*"
     exclude_windows:
       - "*"
     labels:
