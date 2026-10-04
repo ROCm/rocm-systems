@@ -1522,6 +1522,18 @@ graph:
     # asan quarantines freed gpu allocations, so hipMemGetInfo does not
     # immediately report memory released by hipGraphExecDestroy.
     disabled: [amd_windows, asan]
+  Unit_hipGraphSegmentOrdering_SameLevelPeers:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_ForkSeesLaunchStreamWrites:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_DisabledJoinHead:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_LongChainBatches:
+    <<: *level_2
+    tags: [exec]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]
