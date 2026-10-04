@@ -33,7 +33,7 @@ class EventCommands:
         self.stop = False
         threads = []
         for device_handle in range(len(args.gpu)):
-            x = threading.Thread(target=self._event_thread, args=(self, device_handle))
+            x = self.EventListenerThread(target=self._event_thread, args=(self, device_handle))
             threads.append(x)
             x.start()
 
@@ -41,6 +41,8 @@ class EventCommands:
         system_exit_exc = None
         signal.signal(signal.SIGTERM, self._event_sigterm_handler)
         try:
+            for thread in threads:
+                thread.join()
             while True:
                 try:
                     user_input = input()
@@ -60,10 +62,10 @@ class EventCommands:
                     break
         except SystemExit as exc:
             system_exit_exc = exc
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            print("Error in event listening: ", e)
         finally:
             self.stop = True
-            for thread in threads:
-                thread.join()
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
         if system_exit_exc is not None:
@@ -112,3 +114,22 @@ class EventCommands:
                 print(e)
 
         listener.stop()
+
+    # Thread class for capture exceptions from event listener threads which will be passed to main thread
+    class EventListenerThread(threading.Thread):
+        def __init__(self, target, args):
+            super().__init__()
+            self.target = target
+            self.args = args
+            self.exception = None
+
+        def run(self):
+            try:
+                self.target(*self.args)
+            except Exception as e:
+                self.exception = e
+
+        def join(self, timeout=None):
+            super().join(timeout)
+            if self.exception:
+                raise self.exception
