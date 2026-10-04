@@ -4220,6 +4220,11 @@ void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
     if (initial_heap_size_ != 0) {
       initial_heap_size_ = amd::alignUp(initial_heap_size_, 2 * Mi);
       initial_heap_buffer_ = createMemory(initial_heap_size_, 2 * Mi);
+      if (initial_heap_buffer_ == nullptr) {
+        // An empty initial heap can grow through device memory requests.
+        // Never initialize a nonzero slab range at a null address.
+        initial_heap_size_ = 0;
+      }
     }
     if (heap_buffer_ == nullptr) {
       LogError("Heap buffer allocation failed!");
