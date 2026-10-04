@@ -435,6 +435,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   for (int i = 0; i < ginState->numActiveBackends; i++) {
     struct ncclGinBackendState* candidate = &ginState->backends[i];
 
+    if (candidate->closed) continue;
     if (reqGinType != NCCL_GIN_TYPE_NONE && candidate->ginType != reqGinType) {
       continue;
     }
@@ -504,8 +505,28 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
         backend->ginComms[commIdx] = NULL;
       }
     }
+    // Keep ginCommCount and ginInstance: zeroing the count divides by zero in
+    // ginDevCommSetupWithBackend, and ginInstance must reach ncclGinFinalize.
+    // closed makes register / deregister / DevCommSetup skip the NULLed handles.
+    backend->closed = true;
   }
-  memset((void*)ginState, 0, sizeof(*ginState));
+
+  // AICOMRCCL-2739: numActiveBackends and backends[].ginInstance must survive until
+  // ncclGinFinalize runs on the last sharedRes reference, since that is the only
+  // caller of the plugin's finalize() (the per-comm context delete and refCount--).
+  // Clearing them here made ncclGinFinalize find no backend and skip both.
+  // Resetting field by field also keeps the thread, mutex and atomic members intact.
+  // cpuAffinity is not reset: it is overwritten from comm->cpuAffinity before any
+  // progress thread starts, so it is never read stale.
+  ginState->connected = false;
+  ginState->supported = false;
+  ginState->proxyNthreads = 0;
+  ginState->proxyThreadsCreated = false;
+  ginState->proxyThreadStopSignal.store(false);
+  ginState->writePending.store(false);
+  ginState->asyncResult = ncclSuccess;
+  ginState->devComms = NULL;
+  ginState->ginConnectionType = NCCL_GIN_CONNECTION_NONE;
   return ncclSuccess;
 }
 
@@ -517,6 +538,7 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
   int mrFlags = (winFlags & NCCL_WIN_STRICT_ORDERING) ? NCCL_NET_MR_FLAG_FORCE_SO : 0;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
+    if (backend->closed) continue;
     if (multiSegment) {
       // Multi-segment GIN registration requires DMABUF support on all GIN connections
       for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
@@ -545,6 +567,7 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm,
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
+    if (backend->closed) continue;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
       if (ginHostWins[slot] == nullptr) continue;

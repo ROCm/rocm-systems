@@ -849,8 +849,8 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   stopGin(ictx, coll, ginCtx);
 }
 
-// closeColl must un-mark the set: production never reaches plugin finalize
-// (ginState is memset first), so leaving erase only in finalize would leave a
+// closeColl must un-mark the set: erase also covers backend-drop paths that
+// never reach plugin finalize, so leaving erase only in finalize would leave a
 // recycled ncclComm* marked and skip the gate on the next job.
 TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
   void* rawDevLsa = nullptr;
@@ -872,7 +872,9 @@ TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
   ginCtx = nullptr;
   ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
   coll = nullptr;
-  // Intentionally skip finalize: that path is unreachable after HostFinalize.
+  // Intentionally skip finalize: closeColl alone must clear the dedup mark.
+  // Host finalize still runs plugin finalize for a live backend (AICOMRCCL-2739),
+  // but that is a separate erase site and not required for reuse after closeColl.
 
   connectColl(ictx, &coll, 2);
   ncclGinConfig_t cfg{};
