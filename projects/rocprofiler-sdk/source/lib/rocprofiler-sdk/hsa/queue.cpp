@@ -1283,7 +1283,8 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
@@ -1344,7 +1345,8 @@ Queue::Queue(
 {
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
