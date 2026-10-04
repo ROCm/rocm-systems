@@ -1015,6 +1015,7 @@ struct ncclComm {
   bool globalRmaProxySupport;
   bool hostRmaSupport;
   int childCount;
+  bool hasExcludedLocalRank; // NCCL_SHRINK_ABORT excluded a rank on this host; skip destroy barrier
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
