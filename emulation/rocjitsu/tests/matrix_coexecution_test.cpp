@@ -531,7 +531,7 @@ TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
 TEST(MatrixCoexecutionTest, SharedPoolScalesPreferredStartToCapacity) {
   struct Case {
     uint32_t hash;
-    size_t capacity;
+    std::size_t capacity;
     unsigned expected;
   };
   // Include bucket boundaries: masking an unscaled hash would concentrate

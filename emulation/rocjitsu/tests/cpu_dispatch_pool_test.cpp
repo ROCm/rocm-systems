@@ -33,7 +33,8 @@ public:
   }
 
   // The test keeps the submitting caller gated for the lifetime of this view.
-  static auto *pending_submission(CpuDispatchPool &pool, std::span<ComputeUnitCore *> tasks) {
+  static CpuDispatchPool::Submission *pending_submission(CpuDispatchPool &pool,
+                                                         std::span<ComputeUnitCore *> tasks) {
     std::lock_guard lock(pool.mutex_);
     for (auto *submission = pool.ready_head_; submission; submission = submission->next)
       if (submission->tasks.data() == tasks.data())
@@ -194,9 +195,14 @@ private:
   }
   std::mutex mutex_;
   std::condition_variable changed_;
-  std::thread::id caller_, worker_;
-  bool caller_entered_ = false, worker_entered_ = false, draining_entered_ = false;
-  bool caller_released_ = false, worker_released_ = false, draining_released_ = false;
+  std::thread::id caller_;
+  std::thread::id worker_;
+  bool caller_entered_ = false;
+  bool worker_entered_ = false;
+  bool draining_entered_ = false;
+  bool caller_released_ = false;
+  bool worker_released_ = false;
+  bool draining_released_ = false;
   bool all_released_ = false;
 };
 
