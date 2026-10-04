@@ -35,9 +35,9 @@ struct storage_t::impl
         const storage_type_t& storage_type);
 
 private:
-    profiler_hub::version_t m_version{ PROFILER_HUB_VERSION_MAJOR,
-                                       PROFILER_HUB_VERSION_MINOR,
-                                       PROFILER_HUB_VERSION_PATCH };
+    profiler_hub::version_t m_schema_version{ PROFILER_HUB_SCHEMA_VERSION_MAJOR,
+                                              PROFILER_HUB_SCHEMA_VERSION_MINOR,
+                                              PROFILER_HUB_SCHEMA_VERSION_PATCH };
 
     storage_type_t                                m_storage_type{ storage_type_t::none };
     std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
