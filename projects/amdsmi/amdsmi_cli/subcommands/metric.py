@@ -11,6 +11,16 @@ from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
 
 
 class MetricCommands:
+    def _format_usage_value(self, value: object) -> object:
+        if isinstance(value, dict):
+            return {key: self._format_usage_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            formatted = [self._format_usage_value(item) for item in value]
+            if self.logger.is_human_readable_format():
+                return "[" + ", ".join(str(item) for item in formatted) + "]"
+            return formatted
+        return self.helpers.unit_format(self.logger, value, "%")
+
     def metric_gpu(
         self,
         args,
@@ -93,6 +103,11 @@ class MetricCommands:
             args.watch_time = watch_time
         if iterations:
             args.iterations = iterations
+
+        usage_fields = args.usage_fields if "usage_fields" in vars(args) else None
+        if usage_fields:
+            args.usage = True
+        self.logger.usage_fields = usage_fields
 
         # Store args that are applicable to the current platform
         current_platform_args = []
@@ -214,7 +229,11 @@ class MetricCommands:
 
         # Handle watch logic, will only enter this block once
         if args.watch:
-            self.helpers.handle_watch(args=args, subcommand=self.metric_gpu, logger=self.logger)
+            try:
+                self.helpers.handle_watch(args=args, subcommand=self.metric_gpu, logger=self.logger)
+            finally:
+                if usage_fields and self.logger.destination != "stdout":
+                    self.logger.print_output(watching_output=True)
             return
 
         # Handle multiple GPUs
@@ -312,8 +331,10 @@ class MetricCommands:
         # section the user named explicitly still reports N/A rather than nothing.
         # Derive this AFTER arg defaulting (line 291-293) to avoid reading stale values
         # from the shared args namespace across watch iterations and multi-GPU recursion.
-        apu_suppressed = show_apu and all(
-            getattr(args, arg) == True for arg in current_platform_args
+        apu_suppressed = (
+            show_apu
+            and not usage_fields
+            and all(getattr(args, arg) == True for arg in current_platform_args)
         )
         if apu_suppressed:
             logging.debug(
@@ -457,13 +478,21 @@ class MetricCommands:
 
         if "usage" in current_platform_args:
             if args.usage:
+                engine_usage = dict.fromkeys(("gfx_activity", "umc_activity", "mm_activity"), "N/A")
                 try:
-                    engine_usage = amdsmi_interface.amdsmi_get_gpu_activity(args.gpu)
+                    engine_usage.update(amdsmi_interface.amdsmi_get_gpu_activity(args.gpu))
+                except amdsmi_exception.AmdSmiLibraryException as error:
+                    logging.debug(
+                        "Failed to get average activity for gpu %s | %s",
+                        gpu_id,
+                        error.get_error_info(),
+                    )
+                try:
                     logging.debug(f"engine_usage dictionary = {engine_usage}")
 
                     # TODO: move vcn_activity and jpeg_activity into amdsmi_get_gpu_activity
-                    engine_usage["vcn_activity"] = gpu_metric["vcn_activity"]
-                    engine_usage["jpeg_activity"] = gpu_metric["jpeg_activity"]
+                    engine_usage["vcn_activity"] = gpu_metric.get("vcn_activity", "N/A")
+                    engine_usage["jpeg_activity"] = gpu_metric.get("jpeg_activity", "N/A")
                     engine_usage["gfx_busy_inst"] = "N/A"
                     engine_usage["jpeg_busy"] = "N/A"
                     engine_usage["vcn_busy"] = "N/A"
@@ -499,26 +528,13 @@ class MetricCommands:
                             engine_usage["vcn_busy"] = new_xcp_dict
                     elif num_partition != "N/A":
                         # Socket-level metrics with partition support (existing behavior)
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
-                                "xcp_stats.gfx_busy_inst"
-                            ][current_xcp]
-                        engine_usage["gfx_busy_inst"] = new_xcp_dict
-
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
-                                current_xcp
-                            ]
-                        engine_usage["jpeg_busy"] = new_xcp_dict
-
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
-                                current_xcp
-                            ]
-                        engine_usage["vcn_busy"] = new_xcp_dict
+                        for field in ("gfx_busy_inst", "jpeg_busy", "vcn_busy"):
+                            values = gpu_metric.get("xcp_stats." + field, "N/A")
+                            if isinstance(values, list):
+                                engine_usage[field] = {
+                                    f"xcp_{index}": value
+                                    for index, value in enumerate(values[:num_partition])
+                                }
                     else:
                         # On devices without XCP partitions (e.g. Navi), vcn_busy_percent
                         # is available via sysfs; there is no equivalent sysfs for gfx_busy_inst
@@ -537,53 +553,13 @@ class MetricCommands:
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
 
-                    for key, value in engine_usage.items():
-                        activity_unit = "%"
-                        if self.logger.is_human_readable_format():
-                            if isinstance(value, list):
-                                for index, activity in enumerate(value):
-                                    if activity != "N/A":
-                                        engine_usage[key][index] = f"{activity} {activity_unit}"
-                                # Convert list to a string for human readable format
-                                engine_usage[key] = (
-                                    "[" + ", ".join(str(x) for x in engine_usage[key]) + "]"
-                                )
-                            elif isinstance(value, dict):
-                                for k, v in value.items():
-                                    if isinstance(v, list):
-                                        for index, activity in enumerate(v):
-                                            if activity != "N/A" and not isinstance(activity, str):
-                                                value[k][index] = f"{activity} {activity_unit}"
-                                        # Convert list to a string for human readable format
-                                        value[k] = "[" + ", ".join(str(x) for x in value[k]) + "]"
-                                    elif v != "N/A" and not isinstance(v, str):
-                                        value[k] = f"{v} {activity_unit}"
-                            elif value != "N/A":
-                                engine_usage[key] = f"{value} {activity_unit}"
-                        if self.logger.is_json_format():
-                            if isinstance(value, list):
-                                for index, activity in enumerate(value):
-                                    if activity != "N/A":
-                                        engine_usage[key][index] = {
-                                            "value": activity,
-                                            "unit": activity_unit,
-                                        }
-                            elif isinstance(value, dict):
-                                for k, v in value.items():
-                                    if isinstance(v, list):
-                                        for index, activity in enumerate(v):
-                                            if activity != "N/A":
-                                                value[k][index] = {
-                                                    "value": activity,
-                                                    "unit": activity_unit,
-                                                }
-                                    elif v != "N/A":
-                                        value[k] = {"value": v, "unit": activity_unit}
-                            elif value != "N/A":
-                                engine_usage[key] = {"value": value, "unit": activity_unit}
-
-                    values_dict["usage"] = engine_usage
-                except Exception as e:
+                    values_dict["usage"] = {
+                        key: "N/A"
+                        if usage_fields and value in ({}, [])
+                        else self._format_usage_value(value)
+                        for key, value in engine_usage.items()
+                    }
+                except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict["usage"] = "N/A"
                     logging.debug("Failed to get gpu activity for gpu %s | %s", gpu_id, e)
 
@@ -620,6 +596,8 @@ class MetricCommands:
                     }
                     for key, value in apu_usage_fields.items():
                         activity_unit = "%"
+                        if usage_fields and value == []:
+                            value = "N/A"
                         if value != "N/A":
                             if "reads" in key or "writes" in key:
                                 values_dict["usage"][key] = self.helpers.unit_format(
@@ -643,6 +621,11 @@ class MetricCommands:
                                 values_dict["usage"][key] = self.helpers.unit_format(
                                     self.logger, value, activity_unit
                                 )
+        if usage_fields:
+            usage_values = values_dict.get("usage", {})
+            if not isinstance(usage_values, dict):
+                usage_values = {}
+            values_dict["usage"] = {field: usage_values.get(field, "N/A") for field in usage_fields}
         if "power" in current_platform_args:
             if args.power:
                 power_dict = {
@@ -3049,6 +3032,13 @@ class MetricCommands:
         multiple_devices_csv_override = False
         if not self.logger.is_json_format():
             self.logger.store_cpu_output(args.cpu, "values", static_dict)
+            if (
+                "usage_fields" in vars(args)
+                and args.usage_fields
+                and args.watch
+                and self.logger.destination != "stdout"
+            ):
+                self.logger.watch_output.append(self.logger.output.copy())
         else:
             self.logger.store_cpu_json_output.append(static_dict)
         if multiple_devices:
@@ -3214,6 +3204,13 @@ class MetricCommands:
         multiple_devices_csv_override = False
         if not self.logger.is_json_format():
             self.logger.store_core_output(args.core, "values", static_dict)
+            if (
+                "usage_fields" in vars(args)
+                and args.usage_fields
+                and args.watch
+                and self.logger.destination != "stdout"
+            ):
+                self.logger.watch_output.append(self.logger.output.copy())
         else:
             self.logger.store_core_json_output.append(static_dict)
         if multiple_devices:
@@ -3848,6 +3845,7 @@ class MetricCommands:
         gpu_args_enabled = False
         gpu_attributes = [
             "usage",
+            "usage_fields",
             "watch",
             "watch_time",
             "iterations",
@@ -4137,4 +4135,11 @@ class MetricCommands:
                 gpu_board,
             )
         if self.logger.is_json_format():
-            self.logger.combine_arrays_to_json()
+            selected_watch_file = (
+                "usage_fields" in vars(args)
+                and args.usage_fields
+                and self.logger.destination != "stdout"
+                and self.logger.watch_output
+            )
+            if not selected_watch_file:
+                self.logger.combine_arrays_to_json()

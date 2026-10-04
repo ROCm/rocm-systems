@@ -318,7 +318,7 @@ Gets metrics and performance information about the specified GPU.
 ```shell-session
 ~$ amd-smi metric --help
 usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
-                      [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
+                      [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [--usage-fields FIELD[,FIELD...]] [-p] [-c] [-t]
                       [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [-X] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
                       [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
@@ -338,6 +338,7 @@ Metric arguments:
   -h, --help                   show this help message and exit
   -m, --mem-usage              Memory usage per block
   -u, --usage                  Displays engine usage information
+  --usage-fields FIELD[,FIELD...] Select usage fields in order; implies --usage.
   -p, --power                  Current power usage
   -c, --clock                  Average, max, and current clock frequencies
   -t, --temperature            Current temperatures
@@ -432,6 +433,53 @@ Command Modifiers:
   --loglevel LEVEL                          Set the logging level from the possible choices:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
+
+#### Selecting usage fields
+
+`--usage-fields FIELD[,FIELD...]` implies `--usage` and returns only the named
+usage fields, in the requested order. It works with other sections such as
+`--power`, and with `--json`, `--csv`, `--file`, and watch options. Names are
+lower-case; surrounding whitespace is ignored. Empty, unknown, and duplicate
+names are errors. Arrays and XCP dictionaries are selected as whole values.
+
+Examples:
+
+  amd-smi metric --usage-fields gfx_activity,umc_activity --json
+  amd-smi metric --usage-fields gfx_busy_inst --partition --csv
+  amd-smi metric --usage-fields gfx_activity,vcn_busy --power
+  amd-smi metric --usage-fields gfx_activity,vcn_busy --csv --watch 1 --iterations 3 --file usage.csv
+
+Supported fields:
+
+- `gfx_activity`, `umc_activity`, `mm_activity`, `vcn_activity`, `jpeg_activity`
+- `gfx_busy_inst`, `jpeg_busy`, `vcn_busy`
+- `apu_average_gfx_activity`, `apu_average_mm_activity`, `apu_average_vcn_activity`
+- `apu_average_ipu_activity`, `apu_average_core_c0_activity`
+- `apu_average_dram_reads`, `apu_average_dram_writes`
+- `apu_average_ipu_reads`, `apu_average_ipu_writes`
+
+GFX, UMC, and MM activity use the metrics table's average-activity fields.
+They are not interchangeable with instantaneous XCP busy readings
+(`gfx_busy_inst`, `jpeg_busy`, `vcn_busy`). On non-XCP devices, `vcn_busy` can
+instead use the existing sysfs reading. Selecting fields does not change sources;
+`--partition` opts into partition-scoped sources where supported. APU read/write
+fields use MB/s; activity and busy fields use percent. Memory allocation is not
+memory activity.
+
+Availability depends on the GPU, driver, and metrics-table version. `N/A` means
+unavailable, not idle; numeric zero is a valid idle reading. Requested unavailable
+fields remain present, including APU-only fields on a discrete GPU. A failed
+source does not discard values from another readable source. CSV retains field
+names such as `gfx_busy_inst_xcp_0` and keeps arrays in one cell. Without a
+selector, successful `--usage` output is unchanged.
+
+With selection, GPU-only JSON watch files contain a list of timestamped GPU
+samples. If CPU or core metrics are also requested, JSON files instead contain
+`cpu_data` and/or `core_data` alongside those samples in `gpu_data`. CPU/core
+records are collected once, without watch timestamps. CSV uses one header for
+CPU/core rows and GPU samples, with `N/A` for inapplicable columns; human-readable
+files keep both kinds of records. Completed samples are retained when watch
+finishes or is stopped with Ctrl-C or SIGTERM.
 
 (cmd-process)=
 ### amd-smi process

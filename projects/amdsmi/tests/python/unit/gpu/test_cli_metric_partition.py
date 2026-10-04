@@ -105,6 +105,7 @@ def _build_fake_amdsmi(**interface_overrides):
         AMDSMI_MAX_RAIL_INDEX=7,
         AmdSmiClkType=_FakeClkType,
         amdsmi_get_clock_info=_get_clock_info,
+        amdsmi_get_vcn_busy_percent=_raise_lib_exc,
         amdsmi_get_gpu_metrics_info=lambda _handle: {},
         _NA_amdsmi_get_gpu_metrics_info=lambda: {},
         # Set per-test; default keeps the partition path inert.
