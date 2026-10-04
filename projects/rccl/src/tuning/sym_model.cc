@@ -26,13 +26,62 @@ int ncclSymkModelCtasEnvOverride() {
   return static_cast<int>(nUserCTAs);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+extern int64_t ncclParamSymTmaEnable();
+
+// Rerunning the LSA CTA search on every enqueue adds host latency to small eager collectives.
+static ncclResult_t rcclSymkLsaModelCached(struct ncclTuningInput_t* input, enum ncclSymkKernelId kernelId,
+                                           size_t nBytes, float* timeUs, float* selectionTimeUs, int* nBlocks) {
+  struct Entry {
+    const struct ncclComm* comm;
+    uint64_t commHash;
+    const char* archName;
+    int nRanks, minCompCap, cudaArch;
+    int64_t symTmaEnable;
+    int symCtasOverride;
+    size_t nBytes, count, countMax;
+    ncclDataType_t datatype;
+    int inPlace, minCTAs, maxCTAs, nWorks;
+    float timeUs, selectionTimeUs;
+    int nBlocks;
+    bool valid;
+  };
+  static thread_local struct Entry cache[ncclSymkKernelId_Count];
+  struct ncclComm* comm = input->comm;
+  int64_t symTmaEnable = ncclParamSymTmaEnable();
+  int symCtasOverride = ncclSymkModelCtasEnvOverride();
+  struct Entry* e = &cache[kernelId];
+  if (e->valid && e->comm == comm && e->commHash == comm->commHash && e->archName == comm->archName &&
+      e->nRanks == comm->nRanks && e->minCompCap == comm->minCompCap && e->cudaArch == comm->cudaArch &&
+      e->symTmaEnable == symTmaEnable && e->symCtasOverride == symCtasOverride && e->nBytes == nBytes &&
+      e->count == input->count && e->countMax == input->countMax && e->datatype == input->datatype &&
+      e->inPlace == input->inPlace && e->minCTAs == input->minCTAs && e->maxCTAs == input->maxCTAs &&
+      e->nWorks == input->nWorks) {
+    *timeUs = e->timeUs;
+    *selectionTimeUs = e->selectionTimeUs;
+    *nBlocks = e->nBlocks;
+    return ncclSuccess;
+  }
+  NCCLCHECK(ncclSymkLsaModel(input, kernelId, nBytes, timeUs, selectionTimeUs, nBlocks));
+  *e = {comm,           comm->commHash, comm->archName,  comm->nRanks,    comm->minCompCap, comm->cudaArch,
+        symTmaEnable,   symCtasOverride, nBytes,         input->count,    input->countMax,  input->datatype,
+        input->inPlace, input->minCTAs, input->maxCTAs, input->nWorks,   *timeUs,          *selectionTimeUs,
+        *nBlocks,       true};
+  return ncclSuccess;
+}
+#endif
+
 static ncclResult_t queryModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId kernelId, size_t nBytes,
                                float* timeUs, float* selectionTimeUs, int* nBlocks) {
   if (ncclSymkGinKernelMask() >> kernelId & 1) {
     NCCLCHECK(ncclSymkGinModel(input, kernelId, nBytes, timeUs, nBlocks));
     *selectionTimeUs = *timeUs;
   } else {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    NCCLCHECK(rcclSymkLsaModelCached(input, kernelId, nBytes, timeUs, selectionTimeUs, nBlocks));
+#else
     NCCLCHECK(ncclSymkLsaModel(input, kernelId, nBytes, timeUs, selectionTimeUs, nBlocks));
+#endif
   }
   return ncclSuccess;
 }
