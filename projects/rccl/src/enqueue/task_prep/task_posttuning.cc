@@ -333,6 +333,7 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
     return ncclInvalidArgument;
   }
 
+#if !defined(__HIP_PLATFORM_AMD__)
   int driverVersion;
   NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
   if (driverVersion < 12050) {
@@ -340,10 +341,19 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
          (driverVersion % 1000) / 10);
     return ncclInvalidUsage;
   }
+#endif
 
   // Check if signal index is valid
   if (sigIdx < 0 || sigIdx >= comm->config.numRmaSig) {
     WARN("Signal index %d is invalid (must be in [0, %d))", sigIdx, comm->config.numRmaSig);
+    return ncclInvalidArgument;
+  }
+
+  // Check if context is valid: 0 <= ctx < numRmaCtx.
+  // WaitSignal carries ctx per descriptor (info/raw ctx is unused); those are
+  // validated in the descriptor loop below.
+  if (func != ncclFuncWaitSignal && (ctx < 0 || ctx >= comm->config.numRmaCtx)) {
+    WARN("Context %d is invalid (must be in [0, %d))", ctx, comm->config.numRmaCtx);
     return ncclInvalidArgument;
   }
 
@@ -416,6 +426,11 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
       if (signalDescs[i].sigIdx < 0 || signalDescs[i].sigIdx >= comm->config.numRmaSig) {
         WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, signalDescs[i].sigIdx,
              comm->config.numRmaSig);
+        return ncclInvalidArgument;
+      }
+      if (signalDescs[i].ctx < 0 || signalDescs[i].ctx >= comm->config.numRmaCtx) {
+        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, signalDescs[i].ctx,
+             comm->config.numRmaCtx);
         return ncclInvalidArgument;
       }
     }

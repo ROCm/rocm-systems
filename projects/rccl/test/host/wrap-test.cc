@@ -4838,6 +4838,58 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
       });
 }
 
+// RCCL skips hierarchical CE entirely while capturing (rccl_wrap.cc
+// !ceCapturing && ncclHierCeAvailable). NCCL instead keeps hier CE selected
+// and forces numCtx=1. This pins the skip so a later policy change is
+// deliberate.
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                   &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                  &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Complementary proof for AllGather's own CE-registered check (a separate
 // hasSysmemSegment computation from rcclSelectAllReduce's).
 TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {

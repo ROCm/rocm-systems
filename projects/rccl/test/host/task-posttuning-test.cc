@@ -2349,17 +2349,11 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupported_RejectsEveryRma
   }
 }
 
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_IsIgnoredOnHip) {
+  // The CUDA 12.5 driver gate is HIP-elided in postTuneRmaTaskAppend, and this
+  // binary always defines __HIP_PLATFORM_AMD__, so a too-old cache must not reject.
   TaskPostTuning_RmaScene rma;
   ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.PutSignal()));
-  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverAtTheRmaMinimum_IsAccepted) {
-  TaskPostTuning_RmaScene rma;
-  ncclCudaDriverVersionCache = kSupportedDriverVersion;
 
   EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
   EXPECT_EQ(1, rma.AppendedTaskCount());
@@ -2400,8 +2394,16 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheTopOfTheRange_IsAc
   EXPECT_EQ(1, rma.AppendedTaskCount());
 }
 
-// postTuneRmaTaskAppend never range-checks ctx, unlike sigIdx above; fixing that turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = -1;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   struct ncclRawTaskRma raw = rma.Signal();
   raw.rmaOp.signal.ctx = kNumRmaCtx;
@@ -2819,10 +2821,15 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsWaitForOneOpe
   EXPECT_EQ(2, rma.AppendedTaskCount());
 }
 
-// The descriptor loop only checks opCnt and sigIdx, never ctx; the grouping scan then silently drops any
-// descriptor whose ctx falls outside [0, numRmaCtx), so the wait vanishes instead of being rejected.
-// Adding a ctx range check to the descriptor loop turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, -1)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kNumRmaCtx)};
 

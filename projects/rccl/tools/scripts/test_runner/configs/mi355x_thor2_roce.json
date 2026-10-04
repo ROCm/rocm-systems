@@ -779,6 +779,11 @@
           "test_filter": "HostApiTest.PutSignalInvalidSigIdx"
         },
         {
+          "name": "HostApi_PutSignalMultiSigIdx",
+          "description": "Host API: two independent signal indexes on numRmaSig=2",
+          "test_filter": "HostApiMultiSigTest.PutSignalMultiSigIdx"
+        },
+        {
           "name": "HostApi_SignalCumulativeFence",
           "description": "Host API: signal cumulative fence",
           "test_filter": "HostApiTest.SignalCumulativeFence"
@@ -812,6 +817,11 @@
           "name": "HostApi_PutSignalInvalidCtx",
           "description": "Host API: put signal invalid ctx",
           "test_filter": "HostApiTest.PutSignalInvalidCtx"
+        },
+        {
+          "name": "HostApi_PutSignalMultiCtx",
+          "description": "Host API: striped puts across ctx 0 and 1 on numRmaCtx=2",
+          "test_filter": "HostApiMultiCtxTest.PutSignalMultiCtx"
         },
         {
           "name": "HostApi_WaitSignalNullDescs",
