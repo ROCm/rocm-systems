@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -795,11 +796,11 @@ configure(bool _setup, std::int64_t _tid)
             _pe.disabled                 = 1;
             _pe.inherit                  = 0;
 
-            if(_pe.type == PERF_TYPE_SOFTWARE)
-            {
-                _pe.use_clockid = 1;
-                _pe.clockid     = CLOCK_REALTIME;
-            }
+            // Hardware events are the default overflow source. Their sample times
+            // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
+            // freezes the monotonic-to-timeline offset from the first sample.
+            _pe.use_clockid = 1;
+            _pe.clockid     = CLOCK_BOOTTIME;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
@@ -2112,7 +2113,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
+    pending_pause_ts.store(control::clocks::timeline_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -2130,13 +2131,13 @@ resume()
     }
 
     LOG_DEBUG("Resuming sampling...");
-    auto const _pause_ts  = pending_pause_ts.exchange(0);
-    auto const _resume_ts = tim::get_clock_real_now<std::uint64_t, std::nano>();
-    if(_pause_ts > 0)
+    auto const pause_ts  = pending_pause_ts.exchange(0);
+    auto const resume_ts = control::clocks::timeline_ns();
+    if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };
         pause_intervals.push_back(
-            pause_interval_t{ .pause_ts = _pause_ts, .resume_ts = _resume_ts });
+            pause_interval_t{ .pause_ts = pause_ts, .resume_ts = resume_ts });
     }
 
     set_sampler_timers(timer_state::running);

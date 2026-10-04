@@ -10,15 +10,19 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <gtest/gtest.h>
+#include <ratio>
 #include <string>
 #include <thread>
+#include <time.h>
 
 namespace
 {
 using rocprofsys::control::clock_duration;
 using rocprofsys::control::session;
 using rocprofsys::control::clocks::posix;
+using rocprofsys::control::clocks::timeline_ns;
 using time_window_t = rocprofsys::control::triggers::time_window<posix>;
 
 // Polls the session's active state until it reaches @p expected or a
@@ -51,6 +55,23 @@ TEST(posix_clock_test, now_returns_advancing_time_points)
     const auto later = clk.now();
 
     EXPECT_GT(later, earlier) << "now() should advance over time";
+}
+
+TEST(posix_clock_test, timeline_uses_clock_boottime)
+{
+    const auto get_boottime_ns = []() {
+        timespec specs{};
+        EXPECT_EQ(clock_gettime(CLOCK_BOOTTIME, &specs), 0);
+        return static_cast<std::uint64_t>(specs.tv_sec) * std::nano::den +
+               static_cast<std::uint64_t>(specs.tv_nsec);
+    };
+
+    const auto before = get_boottime_ns();
+    const auto now    = timeline_ns();
+    const auto after  = get_boottime_ns();
+
+    EXPECT_LE(before, now);
+    EXPECT_LE(now, after);
 }
 
 TEST(posix_clock_test, interrupt_makes_sleep_until_return_false)
