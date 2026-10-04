@@ -177,8 +177,15 @@ add_test(NAME counter-collection-print-functional-counters
 
 set_tests_properties(
     counter-collection-print-functional-counters
-    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
-               "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples"
+               RUN_SERIAL
+               ON
+               ENVIRONMENT
+               "${counter-collection-functional-counter-env}"
+               FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-device-profiling-client SHARED)
