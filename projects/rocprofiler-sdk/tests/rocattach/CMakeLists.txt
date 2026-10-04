@@ -240,6 +240,45 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "does not refer to a regular file"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
+# Every library in a colon-delimited tool library list is validated
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-last-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "$<TARGET_FILE:rocattach-tool-path-validation-test>:/tmp/rocattach-missing-tool-library-does-not-exist.so"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "'/tmp/rocattach-missing-tool-library-does-not-exist.so' is absolute but is not visible"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-first-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "/tmp/rocattach-missing-tool-library-does-not-exist.so:$<TARGET_FILE:rocattach-tool-path-validation-test>"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "'/tmp/rocattach-missing-tool-library-does-not-exist.so' is absolute but is not visible"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-delimiter-only-tool-path-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS "::"
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path must not be empty"
+    FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
+
 rocprofiler_add_integration_execute_test(
     rocattach-empty-tool-path-test-execute
     TARGET rocattach-tool-path-validation-test
@@ -328,6 +367,23 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-without-env-test-env}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: attach failed gracefully without crashing target"
+    FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"
+    )
+
+# Test that a tool library the target cannot load fails the attach without bringing down
+# the target
+rocprofiler_add_integration_execute_test(
+    rocattach-missing-tool-library-test-execute
+    TARGET rocattach-without-env-test
+    ARGS $<TARGET_FILE:attachment-test> attach-missing-tool
+         $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    LABELS "attachment"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocattach-test-env}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: attach failed gracefully without crashing target"
     FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"

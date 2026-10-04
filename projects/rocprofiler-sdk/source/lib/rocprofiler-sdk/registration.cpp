@@ -76,6 +76,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
@@ -438,12 +439,25 @@ emplace_client(Tp&                                 data,
     return client;
 }
 
+// set when a ROCP_TOOL_LIBRARIES library could not be loaded
+bool&
+get_tool_library_load_failed()
+{
+    static auto _v = false;
+    return _v;
+}
+
 client_library_vec_t
 find_clients()
 {
     auto data = client_library_vec_t{};
 
-    auto is_unique_configure_func = [&data](auto* _cfg_func) {
+    // configure functions of ROCP_TOOL_LIBRARIES libraries which are not used because another
+    // library in the list could not be loaded
+    auto rejected_configure_funcs = std::unordered_set<rocprofiler_configure_func_t>{};
+
+    auto is_unique_configure_func = [&data, &rejected_configure_funcs](auto* _cfg_func) {
+        if(rejected_configure_funcs.count(_cfg_func) > 0) return false;
         for(const auto& itr : data)
         {
             if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
@@ -491,30 +505,8 @@ find_clients()
             return std::vector<std::string>{};
         }
 
-        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-        auto       val_arr   = std::vector<std::string>{};
-        size_t     pos       = 0;
-        const auto delimiter = std::string_view{":"};
-        auto       token     = std::string{};
-
-        if(val.empty())
-        {
-            // do nothing
-        }
-        else if(val.find(delimiter) == std::string::npos)
-        {
-            val_arr.emplace_back(val);
-        }
-        else
-        {
-            while((pos = val.find(delimiter)) != std::string::npos)
-            {
-                token = val.substr(0, pos);
-                if(!token.empty()) val_arr.emplace_back(token);
-                val.erase(0, pos + delimiter.length());
-            }
-        }
-        return val_arr;
+        return rocprofiler::sdk::parse::tokenize(
+            common::get_env("ROCP_TOOL_LIBRARIES", std::string{}), ":");
     };
 
     auto env = get_env_libs();
@@ -524,6 +516,9 @@ find_clients()
 
     if(!env.empty())
     {
+        // ROCP_TOOL_LIBRARIES libraries which were loaded
+        auto env_handles = std::vector<std::pair<std::string, void*>>{};
+
         for(const auto& itr : env)
         {
             ROCP_INFO << "[ROCP_TOOL_LIBRARIES] searching " << itr << " for rocprofiler_configure";
@@ -556,9 +551,35 @@ find_clients()
 
             if(!handle)
             {
-                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
+                const auto* _err = dlerror();
+                ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr
+                           << "': " << ((_err) ? _err : "unknown error");
+                get_tool_library_load_failed() = true;
+                continue;
             }
 
+            env_handles.emplace_back(itr, handle);
+        }
+
+        // A library which could not be loaded fails the whole list: none of the libraries are
+        // used as tools, but the application continues
+        if(get_tool_library_load_failed())
+        {
+            ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] no tool library in '"
+                       << common::get_env("ROCP_TOOL_LIBRARIES", std::string{})
+                       << "' will be used because at least one could not be loaded";
+
+            for(const auto& [itr, handle] : env_handles)
+            {
+                if(auto _sym = rocprofiler_configure_dlsym(handle))
+                    rejected_configure_funcs.emplace(_sym);
+            }
+            env_handles.clear();
+        }
+
+        for(const auto& [itr, env_handle] : env_handles)
+        {
+            auto* handle = env_handle;
             for(const auto& ditr : data)
             {
                 if(ditr->dlhandle && ditr->dlhandle == handle)
@@ -1215,6 +1236,12 @@ finalize()
 rocprofiler_status_t
 attach()
 {
+    if(get_clients() && get_tool_library_load_failed())
+    {
+        ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
     return invoke_client_attaches();
 }
 

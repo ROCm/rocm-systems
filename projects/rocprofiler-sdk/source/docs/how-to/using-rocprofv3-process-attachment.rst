@@ -213,6 +213,37 @@ To attach only to the specified PID and skip its descendants, use ``--attach-chi
 
 The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after the attachment has begun are not automatically profiled.
 
+Every process in the tree is profiled with the tool library selected for the target PID. For more information, see :ref:`process_attachment_tool_library`.
+
+.. _process_attachment_tool_library:
+
+Attaching to a process from a different ROCm installation
+----------------------------------------------------------
+
+The profiling tool library is loaded into the target process, where it runs with the rocprofiler-sdk library that the target already uses. By default, ``rocprofv3 --attach`` (and ``rocprof-attach``) selects the tool library as follows:
+
+#. It reads ``/proc/<PID>/maps`` to find the directory of the rocprofiler-sdk libraries that the target process has loaded, and uses the tool library of that installation, ``<libdir>/rocprofiler-sdk/librocprofiler-sdk-tool.so``. The file is looked up in the target's filesystem, through ``/proc/<PID>/root``, so this also works for processes running in a container.
+
+#. If the target has not loaded rocprofiler-sdk, or its installation's tool library cannot be found, the tool library of the ``rocprofv3`` installation is used instead. A warning is printed when the target has loaded rocprofiler-sdk but its tool library was not found.
+
+When attaching to a process tree, the selection is made once for the target PID and used for every process in the tree.
+
+To attach a specific tool library instead, set ``ROCPROF_ATTACH_TOOL_LIBRARY``, or pass ``-t``/``--attach-tool-library`` to ``rocprof-attach``. The value is a colon-delimited list, is used exactly as given, and is interpreted in the target's filesystem. Attachment fails if any library in the list cannot be found or loaded, and the target keeps running without profiling. ``ROCP_TOOL_LIBRARIES`` is ignored in attach mode, with a warning.
+
+**Option support across versions**
+
+When the target runs a different rocprofiler-sdk installation than ``rocprofv3``, a warning is printed, because the requested options might not all be supported by the target's version:
+
+- With the target's own tool library, options that library does not know are ignored. Aggregate options such as ``--sys-trace``, ``--runtime-trace``, ``--hip-trace``, ``--hsa-trace``, and ``--kfd-trace`` only enable the tracing that the target's version supports.
+
+- With the ``rocprofv3`` installation's tool library, tracing kinds that the target's rocprofiler-sdk does not support are skipped, with a warning in the target process's log. Thread trace (``--att``) is disabled with a warning when the target's rocprofiler-sdk is older than 1.5.0. Prefer individual tracing options over aggregate options, and request only options that the target's version supports.
+
+To use every option that the target's version supports, run the ``rocprofv3`` from the target's own installation.
+
+**Attachment support in the target's version**
+
+Attachment requires the ``rocp-bg-attach`` thread, which the rocprofiler-sdk attach library starts in the target process when attachment is enabled. If the target's attach library is too old to start this thread, ``rocprofv3 --attach-children=false`` reports an error before touching the process. Use the ``rocprofv3`` from the target's own installation to profile such a process. When attaching to a process tree, such processes are skipped and their descendants are still attached.
+
 Key considerations
 -------------------
 
