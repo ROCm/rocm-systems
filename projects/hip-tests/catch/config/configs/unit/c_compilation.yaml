@@ -3,3 +3,20 @@ c_compilation:
   Unit_hipGetDeviceProp_ctest:
     <<: *level_2
     tags: [integration, rtc]
+  # Regression tests for AMD headers
+  Unit_hipBf16Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipFp8Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipFp4Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipFp6Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled: [nvidia_linux, nvidia_windows]
