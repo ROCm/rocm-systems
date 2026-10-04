@@ -770,6 +770,22 @@
       ]
     },
 
+    "cast_udma_pinning_sharing": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "AINIC UDMA QP pinning verification with QP sharing enabled. Verifies the sharing-path UDMA mask selection in ncclIbCreateQpIonic produces valid per-QP UDMA indices. Skips cleanly on non-AINIC or older drivers.",
+      "env_variables": {
+        "RCCL_IB_QP_SHARING_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A24_Cast_UdmaPinningSharingVerify",
+          "description": "Per-QP UDMA index readback with QP sharing enabled confirms sharing-path mask selection produces valid indices, plus data-integrity send/recv.",
+          "test_filter": "NetIbMPITest.CastUdmaPinningSharingVerify"
+        }
+      ]
+    },
+
     "net_ib_cast_udma_unit": {
       "extends": "gtest_base",
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -805,11 +821,6 @@
           "test_filter": "NetIbCastUdma.AllEnginesUsed"
         },
         {
-          "name": "A22_UdmaSharingPathMask",
-          "description": "QP-sharing path mask computation produces valid single-bit masks within range.",
-          "test_filter": "NetIbCastUdma.SharingPathMaskComputation"
-        },
-        {
           "name": "A22_UdmaInvalidArgs",
           "description": "Null pointer, zero udmaCount, and zero channels return ncclInvalidArgument.",
           "test_filter": "NetIbCastUdma.InvalidArgs"
@@ -818,6 +829,21 @@
           "name": "A22_UdmaBackwardCompat",
           "description": "2-engine distribution matches legacy IONIC_UDMA_MASK_LOW/HIGH (0x01/0x02) pattern.",
           "test_filter": "NetIbCastUdma.BackwardCompatWith2Engines"
+        },
+        {
+          "name": "A22_UdmaNormalizeZeroFallback",
+          "description": "ncclIbCastNormalizeUdmaCount returns 2 for zero input (driver fallback).",
+          "test_filter": "NetIbCastUdma.NormalizeUdmaCountZeroFallback"
+        },
+        {
+          "name": "A22_UdmaSharedHelperMatch",
+          "description": "Shared ncclIbCastUdmaRoundRobinMask helper matches production formula for all engine counts.",
+          "test_filter": "NetIbCastUdma.SharedHelperMatchesProductionFormula"
+        },
+        {
+          "name": "A22_UdmaCrossChannelDistribution",
+          "description": "Consecutive channels get distinct UDMA engines, cycling through all engines per round-robin cycle.",
+          "test_filter": "NetIbCastUdma.CrossChannelDistribution"
         }
       ]
     }
@@ -841,6 +867,7 @@
     { "config": "net_ib_cast_multiplane_unit", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_udma_unit",     "enabled": true, "smoke": true },
     { "config": "cast_udma_pinning",        "enabled": true, "smoke": true },
+    { "config": "cast_udma_pinning_sharing", "enabled": true, "smoke": true },
     { "config": "cast_multiplane_mpi",      "enabled": true },
     { "config": "cast_multiplane_disabled", "enabled": true },
 
