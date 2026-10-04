@@ -104,8 +104,8 @@ void TestMutualExclusion::SetUp(void) {
 
     // AMD_SMI_INIT_FLAG_RESRV_TEST1 tells rsmi to fail immediately
     // if it can't get the mutex instead of waiting.
-    DISPLAY_AMDSMI_API("[sleeper] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
-                       "", VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "[sleeper]", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
@@ -142,8 +142,8 @@ void TestMutualExclusion::SetUp(void) {
     }
     close(init_pipe_[0]);
 
-    DISPLAY_AMDSMI_API("[tester] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
-                       "", VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "[tester]", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
