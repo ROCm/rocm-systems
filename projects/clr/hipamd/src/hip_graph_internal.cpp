@@ -411,25 +411,10 @@ void GraphExecSegmented::BuildSyncPlan() {
   sync_plan_.barrier_packets.clear();
   sync_plan_.leaf_segment_ids.clear();
   sync_plan_.seg_to_hw_event.assign(segments_.size(), -1);
+  sync_plan_.seg_to_child_entry_hw_event.assign(segments_.size(), -1);
   sync_plan_.num_hw_events = 0;
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
-
-  // PASS 0: Barrier-ROI collapse. Only runs in mode 0 (default) and only when
-  // the graph is shallow (max_level<=4). Modes 1 (round-robin) and 2 (DFS)
-  // never collapse. When collapse fires, every segment is folded onto stream 0
-  // so the whole graph runs on the launch stream with no cross-stream barriers.
-  // Init() reads collapsed_to_single_stream_ to create just one stream per device.
-  collapsed_to_single_stream_ = false;
-  const bool collapse_eligible = (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 0) &&
-                                 (max_dependency_level_ <= 4);
-  if (collapse_eligible && ShouldCollapseToSingleStream()) {
-    for (auto& seg : segments_) {
-      seg.stream_id = 0;
-      seg.needs_completion_signal = false;
-    }
-    collapsed_to_single_stream_ = true;
-  }
 
   // PASS 1: Assign a compact HW-event slot only to segments whose completion
   // signal is consumed — cross-device/stream successor, or leaf when
@@ -440,6 +425,9 @@ void GraphExecSegmented::BuildSyncPlan() {
   for (size_t i = 0; i < segments_.size(); ++i) {
     if (segments_[i].needs_completion_signal) {
       sync_plan_.seg_to_hw_event[i] = sync_plan_.num_hw_events++;
+    }
+    if (segments_[i].needs_child_entry_signal) {
+      sync_plan_.seg_to_child_entry_hw_event[i] = sync_plan_.num_hw_events++;
     }
   }
 
@@ -589,6 +577,24 @@ void GraphExecSegmented::BuildSyncPlan() {
       }
     }
 
+    // Child-graph segment: completion on the leading batch gates parallel child roots.
+    if (segment.child_graph_ptr != nullptr && segment.needs_child_entry_signal) {
+      const int entry_hw_slot = sync_plan_.seg_to_child_entry_hw_event[segment.id];
+      if (entry_hw_slot >= 0) {
+        if (firstBatch.dispatchPackets.empty()) {
+          uint8_t* entry_barrier = device->CreateBarrierPacket();
+          sync_plan_.barrier_packets.push_back(entry_barrier);
+          firstBatch.dispatchPackets.push_back(entry_barrier);
+          firstBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+          firstBatch.dispatchMetadataPackets.push_back(nullptr);
+        }
+        uint8_t* last_leading = firstBatch.dispatchPackets.back();
+        sync_plan_.patch_list.push_back(
+            {last_leading, nullptr, entry_hw_slot,
+             amd::Device::HwEventPatch::kCompletionSignal});
+      }
+    }
+
     bool last_node_uncaptured = segBatch.has_uncaptured_nodes &&
         !segment.nodes.empty() && !segBatch.node_capture_status.back();
 
@@ -643,9 +649,113 @@ void GraphExecSegmented::BuildSyncPlan() {
     signalManager_->Prepopulate(device, sync_plan_.num_hw_events, kPrecreatedSets);
   }
 
+  // PASS 4: Parallel child roots on streams other than the parent child-node stream
+  // wait on the parent's leading-batch entry signal (patched at recursive launch).
+  parent_boundary_patches_.clear();
+  parent_boundary_segment_ids_.clear();
+  for (auto& segment : segments_) {
+    segment.parent_entry_hw_event_index = -1;
+  }
+  if (inherited_exec_stream_id_ >= 0) {
+    auto level0_it = segments_per_level_.find(0);
+    if (level0_it != segments_per_level_.end()) {
+      for (int seg_id : level0_it->second) {
+        const auto& root_seg = segments_[seg_id];
+        if (root_seg.stream_id == inherited_exec_stream_id_) {
+          continue;
+        }
+        auto segBatchIt = segmentBatches_.find(seg_id);
+        if (segBatchIt == segmentBatches_.end()) {
+          continue;
+        }
+        auto& segBatch = segBatchIt->second;
+        if (segBatch.packet_batches.empty()) {
+          segBatch.packet_batches.emplace_back();
+        }
+        auto& firstBatch = segBatch.packet_batches[0];
+        uint8_t* barrier_pkt = device->CreateBarrierPacket();
+        sync_plan_.barrier_packets.push_back(barrier_pkt);
+        parent_boundary_patches_.push_back({barrier_pkt, nullptr, 0, 0});
+        parent_boundary_segment_ids_.push_back(seg_id);
+        firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
+        firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
+                                              kBarrierKernelNamePtr);
+        firstBatch.dispatchMetadataPackets.insert(firstBatch.dispatchMetadataPackets.begin(),
+                                                  nullptr);
+        for (auto& nodeRange : firstBatch.nodeRanges) {
+          nodeRange.startIndex += 1;
+        }
+      }
+    }
+  }
+
+  // Child root AQL waits reference parent entry slots assigned above.
+  FinalizeChildParentBoundaries();
+
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
           "[hipGraph] BuildSyncPlan: %d segments, %zu barrier packets, %d completion signals",
           sync_plan_.num_segments, sync_plan_.barrier_packets.size(), sync_plan_.num_hw_events);
+}
+
+// ================================================================================================
+bool GraphExecSegmented::HasOffStreamRoots(int exec_stream_id) const {
+  auto level_it = segments_per_level_.find(0);
+  if (level_it == segments_per_level_.end()) {
+    return false;
+  }
+  for (int seg_id : level_it->second) {
+    if (segments_[seg_id].stream_id != exec_stream_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ================================================================================================
+void GraphExecSegmented::FinalizeChildParentBoundaries() {
+  for (const auto& segment : segments_) {
+    if (segment.child_graph_ptr == nullptr || !segment.needs_child_entry_signal) {
+      continue;
+    }
+    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+    const int parent_entry_slot = sync_plan_.seg_to_child_entry_hw_event[segment.id];
+    if (parent_entry_slot < 0) {
+      continue;
+    }
+    for (size_t i = 0; i < child->parent_boundary_patches_.size(); ++i) {
+      child->parent_boundary_patches_[i].hw_event_index = parent_entry_slot;
+      const int child_segment_id = child->parent_boundary_segment_ids_[i];
+      child->segments_[child_segment_id].parent_entry_hw_event_index = parent_entry_slot;
+    }
+  }
+
+  for (const auto& segment : segments_) {
+    if (segment.child_graph_ptr != nullptr) {
+      auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+      child->FinalizeChildParentBoundaries();
+    }
+  }
+}
+
+// ================================================================================================
+void GraphExecSegmented::AssignNestedChildStreamPlans() {
+  for (auto& segment : segments_) {
+    if (segment.child_graph_ptr == nullptr) {
+      continue;
+    }
+
+    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+    child->max_streams_dev_ = max_streams_dev_;
+    child->inherited_exec_stream_id_ = segment.stream_id;
+    if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
+      child->DFSStreamAssignment();
+    } else {
+      child->RoundRobinStreamAssignment();
+    }
+    child->ApplyCollapseSelection();
+    segment.needs_child_entry_signal = child->HasOffStreamRoots(segment.stream_id);
+    child->AssignNestedChildStreamPlans();
+  }
 }
 
 // ================================================================================================
@@ -1337,6 +1447,11 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     // Per-device round-robin counters, reset per level so parallel segments on
     // the same device spread evenly across that device's stream pool.
     std::unordered_map<int, size_t> dev_idx;
+    if (level == 0 && inherited_exec_stream_id_ >= 0) {
+      for (int seg_id : it->second) {
+        dev_idx[segments_[seg_id].dev_id] = static_cast<size_t>(inherited_exec_stream_id_);
+      }
+    }
 
     if (priority_declared) {
       std::stable_sort(it->second.begin(), it->second.end(),
@@ -1344,10 +1459,8 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     }
 
     for (int seg_id : it->second) {
-      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
-        auto& seg = segments_[seg_id];
-        seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
-      }
+      auto& seg = segments_[seg_id];
+      seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
     }
   }
 
@@ -1403,7 +1516,9 @@ void GraphExecSegmented::DFSStreamAssignment() {
     seg.stream_id = -1;
   }
 
-  int sid = 0;
+  // Child stream IDs are absolute in the shared parent pool, so start from the
+  // parent child-node's stream; a root graph starts from pool slot 0.
+  int sid = inherited_exec_stream_id_ >= 0 ? inherited_exec_stream_id_ : 0;
 
   // Mirrors ScheduleNodes(): iterate all segments, start a new DFS for each
   // unscheduled one with the current sid, then increment sid for the next entry.
@@ -1464,32 +1579,49 @@ void GraphExecSegmented::SelectStreamAssignment() {
             "[hipGraph] SelectStreamAssignment: round-robin, no collapse (%zu segs)",
             segments_.size());
     RoundRobinStreamAssignment();
-    return;
-  }
-  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
+  } else if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
             "[hipGraph] SelectStreamAssignment: DFS, no collapse (%zu segs)", segments_.size());
     DFSStreamAssignment();
+  } else {
+    // 0 = collapse-eligible (ROI heuristic + max_level<=4) then round-robin.
+    // ShouldCollapseToSingleStream() is called later in BuildSyncPlan; the extra
+    // max_level guard here prevents collapse on deep graphs where multi-stream
+    // overlap is genuinely valuable.
+    const bool deep_graph = max_dependency_level_ > 4;
+    if (deep_graph) {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] SelectStreamAssignment: deep graph (max_level=%d>4), skip collapse -> "
+              "round-robin (%zu segs)",
+              max_dependency_level_, segments_.size());
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] SelectStreamAssignment: collapse-eligible (max_level=%d) -> round-robin "
+              "(%zu segs)",
+              max_dependency_level_, segments_.size());
+    }
+    RoundRobinStreamAssignment();
+  }
+
+  ApplyCollapseSelection();
+  AssignNestedChildStreamPlans();
+}
+
+// ================================================================================================
+void GraphExecSegmented::ApplyCollapseSelection() {
+  const bool collapse_eligible = (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 0) &&
+                                 (max_dependency_level_ <= 4);
+  if (!collapse_eligible || !ShouldCollapseToSingleStream()) {
     return;
   }
 
-  // 0 = collapse-eligible (ROI heuristic + max_level<=4) then round-robin.
-  // ShouldCollapseToSingleStream() is called later in BuildSyncPlan; the extra
-  // max_level guard here prevents collapse on deep graphs where multi-stream
-  // overlap is genuinely valuable.
-  const bool deep_graph = max_dependency_level_ > 4;
-  if (deep_graph) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: deep graph (max_level=%d>4), skip collapse -> "
-            "round-robin (%zu segs)",
-            max_dependency_level_, segments_.size());
-  } else {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: collapse-eligible (max_level=%d) -> round-robin "
-            "(%zu segs)",
-            max_dependency_level_, segments_.size());
+  // A collapsed child graph must stay on its parent child-node's absolute stream;
+  // only the root graph defaults to stream 0.
+  const int collapse_stream = inherited_exec_stream_id_ >= 0 ? inherited_exec_stream_id_ : 0;
+  for (auto& segment : segments_) {
+    segment.stream_id = collapse_stream;
   }
-  RoundRobinStreamAssignment();
+  ComputeCompletionSignalFlags();
 }
 
 // ================================================================================================
@@ -1620,12 +1752,10 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
 }
 
 // Carries the per-launch state needed by the completion callback: the graph
-// whose refcount to drop, plus the signal set (and its device) to re-arm and
-// return to the pool now that the launch's GPU work is done.
+// whose refcount to drop and all root/child signal sets to recycle.
 struct GraphLaunchCleanup {
   GraphExecBase* exec;
-  amd::Device* device;
-  std::vector<void*> signal_set;
+  std::vector<GraphLaunchSignalSet> signal_sets;
 };
 
 // ================================================================================================
@@ -1754,7 +1884,6 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
   constexpr bool kBlocking = false;
   auto* cleanup = new GraphLaunchCleanup();
   cleanup->exec = this;
-  cleanup->device = g_devices[launch_stream->DeviceId()]->devices()[0];
   if (!event.setCallback(CL_COMPLETE, GraphExecBase::OnLaunchComplete, cleanup, kBlocking)) {
     launch_stream->finish();
     GraphExecBase::OnLaunchComplete(nullptr, CL_COMPLETE, cleanup);
@@ -1804,22 +1933,38 @@ hipError_t GraphExecSegmented::Init() {
   // skip same-stream dependency barriers.
   SelectStreamAssignment();
 
+  if (!max_streams_dev_.empty()) {
+    // FindStreamsReqPerDevForSegments() determines the shared pool size. Reduce
+    // it to one only when every segment in the parent/child hierarchy was
+    // assigned absolute stream 0 after collapse selection.
+    bool all_segments_on_stream_zero = true;
+    std::vector<GraphExecSegmented*> graphs_to_process{this};
+    while (!graphs_to_process.empty() && all_segments_on_stream_zero) {
+      auto* graph = graphs_to_process.back();
+      graphs_to_process.pop_back();
+      for (const auto& segment : graph->segments_) {
+        if (segment.stream_id != 0) {
+          all_segments_on_stream_zero = false;
+          break;
+        }
+        if (segment.child_graph_ptr != nullptr) {
+          graphs_to_process.push_back(
+              static_cast<GraphExecSegmented*>(segment.child_graph_ptr));
+        }
+      }
+    }
+    if (all_segments_on_stream_zero) {
+      max_streams_dev_[captureDeviceId_] = 1;
+    }
+  }
+
   // For graph nodes capture AQL packets to dispatch them directly during graph launch.
-  // BuildSyncPlan (inside CaptureAndFormPacketsForGraph) runs the barrier-ROI collapse
-  // pass, which may fold the graph onto a single stream per device.
+  // Stream assignment and collapse selection are final before packet materialization.
   status = CaptureAQLPackets();
   if (status != hipSuccess) {
     return status;
   }
 
-  // Create parallel streams now (still at instantiate time, never lazily at launch),
-  // sized to the final post-collapse assignment: one stream per device when the
-  // collapse pass fired, otherwise the capped multi-stream counts.
-  if (collapsed_to_single_stream_) {
-    for (auto& [dev_id, count] : max_streams_dev_) {
-      count = 1;
-    }
-  }
   uint32_t total_streams = 0;
   for (auto const& [dev_id, count] : max_streams_dev_) {
     total_streams += static_cast<uint32_t>(std::max(count, 0));
@@ -1904,13 +2049,57 @@ void GraphExecSegmented::PacketBatch::setEnabled(GraphNode* node, bool enabled) 
 }
 
 // ================================================================================================
+void GraphExecSegmented::PacketBatch::retargetPatchesToFilteredBuffer(
+    std::vector<amd::Device::HwEventPatch>& patches,
+    const std::unordered_map<const void*, size_t>& packet_to_filtered_index,
+    const std::unordered_set<const void*>& disabled_batch_packets) {
+  for (auto& patch : patches) {
+    auto it = packet_to_filtered_index.find(patch.packet);
+    if (it != packet_to_filtered_index.end()) {
+      patch.flat_packet = filteredFlatPacketData.data() + it->second * kAqlPktSize;
+      continue;
+    }
+
+    // The patch's owning packet is not in the filtered buffer. Only touch patches
+    // this batch owns whose packet was disabled; patches for other batches are
+    // resolved when those batches rebuild.
+    if (disabled_batch_packets.find(patch.packet) == disabled_batch_packets.end()) {
+      continue;
+    }
+
+    // Only completion signals are relocatable here. Parent-boundary waits are
+    // standalone barrier packets and are never filtered as part of a node range.
+    if (patch.dep_slot != amd::Device::HwEventPatch::kCompletionSignal) {
+      continue;
+    }
+
+    if (!enabledPackets.empty()) {
+      // Relocate the signal to the last still-enabled packet of this batch.
+      const size_t last_idx = enabledPackets.size() - 1;
+      patch.flat_packet = filteredFlatPacketData.data() + last_idx * kAqlPktSize;
+    } else if (fallbackBarrier != nullptr) {
+      // Every node packet in this batch is disabled: no packet remains to host
+      // the signal. Splice the reserved standalone barrier into the *filtered*
+      // buffer only — dispatchPackets/flatPacketData stay untouched.
+      const size_t fallback_idx = enabledPackets.size();
+      enabledPackets.push_back(fallbackBarrier);
+      enabledKernelNames.push_back(nullptr);
+      appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
+                               filteredValidPacketFullHeaders, filteredFlatMetadataData);
+      patch.flat_packet = filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
+    }
+  }
+}
+
+// ================================================================================================
 // Rebuild cached filtered lists of enabled packets.
 // Barrier packets (prepended/appended by BuildSyncPlan) live in dispatchPackets
 // but are not tracked in nodeRanges.  A linear scan with a per-index enabled
 // bitmap preserves them while filtering out disabled node packets.
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
-    std::vector<amd::Device::HwEventPatch>& patch_list) {
+    std::vector<amd::Device::HwEventPatch>& patch_list,
+    std::vector<amd::Device::HwEventPatch>& parent_boundary_patches) {
   if (filteredCacheValid) {
     return;
   }
@@ -1965,44 +2154,11 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
     }
   }
 
-  // Re-point flat_packet pointers in patch_list into filteredFlatPacketData.
-  for (auto& patch : patch_list) {
-    auto it = packetToFilteredIndex.find(patch.packet);
-    if (it != packetToFilteredIndex.end()) {
-      patch.flat_packet =
-          filteredFlatPacketData.data() + it->second * kAqlPktSize;
-      continue;
-    }
-
-    // The patch's owning packet is not in the filtered buffer. Only touch patches
-    // this batch owns whose packet was disabled; patches for other batches are
-    // resolved when those batches rebuild.
-    if (disabledBatchPackets.find(patch.packet) == disabledBatchPackets.end()) {
-      continue;
-    }
-
-    // Only completion signals are relocatable here.
-    if (patch.dep_slot != amd::Device::HwEventPatch::kCompletionSignal) {
-      continue;
-    }
-
-    if (!enabledPackets.empty()) {
-      // Relocate the signal to the last still-enabled packet of this batch.
-      const size_t last_idx = enabledPackets.size() - 1;
-      patch.flat_packet = filteredFlatPacketData.data() + last_idx * kAqlPktSize;
-    } else if (fallbackBarrier != nullptr) {
-      // Every node packet in this batch is disabled: no packet remains to host
-      // the signal. Splice the reserved standalone barrier into the *filtered*
-      // buffer only — dispatchPackets/flatPacketData stay untouched.
-      const size_t fallback_idx = enabledPackets.size();
-      enabledPackets.push_back(fallbackBarrier);
-      enabledKernelNames.push_back(nullptr);
-      appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
-                               filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      patch.flat_packet =
-          filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
-    }
-  }
+  retargetPatchesToFilteredBuffer(patch_list, packetToFilteredIndex, disabledBatchPackets);
+  // Child graphs with off-stream roots keep their parent-entry wait patches in a
+  // separate list; retarget those waits too when this filtered buffer is used.
+  retargetPatchesToFilteredBuffer(parent_boundary_patches, packetToFilteredIndex,
+                                  disabledBatchPackets);
 
   filteredCacheValid = true;
 }
@@ -2013,8 +2169,18 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
 // ApplyHwEventPatches writes into the buffer the dispatch path will use.
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::restorePatchListPointers(
-    std::vector<amd::Device::HwEventPatch>& patch_list) {
+    std::vector<amd::Device::HwEventPatch>& patch_list,
+    std::vector<amd::Device::HwEventPatch>& parent_boundary_patches) {
   for (auto& patch : patch_list) {
+    for (size_t i = 0; i < dispatchPackets.size(); ++i) {
+      if (patch.packet == dispatchPackets[i]) {
+        patch.flat_packet = flatPacketData.data() + i * kAqlPktSize;
+        break;
+      }
+    }
+  }
+
+  for (auto& patch : parent_boundary_patches) {
     for (size_t i = 0; i < dispatchPackets.size(); ++i) {
       if (patch.packet == dispatchPackets[i]) {
         patch.flat_packet = flatPacketData.data() + i * kAqlPktSize;
@@ -2221,11 +2387,17 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
       patch.flat_packet = it->second;
     }
   }
+  for (auto& patch : parent_boundary_patches_) {
+    auto it = pktToFlat.find(patch.packet);
+    if (it != pktToFlat.end()) {
+      patch.flat_packet = it->second;
+    }
+  }
 
   for (auto& [seg_id, segBatch] : segmentBatches_) {
     for (auto& batch : segBatch.packet_batches) {
       if (batch.disabledNodeCount > 0) {
-        batch.rebuildFilteredLists(sync_plan_.patch_list);
+        batch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
       }
     }
   }
@@ -2459,9 +2631,9 @@ void GraphExecSegmented::EndAQLPacketUpdates() {
 
 void GraphExecSegmented::RebuildAQLPacketBatch(PacketBatch& packetBatch) {
   packetBatch.rebuildFlatBuffer();
-  packetBatch.restorePatchListPointers(sync_plan_.patch_list);
+  packetBatch.restorePatchListPointers(sync_plan_.patch_list, parent_boundary_patches_);
   if (packetBatch.disabledNodeCount > 0) {
-    packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
+    packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
   }
 }
 
@@ -2565,11 +2737,11 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
       if (packetBatch.disabledNodeCount > 0) {
         // Eagerly rebuild filtered lists and re-resolve patch_list flat_packet
         // pointers so the launch path doesn't need to scan all segment batches.
-        packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
+        packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
       } else {
         // All nodes re-enabled: restore flat_packet pointers back to
         // flatPacketData so ApplyHwEventPatches patches the correct buffer.
-        packetBatch.restorePatchListPointers(sync_plan_.patch_list);
+        packetBatch.restorePatchListPointers(sync_plan_.patch_list, parent_boundary_patches_);
       }
       return hipSuccess;
     }
@@ -2580,9 +2752,11 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
 void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
-  // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
-  // signal pool) is still alive, then drop the launch's reference.
-  execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
+  // The retained root exec owns every child and signal manager until all sets
+  // have been returned.
+  for (auto& signal_set : cleanup->signal_sets) {
+    signal_set.manager->ReleaseSet(signal_set.device, signal_set.signals);
+  }
   delete cleanup;
   execBase->release();
 }
@@ -2591,7 +2765,10 @@ void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status,
 amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                                const std::vector<hip::Stream*>& streams,
                                                hipError_t* out_status,
-                                               std::vector<void*>* out_signal_set) {
+                                               std::vector<GraphLaunchSignalSet>* signal_sets,
+                                               const std::vector<void*>* parent_hw_events,
+                                               int parent_entry_hw_event_index,
+                                               bool sync_launch_stream_deps) {
   hipError_t status = hipSuccess;
   if (out_status != nullptr) {
     *out_status = hipSuccess;
@@ -2599,10 +2776,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
 
-  // Top-level launches recycle signals through the per-graph pool; the legacy
-  // recursive child-graph path (out_signal_set == nullptr) creates them locally
-  // and lets the AccumulateCommand destructor destroy them.
-  const bool recycle = (out_signal_set != nullptr);
+  // Root and recursive child graph launches recycle signals through their
+  // per-graph pools.
+  const bool recycle = (signal_sets != nullptr);
 
   std::vector<void*> segment_hw_events;
   if (sync_plan_.num_hw_events > 0) {
@@ -2617,14 +2793,30 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
-  // Resolve a segment's assigned hip::Stream* from its pre-computed stream_id.
-  // streams is the collision-handled streams_ vector built by UpdateStreams.
   auto resolveSegmentStream = [&](const Segment& seg) -> hip::Stream* {
     if (!streams.empty()) {
-      return streams[static_cast<size_t>(seg.stream_id) % streams.size()];
+      const size_t idx = static_cast<size_t>(seg.stream_id);
+      if (idx < streams.size()) {
+        return streams[idx];
+      }
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] EnqueueSegmentedGraph: segment %d stream_id %d out of range (pool %zu)",
+              seg.id, seg.stream_id, streams.size());
+      return launch_stream;
     }
     return launch_stream;
   };
+
+  // Child roots wait on the immediate parent's entry completion signal.
+  if (parent_hw_events != nullptr && !parent_hw_events->empty() &&
+      !parent_boundary_patches_.empty()) {
+    for (size_t i = 0; i < parent_boundary_patches_.size(); ++i) {
+      parent_boundary_patches_[i].hw_event_index = parent_entry_hw_event_index;
+      segments_[parent_boundary_segment_ids_[i]].parent_entry_hw_event_index =
+          parent_entry_hw_event_index;
+    }
+    device->ApplyHwEventPatches(parent_boundary_patches_, *parent_hw_events);
+  }
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
@@ -2646,14 +2838,12 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
-  // For the recycling (top-level) path, the pool owns the signals: hand the set
-  // back to the caller, which forwards it to the completion callback
-  // (OnLaunchComplete) that re-arms and returns it to the pool. Tell the
-  // AccumulateCommand destructor not to destroy them. The legacy path keeps the
-  // default (destructor destroys the locally created signals).
+  // The pool owns the signals: hand the set back to the caller, which forwards
+  // it to the completion callback (OnLaunchComplete) that re-arms and returns
+  // it to the pool. Tell the AccumulateCommand destructor not to destroy them.
   if (recycle && !segment_hw_events.empty()) {
     graph_accumulate->setOwnsHwEvents(false);
-    *out_signal_set = segment_hw_events;
+    signal_sets->push_back({signalManager_, device, segment_hw_events});
   }
 
   // Process segments level by level
@@ -2665,7 +2855,7 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 
     const auto& segments_at_level = level_it->second;
 
-    if (level == 0) {
+    if (level == 0 && sync_launch_stream_deps) {
       // Synchronize internal streams with launch stream's last command if available
       amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(true);
       if (launch_last_cmd != nullptr) {
@@ -2692,7 +2882,8 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
       const auto& segment = segments_[segment_id];
       hip::Stream* current_stream = resolveSegmentStream(segment);
 
-      status = EnqueueSegment(segment, current_stream, graph_accumulate);
+      status = EnqueueSegment(segment, current_stream, streams, signal_sets, graph_accumulate,
+                              &segment_hw_events);
 
       if (status != hipSuccess) {
         graph_accumulate->release();
@@ -2728,7 +2919,10 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 // ================================================================================================
 // Graph segment to queue dispatch matching
 hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                                     amd::AccumulateCommand* accumulate) {
+                                              const std::vector<hip::Stream*>& streams,
+                                              std::vector<GraphLaunchSignalSet>* signal_sets,
+                                              amd::AccumulateCommand* accumulate,
+                                              const std::vector<void*>* parent_segment_hw_events) {
   hipError_t status = hipSuccess;
 
   // Find the SegmentBatch for this segment using O(1) map lookup
@@ -2768,7 +2962,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     } else {
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
-      packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
+      packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
       if (!packetBatch.filteredFlatMetadataData.empty()) {
@@ -2805,17 +2999,14 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
         }
       }
 
-      // Recursively enqueue the child graph with its own dependency tracking.
-      // TODO: child graphs currently take the legacy create/destroy signal path
-      // (out_signal_set == nullptr -> recycle == false), so their pre-created
-      // signal pool (from the child's BuildSyncPlan/Prepopulate) sits unused and
-      // they pay signal_create/destroy every launch. To pool child signals too,
-      // pass an out_signal_set here and recycle it from the parent's
-      // OnLaunchComplete (the parent's accumulate completion encloses the
-      // child's work); the cleanup would carry per-pool (manager, set) pairs.
+      // Recursively enqueue the child and collect its borrowed signal set for
+      // recycling by the root launch-completion callback.
       hipError_t child_status = hipSuccess;
-      amd::Command* child_last_cmd =
-          childGraphExec->EnqueueSegmentedGraph(stream, {}, &child_status);
+      const int child_entry_hw_event_index =
+          sync_plan_.seg_to_child_entry_hw_event[segment.id];
+      amd::Command* child_last_cmd = childGraphExec->EnqueueSegmentedGraph(
+          stream, streams, &child_status, signal_sets, parent_segment_hw_events,
+          child_entry_hw_event_index, false);
 
       if (child_status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
@@ -3246,9 +3437,9 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   }
   UpdateStreams(cross_device_launch ? nullptr : launch_stream);
 
-  // Signals borrowed from the per-graph pool for this launch (segmented path
-  // only); handed to the completion callback to re-arm and return to the pool.
-  std::vector<void*> launch_signal_set;
+  // Root and child signal sets borrowed for this launch. The root completion
+  // callback re-arms and returns all of them to their respective managers.
+  std::vector<GraphLaunchSignalSet> launch_signal_sets;
 
   // Command whose completion drives OnLaunchComplete. On the segmented path we
   // reuse the graph's own accumulate command instead of enqueuing a dedicated marker
@@ -3267,10 +3458,10 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
-      last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_set);
+      last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_sets);
     } else {
       // Multi-device: pass empty vector, will use parallel_streams_ internally
-      last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_set);
+      last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_sets);
     }
   } else {
     // Cross-device launch: replay segmented AQL on a capture-device stream.
@@ -3289,7 +3480,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       launch_last_cmd->release();
     }
 
-    last_cmd = EnqueueSegmentedGraph(graph_stream, streams_, &status, &launch_signal_set);
+    last_cmd = EnqueueSegmentedGraph(graph_stream, streams_, &status, &launch_signal_sets);
     if (status == hipSuccess && last_cmd != nullptr) {
       amd::Command::EventWaitList completion_wait_list;
       completion_wait_list.push_back(last_cmd);
@@ -3299,14 +3490,16 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       // The launch stream queue owns this marker now. Keep last_cmd as the
       // capture-device completion command that drives graph resource cleanup.
       launch_done->release();
-    } else if (status != hipSuccess) {
-      // Error path only: EnqueueSegmentedGraph may have queued partial work
-      // before failing. Drain the capture-device streams before the common
-      // cleanup path can recycle launch signals or drop this exec reference.
-      for (auto* stream : streams_) {
-        if (stream != nullptr) {
-          stream->finish();
-        }
+    }
+  }
+
+  // Error path only: EnqueueSegmentedGraph may have queued partial work on
+  // multiple graph streams before failing. Drain all of them before the common
+  // cleanup path can recycle launch signals or drop this exec reference.
+  if (status != hipSuccess) {
+    for (auto* stream : streams_) {
+      if (stream != nullptr) {
+        stream->finish();
       }
     }
   }
@@ -3338,8 +3531,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   constexpr bool kBlocking = false;
   auto* cleanup = new GraphLaunchCleanup();
   cleanup->exec = this;
-  cleanup->device = g_devices[captureDeviceId_]->devices()[0];
-  cleanup->signal_set = std::move(launch_signal_set);
+  cleanup->signal_sets = std::move(launch_signal_sets);
   if (!event.setCallback(CL_COMPLETE, GraphExecBase::OnLaunchComplete, cleanup, kBlocking)) {
     // setCallback essentially never fails, but if it does the launch's GPU work
     // is already queued (the accumulate is enqueued and was told not to destroy
