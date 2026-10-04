@@ -40,8 +40,9 @@ class CpuDispatchPoolTestAccess;
 ///
 /// Workers take submission assignments under a short shared lock, then claim CUs
 /// with a submission-local atomic counter. Callers always drain their own work.
-/// Each submission joins only its assigned workers, so an unrelated slow batch
-/// cannot hold up its completion. The pool retains N-1 workers total, independent
+/// The first caller or worker to exhaust the task index cancels pending worker
+/// assignments. Each submission joins only its assigned workers, so an unrelated
+/// slow batch cannot hold up its completion. The pool retains N-1 workers total, independent
 /// of the number of callers; no additional worker pool is created per XCD.
 class CpuDispatchPool {
 public:
@@ -94,9 +95,7 @@ public:
     // Cancel unused worker assignments and join only workers holding this batch.
     // The final worker notifies while holding mutex_, before this stack object
     // can be destroyed by its caller.
-    if (submission.queued)
-      unlink(submission);
-    submission.worker_tickets = 0;
+    cancel_pending_assignments(submission);
     submission.done_cv.wait(lock, [&] { return submission.active_workers == 0; });
     auto first_exception = submission.first_exception;
     lock.unlock();
@@ -167,6 +166,15 @@ private:
     submission.queued = false;
   }
 
+  // Called under mutex_ after a drain has claimed every CU. Active workers
+  // retain their assignments and must still finish before the caller returns.
+  void cancel_pending_assignments(Submission &submission) {
+    assert(submission.next_task.load(std::memory_order_relaxed) >= submission.tasks.size());
+    if (submission.queued)
+      unlink(submission);
+    submission.worker_tickets = 0;
+  }
+
   void drain_tasks(Submission &submission) {
     while (true) {
       const size_t i = submission.next_task.fetch_add(1, std::memory_order_relaxed);
@@ -198,6 +206,9 @@ private:
       lock.unlock();
       drain_tasks(submission);
       lock.lock();
+      // Draining exhausted the task index. Cancel tickets before another worker
+      // claims an empty assignment while other CUs are still running.
+      cancel_pending_assignments(submission);
       if (--submission.active_workers == 0)
         submission.done_cv.notify_one();
     }
