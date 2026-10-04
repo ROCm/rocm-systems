@@ -634,7 +634,7 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       if (mem_obj == nullptr) {
         hip::Var* deferred_var = PlatformState::Instance().StatCO().FindDeferredManagedVar(dev_ptr);
         if (deferred_var != nullptr) {
-          hipError_t status = deferred_var->AllocateManagedVarPtr();
+          hipError_t status = deferred_var->EnsureManagedStorageMapped();
           if (status != hipSuccess) {
             return status;
           }

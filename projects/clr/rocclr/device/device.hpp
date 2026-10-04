@@ -2187,6 +2187,31 @@ class Device : public RuntimeObject {
     return nullptr;
   }
 
+  //! Outcome of a stream-less write into a loaded code object's global segment.
+  enum class GlobalWriteResult {
+    kUnsupported,  //!< Backend cannot write this global without a command queue
+    kSuccess,
+    kFailure
+  };
+
+  /**
+   * Write host data into a global variable of a loaded code object, without
+   * enqueuing on any command queue.
+   *
+   * Used to fill externally-initialized globals whose value is only known once the
+   * executable is loaded, so the write must not be ordered behind work an
+   * application queued on a stream.
+   *
+   * @param dst Memory object wrapping the global, as returned by createGlobalVarObj
+   * @param offset Byte offset within the global
+   * @param size Number of bytes to write
+   * @param src Host source buffer
+   */
+  virtual GlobalWriteResult writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                              const void* src) const {
+    return GlobalWriteResult::kUnsupported;
+  }
+
   /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */

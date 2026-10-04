@@ -414,7 +414,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
       hipError_t err = hipSuccess;
-      if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
+      if (managedVar->IsSvmOwned()) {
         err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {
         void** pointer = static_cast<void**>(managedVar->GetManagedVarPtr());
@@ -488,12 +488,10 @@ void StatCO::RemoveAllFatBinaries() {
 
       // Free the managed memory allocation itself
       void** managed_ptr = static_cast<void**>(managed_var->GetManagedVarPtr());
-      if (managed_var->GetAllocFlag()) {
-        // Memory was allocated with ihipMallocManaged - use ihipFree
+      if (managed_var->IsSvmOwned()) {
         [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
         assert(err == hipSuccess);
       } else {
-        // Memory was allocated with OS-level allocator - use OS release
         amd::Os::releaseMemory(*managed_ptr, managed_var->GetSize());
       }
       delete managed_var;
@@ -623,7 +621,52 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   return hipSuccess;
 }
 
+namespace {
+
+// ihipMallocManaged resolves the allocating device from TLS, but promotion runs
+// during hip::init (before HIP_INIT_TLS_DEVICE) and on dlopen threads that have
+// never entered a HIP API. Establish the same default those paths would.
+void EnsureCurrentDevice() {
+  if (hip::getCurrentDevice() == nullptr && !g_devices.empty()) {
+    hip::tls.device_ = g_devices[0];
+    amd::Os::setPreferredNumaNode(g_devices[0]->devices()[0]->getPreferredNumaNode());
+  }
+}
+
+}  // namespace
+
+hipError_t StatCO::PromoteManagedVar(Var* var) {
+  EnsureCurrentDevice();
+  return var->EnsureManagedStorageMapped();
+}
+
+hipError_t StatCO::PromoteManagedVars() {
+  std::scoped_lock lock(sclock_);
+  for (const auto& it : managedVars_) {
+    for (const auto& var : it.second) {
+      IHIP_RETURN_ONFAIL(PromoteManagedVar(var));
+    }
+  }
+  return hipSuccess;
+}
+
 hipError_t StatCO::RegisterManagedVar(Var* var) {
+  std::scoped_lock lock(sclock_);
+
+  // Devices are sized once, at platform init. If that already happened the runtime
+  // is up and the init-time promotion sweep has run without seeing this variable,
+  // so a late registration has to promote its own storage.
+  if (managedVarsDevicePtrInitializedSize_ > 0) {
+    IHIP_RETURN_ONFAIL(PromoteManagedVar(var));
+  }
+
+  // A new variable's pointer slot is unwritten on every device. Clear the
+  // aggregate flags before publishing, otherwise a launch can take the lock-free
+  // fast path against a stale "true" and leave this slot null.
+  for (size_t i = 0; i < managedVarsDevicePtrInitializedSize_; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_release);
+  }
+
   managedVars_[var->ModuleInfo()].push_back(var);
   return hipSuccess;
 }
@@ -652,6 +695,29 @@ void StatCO::ResizeForDevices(size_t device_count) {
 }
 
 // ================================================================================================
+// Fills one managed variable's device-side pointer slot. The slot is an
+// externally-initialized pointer in the loaded code object's global segment, so it
+// only exists once the executable is on the device and the runtime has to write it.
+hipError_t StatCO::WriteManagedVarDevicePtr(Var* var, amd::Memory* mem, int deviceId) {
+  amd::Device& device = *g_devices.at(deviceId)->devices()[0];
+
+  switch (device.writeDeviceGlobal(*mem, 0, mem->getSize(), var->GetManagedVarPtr())) {
+    case amd::Device::GlobalWriteResult::kSuccess:
+      return hipSuccess;
+    case amd::Device::GlobalWriteResult::kFailure:
+      return hipErrorRuntimeMemory;
+    case amd::Device::GlobalWriteResult::kUnsupported:
+      break;
+  }
+
+  // Deliberately fails instead of falling back to a queued copy on the null stream: that
+  // copy is host-synchronous, so a launch onto a stream the application has blocked waits
+  // for work that cannot run until the launch returns.
+  LogPrintfError("Device %d cannot write managed var %s outside a command queue", deviceId,
+                 var->GetName().c_str());
+  return hipErrorNotSupported;
+}
+
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   // Fast lock free path
   if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
@@ -660,33 +726,43 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   }
 
   std::scoped_lock lock(sclock_);
-  hipError_t err = hipSuccess;
   // Re-check under the lock in case another thread initialized this device while we waited.
-  if (!managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
-    for (auto& vecIter : managedVars_) {
-      for (auto& var : vecIter.second) {
-        // Lazy load
-        FatBinaryInfo** module = var->ModuleInfo();
-        if (*(module) == nullptr) {
-          IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
-        }
-        hip::Stream* stream = g_devices.at(deviceId)->NullStream();
-        if (stream == nullptr) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-          return hipErrorInvalidResourceHandle;
-        }
-        // Allocate managed var for deferred loading
-        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
-        // Copy from managed var host to device ptr
-        amd::Memory* mem = nullptr;
-        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                         mem->getSize(), hipMemcpyHostToDevice, *stream);
-      }
-    }
-    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
+  if (managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
+    return hipSuccess;
   }
-  return err;
+
+  for (auto& vecIter : managedVars_) {
+    for (auto& var : vecIter.second) {
+      // Per-variable state, so a variable registered by a later dlopen is written
+      // without rewriting the slots that are already correct.
+      if (var->IsManagedSlotWritten(deviceId)) {
+        continue;
+      }
+
+      // Lazy load
+      FatBinaryInfo** module = var->ModuleInfo();
+      if (*(module) == nullptr) {
+        IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
+      }
+      IHIP_RETURN_ONFAIL(var->EnsureManagedStorageMapped());
+
+      amd::Memory* mem = nullptr;
+      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+      if (mem == nullptr) {
+        LogPrintfError("Managed var %s has no device symbol on device %d", var->GetName().c_str(),
+                       deviceId);
+        return hipErrorInvalidSymbol;
+      }
+
+      // Returning here leaves both this variable and the aggregate flag false, so a
+      // later call retries instead of reporting a device that was never initialized.
+      IHIP_RETURN_ONFAIL(WriteManagedVarDevicePtr(var, mem, deviceId));
+      var->SetManagedSlotWritten(deviceId);
+    }
+  }
+
+  managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
+  return hipSuccess;
 }
 
 // ================================================================================================

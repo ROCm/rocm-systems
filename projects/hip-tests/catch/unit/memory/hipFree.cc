@@ -3,8 +3,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
-
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
 #include "hipArrayCommon.hh"
@@ -39,7 +37,7 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
 
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
@@ -57,7 +55,7 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
 
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
@@ -120,7 +118,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
   HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);

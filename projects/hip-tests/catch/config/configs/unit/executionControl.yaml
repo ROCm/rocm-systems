@@ -14,6 +14,10 @@ executionControl:
   Unit_hipLaunchKernel_Positive_Parameters:
     <<: *level_2
     tags: [kernel, launch]
+  Unit_hipLaunchKernel_Positive_Synchronization_Behavior:
+    <<: *level_2
+    disabled: [amd_wsl]
+    tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
