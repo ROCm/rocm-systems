@@ -76,6 +76,7 @@ class AmdSmiExitCode(enum.IntEnum):
     INIT_TIMEOUT = (205, "amdsmi_init() watchdog fired (library call hung)")
     DRIVERS_NOT_LOADED = (206, "no usable AMD drivers / modules not loaded")
     USER_ABORTED = (207, "user declined an interactive confirmation prompt")
+    GPU_DRIVER_NOT_LOADED = (208, "amdgpu driver not loaded")
     # Sits at the top of the band as a sentinel, mirroring the library's 254/255.
     UNREPRESENTABLE_LIBRARY_STATUS = (253, "library status outside 0-128 and not a known sentinel")
 
@@ -420,6 +421,33 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         common_message = (
             f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
         )
+
+        self._build_output_messages(common_message)
+
+
+class AmdSmiGpuDriverNotLoadedException(AmdSmiException):
+    def __init__(self, command: str, outputformat: str) -> None:
+        super().__init__()
+        self.value = int(AmdSmiExitCode.GPU_DRIVER_NOT_LOADED)
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = (
+            f"Command '{self.command}' requires the amdgpu driver but it is not loaded."
+            " Check amdgpu version and module status (sudo modprobe amdgpu)."
+        )
+
+        self._build_output_messages(common_message)
+
+
+class AmdSmiUnknownErrorException(AmdSmiException):
+    def __init__(self, command, outputformat: str):
+        super().__init__()
+        self.value = -100
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = "An unknown error has occurred. Run 'help' for more info."
 
         self._build_output_messages(common_message)
 
