@@ -42,7 +42,7 @@ All changes must meet the following requirements for review/acceptance:
 7. All C and C++ compiler warnings must be fixed
 
 All the above checks are enforced during CI.
-The [requirements.txt](requirements.txt) defines the exact versions of formatters and linters as needed.
+The [requirements-dev.txt](requirements-dev.txt) defines the exact versions of formatters and linters as needed.
 
 In order to streamline requirements 1-5, support has been built into the rocprofiler-sdk build system.
 By default, CMake will search for `clang-format`, `black`, and `cmake-format`. If `clang-format` is found,
@@ -68,7 +68,7 @@ with `ROCPROFILER_BUILD_CI=OFF` (the default), re-running cmake with `ROCPROFILE
 Thus, the build setup for developer contributions is the following:
 
 ```bash
-python3 -m pip install --user ./requirements.txt
+python3 -m pip install --user -r requirements-dev.txt
 cmake -B build-rocprofiler-sdk . -DROCPROFILER_BUILD_CI=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON
 ```
 
