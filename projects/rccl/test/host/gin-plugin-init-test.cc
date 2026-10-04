@@ -208,10 +208,11 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
 // the loop below saw numActiveBackends == 0 and skipped both.
 //
 // The other half of the pairing -- ncclGinHostFinalize preserving these records
-// -- lives in gin_host.cc, which cannot join this binary because
+// and marking backends closed -- lives in gin-host-finalize-test.cc
+// (rccl-UnitTestsMicroGinHost). gin_host.cc cannot join this binary because
 // dev_runtime_micro_fakes.cc already defines the GIN host entry points for
 // dev-runtime-test.cc. GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext
-// covers that half.
+// covers the Anvil init-context path end to end.
 class GinFinalizeTest : public GinPluginInitTest {
  protected:
   std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();

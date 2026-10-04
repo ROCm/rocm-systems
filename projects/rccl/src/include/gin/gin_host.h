@@ -36,6 +36,10 @@ struct ncclGinBackendState {
   ncclNetProperties_t ginProps[NCCL_GIN_MAX_CONNECTIONS];
   bool supportsStrongSignals;
   bool supportsVASignals;
+  // Set by ncclGinHostFinalize after closeColl. Surviving splitShare siblings
+  // keep numActiveBackends and ginInstance for ncclGinFinalize, but register /
+  // deregister / DevCommSetup must not walk ginComms[] after they are NULLed.
+  bool closed;
 };
 
 struct ncclGinState {

@@ -301,9 +301,11 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
-    // Erase here, not in finalize: ncclGinHostFinalize closeColls then memsets
-    // ginState before ncclGinFinalize, so plugin finalize never runs for a live
-    // GIN backend and a recycled ncclComm* would otherwise skip the gate.
+    // Erase here, not in finalize: closeColl also runs on backend-drop paths
+    // (plugin/gin.cc) that never reach plugin finalize, and a recycled
+    // ncclComm* would otherwise skip the gate. Host finalize keeps the backend
+    // records for ncclGinFinalize (AICOMRCCL-2739), so finalize still runs for
+    // a live connected backend and is not the only erase site.
     if (cctx->comm) {
       std::lock_guard<std::mutex> lock(pluginMutex);
       ginAnvilConnCheckedComms.erase(cctx->comm);
