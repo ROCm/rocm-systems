@@ -2160,7 +2160,8 @@ TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
 // Functional HW test: establishes a CAST connection, reads back per-QP UDMA
 // indices via ionic_dv_qp_get_udma_idx, and verifies that the round-robin
 // distribution matches expectations (each QP's UDMA index is within range and
-// all UDMA engines are used when nqps >= udmaCount).
+// indices via ionic_dv_qp_get_udma_idx, and verifies that every QP in this
+// single-channel connection reports the same in-range UDMA index.
 //
 // Also performs a data-integrity send/recv to confirm the QPs are functional.
 //
