@@ -211,7 +211,7 @@ class Buffer : public roc::Memory {
 
  public:
   Buffer(const roc::Device& dev, amd::Memory& owner);
-  Buffer(const roc::Device& dev, size_t size);
+  Buffer(const roc::Device& dev, size_t size, size_t alignment = 0);
 
   virtual ~Buffer();
 
@@ -230,6 +230,12 @@ class Buffer : public roc::Memory {
   hsa_signal_t getSignal() const { return signal_; }
 
  private:
+  // Keep the allocator's pointer separate from the aligned device-visible address.
+  size_t requestedAlignment_ = 0;
+  void* alignedAllocationBase_ = nullptr;
+  size_t alignedAllocationSize_ = 0;
+  bool createAlignedAllocation(size_t alignment);
+
   // signal object used when ROCCLR_MEM_HSA_SIGNAL_MEMORY is set
   hsa_signal_t signal_;
 

@@ -2221,10 +2221,11 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
 
 // ================================================================================================
 device::Memory* Device::createMemory(size_t size, size_t alignment) const {
-  auto buffer = new roc::Buffer(*this, size);
+  auto buffer = new roc::Buffer(*this, size, alignment);
   static constexpr bool LocalAlloc = true;
   if ((buffer == nullptr) || !buffer->create(LocalAlloc)) {
     LogError("Couldn't allocate memory on device!");
+    delete buffer;
     return nullptr;
   }
   return buffer;
@@ -4218,7 +4219,7 @@ void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
     heap_buffer_ = createMemory(HeapBufferSize);
     if (initial_heap_size_ != 0) {
       initial_heap_size_ = amd::alignUp(initial_heap_size_, 2 * Mi);
-      initial_heap_buffer_ = createMemory(initial_heap_size_);
+      initial_heap_buffer_ = createMemory(initial_heap_size_, 2 * Mi);
     }
     if (heap_buffer_ == nullptr) {
       LogError("Heap buffer allocation failed!");
