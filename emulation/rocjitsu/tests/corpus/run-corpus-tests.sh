@@ -11,6 +11,8 @@
 #
 # Options:
 #   --workers N          Number of pytest-xdist workers (default: 8)
+#   --rocjitsu-thread-budget N  Override ROCjitsu's per-process thread budget (0: automatic)
+#                              Default: preserve the configured budget and CPU detection
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
@@ -33,6 +35,7 @@ set -euo pipefail
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
 worker_count=8
+rocjitsu_thread_budget=""
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_timeout_seconds=1200
@@ -41,7 +44,8 @@ warn_perf=false
 sanitizer_mode=none
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
+  echo "Usage: $0 [--workers N] [--rocjitsu-thread-budget N] [--soft-timeout N]" \
+    "[--hard-timeout N] [--rerun-timeout N]" \
     "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
 }
 
@@ -62,6 +66,19 @@ while (( $# )); do
         exit 1
       fi
       worker_count="$2"
+      shift 2
+      ;;
+    --rocjitsu-thread-budget)
+      if (( $# < 2 )); then
+        echo "--rocjitsu-thread-budget requires a value" >&2
+        usage
+        exit 1
+      fi
+      rocjitsu_thread_budget="$2"
+      if [[ ! "${rocjitsu_thread_budget}" =~ ^[0-9]+$ ]]; then
+        echo "--rocjitsu-thread-budget requires a non-negative integer" >&2
+        exit 1
+      fi
       shift 2
       ;;
     --soft-timeout)
@@ -138,6 +155,11 @@ for numeric_option in "${numeric_options[@]}"; do
   fi
 done
 
+rocjitsu_thread_budget_args=()
+if [[ -n "${rocjitsu_thread_budget}" ]]; then
+  rocjitsu_thread_budget_args=(--cpu-thread-budget "${rocjitsu_thread_budget}")
+fi
+
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
 junit_dir="${corpus_work_dir}/.pytest-artifacts/junit"
@@ -203,7 +225,8 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   # does not construct the expected shared-runtime/interposer preload order.
   preflight_config="${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
   "${run_wrapper_prefix[@]}" \
-    "${rocjitsu_launcher}" --config "${preflight_config}" -- \
+    "${rocjitsu_launcher}" --config "${preflight_config}" \
+    "${rocjitsu_thread_budget_args[@]}" -- \
     "${child_command_prefix[@]}" true
 fi
 
@@ -227,6 +250,7 @@ run_pytest() {
     timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${config_path}"
+    "${rocjitsu_thread_budget_args[@]}"
     --
     "${child_command_prefix[@]}"
   )

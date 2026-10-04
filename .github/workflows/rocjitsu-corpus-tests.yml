@@ -102,6 +102,7 @@ jobs:
             # Each simulator process can use many host threads. Bound Release
             # fanout so long FPSAN cases do not starve under runner load.
             corpus_worker_limit: 4
+            rocjitsu_thread_budget: 8
             corpus_soft_timeout: 360
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
@@ -123,7 +124,8 @@ jobs:
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
             corpus_worker_limit: 4
-            corpus_soft_timeout: 240
+            rocjitsu_thread_budget: 4
+            corpus_soft_timeout: 300
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
             corpus_sanitizer: clang-asan
@@ -143,6 +145,7 @@ jobs:
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
             corpus_worker_limit: 16
+            rocjitsu_thread_budget: 4
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -165,6 +168,7 @@ jobs:
             cxx_compiler: g++
             run_simulator_corpus: true
             corpus_worker_limit: 4
+            rocjitsu_thread_budget: 8
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -468,6 +472,9 @@ jobs:
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
 
+      - name: Test corpus harness options
+        run: python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-run-corpus-tests.py"
+
       - name: Run corpus tests
         # Keep the HIP corpus signal even if an independent test step fails.
         if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
@@ -492,8 +499,15 @@ jobs:
           if (( WORKERS > WORKER_LIMIT )); then
             WORKERS="${WORKER_LIMIT}"
           fi
+          ROCJITSU_THREAD_BUDGET_LIMIT=${{ matrix.rocjitsu_thread_budget }}
+          ROCJITSU_THREAD_BUDGET="$(nproc)"
+          if (( ROCJITSU_THREAD_BUDGET > ROCJITSU_THREAD_BUDGET_LIMIT )); then
+            ROCJITSU_THREAD_BUDGET="${ROCJITSU_THREAD_BUDGET_LIMIT}"
+          fi
+          echo "Corpus CPU plan: pytest-workers: ${WORKERS}, rocjitsu-thread-budget: ${ROCJITSU_THREAD_BUDGET}"
           corpus_test_flags=(
             --workers "${WORKERS}"
+            --rocjitsu-thread-budget "${ROCJITSU_THREAD_BUDGET}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}
