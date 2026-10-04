@@ -62,6 +62,11 @@ set_module_counter(int v);
 int
 read_module_counter();
 
+// Return the device address of a read-only __constant__ module symbol. Snapshot discovery must
+// exclude this address because restore writes its captured blocks back to the device.
+void*
+module_constant_address();
+
 // Enqueue a kernel that does an in-place `g_module_counter += 1` from a single thread. The caller
 // synchronizes (as with the other launchers).
 void
