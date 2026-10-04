@@ -89,14 +89,44 @@ else()
         set(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP /usr/bin/true)
     endif()
 
+    # Single source of truth for the binutils release used to build libiberty,
+    # shared with docker/Dockerfile.*.ci (which COPY this same file to stage a
+    # matching tarball at image-build time). Keeping this in one place avoids
+    # the version drift already seen with the Dockerfiles' unused, stale
+    # ELFUTILS_DOWNLOAD_VERSION ARG.
+    file(
+        STRINGS "${CMAKE_CURRENT_LIST_DIR}/binutils_version.txt"
+        _li_binutils_version
+        LIMIT_COUNT 1
+    )
+    string(STRIP "${_li_binutils_version}" _li_binutils_version)
+    rocprofiler_systems_add_cache_option(
+        BINUTILS_DOWNLOAD_VERSION "Version of binutils to download libiberty from" STRING
+        "${_li_binutils_version}"
+    )
+
+    # ExternalProject_Add's URL list rejects any entry without a network scheme
+    # (e.g. file://) once more than one URL is given, so a local override can't
+    # simply be prepended to the GNU mirrors below — it must replace them.
+    #
+    # ftp.gnu.org is GNU's own canonical server (fastest and most reliable in
+    # testing); ftpmirror.gnu.org is a third-party mirror redirector that has
+    # been observed to intermittently 502, so it's kept only as a fallback.
+    if(DYNINST_BINUTILS_DOWNLOAD_URL)
+        set(_li_binutils_urls ${DYNINST_BINUTILS_DOWNLOAD_URL})
+    else()
+        set(_li_binutils_urls
+            https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_DOWNLOAD_VERSION}.tar.gz
+            https://ftpmirror.gnu.org/gnu/binutils/binutils-${BINUTILS_DOWNLOAD_VERSION}.tar.gz
+            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-${BINUTILS_DOWNLOAD_VERSION}.tar.gz
+        )
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         ${_li_project_name}
         PREFIX ${_li_root}
-        URL
-            ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            https://ftpmirror.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
-            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.46.0.tar.gz
+        URL ${_li_binutils_urls}
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3\ -Wno-error

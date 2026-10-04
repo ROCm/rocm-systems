@@ -16,6 +16,8 @@ ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG NJOBS="8"
 
+ARG LIBIBERTY_STAGING_DIR="/opt/rocprofiler-systems-deps"
+
 RUN set +e; \
     zypper --non-interactive -i --gpg-auto-import-keys refresh; \
     zypper --non-interactive -i patch; \
@@ -33,6 +35,21 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive clean --all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' perfetto
+
+# Pre-stage the binutils source tarball so ROCPROFSYS_BUILD_LIBIBERTY=ON builds
+# libiberty from a local copy at CI job time instead of hitting the GNU mirrors
+# on every run (see cmake/DyninstLibIberty.cmake's DYNINST_BINUTILS_DOWNLOAD_URL).
+# openSUSE's binutils-devel doesn't reliably ship libiberty.a, so this project
+# builds libiberty from source on this distro rather than relying on a package.
+# The version comes from cmake/binutils_version.txt — the single source of
+# truth also read by DyninstLibIberty.cmake — so the two never drift apart.
+COPY cmake/binutils_version.txt /tmp/binutils_version.txt
+RUN BINUTILS_VERSION="$(cat /tmp/binutils_version.txt)" && \
+    mkdir -p "${LIBIBERTY_STAGING_DIR}" && \
+    (curl -fSL "https://ftpmirror.gnu.org/gnu/binutils/binutils-${BINUTILS_VERSION}.tar.gz" \
+        -o "${LIBIBERTY_STAGING_DIR}/binutils-libiberty-src.tar.gz" || \
+     curl -fSL "https://mirrors.kernel.org/sourceware/binutils/releases/binutils-${BINUTILS_VERSION}.tar.gz" \
+        -o "${LIBIBERTY_STAGING_DIR}/binutils-libiberty-src.tar.gz")
 
 ARG PYTHON_VERSIONS="8 9 10 11 12 13"
 
