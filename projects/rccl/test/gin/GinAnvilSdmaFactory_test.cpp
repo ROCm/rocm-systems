@@ -29,6 +29,10 @@ uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
+
 namespace {
 
 class ScopedEnv {
