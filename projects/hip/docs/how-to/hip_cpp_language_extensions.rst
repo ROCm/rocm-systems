@@ -117,6 +117,10 @@ can be applied to both ``__host__`` and ``__device__`` functions.
 
 ``__noinline__`` and ``__forceinline__`` can not be used in combination.
 
+``__noinline__`` is only available when compiling with the HIP compiler. Host
+compilers do not get a definition, because ``__noinline__`` is a reserved
+identifier that standard library headers use as an attribute name.
+
 __launch_bounds__
 --------------------------------------------------------------------------------
 

@@ -6,3 +6,6 @@ g++:
   Unit_gcc_half_types:
     <<: *level_2
     tags: [types]
+  Unit_gcc_host_defines:
+    <<: *level_0
+    tags: [compiler]
