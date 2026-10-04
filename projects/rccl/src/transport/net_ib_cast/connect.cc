@@ -639,8 +639,11 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
       int nRoutes = std::min(nLocalPips, nPips);
       // Save the original dgid so we can restore it if route programming fails.
       union ibv_gid origDgid = qpAttr.ah_attr.grh.dgid;
-      // Replace dgid with loopback (local GID) — NIC firmware handles forwarding
-      if (nRoutes > 0) qpAttr.ah_attr.grh.dgid = rtrAttr->localGid;
+      // Replace dgid with loopback (local GID) — NIC firmware handles forwarding.
+      // Skipped under libmrcshim: libmrc needs the remote VIP for the SRv6 uSID
+      // lookup and applies the loopback itself. nRoutes > 0 still required so a
+      // failed local-PIP lookup never publishes a loopback dgid with no routes.
+      if (nRoutes > 0 && IbCastMultiplaneOverrideDgid()) qpAttr.ah_attr.grh.dgid = rtrAttr->localGid;
       for (int i = 0; i < nRoutes; i++) {
         struct ionic_dv_puec_route route = {};
         route.dgid = pipGids[i];

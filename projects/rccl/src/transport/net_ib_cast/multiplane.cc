@@ -11,6 +11,7 @@
 #include "core.h"
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -221,6 +222,35 @@ static void IbCastMultiplaneLoadOnce() {
 ncclResult_t IbCastMultiplaneLoad(void) {
   std::call_once(loadOnceFlag, IbCastMultiplaneLoadOnce);
   return loadResult;
+}
+
+// libionic-rdma declares mrc_multiplane_override_dgid() weak, returning true;
+// libmrcshim defines it returning false because libmrc replaces the dgid itself
+// after using the remote VIP for the SRv6 uSID lookup. libibverbs dlopens the
+// provider privately, so its copy is never visible here: a missing symbol means
+// no shim, and the loopback stays.
+static bool overrideDgid = true;
+static std::once_flag overrideDgidOnceFlag;
+
+static void IbCastMultiplaneOverrideDgidOnce() {
+  typedef bool (*overrideDgidFn)(void);
+  overrideDgidFn fn = (overrideDgidFn)dlsym(RTLD_DEFAULT, "mrc_multiplane_override_dgid");
+  const char* lib = ncclGetEnv("NCCL_IBVERBS_LIB");
+  if (fn == nullptr && lib != nullptr) {
+    void* handle = dlopen(lib, RTLD_NOW | RTLD_NOLOAD);
+    if (handle != nullptr) {
+      fn = (overrideDgidFn)dlsym(handle, "mrc_multiplane_override_dgid");
+      dlclose(handle);
+    }
+  }
+  if (fn != nullptr) overrideDgid = fn();
+  INFO(NCCL_INIT | NCCL_NET, "Multiplane: mrc_multiplane_override_dgid %s, loopback dgid %s",
+       fn ? "found" : "not found", overrideDgid ? "on" : "off");
+}
+
+bool IbCastMultiplaneOverrideDgid(void) {
+  std::call_once(overrideDgidOnceFlag, IbCastMultiplaneOverrideDgidOnce);
+  return overrideDgid;
 }
 
 ncclResult_t IbCastMultiplaneEnabled(bool* enabled) {
