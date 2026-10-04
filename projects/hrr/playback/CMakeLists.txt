@@ -27,6 +27,7 @@ set_target_properties(hrr_reader PROPERTIES
   CXX_STANDARD ${HRR_CXX_STANDARD}
   CXX_STANDARD_REQUIRED ON)
 target_link_libraries(hrr_reader PUBLIC hrr::api_args)
+target_link_libraries(hrr_reader PRIVATE hrr::warnings)
 target_include_directories(hrr_reader PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/hrr/playback>
@@ -62,7 +63,13 @@ if(HRR_BUILD_PLAYBACK)
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
-  target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  # The playback tool replays captured traces verbatim, which legitimately calls
+  # deprecated HIP entry points (hipTexRefGetArray, hipMallocHost, ...). Disable
+  # -Wdeprecated-declarations entirely as it is not relevant.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(hrr-playback PRIVATE -Wno-deprecated-declarations)
+  endif()
+  target_link_libraries(hrr-playback PRIVATE hrr::reader hrr::warnings hip::host Threads::Threads)
 
   # Build identity reported by --version. Stamped by a build rule rather than at
   # configure time so it cannot name a commit the binary was not built from; see
