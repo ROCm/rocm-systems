@@ -846,8 +846,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
         // wave64 outputs or exceed the register file at its last four VGPRs.
         EXPECT_EQ(offloads, 0u);
       } else if (hazard == 0 || (rdna && hazard >= 5)) {
-        // Admission may reject dependent pairs, but this pair is independent
-        // for every shape, register bank, and scale representation above.
+        // These cases have disjoint decoded footprints, including the adjacent
+        // wave32 tiles and its register-file boundary. Admission must permit
+        // the first instruction to overlap independent work on the issuer.
         EXPECT_GT(offloads, 0u);
         EXPECT_GT(after.windows - windows_before, 0u);
       }

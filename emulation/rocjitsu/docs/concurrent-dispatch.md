@@ -32,7 +32,8 @@ other runtime service threads are outside this allocation.
 
 ## Configuration policy
 
-`thread_allocations` contains preferred engine/dispatch/helper triples. `resolve_execution_threads()` is a pure function: apply explicit overrides
+`thread_allocations` contains preferred engine/dispatch/helper triples.
+`resolve_execution_threads()` is a pure function: apply explicit overrides
 and topology clamps, calculate each entry's total retained thread count, and
 choose the largest fitting entry. Later entries break ties. It does not fill
 unused budget between entries. The default budget is CPU affinity and the
