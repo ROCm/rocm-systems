@@ -71,6 +71,8 @@ class KFDNode {
   uint64_t numa_node_weight(void) const { return numa_node_weight_; }
   uint64_t xgmi_hive_id(void) const { return xgmi_hive_id_; }
   uint32_t cu_count(void) const { return cu_count_; }
+  // Used by unit tests to supply a CU count without discovering a live KFD node.
+  void set_cu_count(uint32_t count) { cu_count_ = count; }
   IO_LINK_TYPE numa_node_type(void) const { return numa_node_type_; }
   int get_io_link_type(uint32_t node_to, IO_LINK_TYPE* type);
   int get_io_link_weight(uint32_t node_to, uint64_t* weight);
@@ -114,6 +116,10 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes);
 int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_procs_found);
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
                          std::unordered_set<uint64_t>* gpu_set);
+
+// Unit tests point process sysfs reads at a fake tree. An empty path restores
+// /sys/class/kfd/kfd/proc. Not part of the C ABI in rocm_smi.h.
+void SetKFDProcPathRootForTest(const std::string& path);
 
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
