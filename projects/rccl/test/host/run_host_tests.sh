@@ -169,6 +169,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
+    "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
