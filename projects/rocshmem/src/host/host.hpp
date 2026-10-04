@@ -35,6 +35,7 @@
  */
 
 #include <map>
+#include <memory>
 
 #include "rocshmem/rocshmem.hpp"
 #include "hdp_policy.hpp"
@@ -42,6 +43,10 @@
 #include "memory/window_info.hpp"
 #include "bootstrap/bootstrap.hpp"
 #include "mpi_instance.hpp"
+
+#ifdef USE_VERBS
+namespace rocshmem { namespace net { class VerbsHost; } }
+#endif
 
 namespace rocshmem {
 
@@ -404,6 +409,35 @@ class HostInterface {
   int find_win_info_in_pool(WindowInfo* window_info);
 
   int find_avail_pool_entry();
+
+#ifdef USE_VERBS
+  /**
+   * @brief Optional verbs host transport (selected by ROCSHMEM_HOST_TRANSPORT=verbs).
+   *
+   * When set, host RMA (put/get/nbi/quiet/fence) is served by a WindowInfoVerbs
+   * acquired from this stack instead of the MPI-window path. Barrier/sync/
+   * collectives continue to use the bootstrap path in this interface.
+   */
+  std::unique_ptr<net::VerbsHost> verbs_host_{};
+
+  /// Build the verbs host stack if selected; no-op otherwise. Collective.
+  __host__ void maybe_setup_verbs_host(SymmetricHeap* heap);
+
+  /**
+   * @brief 8-byte AMO fast-path helpers for the verbs host transport.
+   *
+   * Non-template, verbs-header-free indirection called from the amo_fetch_*
+   * templates (host_templates.hpp): if @p window_info is a WindowInfoVerbs,
+   * perform the atomic and set @p *out (true); otherwise return false so the
+   * caller falls through to the MPI-window path. Defined in host.cpp so the
+   * verbs headers stay out of the device-compiled template header.
+   */
+  __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst,
+                                    uint64_t value, int pe, uint64_t* out);
+  __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst,
+                                    uint64_t swap, uint64_t compare, int pe,
+                                    uint64_t* out);
+#endif
 
   /*
    * @brief Used by comm_map map for active sets.
