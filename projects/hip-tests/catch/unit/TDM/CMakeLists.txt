@@ -22,30 +22,39 @@
 set(ACCEPTED_GFX1250_ARCH gfx1250)
 
 function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
-  set(ARCH_GFX1250 -1 PARENT_SCOPE)
-  string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
-  foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
-    string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
-    if (CMAKE_MATCH_COUNT EQUAL 1)
-      # CMAKE_MATCH_1
-    if (CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX1250_ARCH)
-        set(ARCH_GFX1250 1 PARENT_SCOPE)
-      endif()
-    endif()        # CMAKE_MATCH_COUNT
-  endforeach()   # OFFLOAD_ARCH_LIST
-endfunction()  # CheckAcceptedArchs
+    set(ARCH_GFX1250 -1 PARENT_SCOPE)
+    string(
+        REGEX MATCHALL
+        "--offload-arch=gfx[0-9a-z]+"
+        OFFLOAD_ARCH_LIST
+        ${OFFLOAD_ARCH_STR_LOCAL}
+    )
+    foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
+        string(
+            REGEX MATCHALL
+            "--offload-arch=(gfx[0-9a-z]+)"
+            matches
+            ${OFFLOAD_ARCH}
+        )
+        if(CMAKE_MATCH_COUNT EQUAL 1)
+            # CMAKE_MATCH_1
+            if(CMAKE_MATCH_1 IN_LIST ACCEPTED_GFX1250_ARCH)
+                set(ARCH_GFX1250 1 PARENT_SCOPE)
+            endif()
+        endif() # CMAKE_MATCH_COUNT
+    endforeach() # OFFLOAD_ARCH_LIST
+endfunction() # CheckAcceptedArchs
 
-if (DEFINED OFFLOAD_ARCH_STR)
-  CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
+if(DEFINED OFFLOAD_ARCH_STR)
+    checkacceptedarchs(${OFFLOAD_ARCH_STR})
 elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-  CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})
+    checkacceptedarchs($ENV{HCC_AMDGPU_TARGET})
 endif()
 
 if(${ARCH_GFX1250} GREATER_EQUAL 0)
-    set(TEST_SRC
-        tdm_basic_load_store.cc
-    )
-    hip_add_exe_to_target(NAME tdm_basic_load_store
+    set(TEST_SRC test_amd_gfx1250_TDM.cpp)
+    hip_add_exe_to_target(NAME test_amd_gfx1250_TDM
                         TEST_SRC ${TEST_SRC}
-                        TEST_TARGET_NAME build_tests)
+                        TEST_TARGET_NAME build_tests
+    )
 endif()
