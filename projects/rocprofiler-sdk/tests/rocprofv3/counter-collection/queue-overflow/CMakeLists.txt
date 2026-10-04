@@ -34,7 +34,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS multistream
     TIMEOUT 300
     LABELS "integration-tests;counter-collection"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-queue-overflow)
 
 rocprofiler_add_integration_validate_test(
