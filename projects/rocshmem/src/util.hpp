@@ -38,7 +38,9 @@
 #include "atomic.hpp"
 #include "bit.hpp"
 #include "constants.hpp"
+#include "constmem.hpp"
 #include "log.hpp"
+#include "tdm.hpp"
 
 namespace rocshmem {
 
@@ -586,6 +588,52 @@ template <MemcpyKind Kind = MemcpyKind::Put>
                            static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
   }
+}
+
+// Non-temporal + system scope is correct for both directions of an IPC copy
+// (either side may be remote peer memory). Split load/store (like memcpy_wg's
+// LP/SP) so they're independently tunable later.
+constexpr int TdmLoadPolicy = tdm::make_cache_policy(
+    tdm::LoadTemporalHint::NonTemporal, tdm::Scope::System);
+constexpr int TdmStorePolicy = tdm::make_cache_policy(
+    tdm::StoreTemporalHint::NonTemporal, tdm::Scope::System);
+
+// One thread drives the TDM transfer into the registered LDS buffer while
+// the rest of the block covers whatever TDM doesn't (disjoint ranges, no
+// extra sync needed). Falls back to memcpy_wg when TDM isn't available or
+// no LDS buffer was set.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_tdm(void* dst, void* src,
+                                                                size_t size) {
+#if defined(USE_TDM) && defined(__gfx1250__) && HIP_HAVE_TDM_INTRINSICS
+  const tdm::LdsRegistration reg = tdm::get_lds();
+  // A minimum of 16 bytes (2 x 8-byte element, for double buffering) is
+  // required for one usable TDM tile; anything less isn't worth staging.
+  if (reg.ptr != nullptr && reg.bytes >= 16) {
+    constexpr uint32_t element_bytes = 1u << tdm::FlatCopyElementLog2;
+    uint32_t tile_bytes = static_cast<uint32_t>(
+        min(static_cast<size_t>(constmem.tdm_tile_bytes), reg.bytes / 2));
+    // constmem.tdm_tile_bytes may come from an unaligned ROCSHMEM_TDM_TILE_BYTES
+    // override, and reg.bytes/2 depends on the caller's own lds_bytes argument
+    // to rocshmem_set_tdm_lds(); round down to a whole element so the per-tile
+    // address stride (tile_bytes) never outruns what tile_dim0 actually
+    // transfers, which would otherwise leave uncopied gaps between tiles.
+    tile_bytes -= tile_bytes % element_bytes;
+    if (tile_bytes > 0) {
+      if (is_thread_zero_in_block()) {
+        tdm::copy_region<TdmLoadPolicy, TdmStorePolicy>(dst, src, size, reg.ptr, tile_bytes,
+                                            /*double_buffered=*/true);
+      }
+      const size_t covered = tdm::covered_bytes(size, tile_bytes);
+      if (covered < size) {
+        memcpy_wg<Kind>(static_cast<char*>(dst) + covered,
+                        static_cast<char*>(src) + covered, size - covered);
+      }
+      return;
+    }
+  }
+#endif
+  memcpy_wg<Kind>(dst, src, size);
 }
 
 /* Is ptr_b in range [ptr_a, ptr_a + len_a) */

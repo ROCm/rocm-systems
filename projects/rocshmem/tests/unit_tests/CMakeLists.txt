@@ -76,6 +76,15 @@ if (USE_IPC)
   )
 endif()
 
+if (USE_IPC AND USE_TDM)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      tdm_raw_put_gtest.cpp
+      tdm_struct_put_gtest.cpp
+  )
+endif()
+
 
 if (USE_GDA)
   target_sources(
