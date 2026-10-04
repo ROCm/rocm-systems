@@ -22,11 +22,14 @@ See the [requirements](#install_reqs) section for more information.
 1. Ensure `amdgpu` drivers are installed properly for initialization. CPU APIs
    require the `amd_hsmp` kernel module. See {ref}`install_amdgpu_driver`.
 
-2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+2. Make sure `import amdsmi` resolves. Most deliveries stage the module in the
+   ROCm tree without installing it into an interpreter; see
+   {ref}`Make the Python module importable <install_python_module>`.
 
-   ```bash
-   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64:
-   ```
+   You do not need `LD_LIBRARY_PATH` for the Python interface: the wrapper
+   locates `libamd_smi.so` itself, either beside its own tree or through the
+   dynamic linker. See [Packaging and install paths](../packaging.md) for the
+   resolution order.
 
 3. Install Python 3.6.8+.
 
@@ -34,10 +37,10 @@ See the [requirements](#install_reqs) section for more information.
 
 ```{note}
 ``hipcc`` and other compilers will not automatically link in the ``libamd_smi``
-dynamic library. To compile code that uses the AMD SMI library API, ensure the
-``libamd_smi.so`` can be located by setting the ``LD_LIBRARY_PATH`` environment
-variable to the directory containing ``librocm_smi64.so`` (usually
-``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
+dynamic library. To compile code that uses the AMD SMI library API, pass
+``-lamd_smi`` to the compiler, and make sure ``libamd_smi.so`` can be found at
+run time — by setting ``LD_LIBRARY_PATH`` to the directory containing it
+(usually ``/opt/rocm/lib``) or by linking with an RPATH.
 ```
 
 ```{note}
