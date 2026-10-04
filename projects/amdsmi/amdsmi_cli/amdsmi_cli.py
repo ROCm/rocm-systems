@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
