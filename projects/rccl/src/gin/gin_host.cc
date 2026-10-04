@@ -204,6 +204,10 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
       NCCLCHECKGOTO(backend->ncclGin->closeListen(listenComms[backendIdx]), ret, fail);
       listenComms[backendIdx] = NULL;
     }
+    // ginComms[] are live again, so drop the flag a previous ncclGinHostFinalize
+    // set: on a shared sharedRes a surviving splitShare sibling can reconnect GIN,
+    // and leaving it set would have the walks below discard that connection.
+    backend->closed = false;
   }
 
 exit:
@@ -221,6 +225,9 @@ fail:
       NCCLCHECKIGNORE(backend->ncclGin->closeListen(listenComms[backendIdx]), ret);
     }
 
+    // Mark before NULLing, as ncclGinHostFinalize does: a partially connected
+    // backend must not be left with NULL handles and closed still false.
+    backend->closed = true;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       if (backend->ginComms[commIdx] != NULL) {
         NCCLCHECKIGNORE(backend->ncclGin->closeColl(backend->ginComms[commIdx]), ret);
