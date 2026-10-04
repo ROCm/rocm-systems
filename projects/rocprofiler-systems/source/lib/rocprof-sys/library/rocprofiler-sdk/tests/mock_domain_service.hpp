@@ -81,7 +81,9 @@ struct callback_tracing_record_t
     std::uint32_t    operation = 0;
     std::uint64_t    thread_id = 0;
     correlation_id_t correlation_id{};
-    void*            payload = nullptr;
+    // Only k_rccl reads this (extract_event_info() casts it to
+    // mock_sdk::rccl_api_data*); every other domain's on_record leaves it nullptr.
+    void* payload = nullptr;
 };
 
 using tracing_operation_t     = std::size_t;
@@ -441,6 +443,7 @@ struct mock_sdk
     static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API            = 11;
     static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM             = 12;
     static constexpr std::size_t      HIP_STREAM_SET                          = 0;
+    static constexpr std::size_t      CALLBACK_TRACING_RCCL_API               = 13;
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
     static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
@@ -465,6 +468,97 @@ struct mock_sdk
     using memory_copy_record_t          = test_support::memory_copy_record_t;
     using memory_allocation_record_t    = test_support::memory_allocation_record_t;
     using scratch_memory_record_t       = test_support::scratch_memory_record_t;
+
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr nccl_result_t    NCCL_SUCCESS                   = 0;
+    static constexpr nccl_data_type_t NCCL_INT8                      = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8                     = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16                   = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16                  = 3;
+    static constexpr nccl_data_type_t NCCL_INT32                     = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32                    = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32                   = 6;
+    static constexpr nccl_data_type_t NCCL_INT64                     = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64                    = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64                   = 9;
+    static constexpr bool             k_are_nccl_fp8_types_available = false;
+
+    using rccl_api_id_t                                          = std::size_t;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+    // NOLINTEND(readability-identifier-naming)
+
+    struct rccl_arg_with_count
+    {
+        nccl_comm_t      comm     = nullptr;
+        nccl_data_type_t datatype = NCCL_INT8;
+        std::size_t      count    = 0;
+    };
+    struct rccl_arg_with_sendcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      sendcount = 0;
+    };
+    struct rccl_arg_with_recvcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      recvcount = 0;
+    };
+
+    // Mirrors the shape of rocprofiler_rccl_api_args_t: each collective exposes only the
+    // count member the real RCCL API uses for it, so extract_event_info's
+    // if-constexpr(requires{event.count/.sendcount/.recvcount}) branching is exercised
+    // exactly like production.
+    struct rccl_api_args_t
+    {
+        rccl_arg_with_sendcount ncclAllGather;
+        rccl_arg_with_count     ncclAllToAll;
+        rccl_arg_with_count     ncclAllReduce;
+        rccl_arg_with_sendcount ncclGather;
+        rccl_arg_with_count     ncclRecv;
+        rccl_arg_with_count     ncclReduce;
+        rccl_arg_with_count     ncclBroadcast;
+        rccl_arg_with_recvcount ncclReduceScatter;
+        rccl_arg_with_count     ncclSend;
+    };
+
+    struct rccl_api_data
+    {
+        rccl_api_args_t args;
+    };
+
+    [[nodiscard]] static constexpr std::size_t rccl_type_size(
+        nccl_data_type_t datatype) noexcept
+    {
+        switch(datatype)
+        {
+            case NCCL_INT8:
+            case NCCL_UINT8: return 1;
+            case NCCL_FLOAT16:
+            case NCCL_BFLOAT16: return 2;
+            case NCCL_INT32:
+            case NCCL_UINT32:
+            case NCCL_FLOAT32: return 4;
+            case NCCL_INT64:
+            case NCCL_UINT64:
+            case NCCL_FLOAT64: return 8;
+            default: return 0;
+        }
+    }
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
@@ -712,9 +806,9 @@ struct thread_info_data_t
 
 struct track_data_t
 {
-    std::string   track_name;
-    std::uint64_t thread_id = 0;
-    std::string   extdata;
+    std::string                  track_name;
+    std::optional<std::uint64_t> thread_id;
+    std::string                  extdata;
 
     bool operator==(const track_data_t&) const = default;
 };
@@ -842,6 +936,13 @@ struct gmock_buffer_storage
     MOCK_METHOD(void, store_memory_allocation,
                 (const memory_allocation_sample_data_t& sample));
     MOCK_METHOD(void, store_scratch_memory, (const scratch_memory_sample_data_t& sample));
+    // Flattened view of externals::pmc_event_with_sample (declared after this struct).
+    // NOLINTNEXTLINE(readability-function-size)
+    MOCK_METHOD(void, store_pmc_event,
+                (std::size_t category_enum_id, std::string track_name,
+                 std::size_t timestamp_ns, std::string event_metadata,
+                 std::uint32_t device_id, std::uint8_t device_type,
+                 std::string pmc_info_name, double value));
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, write_timemory_bundle,
                 (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
@@ -1009,6 +1110,72 @@ struct externals
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hipfile_api_category_name = "rocm_hipfile_api";
+
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    // Stand-in for rocprofsys::state::thread: only Internal and scoped() are touched by
+    // k_rccl (register_gpu()/add_bytes() push/pop the Internal thread state around
+    // their locked sections).
+    struct state_thread
+    {
+        enum class state
+        {
+            enabled,
+            internal
+        };
+
+        static constexpr state Internal = state::internal;
+
+        struct [[nodiscard]] scoped_guard
+        {};
+
+        static scoped_guard scoped(state /*state_to_set*/) { return {}; }
+    };
+
+    struct rocm_rccl_api_category
+    {};
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rccl_api_category_name = "rocm_rccl_api";
+
+    static constexpr std::string_view comm_data_name        = "comm_data";
+    static constexpr std::string_view comm_data_description = "comm data test category";
+    static constexpr std::size_t      comm_data_enum_value  = 0;
+
+    static constexpr std::string_view rccl_send_label      = "RCCL Comm Send";
+    static constexpr std::string_view rccl_recv_label      = "RCCL Comm Recv";
+    static constexpr std::string_view rccl_send_track_name = rccl_send_label;
+    static constexpr std::string_view rccl_recv_track_name = rccl_recv_label;
+
+    // Stand-in for trace_cache::pmc_event_with_sample: category_enum_id, track_name,
+    // timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
+    // call_stack, line_info, device_id, device_type, pmc_info_name, value, system_tid.
+    // Distinct from kfd_sample_t (one fewer size_t field) -- k_rccl constructs this
+    // exact 14-argument shape.
+    struct pmc_event_with_sample
+    {
+        std::size_t                 category_enum_id = 0;
+        std::string_view            track_name;
+        std::size_t                 timestamp_ns = 0;
+        std::string_view            event_metadata;
+        std::size_t                 stack_id        = 0;
+        std::size_t                 parent_stack_id = 0;
+        std::size_t                 correlation_id  = 0;
+        std::string_view            call_stack;
+        std::string_view            line_info;
+        std::uint32_t               device_id   = 0;
+        std::uint8_t                device_type = 0;
+        std::string_view            pmc_info_name;
+        double                      value = 0.0;
+        std::optional<std::int64_t> system_tid;
+    };
+
+    // Tests set these to drive device_id_resolver::configure_comm_cu_device_function();
+    // the defaults model "symbol not found, no error text".
+    static inline void*       dlsym_result   = nullptr;
+    static inline const char* dlerror_result = nullptr;
+
+    static void*       dlsym(const char* /*symbol_name*/) { return dlsym_result; }
+    static const char* dlerror() { return dlerror_result; }
 
     struct region_sample
     {
@@ -1252,6 +1419,17 @@ struct externals
         // matching this domain family's behavior before the unification onto
         // get_buffer_storage().
         void store(const kfd_sample_t& /*sample*/) {}
+        void store(pmc_event_with_sample&& sample)
+        {
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_pmc_event(
+                    sample.category_enum_id, std::string{ sample.track_name },
+                    sample.timestamp_ns, std::string{ sample.event_metadata },
+                    sample.device_id, sample.device_type,
+                    std::string{ sample.pmc_info_name }, sample.value);
+            }
+        }
         void store(const region_sample& sample)
         {
             if(g_buffer_storage_mock)

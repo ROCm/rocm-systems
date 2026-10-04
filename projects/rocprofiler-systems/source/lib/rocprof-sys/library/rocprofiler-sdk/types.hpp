@@ -145,7 +145,8 @@ struct buffered_callback_dispatcher
 
 template <typename SdkBackend>
 using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
-                                    typename SdkBackend::user_data_t*, void*);
+                                    typename SdkBackend::user_data_t*, void*,
+                                    typename SdkBackend::timestamp_t);
 
 // Indirects the null-check through a function parameter so GCC's -Waddress
 // heuristic (which pattern-matches "function-name != nullptr" and assumes a
@@ -178,7 +179,8 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnEnter))
                 {
-                    OnEnter(record, user_data, callback_data);
+                    OnEnter(record, user_data, callback_data,
+                            SdkBackend::get_timestamp());
                 }
                 break;
             }
@@ -186,7 +188,7 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnExit))
                 {
-                    OnExit(record, user_data, callback_data);
+                    OnExit(record, user_data, callback_data, SdkBackend::get_timestamp());
                 }
                 break;
             }
@@ -194,7 +196,7 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnNone))
                 {
-                    OnNone(record, user_data, callback_data);
+                    OnNone(record, user_data, callback_data, SdkBackend::get_timestamp());
                 }
                 break;
             }
@@ -298,9 +300,8 @@ struct fmt::formatter<rocprofsys::domains::domain_info> : fmt::formatter<std::st
     template <typename FormatContext>
     auto format(const rocprofsys::domains::domain_info& info, FormatContext& ctx) const
     {
-        fmt::format_to(ctx.out(),
-                       "domain_info [key: {} name: {} operations: [{}] group: ", info.key,
-                       info.name, fmt::join(info.operations, ", "));
+        fmt::format_to(ctx.out(), "domain_info [key: {} name: {} group: ", info.key,
+                       info.name);
         if(info.group)
         {
             fmt::format_to(ctx.out(), "{}", *info.group);
@@ -309,7 +310,7 @@ struct fmt::formatter<rocprofsys::domains::domain_info> : fmt::formatter<std::st
         {
             fmt::format_to(ctx.out(), "none");
         }
-        return fmt::format_to(ctx.out(), "]");
+        return fmt::format_to(ctx.out(), "]\n");
     }
 };
 
