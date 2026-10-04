@@ -42,12 +42,20 @@ nudge(int* x)
 int
 main()
 {
+    // Workaround for MI325: ensure device ready before allocations
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceSynchronize());
+
     int* replayed = nullptr;
     int* opted    = nullptr;
     HIP_CHECK(hipMalloc(&replayed, sizeof(int)));
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMalloc(&opted, sizeof(int)));
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemset(replayed, 0, sizeof(int)));
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemset(opted, 0, sizeof(int)));
+    HIP_CHECK(hipDeviceSynchronize());
 
     bump<<<1, kReplayBlock>>>(replayed);
     HIP_CHECK(hipGetLastError());
