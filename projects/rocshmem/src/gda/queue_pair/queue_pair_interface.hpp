@@ -21,7 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include "queue_pair_common.hpp"
-#include "queue_pair_option.hpp"
+#include "rocshmem/comm_options.hpp"
 
 namespace rocshmem {
 
@@ -118,20 +118,20 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void put_nbi(uintptr_t dest, uint32_t dest_rkey,
                           uintptr_t source, uint32_t source_lkey, size_t nelems,
                           const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
+                          CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_rma<OpCode::RDMA_WRITE>(
         source, source_lkey, dest, dest_rkey, nelems, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void put_nbi_single(uintptr_t dest, uint32_t dest_rkey,
                                  uintptr_t source, uint32_t source_lkey, size_t nelems,
-                                 PostOpt<PostOptions...> post_options = {}) {
+                                 CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_rma_single<OpCode::RDMA_WRITE>(
         source, source_lkey, dest, dest_rkey, nelems, post_options);
   }
@@ -149,20 +149,20 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void get_nbi(uintptr_t dest, uint32_t dest_lkey,
                           uintptr_t source, uint32_t source_rkey, size_t nelems,
                           const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
+                          CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_rma<OpCode::RDMA_READ>(
         dest, dest_lkey, source, source_rkey, nelems, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void get_nbi_single(uintptr_t dest, uint32_t dest_lkey,
                                  uintptr_t source, uint32_t source_rkey, size_t nelems,
-                                 PostOpt<PostOptions...> post_options = {}) {
+                                 CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_rma_single<OpCode::RDMA_READ>(
         dest, dest_lkey, source, source_rkey, nelems, post_options);
   }
@@ -187,20 +187,20 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_fetch_add(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
                                        const ActiveWFInfo& wf_info,
-                                       PostOpt<PostOptions...> post_options = {}) {
+                                       CommOpt<CommOptions...> post_options = {}) {
     return provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::Blocking>(
         dest, dest_rkey, value, 0, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_fetch_add_single(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
-                                              PostOpt<PostOptions...> post_options = {}) {
+                                              CommOpt<CommOptions...> post_options = {}) {
     return provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::Blocking>(
         dest, dest_rkey, value, 0, post_options);
   }
@@ -219,22 +219,22 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_fetch_add_nbi(uintptr_t fetch, uint32_t fetch_lkey,
                                        uintptr_t dest, uint32_t dest_rkey, uint64_t value,
                                        const ActiveWFInfo& wf_info,
-                                       PostOpt<PostOptions...> post_options = {}) {
+                                       CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::NonBlocking>(
         fetch, fetch_lkey, dest, dest_rkey, value, 0, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_fetch_add_nbi_single(uintptr_t fetch, uint32_t fetch_lkey,
                                               uintptr_t dest, uint32_t dest_rkey, uint64_t value,
-                                              PostOpt<PostOptions...> post_options = {}) {
+                                              CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::NonBlocking>(
         fetch, fetch_lkey, dest, dest_rkey, value, 0, post_options);
   }
@@ -251,18 +251,18 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_add(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
                              const ActiveWFInfo& wf_info,
-                             PostOpt<PostOptions...> post_options = {}) {
+                             CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo<OpCode::ATOMIC_FA, AMOFetchType::NonFetching>(
         dest, dest_rkey, value, 0, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_add_single(uintptr_t dest, uint32_t dest_rkey, uint64_t value,
-                                    PostOpt<PostOptions...> post_options = {}) {
+                                    CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo_single<OpCode::ATOMIC_FA, AMOFetchType::NonFetching>(
         dest, dest_rkey, value, 0, post_options);
   }
@@ -279,22 +279,22 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_compare_swap(uintptr_t dest, uint32_t dest_rkey,
                                           uint64_t cond, uint64_t value,
                                           const ActiveWFInfo& wf_info,
-                                          PostOpt<PostOptions...> post_options = {}) {
+                                          CommOpt<CommOptions...> post_options = {}) {
     return provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
         dest, dest_rkey, value, cond, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ uint64_t atomic_compare_swap_single(uintptr_t dest, uint32_t dest_rkey,
                                                  uint64_t cond, uint64_t value,
-                                                 PostOpt<PostOptions...> post_options = {}) {
+                                                 CommOpt<CommOptions...> post_options = {}) {
     return provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
         dest, dest_rkey, value, cond, post_options);
   }
@@ -314,24 +314,24 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam PostOptions Options to use when posting these WQEs.
+   * @tparam CommOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nbi(uintptr_t fetch, uint32_t fetch_lkey,
                                           uintptr_t dest, uint32_t dest_rkey,
                                           uint64_t cond, uint64_t value,
                                           const ActiveWFInfo& wf_info,
-                                          PostOpt<PostOptions...> post_options = {}) {
+                                          CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::NonBlocking>(
         fetch, fetch_lkey, dest, dest_rkey, value, cond, wf_info, post_options);
   }
-  template <typename... PostOptions>
+  template <typename... CommOptions>
   __device__ void atomic_compare_swap_nbi_single(uintptr_t fetch, uint32_t fetch_lkey,
                                                  uintptr_t dest, uint32_t dest_rkey,
                                                  uint64_t cond, uint64_t value,
-                                                 PostOpt<PostOptions...> post_options = {}) {
+                                                 CommOpt<CommOptions...> post_options = {}) {
     provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonBlocking>(
         fetch, fetch_lkey, dest, dest_rkey, value, cond, post_options);
   }

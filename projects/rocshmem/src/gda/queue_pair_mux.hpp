@@ -125,25 +125,25 @@ public:
   __device__ __forceinline__
   void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                     uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                    const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
   __device__ __forceinline__
   void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
                            uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+                           CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __forceinline__
   amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                 uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                                const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __forceinline__
   amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
                                        uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+                                       CommOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
 
@@ -243,7 +243,7 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
 template <QueuePairMux::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...> options) {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -268,7 +268,7 @@ __device__ __forceinline__ void QueuePairMux::post_wqe_rma(
 template <QueuePairMux::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    PostOpt<Options...> options) {
+    CommOpt<Options...> options) {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -293,7 +293,7 @@ __device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   switch (get_provider()) {
 #if defined(GDA_IONIC)
@@ -319,7 +319,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    PostOpt<Options...> options) {
+    CommOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   switch (get_provider()) {
 #if defined(GDA_IONIC)

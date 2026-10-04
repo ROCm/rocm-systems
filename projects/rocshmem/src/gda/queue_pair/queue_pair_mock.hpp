@@ -12,7 +12,7 @@
 
 #include "queue_pair_common.hpp"
 #include "queue_pair_interface.hpp"
-#include "queue_pair_option.hpp"
+#include "rocshmem/comm_options.hpp"
 #include "queue_pair_shmem.hpp"
 
 namespace rocshmem {
@@ -67,25 +67,25 @@ public:
   __device__ __forceinline__
   void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                     uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                    const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
   __device__ __forceinline__
   void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
                            uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+                           CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __forceinline__
   amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                 uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                                const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __forceinline__
   amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
                                        uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+                                       CommOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
 
@@ -155,7 +155,7 @@ public:
 template <QueuePairMock::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...> options) {
   if (!laddr || !raddr) {
     return;
   }
@@ -183,7 +183,7 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
 template <QueuePairMock::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    PostOpt<Options...> options) {
+    CommOpt<Options...> options) {
   if (!laddr || !raddr) {
     return;
   }
@@ -208,7 +208,7 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
 template <QueuePairMock::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if (!raddr) {
     // Returns void{}, a prvalue of type void; or uint64_t{}, which performs zero-initialization
@@ -247,7 +247,7 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
 template <QueuePairMock::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    PostOpt<Options...> options) {
+    CommOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if (!raddr) {
     // Returns void{}, a prvalue of type void; or uint64_t{}, which performs zero-initialization

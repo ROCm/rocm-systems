@@ -68,25 +68,25 @@ public:
   __device__ __noinline__
   void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
                     uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                    const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
   __device__ __noinline__
   void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
                            uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+                           CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __noinline__
   amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
                                 uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+                                const ActiveWFInfo& wf_info, CommOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ __noinline__
   amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
                                        uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+                                       CommOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
 
@@ -97,11 +97,11 @@ private:
   static __device__ void acquire_lock(uint32_t* lock);
   static __device__ void release_lock(uint32_t* lock);
 
-  template <OpCode Op, bool CheckSQ>
+  template <OpCode Op, bool FlowControl>
   __device__ void write_rma_wqe(uintptr_t laddr, uint32_t lkey,
                                 uintptr_t raddr, uint32_t rkey, size_t size, bool signaled);
 
-  template <OpCode Op, AMOFetchType Fetch, bool CheckSQ>
+  template <OpCode Op, AMOFetchType Fetch, bool FlowControl>
   __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
                                      uint64_t swap_add, uint64_t compare, bool signaled);
 
@@ -117,7 +117,7 @@ private:
 #endif
 };
 
-template <QueuePairBNXT::OpCode Op, bool CheckSQ>
+template <QueuePairBNXT::OpCode Op, bool FlowControl>
 __device__ void QueuePairBNXT::write_rma_wqe(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, bool signaled) {
   struct bnxt_re_bsqe hdr;
@@ -132,7 +132,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(
 
   bool inline_msg = can_inline<Op>(size);
 
-  if constexpr (CheckSQ) {
+  if constexpr (FlowControl) {
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
   }
 
@@ -187,36 +187,36 @@ __device__ void QueuePairBNXT::write_rma_wqe(
 template <QueuePairBNXT::OpCode Op, typename... Options>
 __device__ __noinline__ void QueuePairBNXT::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
-  if constexpr (PostOptions::ThreadSafe) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...>) {
+  using CommOptions = CommOpt<Options...>;
+  if constexpr (CommOptions::Concurrent) {
     if (wf_info.is_pe_group_first) {
       acquire_lock(&sq.lock);
     }
-  } else if constexpr (!PostOptions::CheckSQ) {
+  } else if constexpr (!CommOptions::FlowControl) {
     // need to at least acquire so that tail is visible
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   }
 
-  bool signaled = PostOptions::signal_completion(wf_info);
+  bool signaled = CommOptions::signal_completion(wf_info);
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      write_rma_wqe<Op, PostOptions::CheckSQ>(laddr, lkey, raddr, rkey, size, signaled);
+      write_rma_wqe<Op, CommOptions::FlowControl>(laddr, lkey, raddr, rkey, size, signaled);
 
       /* Ring Doorbell */
-      if constexpr (PostOptions::RingDB) {
+      if constexpr (CommOptions::Initiate) {
         ring_doorbell(sq.tail);
       }
     }
   }
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     if (wf_info.is_pe_group_first) {
       release_lock(&sq.lock);
     }
-  } else if constexpr (!PostOptions::RingDB) {
+  } else if constexpr (!CommOptions::Initiate) {
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
@@ -225,34 +225,34 @@ __device__ __noinline__ void QueuePairBNXT::post_wqe_rma(
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, typename... Options>
 __device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
-  if constexpr (PostOptions::ThreadSafe) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, CommOpt<Options...>) {
+  using CommOptions = CommOpt<Options...>;
+  if constexpr (CommOptions::Concurrent) {
     acquire_lock(&sq.lock);
-  } else if constexpr (!PostOptions::CheckSQ) {
+  } else if constexpr (!CommOptions::FlowControl) {
     // need to at least acquire so that tail is visible
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   }
 
-  bool signaled = PostOptions::signal_completion_single();
+  bool signaled = CommOptions::signal_completion_single();
 
   /* Write WQE to SQ */
-  write_rma_wqe<Op, PostOptions::CheckSQ>(laddr, lkey, raddr, rkey, size, signaled);
+  write_rma_wqe<Op, CommOptions::FlowControl>(laddr, lkey, raddr, rkey, size, signaled);
 
   /* Ring Doorbell */
-  if constexpr (PostOptions::RingDB) {
+  if constexpr (CommOptions::Initiate) {
     ring_doorbell(sq.tail);
   }
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     release_lock(&sq.lock);
-  } else if constexpr (!PostOptions::RingDB) {
+  } else if constexpr (!CommOptions::Initiate) {
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
 }
 
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
+template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool FlowControl>
 __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
@@ -269,7 +269,7 @@ __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
   uint32_t hdr_flags;
   uint64_t* atomic_laddr;
 
-  if constexpr (CheckSQ) {
+  if constexpr (FlowControl) {
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
   }
 
@@ -319,39 +319,39 @@ __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+    const ActiveWFInfo& wf_info, CommOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
+  using CommOptions = CommOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     if (wf_info.is_pe_group_first) {
       acquire_lock(&sq.lock);
     }
-  } else if constexpr (!PostOptions::CheckSQ) {
+  } else if constexpr (!CommOptions::FlowControl) {
     // need to at least acquire so that tail is visible
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   }
 
-  bool signaled = PostOptions::signal_completion(wf_info);
+  bool signaled = CommOptions::signal_completion(wf_info);
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
+      atomic_laddr = write_amo_wqe<Op, Fetch, CommOptions::FlowControl>(raddr, rkey, swap_add, compare, signaled);
 
       /* Ring Doorbell */
-      if constexpr (PostOptions::RingDB) {
+      if constexpr (CommOptions::Initiate) {
         ring_doorbell(sq.tail);
       }
     }
   }
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     if (wf_info.is_pe_group_first) {
       release_lock(&sq.lock);
     }
-  } else if constexpr (!PostOptions::RingDB) {
+  } else if constexpr (!CommOptions::Initiate) {
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
@@ -365,31 +365,31 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, CommOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
+  using CommOptions = CommOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     acquire_lock(&sq.lock);
-  } else if constexpr (!PostOptions::CheckSQ) {
+  } else if constexpr (!CommOptions::FlowControl) {
     // need to at least acquire so that tail is visible
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   }
 
-  bool signaled = PostOptions::signal_completion_single();
+  bool signaled = CommOptions::signal_completion_single();
 
   /* Write WQE to SQ */
-  atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
+  atomic_laddr = write_amo_wqe<Op, Fetch, CommOptions::FlowControl>(raddr, rkey, swap_add, compare, signaled);
 
   /* Ring Doorbell */
-  if constexpr (PostOptions::RingDB) {
+  if constexpr (CommOptions::Initiate) {
     ring_doorbell(sq.tail);
   }
 
-  if constexpr (PostOptions::ThreadSafe) {
+  if constexpr (CommOptions::Concurrent) {
     release_lock(&sq.lock);
-  } else if constexpr (!PostOptions::RingDB) {
+  } else if constexpr (!CommOptions::Initiate) {
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }

@@ -25,6 +25,8 @@
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_RMA_X_HPP
 #define LIBRARY_INCLUDE_ROCSHMEM_RMA_X_HPP
 
+#include "comm_options.hpp"
+
 namespace rocshmem {
 
 /**
@@ -568,6 +570,14 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put_nbi_wave(
     size_t nelems, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi_wave(
     signed char *dest, const signed char *source, size_t nelems, int pe);
+template <typename... Options>
+__device__ void rocshmem_ctx_schar_put_nbi_wave(
+    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
+    size_t nelems, int pe, CommOpt<Options...> opts);
+template <typename... Options>
+__device__ void rocshmem_schar_put_nbi_wave(
+    signed char *dest, const signed char *source, size_t nelems, int pe,
+    CommOpt<Options...> opts);
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_short_put_nbi_wave(
     rocshmem_ctx_t ctx, short *dest, const short *source,

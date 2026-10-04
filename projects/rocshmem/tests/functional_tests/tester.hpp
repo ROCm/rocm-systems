@@ -212,7 +212,8 @@
   X(TilePutWGRowMajor,         167)  \
   X(TilePutWGColumnMajor,      168)  \
   X(TileGetWGRowMajor,         169)  \
-  X(TileGetWGColumnMajor,      170)
+  X(TileGetWGColumnMajor,      170)  \
+  X(ProducerConsumer,          171)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
