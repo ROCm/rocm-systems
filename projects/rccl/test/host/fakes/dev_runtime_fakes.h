@@ -28,6 +28,9 @@ extern bool g_devrWindowHasSysmemSegmentValue;
 // never sets symmetricSupport with a null peerInfo (dev_runtime.cc's own real error condition).
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce;
 
+// Fail-loud default: a window registration is collective, so a test must opt in to reaching one.
+extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, int, ncclWindow_t*)> g_devrWindowRegisterInGroup;
+
 void ResetDevRuntimeFakes();
 
 #endif  // RCCL_TEST_HOST_DEV_RUNTIME_FAKES_H_

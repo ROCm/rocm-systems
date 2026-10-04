@@ -436,6 +436,11 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
     free(task);
   }
 
+  if (comm->ceColl.stagingPending) {
+    comm->ceColl.stagingPending = false;
+    NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
+  }
+
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
     NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
@@ -687,6 +692,8 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           struct ncclAsyncJob* task = ncclIntruQueueDequeue(&comm->mgmtTaskQueue);
           if (task->destructor) task->destructor((void*)task);
         }
+      } else if (type == ncclGroupTaskTypeSymRegister) {
+        comm->ceColl.stagingPending = false;  // its CE task was just dropped with the planner
       }
       if (!comm->config.blocking) (void)ncclCommSetAsyncError(comm, error);
       comm = next;

@@ -2113,7 +2113,7 @@ fail:
 
 // Allocate CE AllReduce scatter staging on first AllReduce, not during generic
 // CE init. AlltoAll/AllGather should not reserve two staging slots of VMM.
-static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
@@ -2148,7 +2148,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
   ncclResult_t ret = ncclSuccess;
-  NCCLCHECK(ncclCeEnsureAllReduceStaging(comm));
   if (comm->ceColl.ceARTmpBuf == nullptr) {
     WARN("CE AllReduce staging is not available");
     return ncclInvalidUsage;
@@ -2412,6 +2411,11 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t stream = comm->planner.streams->stream;
   struct ncclCeCollArgs* args = plan->ceCollArgs;
 
+  if (ncclCeCollNeedsStaging(args->func) && comm->ceColl.ceARTmpBuf == nullptr) {
+    WARN("CE %s launched without its staging buffer, which is set up at group end", ncclFuncToString(args->func));
+    return ncclInvalidUsage;
+  }
+
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
@@ -2451,12 +2455,6 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
       break;
     case ncclFuncAllReduce:
-      NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
-      if (comm->ceColl.ceARTmpBuf == NULL) {
-        WARN("CE AllReduce invoked without staging buffer");
-        ret = ncclInvalidUsage;
-        break;
-      }
       // Pass args->recvWin so ncclCeAllReduce can take the fast path
       // (AG written directly into user recvbuff, no final D2D copy).
       NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,

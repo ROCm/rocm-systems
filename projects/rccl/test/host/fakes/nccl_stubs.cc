@@ -64,10 +64,12 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
 // "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
 std::vector<std::string> g_cleanupCallOrder;
 ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
+#ifndef RCCL_STUBS_OMIT_ncclCeFinalize
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+#endif
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }

@@ -2110,6 +2110,11 @@
           "test_filter": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog"
         },
         {
+          "name": "CollImplInfo.AllReduceCeRegisteredMatchesDispatchLog",
+          "description": "Forced CE AllReduce with one thread driving every GPU; hangs if CE staging is set up at launch",
+          "test_filter": "CollImplInfo.AllReduceCeRegisteredMatchesDispatchLog"
+        },
+        {
           "name": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog",
           "description": "Same for AllGather with buffers registered as symmetric windows (-R 2 path)",
           "test_filter": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog"

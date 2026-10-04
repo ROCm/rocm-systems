@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "StandaloneUtils.hpp"
+#include "common/CeAllReduceTestHelpers.hpp"  // isCeRuntimeDriverSupported
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
@@ -277,6 +278,7 @@ namespace RcclUnitTesting
       bool checkSymk   = false;  // also assert rcclSymKGetInfo agrees with the dispatch log
       bool expectNoSym = false;  // additionally assert the symk reporter never returns SYM
       bool cumemOff    = false;  // force NCCL_CUMEM_ENABLE=0 before comm init
+      bool ceAllReduce = false;  // force CE AllReduce; registers recv only so symk cannot claim it
     };
 
     // Runs one collective across all comms, captures its selection log to a fresh
@@ -284,7 +286,7 @@ namespace RcclUnitTesting
     void CheckSizeMatchesLog(const char* funcStr, ncclFunc_t coll, int idx, int nRanks,
                              const std::vector<ncclComm_t>& comms, const std::vector<hipStream_t>& streams,
                              const std::vector<void*>& sbuf, const std::vector<void*>& rbuf, size_t count,
-                             ncclDataType_t dt, const SweepMode& mode, bool* sawSym)
+                             ncclDataType_t dt, const SweepMode& mode, bool* sawSym, int* nCe)
     {
       char path[256];
       snprintf(path, sizeof(path), "/tmp/rccl_collimpl_%d_%s_%d.log", (int)getpid(), funcStr, idx);
@@ -334,6 +336,10 @@ namespace RcclUnitTesting
       NCCLCHECK(ncclGroupEnd());
 
       if (sawSym && sel.algoName == "SYM") *sawSym = true;
+      if (nCe && sel.algoName == "CE")
+      {
+        (*nCe)++;
+      }
 
       EXPECT_EQ(rep.algoName, sel.algoName)
         << "reported algo != logged-selected algo\nLOG:\n" << log;
@@ -409,6 +415,11 @@ namespace RcclUnitTesting
       // reporter (rcclSymKGetInfo) must then fall back to the real backend and
       // never claim SYM. Set in the isolated child only (fresh param cache).
       if (mode.cumemOff) setenv("NCCL_CUMEM_ENABLE", "0", 1);
+      if (mode.ceAllReduce)
+      {
+        setenv("RCCL_CE_ALLREDUCE", "1", 1);
+        setenv("RCCL_FORCE_CE_ALLREDUCE", "1", 1);
+      }
 
       // Ground truth = the library's own selection log. COLL covers the addon
       // backend lines; TUNING covers the native-kernel algo/proto/channel line.
@@ -469,8 +480,11 @@ namespace RcclUnitTesting
           for (int i = 0; i < nRanks; i++)
           {
             HIPCALL(hipSetDevice(i));
-            rr[2 * i]     = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
-                                                   &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
+            if (!mode.ceAllReduce)
+            {
+              rr[2 * i] = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
+                                                 &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
+            }
             rr[2 * i + 1] = ncclCommWindowRegister(comms[i], symRecv[i].ptr, recvBytes,
                                                    &symRecv[i].win, NCCL_WIN_COLL_SYMMETRIC);
           }
@@ -555,6 +569,7 @@ namespace RcclUnitTesting
 
       int  idx    = 0;
       bool sawSym = false;
+      int  nCe    = 0;
       for (ncclDataType_t dt : dtypes)
       {
         const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
@@ -566,7 +581,7 @@ namespace RcclUnitTesting
           const size_t count = bytes / denom;
           if (count == 0) continue;  // total too small to split across ranks for this dtype
           CheckSizeMatchesLog(funcStr, coll, idx++, nRanks, comms, streams, sbuf, rbuf, count, dt,
-                              mode, &sawSym);
+                              mode, &sawSym, &nCe);
         }
       }
 
@@ -581,6 +596,12 @@ namespace RcclUnitTesting
                 "[ NOTE     ] %s: symmetric windows registered but SYM never dispatched "
                 "on this arch/config (reporter still matched the dispatch log at every size)\n",
                 funcStr);
+
+      if (mode.ceAllReduce)
+      {
+        fprintf(stderr, "[ NOTE     ] %s: CE AllReduce dispatched at %d sizes\n", funcStr, nCe);
+        EXPECT_GT(nCe, 0) << "CE AllReduce was forced but never dispatched; the sweep tested nothing";
+      }
 
       // Restore default debug target before teardown.
       unsetenv("NCCL_DEBUG_FILE");
@@ -635,6 +656,21 @@ namespace RcclUnitTesting
       mode.checkSymk   = true;
       RunSweep("AllReduce", ncclFuncAllReduce, kLoBytes, kHiBytes, mode);
     });
+  }
+
+  // One thread drives every GPU, so CE AllReduce staging setup must not run at launch (ROCM-32044): this hangs there.
+  TEST(CollImplInfo, AllReduceCeRegisteredMatchesDispatchLog)
+  {
+    if (!isCeRuntimeDriverSupported())
+    {
+      GTEST_SKIP() << "CE driver not in supported range";
+    }
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("AllReduceCeRegisteredMatchesDispatchLog", []() {
+      SweepMode mode;
+      mode.registerSym = true;
+      mode.ceAllReduce = true;
+      RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
+    }).withTimeout(std::chrono::seconds(180)));
   }
 
   TEST(CollImplInfo, AllGatherSymmetricMatchesDispatchLog)
