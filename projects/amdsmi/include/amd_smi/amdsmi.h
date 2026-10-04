@@ -4068,7 +4068,13 @@ amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle proces
  *  ::amdsmi_frequencies_t::num_supported (of ::amdsmi_pcie_bandwidth_t) bits of
  *  this mask are relevant.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p bw_bitmask selects no settable bandwidth
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  */
 amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              uint64_t bw_bitmask);
@@ -5436,33 +5442,46 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a processor handle @p processor_handle, a clock type @p clk_type, and a
- *  64 bit bitmask @p freq_bitmask, this function will limit the set of
- *  allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- *  the frequency (as ordered in an ::amdsmi_frequencies_t returned by
- *  amdsmi_get_clk_freq()) corresponding to that bit index will be
- *  allowed.
+ *  @details Given a processor handle @p processor_handle, this
+ *  function restricts clock @p clk_type to the frequencies
+ *  selected in @p freq_bitmask. Bit N maps to DPM level N in the
+ *  order returned by amdsmi_get_clk_freq(). Set a bit to 1 to
+ *  enable and 0 to disable that level.
  *
- *  This function will change the performance level to
- *  ::AMDSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- *  frequencies. Caller will need to set to ::AMDSMI_DEV_PERF_LEVEL_AUTO in order
- *  to get back to default state.
+ *  Only settable DPM levels can be enabled. Bits outside the settable range are
+ *  dropped before the request is sent, so an out-of-range level is never
+ *  requested; the remaining in-range bits are still applied. The deep-sleep
+ *  frequency (see ::amdsmi_frequencies_t::has_deep_sleep)
+ *  is not settable, so when it is present the settable level count is
+ *  ::amdsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ *  frequency, all ::amdsmi_frequencies_t::num_supported levels (0 to
+ *  num_supported - 1) are settable. The call returns ::AMDSMI_STATUS_INVAL if
+ *  @p freq_bitmask selects no settable level, or ::AMDSMI_STATUS_UNEXPECTED_DATA
+ *  if the device reports zero settable levels for @p clk_type.
  *
- *  All bits with indices greater than or equal to
- *  ::amdsmi_frequencies_t::num_supported will be ignored.
+ *  This call sets the performance level to ::AMDSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ *  back to ::AMDSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @note This function requires admin/sudo privileges
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::amdsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p clk_type is not a valid ::amdsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than AMDSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  */
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
