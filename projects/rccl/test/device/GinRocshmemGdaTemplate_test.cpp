@@ -59,6 +59,11 @@ struct GdaHarness {
 // its remote_vas entry points back at the local dst buffer and its signal
 // remote-address points back at the local signals array, so a self put/signal
 // is observable from the host.
+//
+// nContexts > 1 mirrors createContext striping: one contiguous signals/counters
+// span, shared QPs, and per-context signal_raddrs slices offset by
+// contextId * kNSignals. dContexts holds the GPU-context array; host.ctx is
+// always contexts[0] so existing single-context kernels keep working.
 class GdaEnv {
 public:
   static constexpr int kNRanks = 2;
@@ -66,20 +71,35 @@ public:
   static constexpr uint32_t kNSignals = 4;
   static constexpr uint32_t kNCounters = 2;
 
-  DeviceBuffer<rocshmem::QueuePair> qp{1};
-  DeviceBuffer<rocshmem::QueuePair*> qps{kNRanks};
-  DeviceBuffer<uint64_t> signals{kNSignals};
-  DeviceBuffer<uint64_t> counters{kNCounters};
-  DeviceBuffer<uint32_t> signalRkeys{kNRanks};
-  DeviceBuffer<uintptr_t> signalRaddrs{kNRanks};
-  DeviceBuffer<uintptr_t> dstRemoteVas{kNRanks};
-  DeviceBuffer<uint32_t> dstRkeys{kNRanks};
+  int nContexts;
+  DeviceBuffer<rocshmem::QueuePair> qp;
+  DeviceBuffer<rocshmem::QueuePair*> qps;
+  DeviceBuffer<uint64_t> signals;
+  DeviceBuffer<uint64_t> counters;
+  DeviceBuffer<uint32_t> signalRkeys;
+  DeviceBuffer<uintptr_t> signalRaddrs;
+  DeviceBuffer<uintptr_t> dstRemoteVas;
+  DeviceBuffer<uint32_t> dstRkeys;
   DeviceBuffer<uint8_t> dst;
   DeviceBuffer<uint8_t> src;
-  DeviceBuffer<GdaHarness> dHarness{1};
+  DeviceBuffer<ncclGinRocshmemGdaGPUContext> dContexts;
+  DeviceBuffer<GdaHarness> dHarness;
   GdaHarness host{};
 
-  explicit GdaEnv(size_t bytes) : dst(bytes ? bytes : 1), src(bytes ? bytes : 1) {}
+  explicit GdaEnv(size_t bytes, int nContexts_ = 1)
+      : nContexts(nContexts_),
+        qp(1),
+        qps(kNRanks),
+        signals(static_cast<size_t>(kNSignals) * static_cast<size_t>(nContexts_)),
+        counters(static_cast<size_t>(kNCounters) * static_cast<size_t>(nContexts_)),
+        signalRkeys(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts_)),
+        signalRaddrs(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts_)),
+        dstRemoteVas(kNRanks),
+        dstRkeys(kNRanks),
+        dst(bytes ? bytes : 1),
+        src(bytes ? bytes : 1),
+        dContexts(nContexts_),
+        dHarness(1) {}
 
   void build() {
     std::vector<rocshmem::QueuePair*> qpRow(kNRanks, qp.ptr);
@@ -90,24 +110,34 @@ public:
     signalRkeys.zero();
     dstRkeys.zero();
 
-    std::vector<uintptr_t> sraddr(kNRanks, 0);
-    sraddr[kPeer] = reinterpret_cast<uintptr_t>(signals.ptr);  // signal lands in signals[]
-    signalRaddrs.copyFrom(sraddr.data(), kNRanks);
+    std::vector<uintptr_t> sraddr(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts), 0);
+    for (int c = 0; c < nContexts; ++c) {
+      sraddr[static_cast<size_t>(c) * kNRanks + kPeer] =
+          reinterpret_cast<uintptr_t>(signals.ptr + static_cast<size_t>(c) * kNSignals);
+    }
+    signalRaddrs.copyFrom(sraddr);
 
     std::vector<uintptr_t> rvas(kNRanks, 0);
     rvas[kPeer] = reinterpret_cast<uintptr_t>(dst.ptr);  // "remote" dst maps to local dst
     dstRemoteVas.copyFrom(rvas.data(), kNRanks);
 
+    std::vector<ncclGinRocshmemGdaGPUContext> hostCtxs(static_cast<size_t>(nContexts));
+    for (int c = 0; c < nContexts; ++c) {
+      hostCtxs[static_cast<size_t>(c)] = {};
+      hostCtxs[static_cast<size_t>(c)].qps = qps.ptr;
+      hostCtxs[static_cast<size_t>(c)].signals = signals.ptr + static_cast<size_t>(c) * kNSignals;
+      hostCtxs[static_cast<size_t>(c)].counters = counters.ptr + static_cast<size_t>(c) * kNCounters;
+      hostCtxs[static_cast<size_t>(c)].signal_rkeys = signalRkeys.ptr + static_cast<size_t>(c) * kNRanks;
+      hostCtxs[static_cast<size_t>(c)].signal_raddrs = signalRaddrs.ptr + static_cast<size_t>(c) * kNRanks;
+      hostCtxs[static_cast<size_t>(c)].nSignals = kNSignals;
+      hostCtxs[static_cast<size_t>(c)].nCounters = kNCounters;
+      hostCtxs[static_cast<size_t>(c)].nRanks = kNRanks;
+      hostCtxs[static_cast<size_t>(c)].rank = 0;
+    }
+    dContexts.copyFrom(hostCtxs.data(), static_cast<size_t>(nContexts));
+
     std::memset(&host, 0, sizeof(host));
-    host.ctx.qps = qps.ptr;
-    host.ctx.signals = signals.ptr;
-    host.ctx.counters = counters.ptr;
-    host.ctx.signal_rkeys = signalRkeys.ptr;
-    host.ctx.signal_raddrs = signalRaddrs.ptr;
-    host.ctx.nSignals = kNSignals;
-    host.ctx.nCounters = kNCounters;
-    host.ctx.nRanks = kNRanks;
-    host.ctx.rank = 0;
+    host.ctx = hostCtxs[0];
 
     host.dstMh.local_va = reinterpret_cast<uintptr_t>(dst.ptr);
     host.dstMh.remote_vas = dstRemoteVas.ptr;
@@ -514,6 +544,82 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   syncAndCheck();
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
+}
+
+// G13: GDA device dispatch selects the GPU context indexed by ncclGinCtx::contextId
+// (AICOMRCCL-2339), instead of always using array element zero.
+__global__ void kernelGdaSignalContextSelection(ncclGinRocshmemGdaGPUContext* contexts) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+
+  ginCtx.contextId = 0;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 11;
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 101;
+
+  ginCtx.contextId = 1;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
+  ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 202;
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, SignalApis_SelectLogicalContext) {
+  GdaEnv env(/*bytes=*/1, /*nContexts=*/2);
+  env.build();
+
+  // Non-zero sentinels so a 0 after ResetSignal/ResetCounter only holds if the
+  // write actually reached the context-1 stripe (zero-initialized cells would
+  // pass both before and after the de-aliasing fix).
+  std::vector<uint64_t> sigInit(env.signals.count, 0);
+  sigInit[0] = 7ULL;
+  sigInit[GdaEnv::kNSignals] = 7ULL;
+  env.signals.copyFrom(sigInit);
+  std::vector<uint64_t> ctrInit(env.counters.count, 0);
+  ctrInit[0] = 7ULL;
+  ctrInit[GdaEnv::kNCounters] = 7ULL;
+  env.counters.copyFrom(ctrInit);
+
+  kernelGdaSignalContextSelection<<<1, 1>>>(env.dContexts.ptr);
+  syncAndCheck();
+  auto signals = env.signals.copyTo();
+  auto counters = env.counters.copyTo();
+  EXPECT_EQ(signals[0], 11ULL) << "ResetSignal must not clear context 0 when invoked on contextId=1";
+  EXPECT_EQ(signals[GdaEnv::kNSignals], 0ULL)
+      << "ResetSignal on contextId=1 must clear context 1 signal cell";
+  EXPECT_EQ(counters[0], 101ULL);
+  EXPECT_EQ(counters[GdaEnv::kNCounters], 202ULL);
+}
+
+// G14: Put with an indexed signal must resolve signal_raddrs from the GPU
+// context selected by contextId, so context 1's atomic lands in the second
+// stripe rather than aliasing context 0.
+__global__ void kernelPutSignalSelectContext(GdaHarness* h, ncclGinRocshmemGdaGPUContext* contexts,
+                                             int contextId) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.contextId = contextId;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 0, sig, ncclGinSignalAdd, 5, false, 0, false,
+      nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_SelectLogicalContextSignalStripe) {
+  GdaEnv env(/*bytes=*/1, /*nContexts=*/2);
+  env.build();
+  resetSignalCount();
+  kernelPutSignalSelectContext<<<1, 1>>>(env.dHarness.ptr, env.dContexts.ptr, /*contextId=*/1);
+  syncAndCheck();
+  EXPECT_EQ(readSignalCount(), 1ULL);
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[0], 0ULL) << "contextId=1 Put must not write the context-0 signal stripe";
+  EXPECT_EQ(sigs[GdaEnv::kNSignals], 5ULL)
+      << "contextId=1 Put must deliver the signal into the context-1 stripe";
 }
 
 }  // namespace RcclUnitTesting
