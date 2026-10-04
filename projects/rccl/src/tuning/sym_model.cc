@@ -232,6 +232,20 @@ static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   *timeUs = FLT_MAX;
   *nBlocks = 0;
   switch (k) {
+  case ncclSymkKernelId_AllGather_RailRing_LsaST:
+    {
+      // minBytesPerBlock and blockCap are set based on data collected on gfx950 up to 16 nodes
+      constexpr int minBytesPerBlock = 16 << 10;
+      constexpr int blockCap = 24;
+      // Picks a CTA count that grows as sqrt(per-rank bytes), capped where measured busbw flattens.
+      int requiredBlocks = (int)std::ceil(std::sqrt(double(nBytes) / minBytesPerBlock));
+      float intraTime = (float)(nBytes * (comm->nRanks - rail.nRanks)) / (float)lsaBw;
+      float interTime = (float)(nBytes * (rail.nRanks - 1)) / (float)ginBw;
+      float time = (rail.nRanks - 1) * ginLat + std::max(intraTime, interTime);
+      *timeUs = (/*usec/sec=*/1.e6) * time;
+      *nBlocks = std::max(nMinBlocks, std::min(std::min(nMaxBlocks, blockCap), requiredBlocks));
+    }
+    break;
   case ncclSymkKernelId_AllGather_RailRing_LsaSTMC:
     {
       constexpr int railChunkSize = ncclSymkAllGather_RailRing_ChunkSize;
@@ -525,9 +539,10 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
   tuning->maxChannels = kBlocks;
-  // LL and the vector LSA kernels size themselves for ncclSymkMaxThreads. GIN carves its pipeline
-  // roles out of blockDim.x and symCheckTmaLaunch() requires the full launch for Tma, so both keep it.
-  bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
+  // LL, the vector LSA kernels, and the GIN+LSA AG kernel size themselves from ncclSymkMaxThreads.
+  // GIN RS carves its pipeline roles out of blockDim.x and symCheckTmaLaunch()
+  // requires the full launch for Tma, so both keep it.
+  bool fullWidth = ((ncclSymkGinKernelMask() & ~ncclSymkAGKernelMask()) | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
   tuning->nWarps = fullWidth ? ncclSymkWarpsPerBlock : ncclSymkMaxThreads / inputs->comm->WarpSize;
 #else
   tuning->nWarps = 16;

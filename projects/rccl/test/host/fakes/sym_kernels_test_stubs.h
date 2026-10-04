@@ -17,6 +17,7 @@
 #define RCCL_SYMK_TEST_KERNEL_IDS(X) \
   X(ncclSymkDevKernel_AllGather_LL) \
   X(ncclSymkDevKernel_AllGather_ST) \
+  X(ncclSymkDevKernel_AllGather_RailRing_LsaST) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f32) \
