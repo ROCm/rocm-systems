@@ -215,6 +215,11 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Multi-node hierarchical CE AlltoAllv (RMA rail + intra-node CE).
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing);
+
 // Same gates as AlltoAllv, then ncclCeAvailable (single-node CE; not hier).
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                             bool hasSysmemSegment, bool capturing);
@@ -222,6 +227,8 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

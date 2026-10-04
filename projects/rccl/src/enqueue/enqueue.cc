@@ -4630,7 +4630,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           INFO(NCCL_INIT, "Taking kernel-based collective path");
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-        // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
+        // hierCeAvailable covers AllGather / AlltoAll / AlltoAllv (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
       } else if ((allGatherDecided || alltoAllDecided) &&
                  (info->decision.algo == RCCL_CE_REGISTERED || info->decision.algo == RCCL_CE_SCRATCH)) {

@@ -6033,18 +6033,32 @@ TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArraysAndNullsTheP
   ::free(comm);
 }
 
-TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
+TEST_F(InitMicrotest, CommFree_MultiNodeComm_ReleasesBothSizeArraysAndNullsThePointers) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->nNodes = 2;
   int localSizes = 0;
+  long gatheredSizes = 0;
   comm->localSizes = &localSizes;
-  ScopedHook memFree(g_ncclMemFree, [](void*) { return ncclSuccess; });
+  comm->gatheredSizes = &gatheredSizes;
+  ASSERT_NE(comm->localSizes, comm->gatheredSizes);
 
+  std::vector<void*> released;
+  ScopedHook memFree(g_ncclMemFree, [&](void* p) {
+    released.push_back(p);
+    return ncclSuccess;
+  });
+
+  // commFree frees the comm struct. The spy keeps it alive so the pointer
+  // nulling below is still observable.
+  Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(0, memFree.calls);
+  EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+  EXPECT_EQ(nullptr, comm->localSizes);
+  EXPECT_EQ(nullptr, comm->gatheredSizes);
+  ::free(comm);
 }
 
 
