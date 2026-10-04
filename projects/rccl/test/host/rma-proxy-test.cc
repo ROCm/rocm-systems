@@ -343,6 +343,13 @@ protected:
     }
 
     void TearDown() override {
+        // ncclRmaProxyCtxAllocGraph must never tear the context down itself:
+        // its own header comment delegates failure cleanup to the caller's
+        // ncclRmaProxyDestroyContext. Checking the counter here is also what
+        // gives the destroyContext vtable slot a purpose -- it stays installed
+        // so an unexpected call is counted rather than dispatched through a
+        // null pointer.
+        EXPECT_EQ(0, rmaNet_.destroyCtxCalls);
         FreeGraph();
         // persistentQueues / inProgressQueues live on this stack, not the heap.
         ncclMemoryStackDestruct(&comm_->memPermanent);
@@ -356,6 +363,17 @@ protected:
 
     ncclResult_t AllocGraph() {
         return ncclRmaProxyCtxAllocGraph(comm_.get(), &rma_, ctx_.get());
+    }
+
+    // Preamble shared by the two tests that sweep both GDR arms in a loop:
+    // select the arm, release the previous pass's allocations before
+    // AllocGraph overwrites the pointers (a no-op on the first pass), and
+    // rebuild. Wrap call sites in ASSERT_NO_FATAL_FAILURE -- a failed ASSERT
+    // here only returns from this helper.
+    void ReAllocGraphForArm(gdr_t gdr) {
+        ncclGdrCopy = gdr;
+        FreeGraph();
+        ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
     }
 
     // The cpuAccessSignals registration, located by the address production
@@ -460,13 +478,7 @@ TEST_F(RmaProxyAllocGraphTest, PluginRefusesEveryRegistration_AllocGraphFails) {
 // ---------------------------------------------------------------------------
 TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
-        ncclGdrCopy = gdr;
-        // Release the previous arm's allocations before they are overwritten.
-        // A no-op on the first pass; if an assertion below returns early,
-        // TearDown's FreeGraph() covers the rest.
-        FreeGraph();
-
-        ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
+        ASSERT_NO_FATAL_FAILURE(ReAllocGraphForArm(gdr));
 
         const Registration* reg = FlushBufReg();
         ASSERT_NE(nullptr, reg) << "flushBufDev was never registered, gdr=" << (void*)gdr;
@@ -483,13 +495,7 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
 // ---------------------------------------------------------------------------
 TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
-        ncclGdrCopy = gdr;
-        // Release the previous arm's allocations before they are overwritten.
-        // A no-op on the first pass; if an assertion below returns early,
-        // TearDown's FreeGraph() covers the rest.
-        FreeGraph();
-
-        ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
+        ASSERT_NO_FATAL_FAILURE(ReAllocGraphForArm(gdr));
 
         const Registration* reg = CpuAccessSignalsReg();
         ASSERT_NE(nullptr, reg) << "cpuAccessSignalsDev was never registered, gdr="
