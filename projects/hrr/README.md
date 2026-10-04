@@ -199,7 +199,7 @@ capture.hrr/
   capture itself
 - **blobs/** — host payloads referenced by the trace
 - **code_objects/** — code objects, content-addressed by hash (device images
-  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
