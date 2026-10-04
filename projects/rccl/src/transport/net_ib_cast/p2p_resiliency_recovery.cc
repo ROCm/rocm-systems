@@ -26,14 +26,6 @@ extern int64_t ncclParamIbCastPkey();
 
 #define NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE_MIN 1
 
-// Determines the size of the work queue on the recovery QPs
-#define NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX 10
-
-// The asynchronous thread should be be able to handle the CQ fast enough so
-// no more than two batches of "alive" messsages should be pending in the CQ at
-// any time.
-#define NCCL_IB_RESILIENCY_PORT_RECOVERY_CQ_SIZE (NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX * 2)
-
 static ncclResult_t IbCastPortRecoveryQpInitUd(struct ncclIbQp* qp, int pkeyIndex, int portNum) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
@@ -59,6 +51,13 @@ static ncclResult_t IbCastPortRecoveryQpRtsUd(struct ncclIbQp* qp) {
   attr.qp_state = IBV_QPS_RTS;
   attr.sq_psn = 0;
   NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &attr, IBV_QP_STATE | IBV_QP_SQ_PSN));
+  return ncclSuccess;
+}
+
+ncclResult_t IbCastPortRecoveryQpUdToRts(struct ncclIbQp* qp, int portNum) {
+  NCCLCHECK(IbCastPortRecoveryQpInitUd(qp, ncclParamIbCastPkey(), portNum));
+  NCCLCHECK(IbCastPortRecoveryQpRtrUd(qp));
+  NCCLCHECK(IbCastPortRecoveryQpRtsUd(qp));
   return ncclSuccess;
 }
 
@@ -292,6 +291,7 @@ ncclResult_t IbCastPortRecoveryDevDestroy(struct ncclIbResiliency* resCtx, int d
   }
   if (resDev->portRecoveryCq) {
     NCCLCHECK(wrap_ibv_destroy_cq(resDev->portRecoveryCq));
+    resDev->portRecoveryCq = nullptr;
   }
   if (resDev->portRecoveryQpnMr) {
     wrap_ibv_dereg_mr(resDev->portRecoveryQpnMr);

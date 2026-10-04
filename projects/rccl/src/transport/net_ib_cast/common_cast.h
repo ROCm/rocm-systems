@@ -127,6 +127,8 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
+  int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
