@@ -22,10 +22,9 @@
 // scale-out MPI tests assert on this exact text.
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
-// Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
-// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
-#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
+// Total payload capacity of one reusable CE AllReduce/ReduceScatter staging slot.
+// Messages larger than this are pipelined.
+#define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
 // Fallback 2-shot max cap for rcclCeAr2ShotMax() when no arch table is present.
 // Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
@@ -67,6 +66,24 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
   if (targetChunkBytes > slotChunkBytes) targetChunkBytes = slotChunkBytes;
   return alignDown(targetChunkBytes, (size_t)16);
+}
+
+// CE ReduceScatter staging offsets, split out of ncclCeReduceScatter() for host testability;
+// ncclCeAllReduce() still open-codes these same three formulas.
+
+// Offset is keyed by senderRank, not dstRank: every peer reduces the same slot layout.
+inline size_t ncclCeReduceScatterDstSlotOffsetBytes(int slot, int senderRank, int nRanks, size_t slotChunkBytes) {
+  return ((size_t)slot * (size_t)nRanks + (size_t)senderRank) * slotChunkBytes;
+}
+
+// Offset of chunk `chunk` within dstRank's shard in sendbuff (shardBytes = recvcount * eltSize).
+inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, int chunk, size_t chunkBytes) {
+  return (size_t)dstRank * shardBytes + (size_t)chunk * chunkBytes;
+}
+
+// [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
+inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
+  return (size_t)slot * (size_t)nRanks + (size_t)rank;
 }
 
 enum ncclCeMethodId {
@@ -229,6 +246,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr,
                              struct ncclCeCollArgs* profilerArgs = nullptr);
+
+// CE ReduceScatter: scatter → local-reduce into recvbuff (recvcount elements per rank).
+// Uses the same staging buffer as CE AllReduce (ncclCeEnsureAllReduceStaging).
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                                 struct ncclDevrWindow* recvWin = nullptr,
+                                 struct ncclCeCollArgs* profilerArgs = nullptr);
 
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce

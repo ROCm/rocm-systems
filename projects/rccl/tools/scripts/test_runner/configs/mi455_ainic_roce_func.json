@@ -1327,6 +1327,24 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "CeAllReduceEligibilityTest",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+          }
+        },
+        {
+          "name": "CeReduceScatterEligibilityTest",
+          "description": "CE ReduceScatter eligibility and staging-layout tests.",
+          "test_filter": "CeReduceScatterEligibilityTest.*:RcclCeReduceScatterEligibility.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "DDA fabric eligibility tests (gfx1250)",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"

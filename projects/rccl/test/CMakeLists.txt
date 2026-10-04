@@ -742,6 +742,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
+      CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
