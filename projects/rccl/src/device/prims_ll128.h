@@ -22,7 +22,17 @@
 // hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
 // load128 which bypasses the cache.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-#if RCCL_LL_FIFO_SYS_SCOPE
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  // Crash reproducer: this pun, inlined into the gfx1250 tree LL128 fp8
+  // reduction, crashes AMDGPU ISel at -O1 in APInt::andAssignSlowCase.
+  union {
+    v4i vi;
+    uint64_t u64[2];
+  } u;
+  u.vi = __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)ptr, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
+#elif RCCL_LL_FIFO_SYS_SCOPE
   union {
     v4u v;
     uint64_t u64[2];
