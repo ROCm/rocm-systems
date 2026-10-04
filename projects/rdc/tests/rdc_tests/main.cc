@@ -35,6 +35,7 @@ THE SOFTWARE.
 #include "functional/rdci_dmon.h"
 #include "functional/rdci_fieldgroup.h"
 #include "functional/rdci_group.h"
+#include "functional/test_health.h"
 #include "functional/rdci_stats.h"
 #include "rdc/rdc.h"
 #include "rdc_tests/test_base.h"
@@ -96,6 +97,11 @@ TEST(rdctstReadOnly, TestRdciDmon) {
 
 TEST(rdctstReadOnly, TestRdciFieldgroup) {
   TestRdciFieldgroup tst;
+  RunGenericTest(&tst);
+}
+
+TEST(rdctstReadOnly, TestRdciHealth) {
+  TestRdciHealth tst;
   RunGenericTest(&tst);
 }
 
