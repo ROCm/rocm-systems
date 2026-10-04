@@ -51,6 +51,12 @@ void hip_capture_uninstall();
 // Hook compiler dispatch table for <<<>>> launch path
 void hip_capture_build_compiler_table();
 
+struct HipCompilerDispatchTable;
+
+// Swap the compiler shims into the live table. Call only from
+// hip_capture_build_compiler_table(), after it snapshots g_real_compiler_table.
+void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims);
+
 // Called from hip_context.cpp init() — performs build + conditional install
 void hip_capture_init();
 
