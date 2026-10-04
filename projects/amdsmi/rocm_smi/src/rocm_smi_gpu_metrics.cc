@@ -2815,6 +2815,14 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                          static_cast<uint32_t>(std::size(apu.temperature_core))),
                 apu.temperature_core);
     apu.temperature_skin = metrics.m_temperature_skin;
+    // PMFW leaves core and skin temperatures it does not measure at 0 rather than the
+    // 0xFFFF sentinel; 0 centi-C is not a real reading from a powered die.
+    constexpr auto kTempNotAvailable = std::numeric_limits<uint16_t>::max();
+    std::replace(std::begin(apu.temperature_core), std::end(apu.temperature_core), uint16_t{0},
+                 kTempNotAvailable);
+    if (apu.temperature_skin == 0) {
+      apu.temperature_skin = kTempNotAvailable;
+    }
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
     apu.average_vcn_activity = metrics.m_average_vcn_activity;
     std::copy_n(std::begin(metrics.m_average_ipu_activity),

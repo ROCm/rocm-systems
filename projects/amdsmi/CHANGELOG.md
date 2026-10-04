@@ -218,6 +218,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
+  - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
