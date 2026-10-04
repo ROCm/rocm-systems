@@ -35,13 +35,8 @@ from unittest import mock
 
 def cli_search_order(start_dir):
     """Return source-tree and installed CLI directories to search."""
-    candidates = [
-        parent / "amdsmi_cli"
-        for parent in pathlib.Path(start_dir).resolve().parents
-    ]
-    candidates.append(
-        pathlib.Path(amdsmi_path).resolve().parent.parent / "libexec" / "amdsmi_cli"
-    )
+    candidates = [parent / "amdsmi_cli" for parent in pathlib.Path(start_dir).resolve().parents]
+    candidates.append(pathlib.Path(amdsmi_path).resolve().parent.parent / "libexec" / "amdsmi_cli")
     return [str(candidate) for candidate in candidates]
 
 
