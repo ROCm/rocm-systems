@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/dda_targets.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
@@ -1017,6 +1018,12 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query, const char* prefix) {
+  if (!ncclDdaCompiledForArch(comm->archName)) {
+    if (!query && prefix)
+      INFO(NCCL_TUNING, "%s DDA disqualified: not compiled for arch %s",
+           prefix, comm->archName ? comm->archName : "(null)");
+    return false;
+  }
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:
   // testing the raw sentinel as a boolean disables DDA by default, while
