@@ -146,6 +146,9 @@ struct FakeRma {
     // When true, reject a registration whose declared type contradicts the
     // pointer's provenance -- what the net plugin in NVIDIA/nccl PR #2187 did.
     bool             strictMemType = false;
+    // Refuse every registration, whatever its type. Used to prove the success
+    // the tests above assert is a real oracle and not an unconditional pass.
+    bool             rejectAll     = false;
     std::set<void*>* hostAddrs     = nullptr;
     int              destroyCtxCalls = 0;
 
@@ -158,8 +161,8 @@ struct FakeRma {
 
     ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, bool viaDmaBuf,
                      void** mhandle) {
-        if (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
-            hostAddrs->count(data) != 0) {
+        if (rejectAll || (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
+                          hostAddrs->count(data) != 0)) {
             // Mirror a real plugin: the registration is refused, nothing is
             // recorded, and no handle comes back.
             *mhandle = nullptr;
@@ -288,8 +291,10 @@ protected:
         ctx_->comm        = comm_.get();
         ctx_->rmaCtx      = &rmaNet_.ctxH;
         ctx_->rmaCollComm = &rmaNet_.collH;
-        // A capable NIC: advertising DMA-BUF support proves the registrations
-        // below are steered by the memory type, not by a missing capability.
+        // A capable NIC, so no registration below can be steered by a missing
+        // capability. The DMA-BUF bit is nonetheless never consulted here:
+        // ncclRmaProxyRegMrSym tests ncclParamDmaBufEnable() first, and the
+        // fixture pins that to 0 (see the note on g_paramDmaBufEnable above).
         ctx_->props.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
 
         rmaNet_.hostAddrs = &hostAddrs_;
@@ -403,6 +408,10 @@ TEST_F(RmaProxyAllocGraphTest, GdrCopyOn_RegistersCpuAccessSignalsAsCuda) {
     const Registration* reg = CpuAccessSignalsReg();
     ASSERT_NE(nullptr, reg) << "cpuAccessSignalsDev was never registered";
     EXPECT_EQ(NCCL_PTR_CUDA, reg->type);
+    // ncclGdrCudaCalloc rounds its allocation up to GPU_PAGE_SIZE, so this is
+    // the arm where a registration sized from the padded block instead of
+    // signalsBufSize would otherwise go unnoticed.
+    EXPECT_EQ(kSignalsBufSize, reg->size);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,9 +427,29 @@ TEST_F(RmaProxyAllocGraphTest, StrictPluginRejectsWrongMemoryType_AllocGraphStil
         << "net plugin rejected the cpuAccessSignals registration due to wrong memory type "
            "(NVIDIA/nccl PR #2187)";
 
+    EXPECT_EQ(1u, hostAddrs_.count(ctx_->cpuAccessSignalsDev));
+
     const Registration* reg = CpuAccessSignalsReg();
     ASSERT_NE(nullptr, reg);
     EXPECT_EQ(NCCL_PTR_HOST, reg->type);
+}
+
+// ---------------------------------------------------------------------------
+// Negative control for the three tests above. They all assert
+// ncclRmaProxyCtxAllocGraph returns ncclSuccess, which is only evidence if a
+// refused registration can still make it fail -- i.e. if the NCCLCHECK around
+// the cpuAccessSignals registration really does propagate. Pin that oracle.
+// ---------------------------------------------------------------------------
+TEST_F(RmaProxyAllocGraphTest, PluginRefusesEveryRegistration_AllocGraphFails) {
+    ncclGdrCopy        = NULL;
+    rmaNet_.rejectAll  = true;
+
+    EXPECT_NE(ncclSuccess, AllocGraph())
+        << "a refused MR registration did not propagate out of "
+           "ncclRmaProxyCtxAllocGraph; the ncclSuccess assertions in the other "
+           "tests prove nothing";
+    EXPECT_TRUE(rmaNet_.regs.empty());
+    EXPECT_EQ(nullptr, ctx_->cpuAccessSignalsMhandle);
 }
 
 // ---------------------------------------------------------------------------
@@ -463,9 +492,13 @@ TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
         ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
 
         const Registration* reg = CpuAccessSignalsReg();
-        ASSERT_NE(nullptr, reg) << "gdr=" << (void*)gdr;
+        ASSERT_NE(nullptr, reg) << "cpuAccessSignalsDev was never registered, gdr="
+                                << (void*)gdr;
         EXPECT_EQ(static_cast<uint64_t>(NCCL_NET_MR_FLAG_FORCE_SO), reg->mrFlags)
             << "gdr=" << (void*)gdr;
+        // Not a property of the fix: a guard that the DMA-BUF gate this
+        // fixture relies on (g_paramDmaBufEnable = 0) really did hold, so the
+        // registration above came from the plain regMrSym arm.
         EXPECT_FALSE(reg->viaDmaBuf) << "gdr=" << (void*)gdr;
     }
 }
