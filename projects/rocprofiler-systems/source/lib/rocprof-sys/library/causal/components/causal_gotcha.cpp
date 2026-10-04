@@ -8,17 +8,12 @@
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/signals/signal_mask.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <array>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -28,14 +23,17 @@ auto&
 get_bundle()
 {
     static auto _v = std::unique_ptr<bundle_t>{};
-    if(!_v) _v = std::make_unique<bundle_t>("causal_gotcha");
+    if(!_v)
+    {
+        _v = std::make_unique<bundle_t>("causal_gotcha");
+    }
     return _v;
 }
 
 const auto&
 sampling_signals()
 {
-    static auto _v = get_sampling_signals();
+    static auto const _v = get_sampling_signals();
     return _v;
 }
 
@@ -83,15 +81,22 @@ causal_gotcha::stop()
 void
 causal_gotcha::remove_signals(sigset_t* _set)
 {
-    for(auto _sig : sampling_signals())
+    for(auto const _sig : sampling_signals())
     {
-        if(sigismember(_set, _sig) != 0) sigdelset(_set, _sig);
+        if(sigismember(_set, _sig) != 0)
+        {
+            sigdelset(_set, _sig);
+        }
     }
 
-    if(sigismember(_set, SIGSEGV) != 0) sigdelset(_set, SIGSEGV);
+    if(sigismember(_set, SIGSEGV) != 0)
+    {
+        sigdelset(_set, SIGSEGV);
+    }
 
-    if(sigismember(_set, SIGABRT) != 0) sigdelset(_set, SIGABRT);
+    if(sigismember(_set, SIGABRT) != 0)
+    {
+        sigdelset(_set, SIGABRT);
+    }
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component

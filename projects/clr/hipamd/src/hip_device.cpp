@@ -13,9 +13,6 @@
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
-#undef hipGetDeviceProperties
-#undef hipDeviceProp_t
-
 namespace hip {
 
 // ================================================================================================
@@ -627,7 +624,7 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
 }
 
 // ================================================================================================
-hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
+hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -808,9 +805,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = 0;
-  deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
-  deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
+  // Set option if we have a HDP register
+  deviceProps.gpuDirectRDMAFlushWritesOptions =
+      hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
+  deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
@@ -831,6 +830,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0600, prop, device);
 
+  // For now, we can forward to the internal/unstable API. In the future, if
+  // hipDeviceProp_t is different, this will fail to compile.
   HIP_RETURN(ihipGetDeviceProperties(prop, device));
 }
 
@@ -1026,8 +1027,3 @@ hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
 }
 
 }  // namespace hip
-
-// ================================================================================================
-extern "C" hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
-  return hip::hipGetDevicePropertiesR0000(props, device);
-}

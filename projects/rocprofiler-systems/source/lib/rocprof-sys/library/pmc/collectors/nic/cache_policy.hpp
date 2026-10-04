@@ -44,25 +44,45 @@ struct cache_policy
         const auto thread_id = std::nullopt;
 
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_rx_rdma_ucast_bytes", thread_id, "{}" });
+            { .track_name = "ainic_rx_rdma_ucast_bytes",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_tx_rdma_ucast_bytes", thread_id, "{}" });
+            { .track_name = "ainic_tx_rdma_ucast_bytes",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_rx_rdma_ucast_pkts", thread_id, "{}" });
+            { .track_name = "ainic_rx_rdma_ucast_pkts",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_tx_rdma_ucast_pkts", thread_id, "{}" });
+            { .track_name = "ainic_tx_rdma_ucast_pkts",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_rx_rdma_cnp_pkts", thread_id, "{}" });
+            { .track_name = "ainic_rx_rdma_cnp_pkts",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_tx_rdma_cnp_pkts", thread_id, "{}" });
+            { .track_name = "ainic_tx_rdma_cnp_pkts",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_tx_rdma_ack_timeout", thread_id, "{}" });
+            { .track_name = "ainic_tx_rdma_ack_timeout",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_resp_tx_pkt_seq_err", thread_id, "{}" });
+            { .track_name = "ainic_resp_tx_pkt_seq_err",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_req_rx_pkt_seq_err", thread_id, "{}" });
+            { .track_name = "ainic_req_rx_pkt_seq_err",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { "ainic_req_rx_impl_nak_seq_err", thread_id, "{}" });
+            { .track_name = "ainic_req_rx_impl_nak_seq_err",
+              .thread_id  = thread_id,
+              .extdata    = "{}" });
     }
 
     /**
@@ -83,82 +103,202 @@ struct cache_policy
         constexpr const char* TARGET_ARCH      = "";
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-              "NIC RX UCast PKTS",
-              trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name             = trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+              .symbol           = "NIC RX UCast PKTS",
+              .description =
+                  trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "packets",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-              "NIC TX UCast PKTS",
-              trait::name<category::amd_smi_nic_tx_ucast_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name             = trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+              .symbol           = "NIC TX UCast PKTS",
+              .description =
+                  trait::name<category::amd_smi_nic_tx_ucast_pkts>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "packets",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name             = trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+              .symbol           = "NIC RX CNP PKTS",
+              .description = trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "packets",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name             = trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+              .symbol           = "NIC TX CNP PKTS",
+              .description = trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "packets",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-              "NIC RX UCast Bytes",
-              trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+              .symbol = "NIC RX UCast Bytes",
+              .description =
+                  trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "bytes",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-              "NIC TX UCast Bytes",
-              trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+              .symbol = "NIC TX UCast Bytes",
+              .description =
+                  trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "bytes",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
-              "NIC TX RDMA ACK Timeout",
-              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
-              LONG_DESCRIPTION, COMPONENT, "timeouts", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+              .symbol = "NIC TX RDMA ACK Timeout",
+              .description =
+                  trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "timeouts",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
-              "NIC RESP TX PKT SEQ Error",
-              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
-              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+              .symbol = "NIC RESP TX PKT SEQ Error",
+              .description =
+                  trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "errors",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
-              "NIC REQ RX PKT SEQ Error",
-              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
-              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+              .symbol = "NIC REQ RX PKT SEQ Error",
+              .description =
+                  trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "errors",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
-              "NIC REQ RX Impl NAK SEQ Error",
-              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
-              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+            { .type             = agent_type::nic,
+              .agent_type_index = nic_id,
+              .target_arch      = TARGET_ARCH,
+              .event_code       = EVENT_CODE,
+              .instance_id      = INSTANCE_ID,
+              .name   = trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+              .symbol = "NIC REQ RX Impl NAK SEQ Error",
+              .description =
+                  trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
+              .long_description = LONG_DESCRIPTION,
+              .component        = COMPONENT,
+              .units            = "errors",
+              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .block            = BLOCK,
+              .expression       = EXPRESSION,
+              .is_constant      = 0,
+              .is_derived       = 0,
+              .extdata          = "{}" });
     }
 
     /**

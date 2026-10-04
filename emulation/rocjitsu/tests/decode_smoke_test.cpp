@@ -197,8 +197,9 @@ TEST(Gfx1250DecodeTest, DisassemblesDpp8Selectors) {
 
 TEST(DecoderSmokeTest, Gfx1201DisassemblesDpp16Attributes) {
   const uint32_t words[] = {
-      0xD6410800u, 0x000002FAu, // v_mad_u16 with a DPP16 source.
-      0xFF0D0104u,              // v4, row_shl:1, full masks, bound_ctrl and fi.
+      0xD6410800u,
+      0x000002FAu, // v_mad_u16 with a DPP16 source.
+      0xFF0D0104u, // v4, row_shl:1, full masks, bound_ctrl and fi.
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
@@ -328,7 +329,8 @@ TEST(DecoderSmokeTest, Gfx1201NonPackedVop3pUsesZeroOpSelHiDefault) {
 
 TEST(DecoderSmokeTest, Gfx950DisassemblesVop3pAttributes) {
   const uint32_t words[] = {
-      0xD38F4805u, 0x18020501u, // v_pk_add_f16 v5, v1, v2 op_sel:[1,0].
+      0xD38F4805u,
+      0x18020501u, // v_pk_add_f16 v5, v1, v2 op_sel:[1,0].
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
@@ -891,6 +893,29 @@ TEST(Rdna35FuzzDecodeTest, PreservesRoundTripSignificantSyntax) {
     EXPECT_EQ(inst->disassemble(), test.disassembly);
     for (int word = 0; word < test.size / 4; ++word)
       EXPECT_EQ(inst->raw_encoding()[word], test.words[word]) << test.disassembly;
+  }
+}
+
+TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
+  // RADV's image clear shader uses three nonconsecutive address registers.
+  // Both GFX11 families encode them with one additional instruction DWORD.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::array<uint32_t, 4> words{0xf0180f95, 0x00040402, 0x00000803, S_NOP};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->size(), 12);
+    EXPECT_EQ(inst->mnemonic(), "image_store");
+    words[2] = 0;
+    EXPECT_EQ(inst->raw_encoding()[2], 0x803u);
+    std::unique_ptr<Instruction> next(decode_valid(*decoder, words.data() + inst->size() / 4));
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->mnemonic(), "s_nop");
+    words[0] &= ~1u;
+    inst.reset(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->size(), 8);
   }
 }
 
@@ -1609,7 +1634,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
-  EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
 }
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
@@ -1665,7 +1690,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
     cu->write_vgpr(vb + kDx9Dst, lane, 0xDEADBEEFu);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + kFmaDst, lane), expected_fma) << tc.arch_name << " lane " << lane;
@@ -1719,7 +1744,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskConsumesVccLo) {
     cu->write_vgpr(vb + 8, lane, kYTrue | lane);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const bool select_true = ((kVcc >> lane) & 1u) != 0;
@@ -1788,7 +1813,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMerge) {
   const auto execute = [&](const std::array<uint32_t, 3> &inst_words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   const uint32_t sb = wf->sgpr_alloc().base;

@@ -85,6 +85,17 @@ if(_rccl_copts)
 endif()
 message(STATUS "Device Linker: inherited compile options: ${DL_INHERITED_FLAGS}")
 
+# The --link step is the one consumer that cannot take a -fvisibility= option:
+# the ncclDevFunc_* device functions have to stay visible, or the device link
+# fails with "recompile with -fPIC". The host objects below still need it.
+set(DL_LINK_INHERITED_FLAGS "")
+foreach(_opt IN LISTS DL_INHERITED_FLAGS)
+  if(_opt MATCHES "^-fvisibility=")
+    continue()
+  endif()
+  list(APPEND DL_LINK_INHERITED_FLAGS "${_opt}")
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
 # ---------------------------------------------------------------------------
@@ -154,19 +165,11 @@ elseif(ROCM_PATH)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
 endif()
 
-# fmt headers: FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
-if(fmt_SOURCE_DIR)
-  target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
-elseif(TARGET fmt::fmt-header-only)
-  get_target_property(_fmt_inc fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
-  if(_fmt_inc)
-    foreach(_p ${_fmt_inc})
-      if(NOT _p MATCHES "^\\$<")
-        target_include_directories(rccl_device_defs SYSTEM INTERFACE "${_p}")
-      endif()
-    endforeach()
-  endif()
-endif()
+# fmt headers, named directly rather than read off fmt::fmt-header-only: the
+# target carries its include directory in a $<BUILD_INTERFACE:...> generator
+# expression, which cannot be resolved at configure time.
+target_include_directories(rccl_device_defs SYSTEM INTERFACE
+  "${PROJECT_SOURCE_DIR}/external/fmt/include")
 
 # ---------------------------------------------------------------------------
 # Read specialized file list
@@ -192,14 +195,15 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
     set(${RESULT_VAR} FALSE PARENT_SCOPE)
     return()
   endif()
-  string(REGEX MATCHALL "__gfx[0-9a-z]+__" _guard_archs "${GUARD}")
+  string(REGEX MATCHALL "__gfx[0-9a-z_]+__" _guard_archs "${GUARD}")
+  string(REPLACE "-" "_" _gpu_macro "${GPU_TARGET}")
   if(NOT _guard_archs)
     set(${RESULT_VAR} TRUE PARENT_SCOPE)
     return()
   endif()
   foreach(_ga ${_guard_archs})
     string(REGEX REPLACE "^__(.+)__$" "\\1" _arch "${_ga}")
-    if("${_arch}" STREQUAL "${GPU_TARGET}")
+    if("${_arch}" STREQUAL "${_gpu_macro}")
       set(${RESULT_VAR} TRUE PARENT_SCOPE)
       return()
     endif()
@@ -295,6 +299,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
+  if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+    add_dependencies(${_dev_target} copy_rocshmem_headers)
+  endif()
   # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
   # symbols resolve during the per-arch device.elf link step.
   # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
@@ -374,6 +381,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_LINK_INHERITED_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
@@ -587,6 +595,29 @@ endif()
 # Like collectives.cc, it cannot be built with --offload-host-only on the
 # main rccl target or __hip_fatbin_* stays undefined in librccl.so.
 # ===========================================================================
+# diagnostics/device/p2p.cu.cpp: NCCL 2.31's P2P startup diagnostics kernels.
+# Same reason as the dda objects below - it must be a fat object.
+set(DIAG_P2P_FAT_OBJ "${DEVICE_BUILD_DIR}/diagnostics_p2p.o")
+
+add_custom_command(
+  OUTPUT  ${DIAG_P2P_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    -std=c++17
+    -fPIC
+    -c -o ${DIAG_P2P_FAT_OBJ}
+    ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
+  COMMENT "DL compile: diagnostics/device/p2p.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
 set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
 set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
@@ -733,6 +764,35 @@ if(ENABLE_ROCSHMEM_GIN)
     VERBATIM
   )
 endif()
+
+# ===========================================================================
+# gin_anvil_conn_check_device.cc: GIN-SDMA LSA connectivity-check kernels.
+# This source must bypass the rccl target's --offload-host-only compilation.
+# ===========================================================================
+set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "")
+if(ENABLE_ROCSHMEM_GIN)
+  set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_anvil_conn_check_device.o")
+  add_custom_command(
+    OUTPUT  ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      -DENABLE_ROCSHMEM_GIN
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
+      -std=c++17
+      -fPIC
+      -c -o ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
+      ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
+    DEPENDS ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
+    COMMENT "DL compile: gin_anvil_conn_check_device.cc (GIN-SDMA conn-check kernels)"
+    VERBATIM
+  )
+endif()
+
 # ===========================================================================
 # dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
 # ===========================================================================
@@ -1086,13 +1146,7 @@ if(GENERATE_SYM_KERNELS)
 
     add_custom_command(
       OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link}
-        ${_bc_dir}/queue_pair.bc
-        ${_bc_dir}/queue_pair_mlx5.bc
-        ${_bc_dir}/queue_pair_bnxt.bc
-        ${_bc_dir}/queue_pair_ionic.bc
-        ${_cm_bc}
-        -o ${_qp_raw}
+      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
       COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
       COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
         ${_qp_raw}.ll > ${_qp_raw}.clean.ll
@@ -1146,9 +1200,12 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-	DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${GIN_ANVIL_CONN_CHECK_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_linker_build copy_rocshmem_headers)
+endif()
 if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
   # The fat objects above include GIN device headers, which pull in rocSHMEM
   # headers installed to ext/rocshmem/include by the ExternalProject.
@@ -1160,6 +1217,7 @@ set(DEVICE_LINKER_OBJECTS
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
   ${CE_REDUCE_FAT_OBJS}
+  ${DIAG_P2P_FAT_OBJ}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   ${DDA_ALL_GATHER_IPC_FAT_OBJ}
@@ -1179,6 +1237,7 @@ set(DEVICE_LINKER_OBJECTS
   ${SYM_FAT_OBJS}
   ${GIN_ALLTOALL_SDMA_FAT_OBJ}
   ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
+  ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
 )
 
 # ===========================================================================
@@ -1186,3 +1245,6 @@ set(DEVICE_LINKER_OBJECTS
 # ===========================================================================
 add_custom_target(device_ir DEPENDS ${ALL_IR_FILES})
 add_dependencies(device_ir hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_ir copy_rocshmem_headers)
+endif()

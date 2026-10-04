@@ -129,6 +129,10 @@ struct Gfx1250Sim {
   void build() {
     soc = loaded.soc();
     memory = loaded.memory();
+    // This fixture drives the engine directly and inspects single-partition
+    // state, so pin one worker instead of taking the config's default of one
+    // partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
@@ -294,7 +298,9 @@ constexpr std::array<uint32_t, 3> make_vopd3_pair(VopdSlot x, VopdSlot y, uint8_
 
 template <size_t N>
 void append_instruction(std::vector<uint32_t> &code, const std::array<uint32_t, N> &words) {
-  code.insert(code.end(), words.begin(), words.end());
+  // Avoid GCC 13's null-range warning when inserting into an empty vector.
+  for (uint32_t word : words)
+    code.push_back(word);
 }
 
 inline void append_instruction(std::vector<uint32_t> &code, uint32_t word) { code.push_back(word); }

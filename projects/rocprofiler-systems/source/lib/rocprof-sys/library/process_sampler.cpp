@@ -15,9 +15,7 @@
 #include <thread>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace process_sampler
+namespace rocprofsys::process_sampler
 {
 namespace
 {
@@ -62,13 +60,18 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
     threading::offset_this_id(true);
     threading::set_thread_name("omni.sampler");
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // notify thread started
-    if(_ready) _ready->set_value();
+    if(_ready)
+    {
+        _ready->set_value();
+    }
 
     for(auto& itr : instances)
+    {
         itr->config();
+    }
 
     LOG_DEBUG(
         "Background process sampling polling at an interval of {:.2f} seconds...",
@@ -88,13 +91,34 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
           state::process::get() < state::process::Finalized)
     {
         std::this_thread::sleep_until(now);
-        if(_state->load() != state::process::Active) continue;
-        if(state::process::get() >= state::process::Finalized) break;
-        if(state::process::get() != state::process::Active) continue;
-        if(sampler_paused.load(std::memory_order_relaxed)) continue;
+        if(_state->load() != state::process::Active)
+        {
+            continue;
+        }
+        if(state::process::get() >= state::process::Finalized)
+        {
+            break;
+        }
+        if(state::process::get() != state::process::Active)
+        {
+            continue;
+        }
+
+        for(auto& itr : instances)
+        {
+            itr->flush_pending_pause();
+        }
+
+        if(sampler_paused.load(std::memory_order_relaxed))
+        {
+            now = std::chrono::steady_clock::now() + _interval;
+            continue;
+        }
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
+        {
             itr->sample();
+        }
         get_sampler_is_sampling().store(false);
         if(has_duration && now >= end)
         {
@@ -115,7 +139,10 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
 
     LOG_DEBUG("Thread sampler polling completed...");
 
-    if(polling_finished) polling_finished->set_value();
+    if(polling_finished)
+    {
+        polling_finished->set_value();
+    }
 }
 
 void
@@ -133,16 +160,19 @@ sampler::setup()
     shutdown();
 
     LOG_DEBUG("Setting up PMC sampling.");
-    auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
-    _pmc->setup        = []() { pmc::setup(); };
-    _pmc->shutdown     = []() { pmc::shutdown(); };
-    _pmc->post_process = []() { pmc::post_process(); };
-    _pmc->config       = []() { pmc::config(); };
-    _pmc->sample       = []() { pmc::sample(); };
-    _pmc->pause        = []() { pmc::pause(); };
+    auto& pmc                = instances.emplace_back(std::make_unique<instance>());
+    pmc->setup               = []() { pmc::setup(); };
+    pmc->shutdown            = []() { pmc::shutdown(); };
+    pmc->post_process        = []() { pmc::post_process(); };
+    pmc->config              = []() { pmc::config(); };
+    pmc->sample              = []() { pmc::sample(); };
+    pmc->pause               = []() { pmc::pause(); };
+    pmc->flush_pending_pause = []() { pmc::flush_pending_pause(); };
 
     for(auto& itr : instances)
+    {
         itr->setup();
+    }
 
     polling_finished = std::make_unique<promise_t>();
 
@@ -166,9 +196,16 @@ sampler::shutdown()
     // set the local sampler state to finalized
     set_state(state::process::Finalized);
 
+    for(auto& itr : instances)
+    {
+        itr->flush_pending_pause();
+    }
+
     // shutdown all components
     for(auto& itr : instances)
+    {
         itr->shutdown();
+    }
 
     auto& _thread = get_thread();
     if(_thread)
@@ -181,7 +218,10 @@ sampler::shutdown()
         std::this_thread::sleep_for(msec_t{ _freq });
         while(get_sampler_is_sampling().load())
         {
-            if(_nitr++ > _nitr_max) break;
+            if(_nitr++ > _nitr_max)
+            {
+                break;
+            }
         }
 
         // during CI, throw an error if polling_finished is not valid
@@ -192,7 +232,7 @@ sampler::shutdown()
         if(polling_finished)
         {
             // wait for the thread to finish
-            auto _fut = polling_finished->get_future();
+            auto const _fut = polling_finished->get_future();
             _fut.wait_for(msec_t{ 10 * _freq });
             _thread->join();
         }
@@ -231,7 +271,9 @@ void
 sampler::post_process()
 {
     for(auto& itr : instances)
+    {
         itr->post_process();
+    }
 
     instances.clear();
 }
@@ -241,5 +283,4 @@ sampler::set_state(state_t _state)
 {
     get_sampler_state().store(_state);
 }
-}  // namespace process_sampler
-}  // namespace rocprofsys
+}  // namespace rocprofsys::process_sampler

@@ -27,6 +27,7 @@ test_categories:
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
       - "CheapPostSendFenceTests.*"
+      - "Gfx1250SendRecvLl128WindowTests.*"
       - "PackRoundtripTest.LdStVolatileGlobalPtr"
       - "PackRoundtripTest.LdStRelaxedSysGlobal"
       - "PackRoundtripTest.LdStAcquireReleaseSysGlobal"
@@ -38,7 +39,12 @@ test_categories:
       - "PackRoundtripTest.LoadStorePack_*"
       - "PackRoundtripTest.L2_StorePackBoundary"
       - "PackRoundtripTest.Store16Load16Global_Direct"
+      - "RcclEpLayoutTest.*"
       - "HierarchicalShuffleTest.*"
+      - "LlFifoSysScopeDeviceTest.Gfx1250EnablesSysScope"
+      - "LlFifoSysScopeDeviceTest.FifoLineSysScopeRoundtrip"
+      - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL"
+      - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL128"
     exclude_windows:
       - "*"
     labels:
@@ -56,10 +62,13 @@ test_categories:
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
       - "CheapPostSendFenceTests.*"
+      - "Gfx1250SendRecvLl128WindowTests.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
       - "HierarchicalShuffleTest.*"
+      - "LlFifoSysScopeDeviceTest.*"
+      - "LlFifoSysScope.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"
@@ -71,6 +80,8 @@ test_categories:
       - "u32fpDecode.*"
       - "getHash.*"
       - "eatHash.*"
+      - "RcclEpWaveTest.*"
+      - "RcclEpLayoutTest.*"
     exclude_windows:
       - "*"
     labels:
