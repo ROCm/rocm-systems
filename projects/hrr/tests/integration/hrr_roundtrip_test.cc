@@ -1486,3 +1486,141 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   REQUIRE(ret < 128);  // ...with a clean error, not a crash
 }
 #endif  // !_WIN32
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_FailedMemcpy3D_Direct under capture: a host-to-device
+ *     copy whose extent is far larger than both buffers, which the runtime
+ *     rejects, made through hipMemcpy3D, hipMemcpy3DAsync and their _spt
+ *     spellings.
+ *   - The workload exits cleanly and the archive holds none of the four.
+ *     Before the copies were success-gated, capture hashed extent-many bytes
+ *     from the 4 KiB host buffer and faulted.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_FailedMemcpy3D_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto it = counts.find("hipMalloc3D");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(it->second == 1);
+  CHECK(counts.count("hipMemcpy3D") == 0);
+  CHECK(counts.count("hipMemcpy3DAsync") == 0);
+  CHECK(counts.count("hipMemcpy3D_spt") == 0);
+  CHECK(counts.count("hipMemcpy3DAsync_spt") == 0);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_LongKernelName_Direct under capture: a hipModuleLaunchKernel
+ *     of a kernel whose 70,000-character name does not fit the uint16_t length
+ *     on the wire.
+ *   - The workload exits cleanly, the archive holds no launch and is marked
+ *     incomplete. Before the length was checked it wrapped, and the launch was
+ *     recorded under a truncated name in an archive marked complete.
+ */
+HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_long_kernel_name"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_LongKernelName_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto it = counts.find("hipModuleLoadData");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(counts.count("hipModuleLaunchKernel") == 0);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  CHECK_FALSE(arc.complete);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_OverflowingMemcpy3D_Direct under capture: an accepted
+ *     host-to-device hipMemcpy3DAsync whose width * height * depth overflows
+ *     size_t, so no blob can be sized for it.
+ *   - The archive holds no hipMemcpy3DAsync, is marked incomplete and replays
+ *     cleanly. Recorded without a blob, the copy took the device-to-device
+ *     replay path with an unmapped host source, and replay stopped.
+ */
+HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_overflowing_memcpy3d"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_OverflowingMemcpy3D_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto it = counts.find("hipStreamBeginCapture");
+  REQUIRE(it != counts.end());  // the capture was live
+  CHECK(it->second == 1);
+  CHECK(counts.count("hipMemcpy3DAsync") == 0);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  CHECK_FALSE(arc.complete);
+
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path));
+  INFO("Replay output:\n" << out);
+  CHECK(rc == 0);
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_FailedShimCalls_Direct under capture: one rejected call for
+ *     each hand-written shim that inlines a struct, plus an accepted and a
+ *     rejected hipMemPoolSetAttribute.
+ *   - The archive holds only the accepted calls and replays cleanly. Replay
+ *     issues every recorded call again, so a recorded rejected call stops it.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_FailedShimCalls_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  const auto pools = counts.find("hipMemPoolCreate");
+  REQUIRE(pools != counts.end());  // the capture was live
+  CHECK(pools->second == 1);
+  const auto attrs = counts.find("hipMemPoolSetAttribute");
+  REQUIRE(attrs != counts.end());
+  CHECK(attrs->second == 1);
+  for (const char* api :
+       {"hipMemPoolSetAccess", "hipMemSetAccess", "hipArrayCreate", "hipArray3DCreate",
+        "hipStreamSetAttribute", "hipMemGetAllocationGranularity"}) {
+    INFO("API: " << api);
+    CHECK(counts.count(api) == 0);
+  }
+
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path));
+  INFO("Replay output:\n" << out);
+  CHECK(rc == 0);
+}
