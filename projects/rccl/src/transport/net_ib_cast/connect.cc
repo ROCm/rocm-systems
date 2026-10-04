@@ -1355,6 +1355,7 @@ ib_recv_dev_list:
   comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
 
   INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d", isP2p, handle->isRMA,
        comm->useCtsOffload, comm->base.recvMatchingScheme);
@@ -1407,6 +1408,7 @@ ib_recv_dev_list:
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
   meta.isRMA = handle->isRMA;
+  meta.optRecvCompletion = comm->base.optRecvCompletion;
   meta.sharedGroupIdx = -1;
   meta.commId = 0;
   // TODO - QP sharing
@@ -1567,6 +1569,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
+  comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1986,6 +1989,10 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
 
   struct IbCastSharedQp* recvExistingSlot = IbCastFindSharedQp(&recvProbeKey);
 
+  // QP sharing disables CTS offload.
+  rComm->useCtsOffload = false;
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
+
   if (recvExistingSlot != NULL) {
     // SECONDARY receiver: reuse existing QPs
     INFO(NCCL_NET, "NET/IB: %s: QP sharing SECONDARY receiver commId=%u group=%d",
@@ -1994,7 +2001,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     rComm->base.qpSharing.isPrimary = false;
     int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
     rComm->base.qpSharing.groupNqps = primaryNqps;
-    rComm->useCtsOffload = false;
 
     IbCastSharedQpKey recvKey;
     memset(&recvKey, 0, sizeof(recvKey));
@@ -2087,7 +2093,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d",
          __func__, rComm->base.qpSharing.netIbCommId, recvGroupIdx);
     rComm->base.qpSharing.isPrimary = true;
-    rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
     *outRole = QP_SHARING_PRIMARY;
   }
 
@@ -2273,6 +2278,7 @@ ib_recv:
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
        remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
        rComm->base.recvMatchingScheme);
@@ -2565,6 +2571,8 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
+  meta.optRecvCompletion = rComm->base.optRecvCompletion;
+  rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
