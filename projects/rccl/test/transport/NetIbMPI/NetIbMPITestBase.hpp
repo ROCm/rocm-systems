@@ -18,6 +18,7 @@
 #include "HostBufferHelpers.hpp"
 #include "nccl.h"
 #include "net.h"
+#include "net_ib_limits.h"
 #include "plugin/nccl_net.h"
 #include <atomic>
 #include <chrono>
@@ -1836,6 +1837,498 @@ protected:
         return result;
     }
 
+
+#if defined(ENABLE_FAULT_INJECTION)
+    // ── Worker-safe IB-CAST fault injection: per-communicator hooks, not the global ops registry ──
+
+    ThreadResult WorkerCastFaultArmError(void* sendComm, int nqps) {
+        ThreadResult result;
+        for (int qp = 0; qp < nqps; qp++) {
+            if (ncclIbCastFaultSetQpError(sendComm, qp, /*inject=*/true) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastFaultSetQpError failed on QP " + std::to_string(qp);
+                return result;
+            }
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastFaultSetDelay(void* sendComm, int qpIdx, uint32_t delayUs) {
+        ThreadResult result;
+        if (ncclIbCastFaultSetQpDelay(sendComm, qpIdx, delayUs) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultSetQpDelay failed";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastFaultClear(void* sendComm) {
+        ThreadResult result;
+        if (ncclIbCastFaultClear(sendComm) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultClear failed";
+        }
+        return result;
+    }
+
+    int WorkerCastFatalCount(void* sendComm) {
+        int count = 0;
+        if (ncclIbCastFaultGetFatalCount(sendComm, &count) != ncclSuccess) return -1;
+        return count;
+    }
+
+    ThreadResult WorkerCastDriveQpToError(void* sendComm, int qpIdx) {
+        ThreadResult result;
+        if (ncclIbCastFaultDriveQpToError(sendComm, qpIdx) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultDriveQpToError failed";
+        }
+        return result;
+    }
+
+    // Post one send and poll it; a failed isend and a fatal count are both outcomes, not failures.
+    struct WorkerFaultSendOutcome {
+        ncclResult_t sendRet = ncclSuccess;
+        bool         completed = false;
+        int          fatalCount = 0;
+        // True only when completion was seen or no request exists; otherwise the caller must not free the buffer.
+        bool         retired = false;
+        // Every QP of the connection was driven to error, so it starts no new work on the buffer.
+        bool         quiesced = false;
+    };
+
+    WorkerFaultSendOutcome WorkerCastFaultSend(void* sendComm, void* buffer, size_t size, int tag,
+                                               void* mhandle, int pollIterations) {
+        WorkerFaultSendOutcome outcome;
+        void* request = nullptr;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            outcome.sendRet = PostSend(sendComm, buffer, size, tag, mhandle, &request);
+            if (outcome.sendRet != ncclSuccess || request != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        outcome.fatalCount = WorkerCastFatalCount(sendComm);
+
+        // No request was created, so nothing can reference the buffer.
+        if (request == nullptr) outcome.retired = true;
+
+        if (outcome.sendRet == ncclSuccess && request != nullptr) {
+            for (int poll = 0; poll < pollIterations; poll++) {
+                int done = 0;
+                int sizes[1] = {0};
+                const ncclResult_t testRet = TestRequest(request, &done, sizes);
+                if (testRet != ncclSuccess) {
+                    outcome.sendRet = testRet;
+                    break;
+                }
+                outcome.fatalCount = WorkerCastFatalCount(sendComm);
+                if (done) {
+                    // Recorded here because the settle loop below is skipped once completed is set.
+                    outcome.completed = true;
+                    outcome.retired = true;
+                    break;
+                }
+                if (outcome.fatalCount > 0) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        // Once the fault is counted IbCastTest errors before polling, so completion cannot be seen: drive every QP
+        // to error to stop the hardware, and leave retired false so the caller keeps the buffer.
+        if (request != nullptr && !outcome.completed) {
+            static constexpr int kSettlePolls = 100;  // 100 * 10ms = 1s
+            for (int poll = 0; poll < kSettlePolls; poll++) {
+                int done = 0;
+                int sizes[1] = {0};
+                if (TestRequest(request, &done, sizes) != ncclSuccess) break;
+                if (done) {
+                    outcome.retired = true;
+                    break;
+                }
+                usleep(kPollIntervalUs);
+            }
+            if (!outcome.retired) {
+                // Both the count and every transition are checked before quiesced is claimed.
+                int nqps = 0;
+                const bool counted = WorkerCastLiveNqps(sendComm, &nqps).ok && nqps > 0;
+                if (!counted) nqps = 1;
+                bool allDriven = counted;
+                for (int qp = 0; qp < nqps; qp++) {
+                    if (!WorkerCastDriveQpToError(sendComm, qp).ok) allDriven = false;
+                }
+                outcome.quiesced = allDriven;
+            }
+        }
+        return outcome;
+    }
+
+    // Failover body: break the sender's QP 0; the payload must arrive over the surviving device, state not Ok.
+    // Port recovery stays off here; the global recovery thread is covered by fault_recovery_multithread_2.
+    ThreadResult WorkerCastFailoverTransfer(int rank, ConnectionPair& pair, void* buffer,
+                                            size_t size, int tag, void* mhandle, int seed,
+                                            int messages = 1, std::atomic<int>* arrived = nullptr,
+                                            int expected = 0,
+                                            NetMHandleWorkerGuard* registration = nullptr,
+                                            HostBufferAutoGuard* allocation = nullptr,
+                                            std::atomic<bool>* aborted = nullptr) {
+        ThreadResult result;
+        // Bounded gate so the failures overlap on the fused device instead of merely starting from several workers.
+        if (arrived && expected > 1
+            && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
+            result.ok = false;
+            result.msg = "workers did not all reach the link failure together";
+            return result;
+        }
+        if (rank == 1) {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return result;
+        }
+
+        for (int i = 0; i < messages; i++) {
+            result = WorkerSendRecvPattern(rank, pair, buffer, size, tag + i, mhandle, seed + i,
+                                           kLargeTransferTimeoutMs);
+            if (!result.ok) {
+                result.msg = "after driving QP 0 to error: " + result.msg;
+                // The timed-out request is still posted, so memory is retained as in WorkerTransferAcrossQpFailure.
+                if (registration || allocation)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration,
+                                                             allocation);
+                return result;
+            }
+        }
+
+        if (rank != 1) return result;
+
+        const int fatalCount = WorkerCastFatalCount(pair.sendComm);
+        if (fatalCount != 0) {
+            result.ok = false;
+            result.msg = "failover should have handled the QP error, but the fatal count is "
+                         + std::to_string(fatalCount);
+            return result;
+        }
+
+        struct ncclIbCastResiliencyState state = {};
+        if (ncclIbCastGetResiliencyState(pair.sendComm, &state) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastGetResiliencyState failed";
+            return result;
+        }
+        // 0 is ncclIbResiliencyDevStateOk; anything else means the failure was registered.
+        if (state.devState[0] == 0) {
+            result.ok = false;
+            result.msg = "device 0 still reports Ok after its QP was driven to error";
+        }
+        return result;
+    }
+
+    // Drives this rank's side to error to flush outstanding work and reports whether every QP was reached.
+    // The receiver walks until ncclInvalidArgument (past the count); other errors are real transition failures.
+    ThreadResult WorkerFlushOwnSideQps(ConnectionPair& pair, int rank) {
+        ThreadResult result;
+        auto note = [&](int qp, const std::string& why) {
+            if (!result.ok) return;   // the first one is the useful one
+            result.ok = false;
+            result.msg = "queue pair " + std::to_string(qp) + " could not be driven to error ("
+                         + why + "), so its work may still reference the buffer";
+        };
+        if (rank == 1) {
+            int nqps = 0;
+            const ThreadResult counted = WorkerCastLiveNqps(pair.sendComm, &nqps);
+            if (!counted.ok || nqps <= 0) {
+                // A failed count cannot say which QP still holds work, so report it instead of assuming nqps = 1.
+                result.ok = false;
+                result.msg = "could not learn how many queue pairs to drive to error ("
+                             + (counted.ok
+                                    ? "scheduler reports nqps=" + std::to_string(nqps)
+                                    : counted.msg)
+                             + "), so none of them are known retired";
+            } else {
+                for (int qp = 0; qp < nqps; qp++) {
+                    const ThreadResult driven = WorkerCastDriveQpToError(pair.sendComm, qp);
+                    if (!driven.ok) note(qp, driven.msg);
+                }
+            }
+        } else {
+            for (int qp = 0; qp < kQpProbeLimit; qp++) {
+                const ncclResult_t ret = ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp);
+                if (ret == ncclSuccess) continue;
+                if (ret == ncclInvalidArgument) break;      // past the connection's count
+                note(qp, "ncclIbCastFaultDriveRecvQpToError returned "
+                             + std::to_string(static_cast<int>(ret)));
+            }
+        }
+        return result;
+    }
+
+    // A request may still be live and unreachable: flush this side, then retain both guards rather than free.
+    ThreadResult WorkerRetainAfterAbandonedRequest(ThreadResult failure, ConnectionPair& pair,
+                                                   int rank, NetMHandleWorkerGuard* registration,
+                                                   HostBufferAutoGuard* allocation) {
+        const ThreadResult flushed = WorkerFlushOwnSideQps(pair, rank);
+        if (!flushed.ok) failure.msg += "; " + flushed.msg;
+        failure.msg += "; the buffer and its registration are retained, since a request may "
+                       "still reference them";
+        if (registration) registration->release();
+        if (allocation) allocation->release();
+        return failure;
+    }
+
+
+    // Failover with requests in flight; a posted isend implies a posted receive. buffer holds messages * size.
+    ThreadResult WorkerCastFailoverInFlight(int rank, ConnectionPair& pair, void* buffer,
+                                            size_t size, int tag, void* mhandle, int seed,
+                                            int messages, std::atomic<int>* arrived = nullptr,
+                                            int expected = 0,
+                                            NetMHandleWorkerGuard* registration = nullptr,
+                                            HostBufferAutoGuard* allocation = nullptr,
+                                            int* repostsOut = nullptr,
+                                            std::atomic<bool>* aborted = nullptr) {
+        ThreadResult result;
+        std::vector<void*> requests(messages, nullptr);
+
+        // Every exit after the first post: wait, else flush by driving QPs to error, else retain both guards.
+        auto finish = [&](ThreadResult failure) -> ThreadResult {
+            auto waitAll = [&]() {
+                int live = 0;
+                for (int i = 0; i < messages; i++) {
+                    if (!requests[i]) continue;
+                    int sizes[1] = {0};
+                    if (WorkerWait(requests[i], sizes, kLargeTransferTimeoutMs).ok) {
+                        requests[i] = nullptr;
+                    } else {
+                        live++;
+                    }
+                }
+                return live;
+            };
+
+            if (waitAll() > 0) {
+                // Each rank flushes its own side; the receiver walks the expected span since it cannot query the count.
+                const ThreadResult flushed = WorkerFlushOwnSideQps(pair, rank);
+                const int live = waitAll();
+                // A QP the flush could not reach may still hold work, so the memory is kept.
+                if (live > 0 || !flushed.ok) {
+                    if (!flushed.ok) failure.msg += "; " + flushed.msg;
+                    if (live > 0) {
+                        failure.msg += "; " + std::to_string(live)
+                                       + " request(s) never completed even after flushing";
+                    }
+                    failure.msg += "; the buffer and its registration are retained rather "
+                                   "than released";
+                    if (registration) registration->release();
+                    if (allocation) allocation->release();
+                }
+            }
+            return failure;
+        };
+
+        // Gate before posting: a gate after the posts would let the hardware drain the QP while the worker waits.
+        if (arrived && expected > 1
+            && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
+            result.ok = false;
+            result.msg = "workers did not all reach the link failure together";
+            return finish(result);
+        }
+
+        for (int i = 0; i < messages; i++) {
+            char* slice = static_cast<char*>(buffer) + static_cast<size_t>(i) * size;
+            if (rank == 0) {
+                memset(slice, 0, size);
+                result = WorkerPostRecv(pair.recvComm, slice, size, tag + i, mhandle,
+                                        &requests[i]);
+            } else {
+                fillHostBufferWithPattern<uint8_t>(slice, size, makeBytePattern(seed + i));
+                result = WorkerPostSend(pair.sendComm, slice, size, tag + i, mhandle,
+                                        &requests[i]);
+            }
+            if (!result.ok) return finish(result);
+        }
+
+        // Nothing is polled before the transition: polling drains the shared CQs and would hurry these requests.
+        if (rank == 1) {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return finish(result);
+        }
+
+        for (int i = 0; i < messages; i++) {
+            int sizes[1] = {0};
+            result = WorkerWait(requests[i], sizes, kLargeTransferTimeoutMs);
+            if (!result.ok) {
+                result.msg = "request " + std::to_string(i)
+                             + " never completed after QP 0 was driven to error";
+                return finish(result);
+            }
+            requests[i] = nullptr;
+            if (rank != 0) continue;
+
+            char* slice = static_cast<char*>(buffer) + static_cast<size_t>(i) * size;
+            if (sizes[0] != (int)size
+                || !verifyHostBufferData<uint8_t>(slice, size, makeBytePattern(seed + i))) {
+                result.ok = false;
+                result.msg = "message " + std::to_string(i)
+                             + " arrived corrupted or short after failover";
+                return finish(result);
+            }
+        }
+
+        if (rank != 1) return result;
+
+        // Reported, not asserted: with recovery off nothing observable shows requests caught in flight, only the
+        // post-break-wait ordering. The main thread logs the count, since TEST_INFO calls MPI.
+        if (repostsOut) {
+            int reposts = -1;
+            if (ncclIbCastGetRepostCount(pair.sendComm, &reposts) != ncclSuccess) reposts = -1;
+            *repostsOut = reposts;
+        }
+
+        const int fatalCount = WorkerCastFatalCount(pair.sendComm);
+        if (fatalCount != 0) {
+            result.ok = false;
+            result.msg = "failover should have absorbed the QP error, but the fatal count is "
+                         + std::to_string(fatalCount);
+        }
+        return result;
+    }
+
+    // ncclIbResiliencyDevState values read by WorkerWaitForRecovery.
+    static constexpr int kDevStateOk                 = 0;
+    static constexpr int kDevStateRecoveryInProgress = 2;
+    static constexpr int kDevStateRecoveryFailed     = 3;
+    static constexpr int kDevStateRecovered          = 4;
+    static constexpr int kDevStateErrorPermanent     = 5;
+
+    // Recovery thread budget; the first post-recovery message has to wait it out on top of its own.
+    static constexpr int kRecoveryPollIterations = 6000;  // 6000 * 10ms = 60s
+    static constexpr int kFirstPostRecoveryTimeoutMs =
+        kRecoveryPollIterations * (kPollIntervalUs / 1000) + kLargeTransferTimeoutMs;
+
+    // Waits for device 0 to recover; recoveryCount > 0 tells real recovery from the initial Ok state.
+    ThreadResult WorkerWaitForRecovery(void* sendComm) {
+        ThreadResult result;
+        bool recovered = false;
+        int lastState = -1;
+        int recoveries = 0;
+        for (int poll = 0; poll < kRecoveryPollIterations; poll++) {
+            struct ncclIbCastResiliencyState state = {};
+            if (ncclIbCastGetResiliencyState(sendComm, &state) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastGetResiliencyState failed while waiting for recovery";
+                return result;
+            }
+            lastState = state.devState[0];
+            recoveries = state.recoveryCount[0];
+            if (lastState == kDevStateRecovered
+                || (lastState == kDevStateOk && recoveries > 0)) {
+                recovered = true;
+                break;
+            }
+            if (lastState == kDevStateRecoveryFailed || lastState == kDevStateErrorPermanent) {
+                break;
+            }
+            usleep(kPollIntervalUs);
+        }
+        if (!recovered) {
+            result.ok = false;
+            result.msg = "device 0 never reported a completed recovery; last state was "
+                         + std::to_string(lastState)
+                         + " with recoveryCount=" + std::to_string(recoveries);
+        }
+        return result;
+    }
+
+    // Must be the transport's maximum: a fused two-device NIC at 64 QPs per connection reaches 128.
+    static constexpr int kQpProbeLimit = NCCL_IB_MAX_QPS;
+
+    // Tells the siblings this worker is not coming; built before anything that can fail, disarmed at the gate.
+    struct WorkerGateAbort {
+        std::atomic<bool>& flag;
+        bool armed = true;
+        explicit WorkerGateAbort(std::atomic<bool>& f) : flag(f) {}
+        void reached() { armed = false; }
+        ~WorkerGateAbort() { if (armed) flag.store(true, std::memory_order_release); }
+    };
+
+    // Poll a receive the peer may never satisfy, and report whether it finished.
+    bool WorkerDrainRecv(void* request, int pollIterations) {
+        if (!request) return true;
+        for (int poll = 0; poll < pollIterations; poll++) {
+            int done = 0;
+            int sizes[1] = {0};
+            if (TestRequest(request, &done, sizes) != ncclSuccess) return false;
+            if (done) return true;
+            usleep(kPollIntervalUs);
+        }
+        return false;
+    }
+
+    // Releases a receive the injected send will never satisfy by driving this side to error.
+    ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request,
+                                              HostBufferAutoGuard* allocation = nullptr) {
+        ThreadResult result;
+        if (!request) return result;
+
+        // Only ncclInvalidArgument ends the walk (index past the count); other errors are real failures.
+        // Probes one past kQpProbeLimit so a full-size connection still reaches that sentinel.
+        bool droveWholeRange = false;
+        for (int qp = 0; qp <= kQpProbeLimit; qp++) {
+            const ncclResult_t ret = ncclIbCastFaultDriveRecvQpToError(recvComm, qp);
+            if (ret == ncclSuccess) continue;
+            droveWholeRange = ret == ncclInvalidArgument;
+            break;
+        }
+
+        // Unless the receive is seen to complete, the buffer is never freed; the MR still goes so the PD can close.
+        if (!droveWholeRange) {
+            result.ok = false;
+            result.msg = "driving the receive queue pairs to error stopped short of the end "
+                         "of the range, so the abandoned receive cannot be assumed retired";
+            if (allocation) allocation->release();
+            return result;
+        }
+        static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
+        for (int poll = 0; poll < kFlushPolls; poll++) {
+            int done = 0;
+            int sizes[1] = {0};
+            // An error may come from the fatal-count check or the first flush CQE, neither of which retires it.
+            if (TestRequest(request, &done, sizes) != ncclSuccess) {
+                if (allocation) allocation->release();
+                return result;
+            }
+            if (done) return result;
+            usleep(kPollIntervalUs);
+        }
+        result.ok = false;
+        result.msg = "the abandoned receive was still outstanding after its queue pairs were "
+                     "driven to error";
+        if (allocation) allocation->release();
+        return result;
+    }
+
+    // Both sides lose QP 0 while idle and the payload rides the surviving device.
+    // Takes the guards so a timed-out transfer retains memory the NIC may still write.
+    ThreadResult WorkerTransferAcrossQpFailure(int rank, ConnectionPair& pair, void* buffer,
+                                               size_t size, int tag, void* mhandle, int seed,
+                                               int timeoutMs,
+                                               NetMHandleWorkerGuard* registration = nullptr,
+                                               HostBufferAutoGuard* allocation = nullptr) {
+        ThreadResult result;
+        if (rank == 0) {
+            if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, 0) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastFaultDriveRecvQpToError failed";
+                return result;
+            }
+        } else {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return result;
+        }
+        // Nothing has been posted on the exits above, so they return unchanged.
+        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+        if (!result.ok && (registration || allocation))
+            return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration, allocation);
+        return result;
+    }
+#endif /* ENABLE_FAULT_INJECTION */
+
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
         commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
@@ -2381,6 +2874,9 @@ protected:
     static constexpr int kMinFourProcesses = 4;
     // Timeout for stress tests
     static constexpr int kStressTimeoutMs  = 60000;   // 60s
+
+    // Shared 30 s worker gate; outside the fault-injection block because the stress tests use it too.
+    static constexpr int kWorkerGatePolls = 3000;    // 3000 * 10ms = 30s
 
     // ── RDMA resource leak detection ─────────────────────────────────
     struct RdmaResourceCounts {
