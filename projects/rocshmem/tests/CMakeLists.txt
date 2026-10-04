@@ -35,8 +35,12 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
+IF (BUILD_HOST_TESTS)
+    add_subdirectory(host_tests)
+ENDIF()
+
 # Print top-level test summary if CTest is enabled
-if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
+if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS OR BUILD_HOST_TESTS))
     # Get all tests from this directory and subdirectories
     get_directory_property(all_tests TESTS)
     list(LENGTH all_tests total_tests)
