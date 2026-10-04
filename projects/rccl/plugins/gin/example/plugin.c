@@ -5,11 +5,42 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "nccl/gin.h"
 
 #define __hidden __attribute__((visibility("hidden")))
+
+// Test hooks, inert unless set: RCCL_GIN_EXAMPLE_{DEVICE_TYPE,FAIL_CONNECT_AT,COUNTER_FILE}.
+static int ginEnvInt(const char* name, int fallback) {
+  const char* v = getenv(name);
+  return (v != NULL && *v != '\0') ? atoi(v) : fallback;
+}
+
+// One home for the device-type override, which six vtable entries report.
+static int ginDeviceType(void) {
+  return ginEnvInt("RCCL_GIN_EXAMPLE_DEVICE_TYPE", NCCL_NET_DEVICE_GIN_PROXY);
+}
+
+static int ginConnectCalls = 0;
+static int ginCloseCollCalls = 0;
+static int ginCloseListenCalls = 0;
+
+static void ginWriteCounters(void) {
+  const char* path = getenv("RCCL_GIN_EXAMPLE_COUNTER_FILE");
+  if (path == NULL || *path == '\0') return;
+  // O_NOFOLLOW: the file sits in world-writable /tmp, so never write through a planted symlink.
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+  if (fd < 0) return;
+  FILE* f = fdopen(fd, "w");
+  if (f == NULL) { close(fd); return; }
+  fprintf(f, "connect %d\ncloseColl %d\ncloseListen %d\n", ginConnectCalls, ginCloseCollCalls,
+          ginCloseListenCalls);
+  fclose(f);
+}
 
 #define NCCL_MAX_NET_SIZE_BYTES (1*1024*1024*1024*1024L) // 1TB
 
@@ -72,6 +103,12 @@ __hidden ncclResult_t ginListen(void* ctx, int dev, void* handle, void** listenC
 }
 
 __hidden ncclResult_t ginConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
+  int failAt = ginEnvInt("RCCL_GIN_EXAMPLE_FAIL_CONNECT_AT", 0);
+  ginConnectCalls++;
+  if (failAt > 0 && ginConnectCalls == failAt) {
+    ginWriteCounters();
+    return ncclSystemError;
+  }
   struct ginCollComm* comm = (struct ginCollComm*)calloc(1, sizeof(*comm));
   if (comm == NULL) return ncclSystemError;
   comm->nranks = nranks;
@@ -105,11 +142,15 @@ __hidden ncclResult_t ginDestroyContext(void* ginCtx) {
 }
 
 __hidden ncclResult_t ginCloseColl(void* collComm) {
+  ginCloseCollCalls++;
+  ginWriteCounters();
   free(collComm);
   return ncclSuccess;
 }
 
 __hidden ncclResult_t ginCloseListen(void* listenComm) {
+  ginCloseListenCalls++;
+  ginWriteCounters();
   free(listenComm);
   return ncclSuccess;
 }
@@ -150,7 +191,7 @@ __hidden ncclResult_t ginGetProperties_v11(int dev, ncclNetProperties_v11_t* pro
   props->latency = 0;
   props->maxComms = 1024 * 1024;
   props->maxRecvs = 1;
-  props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  props->netDeviceType = ginDeviceType();
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
@@ -168,7 +209,7 @@ __hidden ncclResult_t ginCreateContext_v11(void* collComm, int nSignals, int nCo
 
   ncclNetDeviceHandle_v11_t* dh = (ncclNetDeviceHandle_v11_t*)calloc(1, sizeof(*dh));
   if (dh == NULL) { free(gc); return ncclSystemError; }
-  dh->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  dh->netDeviceType = ginDeviceType();
   dh->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   dh->handle = NULL;
   dh->size = 0;
@@ -221,7 +262,7 @@ __hidden ncclResult_t ginCreateContext_v12(void* collComm, int nSignals, int nCo
 
   ncclNetDeviceHandle_v11_t* dh = (ncclNetDeviceHandle_v11_t*)calloc(1, sizeof(*dh));
   if (dh == NULL) { free(gc); return ncclSystemError; }
-  dh->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  dh->netDeviceType = ginDeviceType();
   dh->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   dh->handle = NULL;
   dh->size = 0;
@@ -264,7 +305,7 @@ __hidden ncclResult_t ginGetProperties_v13(int dev, ncclNetProperties_v12_t* pro
   props->latency = 0;
   props->maxComms = 1024 * 1024;
   props->maxRecvs = 1;
-  props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  props->netDeviceType = ginDeviceType();
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
@@ -284,7 +325,7 @@ __hidden ncclResult_t ginCreateContext_v13(void* collComm, ncclGinConfig_v13_t* 
 
   ncclNetDeviceHandle_v11_t* dh = (ncclNetDeviceHandle_v11_t*)calloc(1, sizeof(*dh));
   if (dh == NULL) { free(gc); return ncclSystemError; }
-  dh->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  dh->netDeviceType = ginDeviceType();
   dh->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   dh->handle = NULL;
   dh->size = 0;
@@ -353,7 +394,7 @@ __hidden ncclResult_t ginCreateContext_v14(void* collComm, ncclGinConfig_v14_t* 
 
   ncclNetDeviceHandle_v11_t* dh = (ncclNetDeviceHandle_v11_t*)calloc(1, sizeof(*dh));
   if (dh == NULL) { free(gc); return ncclSystemError; }
-  dh->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  dh->netDeviceType = ginDeviceType();
   dh->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   dh->handle = NULL;
   dh->size = 0;
