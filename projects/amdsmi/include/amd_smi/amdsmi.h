@@ -9009,9 +9009,9 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
  *
  * @param[in] processor_handle Cpu socket which to query
  *
- * @param[in,out] min - Input buffer to receive minimum XGMI link width
+ * @param[out] min - Output buffer to receive minimum XGMI link width
  *
- * @param[in,out] max - Input buffer to receive maximum XGMI link width
+ * @param[out] max - Output buffer to receive maximum XGMI link width
  *
  * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -9088,10 +9088,10 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
  *
  * @param[in] processor_handle Cpu socket which to query
  *
- * @param[in,out] apb_status - Input buffer to receive APB status (0 = APB enabled/automatic
+ * @param[out] apb_status - Output buffer to receive APB status (0 = APB enabled/automatic
  * P-state, 1 = APB disabled/fixed P-state)
  *
- * @param[in,out] pstate - Input buffer to receive DF pstate value, during APB disabled condition
+ * @param[out] pstate - Output buffer to receive DF pstate value during APB disabled condition
  *
  * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

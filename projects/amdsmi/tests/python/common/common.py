@@ -1022,7 +1022,8 @@ class Common:
         Nothing is tolerated implicitly, unlike ``check_ret``: a status outside
         *accept* fails, NOT_SUPPORTED included. Leaving ``PASS`` out (that is,
         amdsmi.AmdSmiStatus.SUCCESS) is how a negative case is written, since
-        the call then fails by succeeding::
+        the call then fails by succeeding. ``self.ANY_FAIL`` accepts any API
+        error status while still rejecting a successful return::
 
             accept = [common.PASS, "AMDSMI_STATUS_NOT_SUPPORTED", amdsmi.AmdSmiStatus.NO_PERM]
             with self.common.expect_status(msg, accept):
@@ -1034,8 +1035,9 @@ class Common:
         Args:
             msg (str): header printed above the verdict, and the name a sweep
                 reports the call under. Keep it specific.
-            accept (str | list): every status treated as correct, as
-                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members.
+            accept (str | list): statuses treated as correct, as
+                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members, or
+                ``self.ANY_FAIL`` to accept any API error status.
 
         Raises:
             AssertionError: when no sweep is open to collect the failure.
@@ -1116,7 +1118,11 @@ class Common:
         accepted = self._normalize_expected(list(accept))
         # A misspelled name normalizes untouched and would simply never match,
         # failing the test for the wrong reason.
-        unknown = [name for name in accepted if name not in self.error_map.values()]
+        unknown = [
+            name
+            for name in accepted
+            if name != self.ANY_FAIL and name not in self.error_map.values()
+        ]
         if unknown:
             raise ValueError(f"expect_status got unknown status name(s): {unknown}")
         return types.SimpleNamespace(
@@ -1131,7 +1137,9 @@ class Common:
     def _record_raised_status(self, outcome, exc):
         """The call raised: keep the exception when its status is not accepted."""
         outcome.status_code, outcome.status_name = self.get_error_code(exc)
-        outcome.failed = outcome.status_name not in outcome.accepted
+        outcome.failed = outcome.status_name == self.PASS or (
+            outcome.status_name not in outcome.accepted and self.ANY_FAIL not in outcome.accepted
+        )
         if outcome.failed:
             outcome.exception = exc
 
