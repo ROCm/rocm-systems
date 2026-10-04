@@ -21,6 +21,7 @@
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
+#   6b. rccl-UnitTestsGinAnvilPlugin      Anvil host plugin gtest (single-node)
 #   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
@@ -294,7 +295,6 @@ nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
   printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
   printf 'export RCCL_FIXTURES_BIN_DIR=%q\n' "$(dirname "${rccl_fixtures_bin}")"
-  printf 'export RCCL_ANVIL_PLUGIN_TEST=%q\n' "${rccl_conn_plugin_bin}"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
@@ -334,19 +334,31 @@ else
 fi
 
 # --- unit test: Anvil host plugin gtest (already built in step 4). ---
-# Covers bind-signals / logical-context stripe coverage that install.sh -t skips.
+# Covers the bind-signals and conn-check cases in the Anvil host plugin gtest.
+# Step 4 exits if this binary is missing, so there is no skip path here.
+# Wall-clock cap matches fixtures in run-gin-ci.sh so a hang cannot burn the
+# 4h sbatch budget before the tests-failed sentinel is written.
 echo "==> [6b/7] run Anvil plugin unit tests"
-anvil_plugin_test="${RCCL_ANVIL_PLUGIN_TEST:-${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilPlugin}"
-if [[ -x "${anvil_plugin_test}" ]]; then
-  _sysdeps_lib=""
-  for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
-    [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
-  done
-  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
+anvil_plugin_test="${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilPlugin"
+BENCH_TIMEOUT="${BENCH_TIMEOUT:-600s}"
+BENCH_KILL_AFTER="${BENCH_KILL_AFTER:-30s}"
+_sysdeps_lib=""
+for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
+  [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
+done
+export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
+anvil_plugin_rc=0
+timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
   "${anvil_plugin_test}" --gtest_output="xml:${logs_dir}/anvil-plugin-test.xml" \
-    || echo "WARNING: Anvil plugin unit tests failed (non-gating)" >&2
-else
-  echo "  SKIP: ${anvil_plugin_test} not found (GIN_ANVIL_UNIT_TESTS may be off)"
+  || anvil_plugin_rc=$?
+anvil_plugin_fail=""
+if [[ "${anvil_plugin_rc}" -ne 0 ]]; then
+  if [[ "${anvil_plugin_rc}" -eq 124 || "${anvil_plugin_rc}" -eq 137 ]]; then
+    anvil_plugin_fail="rccl-UnitTestsGinAnvilPlugin (TIMEOUT >${BENCH_TIMEOUT}, rc=${anvil_plugin_rc})"
+  else
+    anvil_plugin_fail="rccl-UnitTestsGinAnvilPlugin (rc=${anvil_plugin_rc})"
+  fi
+  echo "WARNING: Anvil plugin unit tests failed (non-gating): ${anvil_plugin_fail}" >&2
 fi
 
 # --- test phase -> test-%j.{out,err}. Don't fail the sbatch on test failures
@@ -365,4 +377,14 @@ if [[ "${test_rc}" -ne 0 ]]; then
   sed -n '/=== FAILED \/ SKIPPED RUNS/,$p' "${test_out}" > "${logs_dir}/tests-failed" 2>/dev/null || true
   [[ -s "${logs_dir}/tests-failed" ]] \
     || echo "GIN tests failed (rc=${test_rc}); see the test log group." > "${logs_dir}/tests-failed"
+fi
+# Step 6b runs before this redirect, so its failure is not in test-%j.out.
+# Append it after step 7's summary, which would otherwise replace the file.
+if [[ -n "${anvil_plugin_fail}" ]]; then
+  if [[ -s "${logs_dir}/tests-failed" ]]; then
+    printf '  %s\n' "${anvil_plugin_fail}" >> "${logs_dir}/tests-failed"
+  else
+    printf '=== FAILED / SKIPPED RUNS ===\n  %s\n' "${anvil_plugin_fail}" \
+      > "${logs_dir}/tests-failed"
+  fi
 fi
