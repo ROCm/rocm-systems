@@ -91,6 +91,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
+  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
+    `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
+    context initialization, request lifecycle, local-data collection,
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
+    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
+    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
+    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
+    sentinel remains covered by enabled dispatch and peer-payload tests.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
