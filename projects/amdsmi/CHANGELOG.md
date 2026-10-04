@@ -46,12 +46,47 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
+- **`amd-smi list --nic` now enumerates UALoE endpoints**.  
+  - The `ifoe`-bound functions (`0x1022:0x1747`) were absent from the NIC inventory. They now appear as rows reporting their BDF and `MODE: fwctl-only`. Their firmware versions come from `amd-smi firmware --nic`, which reaches them with no change.
+  - These endpoints have no VPD, no hwmon node, and no netdev, so identity, `PERMANENT_ADDRESS`, and every `metric --nic` field read `N/A` for them. They are listed rather than filtered so `--nic all` resolves to the same device set in every subcommand.
+  - NIC indices are positional, so adding these rows renumbers the AI-NIC cards that follow them. Select a device by BDF where the identity has to be stable.
+
+- **Added ``amdsmi_get_nic_type()`` and a ``type`` field in ``amdsmi_nic_asic_info_t``**.  
+  - The new ``amdsmi_nic_type_t`` reports ``AMDSMI_NIC_TYPE_AINIC``, ``AMDSMI_NIC_TYPE_UALOE``, ``AMDSMI_NIC_TYPE_OTHER`` or ``AMDSMI_NIC_TYPE_UNKNOWN``. Callers no longer have to infer the kind from ``MODE`` or the vendor name; a Pensando card whose ports were not found is ``fwctl-only`` as well. The getter and the field report the same value.
+  - The field is one ``uint8_t`` placed in the alignment padding before ``capability``, so ``sizeof(amdsmi_nic_asic_info_t)`` and every existing offset are unchanged and callers built against the old header keep working.
+
+- **Added ``TYPE`` to ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
+  - It shows ``AINIC``, ``UALoE``, or the vendor name for any other NIC, and ``N/A`` when the type is unknown. In ``metric --nic`` it is the first field of each block, so the all-``N/A`` block of a UALoE endpoint is not read as a failure.
+  - ``list --nic`` also adds a ``type`` column to CSV output, right after the BDF.
+
+- **`amd-smi list --nic` now notes when PCI VPD was unreadable**.  
+  - `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` come from `/sys/bus/pci/devices/*/vpd`, which is mode 0600, so an unprivileged run cannot be told apart from a card with no VPD image. When the caller is not root and any of the three reads `N/A`, one note on stderr says so. JSON and CSV output are unaffected.
+
 ### Changed
 
 - **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject `amdsmi_node_handle` values not vended by `amdsmi_get_node_handle()`**.  
   - Previously any non-null handle was dereferenced directly; an unregistered/garbage handle now returns `AMDSMI_STATUS_INVAL` instead.
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
+
+- **AI-NIC discovery now recognizes both Pensando upstream bridge device IDs**.  
+  - Only `0x0008` was matched, so a host whose cards present `0x1008` reported a single NIC instead of one per card. `amd-smi list --nic all` and `amd-smi metric --nic all` now enumerate every card present.
+
+- **AI-NIC identity and telemetry now read the port function instead of the upstream bridge**.  
+  - The NIC handle names the PCIe bridge, while PCI VPD, hwmon, and the devlink instance register on the port function beneath it. `ASIC_TEMP_C` and `PORT_SPLIT` reported `N/A` on every AI-NIC as a result, and `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` were empty on cards whose bridge exposes no `vpd` node.
+  - Identity prefers the NIC's own VPD field by field and fills only the absent fields from the port, so a bridge carrying a partial image no longer suppresses the values the port does carry.
+  - On a card with more than one port, the devlink-sourced fields report port 0.
+  - `SERIAL_NUMBER` keeps its devlink board-serial fallback, which now also addresses the port function.
+
+- **AI-NIC `HEALTH` now reads the card's management function**.  
+  - The devlink health reporter belongs to the card's `pds_core` function (`0x100c`), which sits behind the other downstream port of the card's internal PCIe switch. It is therefore neither the bridge the NIC handle names nor the port function the rest of telemetry uses, and addressing health at the port found no reporter, so `HEALTH` read `UNSUPPORTED` on every AI-NIC.
+  - Discovery now records that function alongside the ports, and health alone is addressed there. `PORT_SPLIT` and firmware continue to read the port function, which answers both.
+  - A card that exposes no separate management function is unaffected: health keeps using the address the rest of telemetry uses.
+
+- **`amd-smi fabric` now reports `UNKNOWN` instead of a real state for fabric fields it could not read**.  
+  - `FABRIC_TYPE`, `ADDR_MODE`, and `ACCEL_STATE` were defaulted through `std::numeric_limits<T>::max()`, which is not specialized for enumeration types and so yielded `0` rather than the intended reserved value. A GPU with no readable UALink data therefore reported `UALOE`, `SOURCE_ALIASING`, and `UNCONFIGURED` as if they had been measured.
+  - The three fields now default to `AMDSMI_FABRIC_TYPE_UNKNOWN`, `AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN`, and `AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN`. The integer fields on the same structure were already correct and are unchanged.
+
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
   - The `UINT_MAX` "unavailable" sentinel is exempt: a domain with no minimum dpm level or no deep-sleep state keeps reporting the clock as unavailable instead of failing the call.
@@ -140,6 +175,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A numeric profile INDEX (e.g. `-C 0`) is also accepted, matched against an estimated `SPX, DPX, TPX, QPX, CPX` ordering.
   - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` and `0-4` instead of `N/A`.
 
+- **`amdsmi_get_nic_port_statistics()` and `amdsmi_get_nic_vendor_statistics()` are now implemented**.  
+  - Both previously always returned `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. They now report per-port standard and vendor driver counters.
+  - `amdsmi_get_nic_vendor_statistics()` gains a new `amdsmi_nic_stat_scope_t scope` parameter (`DEFAULT` or `EXTENDED`), inserted before `num_stats`. This is a breaking signature change, but no released caller could have depended on the old signature actually returning data.
+  - `amd-smi metric --nic --port [--extended]` now shows per-port vendor and standard statistics.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -213,6 +253,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The NIC is now enumerated with an empty `rdma_dev`.
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
   - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
+
+- **Fixed ``amd-smi metric --nic`` printing an empty ``REPORTER`` for NICs with no health reporter**.  
+  - ``amdsmi_get_nic_telemetry()`` in the Python interface returned an empty ``health.reporter`` string where every other unavailable telemetry field reads ``N/A``, so the ``HEALTH`` block of a UALoE endpoint showed ``REPORTER:`` with no value.
+  - It now reports ``N/A``. The C API is unchanged and still returns an empty ``reporter``.
 
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.

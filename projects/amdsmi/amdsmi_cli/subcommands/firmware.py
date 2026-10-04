@@ -2,12 +2,22 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import concurrent.futures
 import logging
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
 class FirmwareCommands:
+    def _get_nic_fw_info(self, device_handle):
+        """Query firmware info for one NIC; {} on failure (logged)."""
+        try:
+            return amdsmi_interface.amdsmi_get_nic_fw_info(device_handle)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            nic_id = self.helpers.get_ainic_id_from_device_handle(device_handle)
+            logging.debug("Failed to get firmware info for nic %s | %s", nic_id, e.get_error_info())
+            return {}
+
     def firmware_nic(self, args, multiple_devices=False, nic=None, fw_list=True):
         """Get Firmware information for target nic
 
@@ -29,28 +39,34 @@ class FirmwareCommands:
 
         # Handle No NIC passed
         if args.nic == None:
-            args.nic = self.device_handles_brcm_nics
+            args.nic = self.device_handles_ainics
 
         # Handle multiple NICs
 
         if args.nic != None:
-            handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(
+            # Each firmware query is a live devlink round trip (~1s); fetch them
+            # concurrently instead of once per recursive handle_ainics call below.
+            if isinstance(args.nic, list) and len(args.nic) > 1 and args.fw_list:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(args.nic)) as pool:
+                    fw_infos = pool.map(self._get_nic_fw_info, args.nic)
+                args._nic_fw_info_prefetch = dict(zip((h.value for h in args.nic), fw_infos))
+
+            handled_multiple_nics, device_handle = self.helpers.handle_ainics(
                 args, self.logger, self.firmware_nic
             )
             if handled_multiple_nics:
                 return  # This function is recursive
 
         args.nic = device_handle
-        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
+        fw_info = {}
         if args.fw_list:
-            try:
-                fw_info = amdsmi_interface.amdsmi_get_nic_fw_info(args.nic)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug(
-                    "Failed to get firmware info for nic %s | %s", nic_id, e.get_error_info()
-                )
+            prefetch = getattr(args, "_nic_fw_info_prefetch", None)
+            if prefetch is not None and args.nic.value in prefetch:
+                fw_info = prefetch[args.nic.value]
+            else:
+                fw_info = self._get_nic_fw_info(args.nic)
 
-        self.logger.store_nic_output(args.nic, "values", fw_info)
+        self.logger.store_ainic_output(args.nic, "values", fw_info)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -58,9 +74,7 @@ class FirmwareCommands:
 
         self.logger.print_output()
 
-    def firmware(
-        self, args, multiple_devices=False, gpu=None, nic=None, fw_list=True, brcm_nic=None
-    ):
+    def firmware(self, args, multiple_devices=False, gpu=None, nic=None, fw_list=True):
         """Get Firmware information for target gpu
 
         Args:
@@ -68,7 +82,6 @@ class FirmwareCommands:
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
             fw_list (bool, optional): True to get list of all firmware information
-            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -84,9 +97,7 @@ class FirmwareCommands:
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        if self.helpers.is_brcm_nic_initialized() and (
-            getattr(args, "brcm_nic", False) or brcm_nic
-        ):
+        if self.helpers.is_ainic_initialized() and (nic or getattr(args, "nic", None)):
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
             self.firmware_nic(args, multiple_devices, nic, fw_list)
