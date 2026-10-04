@@ -3170,6 +3170,51 @@ bool Device::UpdateScratchLimitCurrent(size_t limit) const {
 };
 
 // ================================================================================================
+size_t Device::PersistingL2CacheSizeCurrent() const {
+  uint32_t persistingL2CacheSize = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSize);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return static_cast<size_t>(persistingL2CacheSize);
+};
+
+// ================================================================================================
+size_t Device::PersistingL2CacheSizeMax() const {
+  uint32_t persistingL2CacheSizeMax = 0;
+  hsa_status_t ret =
+      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
+                         &persistingL2CacheSizeMax);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE cannot be queried! Err: 0x%xh", ret);
+    return 0;
+  }
+  return static_cast<size_t>(persistingL2CacheSizeMax);
+};
+
+// ================================================================================================
+bool Device::UpdatePersistingL2CacheSizeCurrent(size_t size) const {
+  const size_t max_size = PersistingL2CacheSizeMax();
+  if (size > max_size) {
+    LogPrintfError("Persisting L2 cache size %zu exceeds device max %zu", size, max_size);
+    return false;
+  }
+  // HSA API expects size_t* (not uint32_t*) per hsa_ext_amd.h documentation
+  // Make a mutable copy since HSA API takes non-const void*
+  size_t cache_size = size;
+  hsa_status_t ret = Hsa::agent_set_attribute(bkendDevice_,
+      HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, &cache_size);
+  if (HSA_STATUS_SUCCESS != ret) {
+    LogPrintfError("hsa_amd_agent_set_attribute(PERSISTING_L2_CACHE_SIZE, %zu) failed with err 0x%xh", size, ret);
+    return false;
+  }
+  return true;
+};
+
+// ================================================================================================
 bool Device::SvmAllocInit(void* memory, size_t size) const {
   amd::MemoryAdvice advice = amd::MemoryAdvice::SetAccessedBy;
   constexpr bool kFirstAlloc = true;
