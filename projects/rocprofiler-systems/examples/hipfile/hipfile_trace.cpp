@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Built with the hipFile SDK include path, which the tidy job does not have.
+// NOLINTNEXTLINE(clang-diagnostic-error)
 #include <hipfile.h>
 
 #include <cstdio>
