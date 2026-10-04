@@ -27,10 +27,6 @@ test_categories:
       - test_list_metrics_cli
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
-      - test_instant_button
-      - test_menu_bar
-      - test_tui_utils
-      - test_collapsibles
       - test_analysis_db
       - test_analysis_base
       - test_analysis_orm
@@ -55,6 +51,7 @@ test_categories:
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_conftest
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -88,6 +85,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_bench
@@ -128,10 +126,6 @@ test_categories:
       - test_roofline_main
       - test_rocpd_data
       - test_torch_trace_coverage
-      - test_instant_button
-      - test_menu_bar
-      - test_tui_utils
-      - test_collapsibles
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -150,6 +144,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -186,6 +181,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -227,10 +223,6 @@ test_categories:
       - test_roofline_main
       - test_rocpd_data
       - test_torch_trace_coverage
-      - test_instant_button
-      - test_menu_bar
-      - test_tui_utils
-      - test_collapsibles
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -249,6 +241,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -285,6 +278,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -326,10 +320,6 @@ test_categories:
       - test_roofline_main
       - test_rocpd_data
       - test_torch_trace_coverage
-      - test_instant_button
-      - test_menu_bar
-      - test_tui_utils
-      - test_collapsibles
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
@@ -348,6 +338,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250

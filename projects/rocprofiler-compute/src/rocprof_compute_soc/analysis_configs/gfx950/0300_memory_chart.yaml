@@ -187,7 +187,6 @@ Panel Config:
           unit: Bytes/s
       comparable: false
       cli_style: mem_chart
-      tui_style: mem_chart
   metrics_description:
     Wavefront Occupancy: Wavefronts per active CU.
     Wave Life: Average number of cycles executing a wave.

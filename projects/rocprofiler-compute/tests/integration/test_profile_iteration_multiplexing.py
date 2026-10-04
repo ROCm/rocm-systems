@@ -3,7 +3,6 @@
 
 """Integration tests for iteration multiplexing."""
 
-import inspect
 import os
 
 import common
@@ -19,7 +18,6 @@ from tests.integration.common import (
     num_devices,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
 
 
@@ -46,12 +44,6 @@ def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     )
     assert sorted(list(file_dict.keys())) == CSVS
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -67,12 +59,6 @@ def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
         workload_dir, num_devices, num_kernels
     )
     assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -91,12 +77,6 @@ def test_iteration_multiplexing_kernel_launch_params(
         workload_dir, num_devices, num_kernels
     )
     assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

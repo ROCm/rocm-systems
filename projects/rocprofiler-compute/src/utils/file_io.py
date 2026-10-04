@@ -415,45 +415,6 @@ def _read_counter_results(result_file: Path) -> pd.DataFrame:
     return df
 
 
-def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
-    """
-    Collect wave occupancy info from in_dir csv files
-    and consolidate into out_dir/wave_occu_per_cu.csv.
-    It depends highly on wave_occu_se*.csv format.
-    """
-    in_path = Path(in_dir)
-    all_data = pd.DataFrame()
-
-    for i in range(num_se):
-        file_path = in_path / f"wave_occu_se{i}.csv"
-        if not file_path.exists():
-            continue
-
-        tmp_df = pd.read_csv(file_path)
-        if tmp_df.empty:
-            continue
-
-        se_idx = f"SE{tmp_df.loc[0, 'SE']}"
-        tmp_df.rename(
-            columns={
-                "Dispatch": "Dispatch",
-                "SE": "SE",
-                "CU": "CU",
-                "Occupancy": se_idx,
-            }
-        )
-
-        # TODO: join instead of concat!
-        if i == 0:
-            all_data = tmp_df[{"CU", se_idx}]
-            all_data.sort_index(axis=1, inplace=True)
-        else:
-            all_data = pd.concat([all_data, tmp_df[se_idx]], axis=1, copy=False)
-
-    if not all_data.empty:
-        all_data.to_csv(Path(out_dir) / "wave_occu_per_cu.csv", index=False)
-
-
 def is_single_panel_config(
     root_dir: str, supported_archs: dict[str, str]
 ) -> Optional[bool]:

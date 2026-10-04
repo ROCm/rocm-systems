@@ -3,6 +3,25 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
+## ROCm Compute Profiler 3.11.0 for ROCm 10.3.0
+
+### Added
+
+### Changed
+
+### Removed
+
+* Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
+  * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
+
+### Optimized
+
+### Resolved issues
+
+### Upcoming changes
+
+### Known issues
+
 ## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
 
 ### Added

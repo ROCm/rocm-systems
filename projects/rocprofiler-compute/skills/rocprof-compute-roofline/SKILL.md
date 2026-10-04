@@ -10,8 +10,8 @@ ceilings, peak compute and peak bandwidth, and answers one question: which of
 the two is the limit.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
-before choosing flags. Never use the GUI or TUI, and do not open the generated
-HTML chart. The analyze table carries the same numbers in readable form.
+before choosing flags. Do not open the generated HTML chart. The analyze table
+carries the same numbers in readable form.
 
 ## 1. Collect
 

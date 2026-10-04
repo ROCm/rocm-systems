@@ -478,14 +478,8 @@ def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
 
 
 def _resolve_kernel_ids(workload: schema.Workload) -> list[int]:
-    """Kernel row ids to plot: an explicit int filter, else every top kernel.
-
-    WebUI passes string kernel names as filters and pre-narrows pmc_df, so in
-    that case every id is processed and the caller's filtering is relied upon.
-    """
-    if workload.filter_kernel_ids and all(
-        isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids
-    ):
+    """Kernel row ids to plot: an explicit kernel filter, else every top kernel."""
+    if workload.filter_kernel_ids:
         return workload.filter_kernel_ids
     if _KERNEL_TOP_TABLE_ID not in workload.dfs:
         return []

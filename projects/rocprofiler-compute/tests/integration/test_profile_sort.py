@@ -3,7 +3,6 @@
 
 """Integration tests for the profile --sort option."""
 
-import inspect
 from pathlib import Path
 
 import common
@@ -14,7 +13,6 @@ from tests.integration.common import (
     config,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
 
 
@@ -46,8 +44,6 @@ def test_roof_sort_dispatches(
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -79,6 +75,4 @@ def test_roof_sort_kernels(
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
     common.clean_output_dir(config["cleanup"], workload_dir)

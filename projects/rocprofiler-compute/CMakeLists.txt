@@ -619,6 +619,13 @@ add_test(
 )
 
 add_test(
+    NAME test_mem_chart_common
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
+        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_mem_chart_gfx9
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
@@ -842,42 +849,6 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pc_sampling_analyze_cli.xml
         ${COV_OPTION} tests/integration/test_pc_sampling_analyze_cli.py
-        ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
-# TUI component tests
-# -----------------------------------
-
-add_test(
-    NAME test_instant_button
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_instant_button.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_instant_button.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_menu_bar
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_menu_bar.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/menu_bar/test_menu_bar.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_tui_utils
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_tui_utils.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/utils/test_tui_utils.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_collapsibles
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_collapsibles.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_collapsibles.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -1109,6 +1080,7 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
+        test_mem_chart_common
         test_mem_chart_gfx9
         test_mem_chart_gfx11
         test_mem_chart_gfx1250
@@ -1120,10 +1092,6 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
-        test_instant_button
-        test_menu_bar
-        test_tui_utils
-        test_collapsibles
         test_rocpd_data
         test_torch_trace_coverage
         test_profile_torch_trace
@@ -1138,6 +1106,7 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
+        test_per_kernel_isa_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
@@ -1265,14 +1234,6 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# src/rocprof_compute_tui
-install(
-    DIRECTORY src/rocprof_compute_tui
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-
 # ==============================================================================
 # Vendored Dependencies Installation
 # ==============================================================================
