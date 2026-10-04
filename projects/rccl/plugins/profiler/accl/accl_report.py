@@ -51,6 +51,39 @@ class Record:
     kernel_events: list = field(default_factory=list)
 
 
+def drop_warmup(records: List[Record], warmup: int,
+                where: str = "") -> List[Record]:
+    """Drop the first `warmup` iterations of every (rank, coll, msg_size) group.
+
+    coll_sn is comm->seqNumber[func]: monotonic for the whole run per function,
+    not per message size. Thresholding on it (sn < warmup) therefore only ever
+    trims the first size of a sweep and leaves every later size carrying its own
+    in-band warmup iterations, which is the contamination the flag exists to
+    remove. Group first, then drop within each group.
+    """
+    if warmup <= 0 or not records:
+        return records
+    groups: Dict[Tuple[int, str, int], List[int]] = defaultdict(list)
+    for i, r in enumerate(records):
+        groups[(r.rank, r.coll, r.msg_size)].append(i)
+    dropped = set()
+    short = []
+    for key, idxs in groups.items():
+        # Sort by sn so "first N iterations" holds even if completion records
+        # land out of order; the index tiebreak keeps the sort deterministic.
+        idxs.sort(key=lambda i: (records[i].sn, i))
+        dropped.update(idxs[:warmup])
+        if len(idxs) <= warmup:
+            short.append((key, len(idxs)))
+    if short:
+        detail = ", ".join(f"rank {rk} {cl} {fmt_size(sz)} ({n} record(s))"
+                           for (rk, cl, sz), n in sorted(short))
+        print(f"WARNING:{where} warmup={warmup} consumed every record of "
+              f"{len(short)} group(s); they are absent from the report: "
+              f"{detail}.", file=sys.stderr)
+    return [r for i, r in enumerate(records) if i not in dropped]
+
+
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
     records = []
     with open(filepath, encoding="utf-8") as f:
@@ -69,8 +102,6 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
 
             sn = cp.get('coll_sn', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn < warmup:
-                continue
 
             decomp = cp.get('decomposition', {})
             records.append(Record(
@@ -99,6 +130,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 n_send_ops=decomp.get('n_send_ops', 0),
                 n_recv_ops=decomp.get('n_recv_ops', 0),
             ))
+    records = drop_warmup(records, warmup, where=f" {os.path.basename(filepath)}:")
     if not records and warmup > 0:
         print(f"WARNING: 0 records after filtering warmup={warmup}. "
               f"File may have fewer than {warmup} iterations.",
@@ -141,11 +173,48 @@ def print_drop_warnings(summaries: List[dict]):
         return
     total_dropped = sum(s.get('dropped_collectives', 0) for s in summaries)
     total_leaked = sum(s.get('leaked_collectives', 0) for s in summaries)
-    if total_dropped > 0 or total_leaked > 0:
-        print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
-              f"dropped (pool exhausted, pool_size={summaries[0].get('pool_size', '?')}), "
-              f"{total_leaked} slots leaked (teardown-skipped kernel events). "
-              f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
+    total_dropped_ops = sum(s.get('dropped_proxy_ops', 0) for s in summaries)
+    total_dropped_steps = sum(s.get('dropped_proxy_steps', 0) for s in summaries)
+    total_overflow_ops = sum(s.get('overflow_proxy_ops', 0) for s in summaries)
+    total_outstanding_ops = sum(s.get('outstanding_proxy_ops', 0) for s in summaries)
+    total_outstanding_steps = sum(s.get('outstanding_proxy_steps', 0) for s in summaries)
+    total_inflight = sum(s.get('inflight_collectives', 0) for s in summaries)
+    total_stale_steps = sum(s.get('stale_proxy_steps', 0) for s in summaries)
+    any_write_error = any(s.get('write_error', False) for s in summaries)
+    # `complete` is the plugin's own verdict and covers every counter it tracks,
+    # including any added later; trust it over the counters we happen to read.
+    # Pre-`complete` files have no flag, so absence must not read as incomplete.
+    any_incomplete = any(not s.get('complete', True) for s in summaries)
+    if not (any_incomplete or total_dropped or total_leaked or total_inflight
+            or total_dropped_ops or total_dropped_steps or total_overflow_ops
+            or total_stale_steps or total_outstanding_ops
+            or total_outstanding_steps or any_write_error):
+        return
+    print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
+          f"dropped (coll pool exhausted, "
+          f"coll_pool_size={summaries[0].get('coll_pool_size', '?')}), "
+          f"{total_leaked} slots leaked (teardown-skipped kernel events), "
+          f"{total_inflight} collectives in flight at finalize, "
+          f"{total_dropped_ops} proxy ops dropped, "
+          f"{total_dropped_steps} proxy steps dropped, "
+          f"{total_overflow_ops} proxy ops discarded (per-collective limit), "
+          f"{total_stale_steps} proxy steps stale (parent slot reissued), "
+          f"{total_outstanding_ops} proxy ops and {total_outstanding_steps} proxy "
+          f"steps still outstanding at finalize, "
+          f"write_error={any_write_error}. "
+          f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
+
+
+def reject_legacy_summaries(summaries: List[dict], label: str):
+    # `pool_size` was renamed `coll_pool_size` in the same change that moved the
+    # proxy_* means onto per-op-class divisors, so a file still carrying the old
+    # key is on the old scale: roughly 2x low, which both misclassifies the
+    # bottleneck in `single` and reads as a regression in `compare`.
+    if any('pool_size' in s and 'coll_pool_size' not in s for s in summaries):
+        print(f"ERROR: {label} was produced by a pre-rename profiler "
+              f"(summary has 'pool_size'). Its proxy_* fields use a different "
+              f"divisor and cannot be interpreted; regenerate it.", file=sys.stderr)
+        sys.exit(1)
 
 
 def load_dir_or_file(path: str, warmup: int) -> List[Record]:
@@ -476,6 +545,7 @@ def main():
         if args.cmd == 'single':
             records = load_dir_or_file(args.input, args.warmup)
             summaries = load_summaries(args.input)
+            reject_legacy_summaries(summaries, "input")
             print(f"Loaded {len(records)} records")
             print_drop_warnings(summaries)
             print_single_report(records)
@@ -484,6 +554,8 @@ def main():
             cand = load_dir_or_file(args.candidate, args.warmup)
             base_summaries = load_summaries(args.baseline)
             cand_summaries = load_summaries(args.candidate)
+            reject_legacy_summaries(base_summaries, "baseline")
+            reject_legacy_summaries(cand_summaries, "candidate")
             print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
             print_drop_warnings(base_summaries + cand_summaries)
             print_compare_report(base, cand, args.threshold)
