@@ -9,10 +9,20 @@ memory effects are still computed eagerly.
 
 | Architecture | Completion queues |
 |---|---|
-| CDNA1, CDNA2, CDNA3, CDNA4 | `vmcnt`, `lgkmcnt`, `expcnt` |
+| CDNA1, CDNA2, CDNA3 | `vmcnt`, `lgkmcnt`, `expcnt` |
+| CDNA4 | `vmcnt`, `lgkmcnt`; the encoded `expcnt` field is unused |
 | RDNA1, RDNA2, RDNA3, RDNA3.5 | `vmcnt`, `vscnt`, `lgkmcnt`, `expcnt` |
 | RDNA4 | `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `expcnt`, `samplecnt`, `bvhcnt` |
 | CDNA5 | `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `expcnt`, `asynccnt`, `tensorcnt` |
+
+The [CDNA4 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf),
+sections 3.1 and 4.4, specifies EXPCNT as unused. CDNA4 memory
+instructions therefore do not acquire an EXPCNT obligation. For example, a
+returning GLOBAL atomic followed by `s_waitcnt vmcnt(0)` makes its returned
+VGPR readable; an EXP-only wait does not establish that readiness. This does
+not change the separate VMCNT/LGKMCNT obligations of generic FLAT operations.
+A FLAT write to LDS followed by those waits and a workgroup barrier must also
+be visible to another wave without an EXP wait.
 
 Only instructions present in a target's ISA produce entries. Counter names do not imply
 that every target has every instruction associated with that family. The GFX10 legacy

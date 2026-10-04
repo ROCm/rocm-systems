@@ -87,6 +87,163 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
+// --- Returning GLOBAL atomics ---
+
+// CDNA4's EXPCNT is unused. VMCNT alone makes the returned atomic value
+// readable; an EXP-only wait must not hide the missing VMCNT dependency.
+template <bool VmWait, bool ExpWait, bool Masked>
+__global__ void global_atomic_wait_kernel(unsigned *values, unsigned *output) {
+  unsigned lane = threadIdx.x;
+  if (!Masked || lane == 0) {
+    unsigned old;
+    asm volatile("global_atomic_add %[old], %[address], %[increment], off sc0\n"
+                 "s_waitcnt vmcnt(%c[vm]) expcnt(%c[exp]) lgkmcnt(15)\n"
+                 "v_mov_b32 %[old], %[old]\n"
+                 : [old] "=&v"(old)
+                 : [address] "v"(values + lane), [increment] "v"(1u), [vm] "n"(VmWait ? 0 : 63),
+                   [exp] "n"(ExpWait ? 0 : 7)
+                 : "memory");
+    output[lane] = old;
+  }
+}
+
+template <bool VmWait, bool ExpWait, bool Masked> void check_global_atomic_values() {
+  std::vector<unsigned> input(64), result(64, 0xdeadbeef);
+  for (unsigned lane = 0; lane < input.size(); ++lane)
+    input[lane] = lane + 11;
+  unsigned *values = nullptr, *output = nullptr;
+  ASSERT_EQ(hipMalloc(&values, input.size() * sizeof(unsigned)), hipSuccess);
+  ASSERT_EQ(hipMalloc(&output, result.size() * sizeof(unsigned)), hipSuccess);
+  ASSERT_EQ(hipMemcpy(values, input.data(), input.size() * sizeof(unsigned), hipMemcpyHostToDevice),
+            hipSuccess);
+  ASSERT_EQ(
+      hipMemcpy(output, result.data(), result.size() * sizeof(unsigned), hipMemcpyHostToDevice),
+      hipSuccess);
+  global_atomic_wait_kernel<VmWait, ExpWait, Masked><<<1, 64>>>(values, output);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ASSERT_EQ(hipMemcpy(input.data(), values, input.size() * sizeof(unsigned), hipMemcpyDeviceToHost),
+            hipSuccess);
+  ASSERT_EQ(
+      hipMemcpy(result.data(), output, result.size() * sizeof(unsigned), hipMemcpyDeviceToHost),
+      hipSuccess);
+  for (unsigned lane = 0; lane < input.size(); ++lane) {
+    const bool active = !Masked || lane == 0;
+    EXPECT_EQ(input[lane], lane + 11 + unsigned(active));
+    EXPECT_EQ(result[lane], active ? lane + 11 : 0xdeadbeef);
+  }
+  EXPECT_EQ(hipFree(output), hipSuccess);
+  EXPECT_EQ(hipFree(values), hipSuccess);
+}
+
+static constexpr RaceExpectation kGlobalAtomicWaitRaceExpectation{
+    .kernel = "global_atomic_wait_kernel",
+    .type = "VGPR",
+    .access = "read",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_atomic_add",
+    .consumer = "v_mov_b32",
+};
+
+TEST_F(Gfx950RaceTest, global_atomic_vmcnt) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<true, false, false>()));
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_both_waits) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<true, true, false>()));
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_no_wait_race) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<false, false, false>()));
+  ExpectRace(kGlobalAtomicWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_expcnt_only_race) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<false, true, false>()));
+  ExpectRace(kGlobalAtomicWaitRaceExpectation);
+}
+
+// Each EXEC mask gets its own process and report assertion: a finding from
+// the full-wave launch must not hide a missed dependency in the masked launch.
+TEST_F(Gfx950RaceTest, global_atomic_masked_vmcnt) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<true, false, true>()));
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_masked_both_waits) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<true, true, true>()));
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_masked_no_wait_race) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<false, false, true>()));
+  ExpectRace(kGlobalAtomicWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, global_atomic_masked_expcnt_only_race) {
+  ASSERT_NO_FATAL_FAILURE((check_global_atomic_values<false, true, true>()));
+  ExpectRace(kGlobalAtomicWaitRaceExpectation);
+}
+
+// --- FLAT writes to LDS do not need EXPCNT ---
+
+// Exchange data between two waves through generic FLAT accesses. Explicitly
+// drain both FLAT counters, leaving EXPCNT untouched. The store must be retired
+// at the barrier; a spurious EXPCNT obligation would keep its LDS write pending.
+template <bool Synchronized> __global__ void flat_lds_exchange_kernel(unsigned *output) {
+  __shared__ unsigned tile[128];
+  const unsigned tid = threadIdx.x;
+  const uint64_t write_address = reinterpret_cast<uint64_t>(&tile[tid]);
+  asm volatile("flat_store_dword %[address], %[value]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
+               :
+               : [address] "v"(write_address), [value] "v"(tid + 11)
+               : "memory");
+  if constexpr (Synchronized)
+    __syncthreads();
+  const uint64_t read_address = reinterpret_cast<uint64_t>(&tile[127 - tid]);
+  unsigned value;
+  asm volatile("flat_load_dword %[value], %[address]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
+               : [value] "=v"(value)
+               : [address] "v"(read_address)
+               : "memory");
+  output[tid] = value;
+}
+
+template <bool Synchronized> void check_flat_lds_exchange() {
+  unsigned *output = nullptr;
+  std::vector<unsigned> result(128);
+  ASSERT_EQ(hipMalloc(&output, result.size() * sizeof(unsigned)), hipSuccess);
+  flat_lds_exchange_kernel<Synchronized><<<1, 128>>>(output);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ASSERT_EQ(
+      hipMemcpy(result.data(), output, result.size() * sizeof(unsigned), hipMemcpyDeviceToHost),
+      hipSuccess);
+  if constexpr (Synchronized) {
+    for (unsigned tid = 0; tid < result.size(); ++tid)
+      EXPECT_EQ(result[tid], 127 - tid + 11);
+  }
+  EXPECT_EQ(hipFree(output), hipSuccess);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_exchange) {
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<true>());
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_exchange_race) {
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<false>());
+  ExpectRace({.kernel = "flat_lds_exchange_kernel",
+              .type = "LDS",
+              .access = "read",
+              .consumer = "flat_load_dword"});
+}
+
 // --- Generic FLAT dual-counter waits ---
 
 // Generic FLAT carries simultaneous VMCNT and LGKMCNT obligations, regardless
