@@ -82,8 +82,8 @@ stream:
   Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) Disabling below tests temporarily due to change in API behavior; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) Disabling below tests temporarily due to change in API behavior; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities:
     <<: *level_2
@@ -97,8 +97,8 @@ stream:
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, asan]
-      reason: "Disabling test tracked SWDEV-394199; Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, asan]
+      reason: "Disabling test tracked SWDEV-394199; Does not play well with ASAN Needs to be re-triaged on amd_wsl, asan AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
@@ -109,35 +109,47 @@ stream:
   Unit_hipStreamCreateWithPriority_VerifyKernelResults:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in stress test on 24/07/23 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in stress test on 24/07/23 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_2
     tags: [lifecycle, P1]
   Unit_hipStreamPriorityAqlLog_ChildWorkload:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "Internal helper, only invoked by the parent test via re-exec (by exact; name, which still runs hidden [.] cases). Enabled on amd_linux, where it; runs as a harmless standalone no-op; disabled on other platforms. Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "Internal helper, only invoked by the parent test via re-exec (by exact; name, which still runs hidden [.] cases). Enabled on amd_linux, where it; runs as a harmless standalone no-op; disabled on other platforms. Needs to be re-triaged on amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "Verifies AQL packet trace reports stream priority next to HWq; relies on; AMD_LOG AQL output, so AMD/Linux only. Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "Verifies AQL packet trace reports stream priority next to HWq; relies on; AMD_LOG AQL output, so AMD/Linux only. Needs to be re-triaged on amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [lifecycle]
   Unit_hipStreamAqlBarrierBit_ChildWorkload:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "Internal helper invoked by the parent test via re-exec. Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_linux, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "Internal helper invoked by the parent test via re-exec. Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [synchronization]
   Unit_hipStreamAqlBarrierBit_Scenarios:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "Parses AMD AQL logs and requires fork/exec. Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "Parses AMD AQL logs and requires fork/exec. Needs to be re-triaged on amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [synchronization]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
@@ -193,8 +205,8 @@ stream:
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) mlsejenkins_Window_Failures_on_gfx1201; (amd_wsl) Note: TDR (pass) Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) mlsejenkins_Window_Failures_on_gfx1201; (amd_wsl) Note: TDR (pass) Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
@@ -202,8 +214,8 @@ stream:
   Unit_hipStreamSynchronize_NullStreamAndStreamPerThread:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: needs to be enabled when streamPerThread issues are fixed Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: needs to be enabled when streamPerThread issues are fixed Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, P1]
   Unit_hipStreamKilledWorkerThread:
     <<: *level_2
@@ -217,8 +229,8 @@ stream:
   Unit_hipStreamQuery_WithFinishedWork:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, smoke, P0]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_2
@@ -244,8 +256,8 @@ stream:
   Unit_hipStreamAddCallback_StrmSyncTiming:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-400049 tdr intermittently; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-400049 tdr intermittently; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_2
@@ -268,8 +280,8 @@ stream:
   Unit_hipLaunchHostFunc_KernelHost:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multidevice:
     <<: *level_2
@@ -283,8 +295,8 @@ stream:
   Unit_hipLaunchHostFunc_Graph:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [callback, P1]
   Unit_hipStreamGetDevice_Negative:
     <<: *level_2
@@ -400,8 +412,8 @@ stream:
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, P1]
   Unit_hipStreamGetFlags_spt_Basic:
     <<: *level_2
@@ -427,20 +439,20 @@ stream:
   Unit_hipStreamQuery_spt_WithFinishedWork:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_NegativeCases:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithPendingWork:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_EmptyStream:
     <<: *level_2
@@ -448,14 +460,14 @@ stream:
   Unit_hipStreamSynchronize_spt_FinishWork:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Following tests disabled due to SWDEV-486363 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_2
@@ -463,32 +475,32 @@ stream:
   Unit_hipStreamBatchMemOp_SequentialOrdering:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, nvidia]
+      reason: "Needs to be re-triaged on amd_wsl, nvidia AIRUNTIME-2744"
     tags: [synchronization, memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: Test requires at least 2 GPUs. Needs to be re-triaged on amd_wsl, nvidia AIRUNTIME-2744"
     tags: [synchronization, memory, multigpu]
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: result == 0x42 -> 0 == 66. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl, nvidia AIRUNTIME-2744"
     tags: [synchronization]
   Unit_hipStreamWaitWriteValue64_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: result == 0xCAFEBABECAFEBABEULL -> 0 == 14627333968358193854 (0xcafebabecafebabe). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl, nvidia AIRUNTIME-2744"
     tags: [synchronization]
   Unit_hipStreamBatchMemOp_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: result == 0x1234 -> 0 == 4660 (0x1234). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl, nvidia AIRUNTIME-2744"
     tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
     <<: *level_2
@@ -549,4 +561,4 @@ stream:
     tags: [synchronization, overlap]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit; stream wait-value deadlocks on HW rings. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit; stream wait-value deadlocks on HW rings. gfx1201 (amd_windows) HANG (>300s timeout). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"

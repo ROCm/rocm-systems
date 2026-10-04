@@ -229,20 +229,20 @@ memory:
     <<: *level_2
     tags: [P1]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset:
     <<: *level_2
     tags: [P1]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset:
     <<: *level_2
     tags: [P1, managed_memory]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [transfer, P1]
@@ -280,8 +280,8 @@ memory:
     <<: *level_2
     tags: [P1]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
     tags: [multigpu, P1]
@@ -532,8 +532,8 @@ memory:
   Unit_hipHostGetDevicePointer_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1]
   Unit_hipHostGetDevicePointer_UseCase:
     <<: *level_2
@@ -594,7 +594,7 @@ memory:
     tags: [multigpu, P1, managed_memory]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipManagedMultiGpuVaConsistency_MultiDevice:
     <<: *level_2
     tags: [alloc, multigpu, managed_memory]
@@ -684,8 +684,8 @@ memory:
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [memset, P1]
   Unit_hipMemset3D_Capture:
     <<: *level_2
@@ -713,8 +713,8 @@ memory:
   Unit_hipMemset2DAsync_capturehipMemset2DAsync:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [memset, P1]
   Unit_hipMemset2D_Capture:
     <<: *level_2
@@ -808,8 +808,8 @@ memory:
   Unit_hipMemPrefetchAsync_NonPageSz:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "Disabling below tests temporarily due to change in API behavior Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, amd_linux]
+      reason: "Disabling below tests temporarily due to change in API behavior Needs to be re-triaged on amd_wsl, amd_linux AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
@@ -821,7 +821,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1, managed_memory]
   Unit_hipMallocManaged_Large:
     <<: *level_2
@@ -881,13 +881,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_4:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipHostMalloc_CoherentTst:
     <<: *level_2
@@ -899,13 +899,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMalloc_CoherentTst:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipExtMallocWithFlags_CoherentTst:
     <<: *level_2
@@ -995,9 +995,6 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast_Large:
     <<: *level_2
-    disabled:
-      targets: [amd_windows]
-      reason: "ROCM-28819 Needs to be re-triaged AIRUNTIME-2744"
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
     <<: *level_2
@@ -1185,8 +1182,8 @@ memory:
   Unit_hipMemPoolExportToShareableHandle_SameProc:
     <<: *level_2
     disabled:
-      targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_linux, amd_wsl]
+      reason: "Needs to be re-triaged on amd_linux, amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolExportToShareableHandle_ChldUseHdl:
     <<: *level_2
@@ -1272,8 +1269,8 @@ memory:
   Unit_hipMemVmm_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "SWDEV-396616 hipMemMap returns invalid error; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, amd_linux]
+      reason: "SWDEV-396616 hipMemMap returns invalid error; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged on amd_wsl, amd_linux AIRUNTIME-2744"
     tags: [virtualMemoryManagement, P1]
   Unit_hipMemVmm_Uncached:
     <<: *level_2
@@ -1421,26 +1418,26 @@ memory:
   Unit_hipMemPoolApi_BasicAlloc:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolApi_BasicTrim:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolApi_BasicReuse:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolApi_Opportunistic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc]
   Unit_hipMemPoolApi_Default:
     <<: *level_2
@@ -1477,15 +1474,15 @@ memory:
     tags: [alloc, multigpu, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemPoolSetGetAccess_Positive_P2P:
     <<: *level_2
     tags: [alloc, multigpu, P1]
   Unit_hipMemPoolSetAccess_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-435667: Below tests failing randomly in stress test on 08/12/23 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-435667: Below tests failing randomly in stress test on 08/12/23 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolSetAccess_SetAccess:
     <<: *level_2
@@ -1496,8 +1493,8 @@ memory:
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolGetAccess_SetGet:
     <<: *level_2
@@ -1517,14 +1514,14 @@ memory:
   Unit_hipMemPoolSetAttribute_EventDependencies:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "mlsejenkins_Window_Failures_on_gfx1201 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "mlsejenkins_Window_Failures_on_gfx1201 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolSetAttribute_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_2
@@ -1532,8 +1529,8 @@ memory:
   Unit_hipMemPoolGetAttribute_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMemPoolGetAttribute_SetGet:
     <<: *level_2
@@ -1586,8 +1583,8 @@ memory:
   Unit_hipMemPoolTrimTo_Multithreaded:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
     <<: *level_2
@@ -1631,14 +1628,14 @@ memory:
   Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, asan]
+      reason: "Does not play well with ASAN Needs to be re-triaged on amd_wsl, asan AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, asan]
+      reason: "Does not play well with ASAN Needs to be re-triaged on amd_wsl, asan AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
     <<: *level_2
@@ -1675,7 +1672,7 @@ memory:
     tags: [multigpu, transfer, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Disabling test tracked SWDEV-391555 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Disabling test tracked SWDEV-391555 gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpyPeer_Positive_OrderingWithSrcBlockingStream:
     <<: *level_2
     tags: [multigpu, transfer]
@@ -1693,7 +1690,7 @@ memory:
     tags: [multigpu, transfer, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Disabling test tracked SWDEV-391555 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Disabling test tracked SWDEV-391555 gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemcpyPeerAsync_Negative_Parameters:
     <<: *level_2
     tags: [multigpu, transfer, P1]
@@ -1838,8 +1835,8 @@ memory:
   Unit_hipMemcpyAsync_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, P1]
   Unit_hipMemcpyAsync_Capture:
     <<: *level_2
@@ -1865,8 +1862,8 @@ memory:
   Unit_hipMemcpyDtoHAsync_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, P1]
   Unit_hipMemcpyHtoDAsync_Positive_Basic:
     <<: *level_2
@@ -1877,8 +1874,8 @@ memory:
   Unit_hipMemcpyHtoDAsync_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, P1]
   Unit_hipMemcpyDtoDAsync_Positive_Basic:
     <<: *level_2
@@ -1889,8 +1886,8 @@ memory:
   Unit_hipMemcpyDtoDAsync_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, P1]
   Unit_hipMemcpyDtoHAsync_Capture:
     <<: *level_2
@@ -2003,8 +2000,8 @@ memory:
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl, asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl, asan]
+      reason: "Rock_Window_Failures_on_gfx1151; Huge memory usage, no point enabling it with ASAN Needs to be re-triaged on amd_wsl, asan AIRUNTIME-2744"
     tags: [alloc, P0]
   Unit_hipMalloc_Positive_APU_LargeAllocSpill:
     <<: *level_2
@@ -2016,14 +2013,14 @@ memory:
   Unit_hipMalloc3D_ValidatePitch:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P0]
   Unit_hipMemAllocPitch_ValidatePitch:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocPitch_ValidatePitch:
     <<: *level_2
@@ -2034,8 +2031,8 @@ memory:
   Unit_hipMalloc3D_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocPitch_Negative:
     <<: *level_2
@@ -2211,8 +2208,8 @@ memory:
   Unit_hipDrvMemcpy3D_Positive_Array:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Negative_Parameters:
     <<: *level_2
@@ -2268,8 +2265,8 @@ memory:
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
@@ -2353,7 +2350,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: Device does not support concurrent managed access. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, managed_memory]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
@@ -2568,7 +2565,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "Note: Windows disabled; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl, amd_linux AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_2
@@ -2584,7 +2581,7 @@ memory:
     tags: [multigpu, query, P1, managed_memory]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemAdvise_Set_Unset_Basic:
     <<: *level_2
     tags: [query, P1, managed_memory]
@@ -2592,7 +2589,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_Rounding:
     <<: *level_2
@@ -2624,8 +2621,8 @@ memory:
   Unit_hipFreeAsync_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipFreeAsync_capturehipFreeAsync:
     <<: *level_2
@@ -2726,8 +2723,8 @@ memory:
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1]
   Unit_hipMemGetAddressRange_Negative:
     <<: *level_2
@@ -2739,14 +2736,14 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Below tests are failing PSDB gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_MultiThread:
     <<: *level_2
     tags: [alloc, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Below tests are failing PSDB gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMallocMipmappedArray_happy:
     <<: *level_2
     tags: [P1]
@@ -2765,8 +2762,8 @@ memory:
   Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
     <<: *level_2
@@ -2810,8 +2807,8 @@ memory:
   Unit_hipGetMipmappedArrayLevel_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipFreeMipmappedArrayImplicitSyncArray:
     <<: *level_2
@@ -2823,8 +2820,8 @@ memory:
     <<: *level_2
     tags: [P1]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel:
     <<: *level_2
     tags: [alloc]
@@ -2910,31 +2907,31 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged AIRUNTIME-2744"
+      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipHostAlloc_Default:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged AIRUNTIME-2744"
+      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_NonCoherent:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_Coherent:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_NumaUser:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [alloc, P1]
   Unit_hipHostAlloc_ArgValidation:
     <<: *level_2
@@ -3048,7 +3045,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Multiproc child; needs 2nd process — not locally verifiable single-GPU. Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process — not locally verifiable single-GPU. Further investigation needed. gfx1201 (amd_windows) self-skips: Parent shared memory not found. This test should only be invoked by Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping. Needs to be re-triaged on amd_wsl, amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"
   Unit_hipMemGetDefaultMemPool_Negative:
     <<: *level_2
     tags: [alloc]

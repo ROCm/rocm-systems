@@ -75,8 +75,8 @@ texture:
   Unit_hipGetChannelDesc_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texobj, image]
   Unit_hipGetTextureAlignmentOffset_Positive:
     <<: *level_2
@@ -96,32 +96,32 @@ texture:
   Unit_hipTexRefSetArray_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetArray_CheckData:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetArray_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetArray_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetArray_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetBorderColor_Positive:
     <<: *level_2
@@ -129,8 +129,8 @@ texture:
   Unit_hipTexRefGetBorderColor_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetBorderColor_Positive:
     <<: *level_2
@@ -138,74 +138,74 @@ texture:
   Unit_hipTexRefSetBorderColor_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetAddress_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetAddress_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetAddress_AdressNotSet:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetFormat_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetFormat_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipCreateTextureObject_tex1DfetchVerification:
     <<: *level_2
@@ -269,9 +269,6 @@ texture:
     tags: [texobj, image]
   Unit_TexObjectCreate_TypePitch2D_EdgeCases:
     <<: *level_2
-    disabled:
-      targets: [amd_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_positive:
     <<: *level_2
@@ -318,38 +315,38 @@ texture:
   Unit_hipTexRefSetAddress2D_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddress2D_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetMaxAnisotropy_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetMaxAnisotropy_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipUnbindTexture_Null_Texture:
     <<: *level_2
@@ -366,14 +363,14 @@ texture:
   Unit_hipTexRefSetFlags_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetFlags_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipBindTextureToArray_Negative_Parameters:
     <<: *level_2
@@ -390,38 +387,38 @@ texture:
   Unit_hipTexRefGetFlags_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetFlags_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddressMode_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetAddressMode_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetAddressMode_Negative_Parameters:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefGetAddressMode_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTexRefSetGetFilterMode:
     <<: *level_2

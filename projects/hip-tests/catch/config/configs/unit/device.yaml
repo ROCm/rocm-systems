@@ -84,8 +84,8 @@ device:
   Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_NegTst:
     <<: *level_2
@@ -174,8 +174,8 @@ device:
   Unit_hipGetDeviceFlags_Positive_Context:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipGetSetDeviceFlags_InvalidFlag:
     <<: *level_2
@@ -198,8 +198,8 @@ device:
   Unit_hipDeviceGetUuid_Positive:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) Note: UUID returned empty on some windows nodes; (amd_wsl) Note: UUID returned empty on some windows nodes Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) Note: UUID returned empty on some windows nodes; (amd_wsl) Note: UUID returned empty on some windows nodes Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Negative:
     <<: *level_2
@@ -225,14 +225,14 @@ device:
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) self-skips: Skipping because this machine has total GPUs < 2. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, multigpu, P0]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
@@ -327,14 +327,14 @@ device:
   Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Negative_Parameters:
     <<: *level_2
@@ -375,8 +375,8 @@ device:
   Unit_hipInit_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [init, P0]
   Unit_hipInitDevice_Positive_Basic:
     <<: *level_2
@@ -494,4 +494,4 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Multiproc child; needs 2nd process/device — not locally verifiable on single-GPU gfx1030. Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process/device — not locally verifiable on single-GPU gfx1030. Further investigation needed. gfx1201 (amd_windows) self-skips: This test must be launched by parent multiprocess test. Needs to be re-triaged on amd_wsl, amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"

@@ -4,8 +4,8 @@ multiThread:
     <<: *level_2
     tags: [memory, P1]
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_2
     tags: [device_mgmt, P0]
@@ -21,8 +21,8 @@ multiThread:
   Unit_hipMultiThreadDevice_NearZero:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadStreams1_AsyncSync:
     <<: *level_2

@@ -13,8 +13,8 @@ executionctx:
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged on amd_windows, amd_wsl AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
     <<: *level_2
   Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
@@ -62,8 +62,8 @@ executionctx:
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_2
     disabled:
-      targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_linux, amd_wsl]
+      reason: "Needs to be re-triaged on amd_linux, amd_wsl AIRUNTIME-2744"
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
@@ -74,7 +74,7 @@ executionctx:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
   Unit_hipExecutionCtxRecordWaitEvent_Negative:
     <<: *level_2
   Unit_hipExecutionCtxWaitEvent_CrossCtx:

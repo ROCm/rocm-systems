@@ -24,6 +24,6 @@ channelDescriptor:
   Unit_ChannelDescriptor_Positive_16BitFloatingPoint:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "(amd_wsl) Note: devicelib hangs and failures Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "(amd_wsl) Note: devicelib hangs and failures Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [texture]

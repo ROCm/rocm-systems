@@ -51,8 +51,8 @@ rtc:
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-450909: Test failed in stress testing Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-450909: Test failed in stress testing Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [link]
   Unit_RTC_LinkerAPI:
     <<: *level_2
@@ -240,13 +240,13 @@ rtc:
   Unit_Rtc_CoopReduce:
     <<: *level_2
     disabled:
-      targets: [amd_windows, asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [asan]
+      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
   Unit_Rtc_CoopScan:
     <<: *level_2
     disabled:
-      targets: [amd_windows, asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [asan]
+      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
   Unit_RTC_BUNDLE_FROM_FILE:
     <<: *level_2
     tags: [link]

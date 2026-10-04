@@ -2,31 +2,46 @@
 oob:
   OOB_hip_module_load_over:
     <<: *level_4
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/CMakeLists.txt gates add_subdirectory(oob) under UNIX (and ENABLE_OOB_TESTS). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [windows, amd_windows, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [windows, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged on windows, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [oob]
   OOB_hip_module_load_data_over:
     <<: *level_4
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/CMakeLists.txt gates add_subdirectory(oob) under UNIX (and ENABLE_OOB_TESTS). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [windows, amd_windows, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [windows, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged on windows, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [oob]
   OOB_hiprtc_roundtrip_loads:
     <<: *level_4
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/CMakeLists.txt gates add_subdirectory(oob) under UNIX (and ENABLE_OOB_TESTS). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [windows, amd_windows, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [windows, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged on windows, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [oob]
   OOB_hipModuleLoadData_Positive_ValidFileBackedImage:
     <<: *level_4
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/CMakeLists.txt gates add_subdirectory(oob) under UNIX (and ENABLE_OOB_TESTS). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [windows, amd_windows, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [windows, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged on windows, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [oob]
   OOB_hipModuleLoad_Negative_OutOfBoundsTotalSize:
     <<: *level_4
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/CMakeLists.txt gates add_subdirectory(oob) under UNIX (and ENABLE_OOB_TESTS). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [windows, amd_windows, nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      targets: [windows, nvidia_linux, nvidia_windows]
+      reason: "Needs to be re-triaged on windows, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [oob]
