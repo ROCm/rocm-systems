@@ -33,6 +33,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: How to
 
+    * :doc:`Using the rocsys command <./how-to/using-rocsys>`
     * :doc:`Configuring the environment <./how-to/configuring-validating-environment>`
 
       * :doc:`Configuring runtime options <./how-to/configuring-runtime-options>`
