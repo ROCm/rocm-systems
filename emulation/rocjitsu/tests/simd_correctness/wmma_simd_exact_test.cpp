@@ -67,6 +67,30 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
   }
 }
 
+void expect_fixture_bit_exact(const char *label, const std::function<void(WmmaFixture &)> &seed,
+                              const std::function<void(WmmaFixture &)> &kernel, uint32_t dst,
+                              uint32_t dst_regs) {
+  ForceScalarGuard force_scalar_guard;
+  WmmaFixture scalar_fixture;
+  WmmaFixture simd_fixture;
+  ASSERT_NE(scalar_fixture.wf, nullptr);
+  ASSERT_NE(simd_fixture.wf, nullptr);
+  seed(scalar_fixture);
+  seed(simd_fixture);
+
+  util::set_force_scalar_for_testing(true);
+  kernel(scalar_fixture);
+  util::set_force_scalar_for_testing(false);
+  kernel(simd_fixture);
+
+  const std::vector<uint32_t> scalar = scalar_fixture.snapshot(dst, dst_regs);
+  const std::vector<uint32_t> simd = simd_fixture.snapshot(dst, dst_regs);
+  for (size_t word = 0; word < scalar.size(); ++word)
+    ASSERT_EQ(scalar[word], simd[word])
+        << label << ": SIMD diverges from scalar at word " << word << " (scalar=0x" << std::hex
+        << scalar[word] << " simd=0x" << simd[word] << ")";
+}
+
 template <typename Ea, typename Eb>
 void run_dense_f32(const char *label, Fmt fmt, uint32_t M, uint32_t N, uint32_t K, uint32_t bits,
                    Ea ea, Eb eb) {
@@ -399,6 +423,120 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
   const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
   const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
   EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+}
+
+TEST(WmmaSimdExact, F32F16Bf16SpecSourceAndAccumulatorOverlap) {
+  SKIP_IF_NO_SIMD();
+  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+  if (!amdgpu::mma_f32_native_width_supported(16, width))
+    GTEST_SKIP() << "WMMA shape is not divisible by the native SIMD width";
+
+  constexpr uint32_t matrix_regs = 8;
+  enum class OverlapKind { DstAFull, DstBFull, DstAPartial, DstBPartial, AAcc, BAcc };
+  struct OverlapCase {
+    const char *label;
+    OverlapKind kind;
+    uint32_t dst;
+    uint32_t a;
+    uint32_t b;
+    uint32_t acc;
+  };
+  constexpr std::array cases{
+      OverlapCase{"dst == A", OverlapKind::DstAFull, 32, 32, 0, 64},
+      OverlapCase{"dst == B", OverlapKind::DstBFull, 32, 0, 32, 64},
+      OverlapCase{"dst partially overlaps A", OverlapKind::DstAPartial, 36, 32, 0, 64},
+      OverlapCase{"dst partially overlaps B", OverlapKind::DstBPartial, 36, 0, 32, 64},
+      OverlapCase{"A == accumulator", OverlapKind::AAcc, 96, 64, 32, 64},
+      OverlapCase{"B == accumulator", OverlapKind::BAcc, 96, 0, 64, 64},
+  };
+
+  auto check = [&](WmmaF32SpecFn fn, Fmt fmt, const char *label) {
+    for (const OverlapCase &test_case : cases) {
+      SCOPED_TRACE(test_case.label);
+      for (bool materialized : {false, true}) {
+        SCOPED_TRACE(materialized ? "materialized" : "logical zero");
+        auto seed = [=](WmmaFixture &fx) {
+          switch (test_case.kind) {
+          case OverlapKind::DstAFull:
+            fx.seed(test_case.b, matrix_regs, fmt, Mode::RandomInt, 11);
+            fx.seed(test_case.acc, matrix_regs, Fmt::F32, Mode::RandomInt, 22);
+            if (materialized)
+              fx.seed(test_case.a, matrix_regs, fmt, Mode::RandomInt, 33);
+            break;
+          case OverlapKind::DstBFull:
+            fx.seed(test_case.a, matrix_regs, fmt, Mode::RandomInt, 11);
+            fx.seed(test_case.acc, matrix_regs, Fmt::F32, Mode::RandomInt, 22);
+            if (materialized)
+              fx.seed(test_case.b, matrix_regs, fmt, Mode::RandomInt, 33);
+            break;
+          case OverlapKind::DstAPartial:
+            fx.seed(test_case.a, materialized ? matrix_regs : 4, fmt, Mode::RandomInt, 33);
+            fx.seed(test_case.b, matrix_regs, fmt, Mode::RandomInt, 11);
+            fx.seed(test_case.acc, matrix_regs, Fmt::F32, Mode::RandomInt, 22);
+            break;
+          case OverlapKind::DstBPartial:
+            fx.seed(test_case.a, matrix_regs, fmt, Mode::RandomInt, 11);
+            fx.seed(test_case.b, materialized ? matrix_regs : 4, fmt, Mode::RandomInt, 33);
+            fx.seed(test_case.acc, matrix_regs, Fmt::F32, Mode::RandomInt, 22);
+            break;
+          case OverlapKind::AAcc:
+            fx.seed(test_case.b, matrix_regs, fmt, Mode::RandomInt, 11);
+            if (materialized)
+              fx.seed(test_case.a, matrix_regs, fmt, Mode::RandomInt, 33);
+            break;
+          case OverlapKind::BAcc:
+            fx.seed(test_case.a, matrix_regs, fmt, Mode::RandomInt, 11);
+            if (materialized)
+              fx.seed(test_case.b, matrix_regs, fmt, Mode::RandomInt, 33);
+            break;
+          }
+        };
+        auto kernel = [=](WmmaFixture &fx) {
+          fn(*fx.cu, fx.vbase + test_case.dst, fx.vbase + test_case.a, fx.vbase + test_case.b,
+             fx.vbase + test_case.acc, amdgpu::ACC_FROM_VGPR, 0);
+        };
+        expect_fixture_bit_exact(label, seed, kernel, test_case.dst, matrix_regs);
+      }
+    }
+  };
+
+  check(amdgpu::exec_wmma_f32_16x16x32_f16, Fmt::F16, "f16 overlap");
+  check(amdgpu::exec_wmma_f32_16x16x32_bf16, Fmt::BF16, "bf16 overlap");
+}
+
+TEST(WmmaSimdExact, F32F16Bf16SpecAccumulatorModifiers) {
+  SKIP_IF_NO_SIMD();
+  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+  if (!amdgpu::mma_f32_native_width_supported(16, width))
+    GTEST_SKIP() << "WMMA shape is not divisible by the native SIMD width";
+
+  constexpr uint32_t source_a = 0, source_b = 32, accumulator = 64, destination = 96;
+  constexpr uint32_t matrix_regs = 8;
+  constexpr uint32_t const_neg_one = 0xBF80'0000u;
+
+  auto check = [=](WmmaF32SpecFn fn, Fmt fmt, const char *label) {
+    for (uint32_t c_modifier : {0u, 1u, 2u, 3u}) {
+      SCOPED_TRACE(c_modifier);
+      for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, const_neg_one}) {
+        SCOPED_TRACE(const_acc == amdgpu::ACC_FROM_VGPR ? "VGPR accumulator"
+                                                        : "constant accumulator");
+        auto seed = [=](WmmaFixture &fx) {
+          fx.seed(source_a, matrix_regs, fmt, Mode::RandomInt, 11);
+          fx.seed(source_b, matrix_regs, fmt, Mode::RandomInt, 22);
+          if (const_acc == amdgpu::ACC_FROM_VGPR)
+            fx.seed(accumulator, matrix_regs, Fmt::F32, Mode::RandomInt, 33);
+        };
+        auto kernel = [=](WmmaFixture &fx) {
+          fn(*fx.cu, fx.vbase + destination, fx.vbase + source_a, fx.vbase + source_b,
+             fx.vbase + accumulator, const_acc, c_modifier);
+        };
+        expect_fixture_bit_exact(label, seed, kernel, destination, matrix_regs);
+      }
+    }
+  };
+
+  check(amdgpu::exec_wmma_f32_16x16x32_f16, Fmt::F16, "f16 accumulator modifier");
+  check(amdgpu::exec_wmma_f32_16x16x32_bf16, Fmt::BF16, "bf16 accumulator modifier");
 }
 
 // --- dense fp8/bf8 inputs, all four A/B combos, K=64 and K=128, f32/f16 out ---
