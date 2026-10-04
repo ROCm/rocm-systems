@@ -1048,12 +1048,13 @@ protected:
             g_hipPointerGetAttribute, ForceLegacyIpcCapable());
 
         // hipMemGetAddressRange: returns baseAddr + baseSize. Production
-        // contract: called with dptr == userbuff.
+        // contract (NCCL 2.32): called with dptr == regRecord->begAddr, since
+        // the whole registration record is registered, not just userbuff.
         memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
             g_hipMemGetAddressRange,
             [this](hipDeviceptr_t* pbase, std::size_t* psize,
                    hipDeviceptr_t dptr) -> hipError_t {
-                EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
+                EXPECT_EQ(reinterpret_cast<const void*>(dptr), reinterpret_cast<const void*>(kBegAddr));
                 if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
                 if (psize) *psize = kBaseSize;
                 return hipSuccess;
@@ -2094,7 +2095,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerFreshRegistrationReusesBaseAddrA
     ScopedHook memGet(g_hipMemGetAddressRange,
         [&](hipDeviceptr_t* pbase, std::size_t* psize,
             hipDeviceptr_t dptr) -> hipError_t {
-            EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
+            // NCCL 2.32 queries the range at the record start, not at userbuff.
+            EXPECT_EQ(reinterpret_cast<const void*>(dptr), reinterpret_cast<const void*>(kBegAddr));
             if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
             if (psize) *psize = kBaseSize;
             return hipSuccess;
