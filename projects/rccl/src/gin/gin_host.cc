@@ -503,16 +503,19 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
 
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
+    // Keep ginCommCount and ginInstance: zeroing the count divides by zero in
+    // ginDevCommSetupWithBackend, and ginInstance must reach ncclGinFinalize.
+    // closed makes register / deregister / DevCommSetup skip the NULLed handles.
+    // Set before the loop, not after: the loop NULLs each handle it closes, so a
+    // closeColl failure returns from here with handles already gone -- exactly the
+    // state the flag exists to keep callers out of.
+    backend->closed = true;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       if (backend->ginComms[commIdx] != NULL) {
         NCCLCHECK(backend->ncclGin->closeColl(backend->ginComms[commIdx]));
         backend->ginComms[commIdx] = NULL;
       }
     }
-    // Keep ginCommCount and ginInstance: zeroing the count divides by zero in
-    // ginDevCommSetupWithBackend, and ginInstance must reach ncclGinFinalize.
-    // closed makes register / deregister / DevCommSetup skip the NULLed handles.
-    backend->closed = true;
   }
 
   // AICOMRCCL-2739: numActiveBackends and backends[].ginInstance must survive until

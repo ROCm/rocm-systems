@@ -110,9 +110,9 @@ class GinHostFinalizeTest : public ::testing::Test {
   void SetUp() override {
     FakeGinHost::setCurrent(&fake_);
     gin_ = fake_.vtable();
-    // ncclSharedResources is value-initialized by make_unique; do not memset it —
-    // ginState embeds std::thread / mutex / atomic.
-    std::memset(&comm_, 0, sizeof(comm_));
+    // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
+    // do not memset either. ginState embeds std::thread / mutex / atomic, and
+    // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
     comm_.sharedRes = sharedRes_.get();
 
     struct ncclGinState* ginState = &sharedRes_->ginState;
