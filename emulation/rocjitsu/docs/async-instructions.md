@@ -84,6 +84,12 @@ unrelated completed result. The issuer polls or joins jobs and destroys decoded
 instructions on their allocator's owning thread. Admission plans retain code
 snapshots and decisions; their temporary decodes never escape a scan.
 
+Each issuer uses a stable, hashed starting position when selecting a free
+helper, preferring reuse across consecutive jobs. This preference does not pin
+threads or guarantee cache locality. Other free slots remain available, and
+pools larger than 64 helpers retain first-word priority. Selection still falls
+back inline after a bounded number of failed reservation attempts.
+
 Both publication and completion use release/acquire synchronization. Helpers
 inherit the issuer's floating-point environment. A bounded warm wait precedes
 blocking through standard atomic wait/notify operations.

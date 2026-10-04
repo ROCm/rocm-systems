@@ -14,6 +14,8 @@
 #include <atomic>
 #include <bit>
 #include <cfenv>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -135,6 +137,12 @@ private:
   std::thread thread_;
 };
 
+// Map the issuer hash into the pool before selecting a bit in its current word.
+// Pools above 64 helpers keep first-word priority.
+constexpr unsigned preferred_helper_start(uint32_t issuer_hash, std::size_t capacity) {
+  return static_cast<unsigned>((uint64_t{issuer_hash} * capacity) >> 32) & 63;
+}
+
 // Each claim covers publication through joining, so another issuer cannot
 // reuse a helper's payload while its previous owner still reads completion.
 // There is no pending-job queue and no wait for capacity. Two bitmap words
@@ -206,16 +214,22 @@ private:
     // One or two loads detect an exhausted pool. Reservation is bounded even
     // under contention: after two failed CAS attempts per word, run inline.
     // A conservative miss is allowed; waiting for worker capacity is not.
+    // Each issuer searches from a fixed start to favor reuse across jobs.
+    // Scale the hash to the pool size so small pools do not send out-of-range
+    // starts to the lowest helper.
+    // Pools above 64 helpers retain first-word priority; this preference does
+    // not distribute issuers uniformly across both words.
+    static thread_local const uint32_t issuer_hash =
+        static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
     for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
       auto free = free_[word].load(std::memory_order_relaxed);
       for (unsigned attempt = 0; free && attempt != 2; ++attempt) {
-        thread_local unsigned next = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 63;
-        const unsigned bit = (std::countr_zero(std::rotr(free, int(next))) + next) & 63;
+        const unsigned bit = (std::countr_zero(std::rotr(free, int(start))) + start) & 63;
         if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
                                                  std::memory_order_acquire,
                                                  std::memory_order_relaxed))
           continue;
-        next = (bit + 1) & 63;
         auto *slot = slots_[word * 64 + bit].get();
         slot->helper.submit(instruction, wave);
         return slot;
