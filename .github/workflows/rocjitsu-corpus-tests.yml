@@ -35,6 +35,10 @@ on:
         # Last updated on 2026/09/25.
         default: "4c7fdd08d55bc1801cf1525732d6cabad06e05de"
         required: true
+      hrx_corpus_ref:
+        description: "Branch, tag, or SHA used by the HRX AMDGPU CTS tests"
+        default: "1ccdff0a94bac73457e3e2f63378ae453174d9ee"
+        required: true
 
 concurrency:
   # Preserve every non-PR run, including manual reruns of one develop commit.
@@ -52,6 +56,8 @@ env:
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_VULKAN_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-vulkan-corpus
   ROCJITSU_VULKAN_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
+  HRX_CORPUS_DIR: ${{ github.workspace }}/hrx-test-corpus
+  HRX_CORPUS_REF: 1ccdff0a94bac73457e3e2f63378ae453174d9ee
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_DBT_CORPUS_REF: cc781dd88cabd1638d1beeb4539c521ccf27de60
@@ -789,6 +795,69 @@ jobs:
         with:
           name: rocjitsu-vulkan-cts-release
           path: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}/.pytest-artifacts/vulkan-*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Keep the existing HIP/DBT corpus pin and its translation baseline stable.
+      - name: Checkout HRX corpus
+        id: checkout_hrx_corpus
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
+          ref: ${{ github.event.inputs.hrx_corpus_ref || env.HRX_CORPUS_REF }}
+          path: hrx-test-corpus
+
+      - name: Install pinned HRX ROCm SDK
+        id: install_hrx_sdk
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.checkout_hrx_corpus.outcome == 'success' }}
+        working-directory: ${{ env.HRX_CORPUS_DIR }}
+        shell: bash
+        run: |
+          uv venv --system-site-packages "${GITHUB_WORKSPACE}/hrx-venv"
+          uv pip install --python "${GITHUB_WORKSPACE}/hrx-venv/bin/python" --prerelease allow \
+            -r corpus/hrx-system/requirements-rocm.txt
+          "${GITHUB_WORKSPACE}/hrx-venv/bin/rocm-sdk" init
+
+      - name: Build pinned HRX AMDGPU CTS
+        id: build_hrx_cts
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.install_hrx_sdk.outcome == 'success' }}
+        timeout-minutes: 60
+        working-directory: ${{ env.HRX_CORPUS_DIR }}
+        shell: bash
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/hrx-venv/bin:${PATH}"
+          bash scripts/build_hrx_cts.sh
+
+      - name: Run HRX AMDGPU CTS on gfx1201
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_hrx_cts.outcome == 'success' }}
+        continue-on-error: true # Known CTS failures retain logs without gating CI.
+        timeout-minutes: 15
+        shell: bash
+        env:
+          ROCJITSU_CORPUS_DIR: ${{ env.HRX_CORPUS_DIR }}
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/hrx-venv/bin:${PATH}"
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-hrx-cts.sh" gfx1201
+
+      - name: Run HRX AMDGPU CTS on single-XCC gfx1250
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_hrx_cts.outcome == 'success' }}
+        continue-on-error: true # Known CTS failures retain logs without gating CI.
+        timeout-minutes: 15
+        shell: bash
+        env:
+          ROCJITSU_CORPUS_DIR: ${{ env.HRX_CORPUS_DIR }}
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/hrx-venv/bin:${PATH}"
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-hrx-cts.sh" gfx1250
+
+      - name: Upload HRX AMDGPU CTS diagnostics
+        if: ${{ always() && matrix.name == 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-hrx-cts-release
+          path: ${{ env.HRX_CORPUS_DIR }}/.pytest-artifacts/hrx-*
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7

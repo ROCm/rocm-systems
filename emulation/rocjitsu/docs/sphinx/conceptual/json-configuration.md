@@ -168,6 +168,7 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
+| `gfx1250_mi455x_single_xcc.json` | One gfx1250 A0 XCC for HRX CTS simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
