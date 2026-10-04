@@ -33,6 +33,7 @@
  * - RMA: put/get/p/g + variants (wave, wg, nbi)
  * - AMO: standard, extended, bitwise
  * - Sync: wait_until variants, test
+ * - Collectives: alltoall (typed wg/wave, untyped mem), broadcast (typed wg/wave, untyped mem, tile)
  * - Signal: put_signal variants
  *
  * Intentionally excluded (internal use only):
@@ -795,6 +796,132 @@ ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
   return rocshmem::rocshmem_tile_broadcast_wg_internal(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+// Collective - Alltoall (typed wg)
+#define ROCSHMEM_ALLTOALL_WG_WRAPPER(TNAME, T)                              \
+ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_alltoall_wg(                    \
+    rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
+  rocshmem_ctx_##TNAME##_alltoall_wg(                                       \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+}
+
+ROCSHMEM_ALLTOALL_WG_WRAPPER(float,     float)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(double,    double)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(char,      char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(schar,     signed char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(short,     short)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(int,       int)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(long,      long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(longlong,  long long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(uchar,     unsigned char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ushort,    unsigned short)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(uint,      unsigned int)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ulong,     unsigned long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ulonglong, unsigned long long)
+#undef ROCSHMEM_ALLTOALL_WG_WRAPPER
+
+// Collective - Alltoall (typed wave)
+#define ROCSHMEM_ALLTOALL_WAVE_WRAPPER(TNAME, T)                            \
+ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_alltoall_wave(                   \
+    rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
+  return rocshmem_ctx_##TNAME##_alltoall_wave(                              \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+}
+
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(float,     float)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(double,    double)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(char,      char)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(schar,     signed char)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(short,     short)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(int,       int)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(long,      long)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(longlong,  long long)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(uchar,     unsigned char)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(ushort,    unsigned short)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(uint,      unsigned int)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(ulong,     unsigned long)
+ROCSHMEM_ALLTOALL_WAVE_WRAPPER(ulonglong, unsigned long long)
+#undef ROCSHMEM_ALLTOALL_WAVE_WRAPPER
+
+// Collective - Alltoall (untyped mem)
+ROCSHMEM_DEVICE_API void rocshmem_alltoallmem_wg(
+    rocshmem_team_t team, void *dest, const void *source, int nelems) {
+  rocshmem_ctx_alltoallmem_wg(
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_alltoallmem_wave(
+    rocshmem_team_t team, void *dest, const void *source, int nelems) {
+  return rocshmem_ctx_alltoallmem_wave(
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
+}
+
+// Collective - Broadcast (typed wg)
+#define ROCSHMEM_BROADCAST_WG_WRAPPER(TNAME, T)                             \
+ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_broadcast_wg(                   \
+    rocshmem_team_t team, T *dest, const T *source,                         \
+    int nelems, int pe_root) {                                               \
+  rocshmem_ctx_##TNAME##_broadcast_wg(                                      \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                         \
+      dest, source, nelems, pe_root);                                        \
+}
+
+ROCSHMEM_BROADCAST_WG_WRAPPER(float,     float)
+ROCSHMEM_BROADCAST_WG_WRAPPER(double,    double)
+ROCSHMEM_BROADCAST_WG_WRAPPER(char,      char)
+ROCSHMEM_BROADCAST_WG_WRAPPER(schar,     signed char)
+ROCSHMEM_BROADCAST_WG_WRAPPER(short,     short)
+ROCSHMEM_BROADCAST_WG_WRAPPER(int,       int)
+ROCSHMEM_BROADCAST_WG_WRAPPER(long,      long)
+ROCSHMEM_BROADCAST_WG_WRAPPER(longlong,  long long)
+ROCSHMEM_BROADCAST_WG_WRAPPER(uchar,     unsigned char)
+ROCSHMEM_BROADCAST_WG_WRAPPER(ushort,    unsigned short)
+ROCSHMEM_BROADCAST_WG_WRAPPER(uint,      unsigned int)
+ROCSHMEM_BROADCAST_WG_WRAPPER(ulong,     unsigned long)
+ROCSHMEM_BROADCAST_WG_WRAPPER(ulonglong, unsigned long long)
+#undef ROCSHMEM_BROADCAST_WG_WRAPPER
+
+// Collective - Broadcast (typed wave)
+#define ROCSHMEM_BROADCAST_WAVE_WRAPPER(TNAME, T)                           \
+ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_broadcast_wave(                  \
+    rocshmem_team_t team, T *dest, const T *source,                         \
+    int nelems, int pe_root) {                                               \
+  return rocshmem_ctx_##TNAME##_broadcast_wave(                             \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,                         \
+      dest, source, nelems, pe_root);                                        \
+}
+
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(float,     float)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(double,    double)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(char,      char)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(schar,     signed char)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(short,     short)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(int,       int)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(long,      long)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(longlong,  long long)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(uchar,     unsigned char)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(ushort,    unsigned short)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(uint,      unsigned int)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(ulong,     unsigned long)
+ROCSHMEM_BROADCAST_WAVE_WRAPPER(ulonglong, unsigned long long)
+#undef ROCSHMEM_BROADCAST_WAVE_WRAPPER
+
+// Collective - Broadcast (untyped mem)
+ROCSHMEM_DEVICE_API void rocshmem_broadcastmem_wg(
+    rocshmem_team_t team, void *dest, const void *source,
+    int nelems, int PE_root) {
+  rocshmem_ctx_broadcastmem_wg(
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,
+      dest, source, nelems, PE_root);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_broadcastmem_wave(
+    rocshmem_team_t team, void *dest, const void *source,
+    int nelems, int PE_root) {
+  return rocshmem_ctx_broadcastmem_wave(
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team,
+      dest, source, nelems, PE_root);
 }
 
 // Collective - SUM Reduce
