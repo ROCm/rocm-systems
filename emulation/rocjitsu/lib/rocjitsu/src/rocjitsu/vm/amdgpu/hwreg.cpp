@@ -625,10 +625,30 @@ const char *hwreg_access_result_name(HwregAccessResult result) {
 
 HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &value) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
-  const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
+  const auto arch = wf.cu().arch();
+  const HwregDescriptor *desc = find_descriptor(arch, decoded.id);
   if (!desc) {
     value = 0;
     return HwregAccessResult::Unsupported;
+  }
+
+  // The CDNA2/3/4 ISA Hardware ID tables define SIMD_ID at HW_ID[5:4].
+  // CDNA1's public ISA names HW_ID but omits its field layout; leave it
+  // unsupported until the SIMD_ID bits are verified.
+  // RDNA HW_ID1/2 and CDNA5 WAVE_HW_ID1/2 need their own field/placement
+  // mapping, as does RDNA1's legacy HW_ID. On RDNA4/CDNA5, register 4 is
+  // WAVE_STATE_PRIV and must retain its normal register handling.
+  const bool has_cdna_simd_id = arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                                arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                arch == ROCJITSU_CODE_ARCH_CDNA4;
+  // Assign permanent CU wave slots cyclically to four logical SIMDs. Slot
+  // identity survives reuse and checkpoint restoration; no timing model is
+  // implied. Only reads wholly within the SIMD_ID field are backed.
+  if (has_cdna_simd_id && decoded.id == 4 && decoded.offset >= 4 &&
+      decoded.offset + decoded.size <= 6) {
+    const uint32_t simd_id = wf.wf_id() % 4u;
+    value = (simd_id >> (decoded.offset - 4)) & decoded.mask;
+    return HwregAccessResult::Success;
   }
 
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
