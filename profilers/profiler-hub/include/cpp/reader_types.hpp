@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <profiler-hub/shared_types.hpp>
+#include <profiler-hub/cpp/shared_types.hpp>
 
 namespace profiler_hub::reader_types
 {

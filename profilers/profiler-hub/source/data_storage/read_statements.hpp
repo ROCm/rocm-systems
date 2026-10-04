@@ -5,7 +5,7 @@
 
 #include "backends/sqlite_backend.hpp"
 
-#include "profiler-hub/reader_types.hpp"
+#include "profiler-hub/cpp/reader_types.hpp"
 
 #include <cstddef>
 #include <functional>

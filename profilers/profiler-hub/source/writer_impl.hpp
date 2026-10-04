@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
 #include "writers/writer_context.hpp"
 #include "writers/writer_policy_traits.hpp"
