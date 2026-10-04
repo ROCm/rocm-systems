@@ -2391,6 +2391,9 @@ memory:
   Unit_hipMallocAsync_DefaultStreams_Concurrent:
     <<: *level_2
     tags: [alloc, P1]
+  Unit_hipMallocAsync_InteriorPointer_Memcpy2DAsync:
+    <<: *level_2
+    tags: [alloc, transfer, P1]
   Unit_hipStreamAttachMemAsync_Positive_Basic:
     <<: *level_2
     tags: [query, P1, managed_memory]
