@@ -1681,28 +1681,6 @@ class AMDSMIHelpers:
             return f"{converted} W"
         return value
 
-    def get_max_node_power_limit(self):
-        """Get the platform max NPM node power limit (Watts), for help-text bounds.
-
-        Mirrors get_power_caps(): queried once at parser-build time so
-        --node-power-limit's help text can show its valid upper bound. NPM is
-        node-wide, so the first device that yields a reading is sufficient.
-        """
-        for dev in self.get_gpu_handles():
-            try:
-                node_handle = amdsmi_interface.amdsmi_get_node_handle(dev)
-                max_node_power_limit = amdsmi_interface.amdsmi_get_npm_info(node_handle)[
-                    "max_node_power_limit"
-                ]
-                if max_node_power_limit != "N/A":
-                    return f"{max_node_power_limit} W"
-            except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
-                logging.debug(
-                    f"AMDSMIHelpers.get_max_node_power_limit - Unable to get NPM info for device {dev}: {str(e)}"
-                )
-                continue
-        return "N/A"
-
     @staticmethod
     def detect_gpu_od(bdf):
         """Detect if a GPU has the gpu_od sysfs interface.
@@ -3438,34 +3416,7 @@ class AMDSMIHelpers:
             return error_msg
 
     def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
-        """Validate and set the NPM (Node Power Management) power limit for a node.
-
-        Mirrors validate_and_set_power_cap(): fetches the platform max bound via
-        amdsmi_get_npm_info() (amdsmi_npm_info_t::max_node_power_limit, sourced from
-        board/max_node_power_limit) and rejects out-of-range requests before ever
-        issuing the write. This is an early, CLI-friendly pre-check only:
-        amdsmi_set_npm_limit() itself already validates `limit` against the same
-        bound internally and fails closed if that bound can't be read (see its
-        docstring); this CLI-side check exists purely to fail fast and surface a
-        clean, user-facing hint here rather than relying solely on the library
-        call's exception.
-
-        There is no driver-exposed minimum bound beyond positivity (no sysfs file
-        or design-doc source documents a real minimum), so the lower bound enforced
-        here is simply "> 0".
-
-        Also rejects the request up front if NPM itself is disabled on this node
-        (amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED) -- there is no
-        max bound to validate against in that case, and writing
-        board/cur_node_power_limit while NPM is disabled has no defined effect.
-        Same fail-fast pattern as the max-bound check above: amdsmi_set_npm_limit()
-        itself already enforces this too, so this is a CLI-friendly early exit,
-        not the sole enforcement.
-
-        Fails closed when the platform max is unavailable ("N/A"): rather than
-        allowing any positive value through in that degraded-driver scenario, the
-        request is rejected outright here too, matching amdsmi_set_npm_limit()'s
-        own fail-closed behavior for the same condition.
+        """Validate and set the NPM node power limit, rejecting before the write when out of range.
 
         Args:
             node_handle: Node handle obtained via amdsmi_get_node_handle()
@@ -3481,29 +3432,25 @@ class AMDSMIHelpers:
 
             if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    "set",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint="Node power limit cannot be set: NPM is disabled on this node",
+                    hint="--node-power-limit cannot be set: NPM is disabled on this node",
                 )
             elif max_node_power_limit == "N/A":
-                # Fail closed: the platform max is unreadable (degraded driver /
-                # unavailable sysfs), so there is no bound to validate the
-                # request against. Reject rather than let an unbounded value
-                # through.
+                # Fail closed: without a platform max there is no bound to check against.
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    "set",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint="Node power limit cannot be validated: platform maximum is unavailable",
+                    hint="--node-power-limit cannot be validated: platform maximum is unavailable",
                 )
             elif not 0 < requested_limit <= max_node_power_limit:
-                # Raise so the caller exits with a non-zero return code
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    "set",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint=f"Node power limit must be between 1W and {max_node_power_limit}W",
+                    hint=f"--node-power-limit must be between 1W and {max_node_power_limit}W",
                 )
 
             amdsmi_interface.amdsmi_set_npm_limit(node_handle, requested_limit)
@@ -3518,15 +3465,15 @@ class AMDSMIHelpers:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                # Raise so the caller exits with a non-zero return code, same as
-                # the CLI-side bound checks above.
+                # Same exit code as the CLI-side range checks above.
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    "set",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint=e.get_error_info(detailed=False),
+                    hint=f"--node-power-limit rejected: {e.get_error_info(detailed=False)}",
                 ) from e
             error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set node power limit to {requested_limit} W"
+            self.error_collector.record_library_error(e.get_error_code())
             if logger.is_json_format() or logger.is_csv_format():
                 return {
                     "status": "error",

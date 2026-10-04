@@ -18,6 +18,9 @@ rsmi_status_t get_npm_board_limit(const std::string& board_path, uint64_t* limit
 // bound requests made via set_npm_board_limit()/rsmi_dev_npm_limit_set().
 rsmi_status_t get_npm_board_max_limit(const std::string& board_path, uint64_t* limit);
 
+// Checks NPM is enabled and 1 <= limit <= platform max, without writing.
+rsmi_status_t validate_npm_board_limit(const std::string& board_path, uint64_t limit);
+
 // NPM board limit set (Set NPM Limit request to GPU PMFW via amdgpu driver)
 rsmi_status_t set_npm_board_limit(const std::string& board_path, uint64_t limit);
 

@@ -4,70 +4,12 @@
 
 """Mock-based unit tests for ``amd-smi set --node-power-limit``.
 
-Two layers are covered here:
-
-* ``TestCliSetNodePowerLimit`` drives ``SetValueCommands.set_value()``'s
-  node-wide (not per-GPU) early-dispatch block, modeled on the existing
-  ``--gtt`` block:
-
-  * ``--node-power-limit`` combined with ``--gpu`` is rejected before any
-    library call, exiting with status 2 and a stderr message (mirrors the
-    ``--gtt``/``--gpu`` argparse-level guard's runtime-level counterpart).
-  * ``self.node_handle is None`` (no NPM-capable node resolved at startup,
-    e.g. the pre-existing ``oam_id != 0`` gate on current mock hardware)
-    short-circuits to a NOT_SUPPORTED-style message without calling the API.
-  * A successful set reports "Successfully set node power limit to <value> W."
-  * ``AMDSMI_STATUS_NO_PERM`` from the library is translated into a raised
-    ``PermissionError`` (so the CLI's elevation-prompt wrapper can catch it),
-    not swallowed into an output message.
-  * Any other library exception (e.g. NOT_SUPPORTED bubbling up from
-    ``rsmi_dev_npm_limit_set()`` for a missing sysfs file) is caught and
-    reported as an output message referencing the requested value, without
-    raising.
-
-  ``self.helpers`` is a minimal stub (mirroring ``test_cli_set_clk_limit.py``'s
-  ``_StubHelpers`` pattern) that reproduces
-  ``validate_and_set_node_power_limit()``'s call/status-mapping contract, so
-  these tests can focus on ``set_value.py``'s own dispatch behavior without
-  re-deriving the validation logic tested in depth below.
-
-* ``TestValidateAndSetNodePowerLimit`` drives the real
-  ``amdsmi_helpers.AMDSMIHelpers.validate_and_set_node_power_limit()``
-  directly (added for the original F-1 fix, and updated for the F-2 fix
-  below), against a real import of ``amdsmi_helpers`` with only the C library
-  faked -- this is the validation logic itself, previously exercised nowhere
-  in the tree:
-
-  * a request above the platform max (``amdsmi_get_npm_info()``'s
-    ``max_node_power_limit``) is rejected before any write.
-  * a request of ``0`` is rejected.
-  * an in-range request succeeds and calls ``amdsmi_set_npm_limit()`` with
-    the requested value verbatim.
-  * an unreadable platform max (``max_node_power_limit == "N/A"``) now fails
-    *closed*: the request is rejected, not allowed through on a bare
-    positivity check. (Previously this class of degraded-driver scenario
-    was fail-open; see the F-2 handoff finding this test locks in.)
-
-* ``TestNodePowerLimitGuestRegistration`` drives ``AMDSMIParser`` directly
-  (loaded the same way as ``test_output_file_stdin.py``): commit 567bed2f89d
-  moved ``-n``/``--node-power-limit`` argparse registration out of the
-  ``is_baremetal()``-only block so it is gated only by
-  ``is_amdgpu_initialized()`` (same pattern as ``-o``/``--power-cap``),
-  since NPM is exposed to 1VF guests. Asserts the argument is still
-  registered and parseable under a non-baremetal (guest) helpers stub.
-
-* ``TestGetMaxNodePowerLimit`` drives the real
-  ``amdsmi_helpers.AMDSMIHelpers.get_max_node_power_limit()`` (added by
-  ece891b6787 to size --node-power-limit's help-text bound), against a real
-  import of ``amdsmi_helpers`` with only the C library faked -- mirroring
-  ``TestValidateAndSetNodePowerLimit``'s pattern:
-
-  * a first-device success returns immediately without probing further
-    devices.
-  * an exception on every device falls back to "N/A".
-  * a device that succeeds but reports "N/A" as the value itself (not an
-    exception) is a distinct code path from the exception branch; the loop
-    must still continue to the next device.
+* ``TestCliSetNodePowerLimit``: the node-wide dispatch block in ``set_value.py``,
+  with ``self.helpers`` stubbed.
+* ``TestValidateAndSetNodePowerLimit``: the real
+  ``AMDSMIHelpers.validate_and_set_node_power_limit()`` with only the C library faked.
+* ``TestSetValueParser``: ``-n`` registers on a 1VF guest, and the ``--gtt``/``--gpu``
+  guard rewrites only argparse's missing ``--gpu`` value error.
 """
 
 import argparse
@@ -179,18 +121,28 @@ class _FakeLogger:
         return False
 
 
-class _StubHelpers:
-    """Minimal ``self.helpers`` stub for the node-power-limit dispatch block.
+class _RecordingErrorCollector:
+    def __init__(self):
+        self.codes = []
+        self.library_codes = []
 
-    Mirrors ``test_cli_set_clk_limit.py``'s ``_StubHelpers`` pattern: just
-    enough of ``validate_and_set_node_power_limit()``'s call/status-mapping
-    contract (call the C entry point, map ``AMDSMI_STATUS_NO_PERM`` to a
-    raised ``PermissionError``, otherwise format success/error strings) for
-    ``set_value.py``'s dispatch block to exercise, without pulling in the real
-    max-bound validation -- that logic is exercised directly and in depth by
-    ``TestValidateAndSetNodePowerLimit`` below, against the real
-    ``amdsmi_helpers.AMDSMIHelpers`` implementation.
+    def record(self, exit_code):
+        self.codes.append(exit_code)
+
+    def record_library_error(self, error_code):
+        self.library_codes.append(error_code)
+
+
+class _StubHelpers:
+    """``self.helpers`` stub reproducing validate_and_set_node_power_limit()'s
+    status mapping; the real validation is covered by TestValidateAndSetNodePowerLimit.
     """
+
+    def __init__(self):
+        self.error_collector = _RecordingErrorCollector()
+
+    def get_output_format(self):
+        return "human"
 
     def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
         # Resolved lazily (not at module scope) because the fake "amdsmi"
@@ -205,6 +157,7 @@ class _StubHelpers:
         except exception.AmdSmiLibraryException as e:
             if e.get_error_code() == interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
+            self.error_collector.record_library_error(e.get_error_code())
             return (
                 f"[{e.get_error_info(detailed=False)}] "
                 f"Unable to set node power limit to {requested_limit} W"
@@ -232,22 +185,23 @@ class TestCliSetNodePowerLimit(unittest.TestCase):
     def _make_args(self, node_power_limit, gpu=None):
         return types.SimpleNamespace(gpu=gpu, node_power_limit=node_power_limit)
 
-    def test_gpu_conflict_exits_with_status_2(self):
+    def test_gpu_conflict_raises_invalid_parameter(self):
+        calls = []
+        self.interface.amdsmi_set_npm_limit = lambda h, limit: calls.append((h, limit))
         cmd = self._make_command(node_handle=object())
         args = self._make_args(node_power_limit=250, gpu="gpu0")
 
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            with self.assertRaises(SystemExit) as ctx:
-                cmd.set_value(args)
+        with self.assertRaises(self.module.AmdSmiInvalidParameterException) as ctx:
+            cmd.set_value(args)
 
-        self.assertEqual(ctx.exception.code, 2)
-        self.assertIn("--node-power-limit", stderr.getvalue())
-        self.assertIn("--gpu", stderr.getvalue())
+        self.assertIn(
+            "--node-power-limit/-n: not allowed with argument --gpu/-g", str(ctx.exception)
+        )
+        self.assertEqual(calls, [], "API must not be called when --gpu is also given")
 
-    def test_no_node_handle_reports_not_supported_without_calling_api(self):
+    def test_no_node_handle_records_not_supported_without_calling_api(self):
         calls = []
-        self.interface.amdsmi_set_npm_limit = lambda h, l: calls.append((h, l))
+        self.interface.amdsmi_set_npm_limit = lambda h, limit: calls.append((h, limit))
         cmd = self._make_command(node_handle=None)
         args = self._make_args(node_power_limit=250)
 
@@ -257,10 +211,11 @@ class TestCliSetNodePowerLimit(unittest.TestCase):
         message = cmd.logger.output["set_node_power_limit"]
         self.assertIn("NOT_SUPPORTED", message)
         self.assertIn("no NPM-capable node found", message)
+        self.assertEqual(cmd.helpers.error_collector.library_codes, [_STATUS_NOT_SUPPORTED])
 
     def test_success_reports_value_in_watts(self):
         calls = []
-        self.interface.amdsmi_set_npm_limit = lambda h, l: calls.append((h, l))
+        self.interface.amdsmi_set_npm_limit = lambda h, limit: calls.append((h, limit))
         node_handle = object()
         cmd = self._make_command(node_handle=node_handle)
         args = self._make_args(node_power_limit=6000)
@@ -371,25 +326,27 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
 
     def setUp(self):
         self.calls = []
-        self.interface.amdsmi_set_npm_limit = lambda h, l: self.calls.append((h, l))
+        self.error_collector = _RecordingErrorCollector()
+        self.interface.amdsmi_set_npm_limit = lambda h, limit: self.calls.append((h, limit))
 
     def _validate(self, requested_limit, max_node_power_limit, npm_status=_NPM_STATUS_ENABLED):
         self.interface.amdsmi_get_npm_info = lambda _h: {
             "max_node_power_limit": max_node_power_limit,
             "status": npm_status,
         }
-        # A lightweight duck-typed ``self`` -- exercises the real, unbound
-        # ``validate_and_set_node_power_limit`` method body without paying for
-        # ``AMDSMIHelpers.__init__``'s platform/hypervisor probing, which is
-        # irrelevant to this validation logic.
-        fake_self = types.SimpleNamespace(get_output_format=lambda: "human")
+        # Duck-typed ``self`` skips AMDSMIHelpers.__init__'s platform probing.
+        fake_self = types.SimpleNamespace(
+            get_output_format=lambda: "human", error_collector=self.error_collector
+        )
         logger = _FakeLogger()
         return self.validate(fake_self, object(), requested_limit, logger)
 
     def test_over_max_rejects(self):
         with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException) as ctx:
             self._validate(requested_limit=6401, max_node_power_limit=6400)
-        self.assertIn("must be between 1W and 6400W", str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn("--node-power-limit must be between 1W and 6400W", message)
+        self.assertIn("amd-smi set -h", message)
         self.assertEqual(self.calls, [], "API must not be called on a rejected request")
 
     def test_zero_rejects(self):
@@ -416,120 +373,41 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
         self.assertIn("NPM is disabled", str(ctx.exception))
         self.assertEqual(self.calls, [], "API must not be called when NPM is disabled")
 
-    def test_na_max_now_rejects(self):
-        # F-2 fail-closed fix: an unreadable platform max ("N/A") must reject
-        # the request outright, not fall back to a bare "> 0" check that would
-        # let an unbounded value through in a degraded-driver scenario.
+    def test_na_max_rejects(self):
+        # Fail closed: an unreadable platform max must not fall back to a bare > 0 check.
         with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException) as ctx:
             self._validate(requested_limit=250, max_node_power_limit="N/A")
         self.assertIn("platform maximum is unavailable", str(ctx.exception))
         self.assertEqual(self.calls, [], "API must not be called when the platform max is unknown")
 
     def test_library_inval_raises_instead_of_returning(self):
-        # amdsmi_set_npm_limit() itself can still reject a request that passed
-        # the CLI-side pre-check (e.g. a race against a shrinking platform
-        # max). AMDSMI_STATUS_INVAL from the library must raise, exiting
-        # non-zero, not be swallowed into a returned error string/dict.
-        self.interface.amdsmi_set_npm_limit = lambda h, l: (_ for _ in ()).throw(
-            _FakeLibraryException(_STATUS_INVAL, "AMDSMI_STATUS_INVAL - Invalid parameters")
-        )
+        # The library can still reject a request that passed the CLI pre-check.
+        def _raise(_handle, _limit):
+            raise _FakeLibraryException(_STATUS_INVAL, "AMDSMI_STATUS_INVAL - Invalid parameters")
+
+        self.interface.amdsmi_set_npm_limit = _raise
         with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
             self._validate(requested_limit=250, max_node_power_limit=6400)
 
+    def test_library_error_records_status(self):
+        def _raise(_handle, _limit):
+            raise _FakeLibraryException(
+                _STATUS_NOT_SUPPORTED, "AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+            )
 
-# ---------------------------------------------------------------------------
-# Direct tests for amdsmi_helpers.AMDSMIHelpers.get_max_node_power_limit()
-# ---------------------------------------------------------------------------
+        self.interface.amdsmi_set_npm_limit = _raise
+        result = self._validate(requested_limit=250, max_node_power_limit=6400)
 
-
-class TestGetMaxNodePowerLimit(unittest.TestCase):
-    """Covers get_max_node_power_limit() (added by ece891b6787), which mirrors
-    get_power_caps()'s per-device probe loop: it queries devices in order and
-    returns the first successful reading, falling back to "N/A" only if every
-    device fails or reports "N/A" itself.
-    """
-
-    _EXTRA_STUBBED_NAMES = TestValidateAndSetNodePowerLimit._EXTRA_STUBBED_NAMES
-
-    @classmethod
-    def setUpClass(cls):
-        if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
-        modules = _install_fake_amdsmi_for_helpers()
-        modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
-        stub_modules(cls, modules)
-        cls.interface = modules["amdsmi.amdsmi_interface"]
-
-        cls._path_added = _CLI_DIR not in sys.path
-        if cls._path_added:
-            sys.path.insert(0, _CLI_DIR)
-
-        import amdsmi_helpers as amdsmi_helpers_module
-
-        # staticmethod() wrapping avoids auto-binding this TestCase instance
-        # as `self`; see TestValidateAndSetNodePowerLimit's setUpClass.
-        cls.get_max = staticmethod(amdsmi_helpers_module.AMDSMIHelpers.get_max_node_power_limit)
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "_path_added", False) and _CLI_DIR in sys.path:
-            sys.path.remove(_CLI_DIR)
-
-    def _fake_self(self, gpu_handles):
-        # get_max_node_power_limit() only calls self.get_gpu_handles(); a
-        # duck-typed stub avoids paying for real device enumeration.
-        return types.SimpleNamespace(get_gpu_handles=lambda: gpu_handles)
-
-    def test_first_device_success_short_circuits(self):
-        calls = []
-
-        def node_handle(dev):
-            calls.append(dev)
-            return f"node_{dev}"
-
-        self.interface.amdsmi_get_node_handle = node_handle
-        self.interface.amdsmi_get_npm_info = lambda _h: {"max_node_power_limit": 6000}
-
-        result = self.get_max(self._fake_self(["dev0", "dev1"]))
-
-        self.assertEqual(result, "6000 W")
-        self.assertEqual(calls, ["dev0"], "second device must not be probed after a success")
-
-    def test_all_devices_exception_falls_back_to_na(self):
-        def _raise(_dev):
-            raise _FakeLibraryException("npm info unavailable")
-
-        self.interface.amdsmi_get_node_handle = _raise
-
-        result = self.get_max(self._fake_self(["dev0", "dev1"]))
-
-        self.assertEqual(result, "N/A")
-
-    def test_na_value_on_first_device_continues_to_next(self):
-        # Distinct from the exception path: the device call succeeds but
-        # reports "N/A" as the value itself, so the loop must fall through to
-        # the next device rather than returning "N/A" early.
-        def node_handle(dev):
-            return f"node_{dev}"
-
-        def npm_info(node_handle_):
-            if node_handle_ == "node_dev0":
-                return {"max_node_power_limit": "N/A"}
-            return {"max_node_power_limit": 6400}
-
-        self.interface.amdsmi_get_node_handle = node_handle
-        self.interface.amdsmi_get_npm_info = npm_info
-
-        result = self.get_max(self._fake_self(["dev0", "dev1"]))
-
-        self.assertEqual(result, "6400 W")
+        self.assertIn("Unable to set node power limit to 250 W", result)
+        self.assertEqual(self.error_collector.library_codes, [_STATUS_NOT_SUPPORTED])
 
 
 # ---------------------------------------------------------------------------
-# --node-power-limit registration on a non-baremetal (1VF guest) platform
+# set parser: --node-power-limit on a 1VF guest, and the --gtt/--gpu guard
 # ---------------------------------------------------------------------------
 
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else ""
+_GTT_GPU_CONFLICT = "argument --gtt/-G: not allowed with argument --gpu/-g"
 
 
 def _build_fake_modules_for_parser():
@@ -601,9 +479,6 @@ class _FakeHelpersGuest:
     def get_power_caps(self):
         return ("0 W", "550 W", "0 W", "550 W")
 
-    def get_max_node_power_limit(self):
-        return "6000 W"
-
     def get_output_format(self):
         return "human"
 
@@ -611,7 +486,7 @@ class _FakeHelpersGuest:
         return 1, True, [object()]
 
 
-class TestNodePowerLimitGuestRegistration(unittest.TestCase):
+class TestSetValueParser(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
@@ -650,12 +525,8 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
 
     def test_unrelated_gpu_error_keeps_argparse_error(self):
         parser = argparse.ArgumentParser()
-        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(
-            parser,
-            gtt_flags=("--node-power-limit", "-n"),
-            reason="--node-power-limit is a node-wide setting, not per-GPU",
-        )
-        argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu", "0"]
+        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G"))
+        argv = ["amd-smi", "set", "--gtt", "8", "--gpu", "0"]
 
         with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
             io.StringIO()
@@ -664,18 +535,12 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("argument --cpu", stderr.getvalue())
-        self.assertNotIn(
-            "--node-power-limit/-n: not allowed with argument --gpu/-g", stderr.getvalue()
-        )
+        self.assertNotIn(_GTT_GPU_CONFLICT, stderr.getvalue())
 
-    def test_missing_gpu_value_gets_node_power_limit_error(self):
+    def test_missing_gpu_value_gets_gtt_error(self):
         parser = argparse.ArgumentParser()
-        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(
-            parser,
-            gtt_flags=("--node-power-limit", "-n"),
-            reason="--node-power-limit is a node-wide setting, not per-GPU",
-        )
-        argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu"]
+        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G"))
+        argv = ["amd-smi", "set", "--gtt", "8", "--gpu"]
 
         with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
             io.StringIO()
@@ -684,17 +549,13 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn(
-            "--node-power-limit/-n: not allowed with argument --gpu/-g", stderr.getvalue()
+            _GTT_GPU_CONFLICT + " (--gtt is a system-wide setting, not per-GPU)", stderr.getvalue()
         )
 
     def test_missing_unrelated_value_keeps_argparse_error(self):
         parser = argparse.ArgumentParser()
-        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(
-            parser,
-            gtt_flags=("--node-power-limit", "-n"),
-            reason="--node-power-limit is a node-wide setting, not per-GPU",
-        )
-        argv = ["amd-smi", "set", "--node-power-limit", "100", "--gpu", "0", "--power-cap"]
+        self.parser_mod.AMDSMIParser._guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G"))
+        argv = ["amd-smi", "set", "--gtt", "8", "--gpu", "0", "--power-cap"]
 
         with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(
             io.StringIO()
@@ -703,6 +564,4 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("argument -o/--power-cap", stderr.getvalue())
-        self.assertNotIn(
-            "--node-power-limit/-n: not allowed with argument --gpu/-g", stderr.getvalue()
-        )
+        self.assertNotIn(_GTT_GPU_CONFLICT, stderr.getvalue())

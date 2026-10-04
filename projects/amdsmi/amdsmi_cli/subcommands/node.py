@@ -192,10 +192,10 @@ class NodeCommands:
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
-                # Only node 0 is currently supported; mirror the gpu/cpu/nic
-                # CSV surfaces, which always lead with a device identifier.
-                csv_dict = {"node": 0}
+                csv_dict = {}
                 if args.power_management:
+                    # Only node 0 exists today; the NPM design shows this column for -p output only.
+                    csv_dict["node"] = 0
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
