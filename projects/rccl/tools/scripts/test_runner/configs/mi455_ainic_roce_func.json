@@ -3879,8 +3879,8 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall)",
-          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
           "timeout": 600
         },
         {
@@ -3905,6 +3905,22 @@
           "test_filter": "GinMPIDeviceTests.RailConnection_Create",
           "env_variables": {
             "NCCL_CROSS_NIC": "0"
+          }
+        },
+        {
+          "name": "GIN_ProxyNthreads_2",
+          "description": "GIN PROXY Recycle/SplitShare/Put/HealthyBarrier under NCCL_GIN_PROXY_NTHREADS=2 (AICOMRCCL-2017 / NVIDIA/nccl#2279)",
+          "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
+          "env_variables": {
+            "NCCL_GIN_PROXY_NTHREADS": "2"
+          }
+        },
+        {
+          "name": "GIN_ProxyNthreads_4",
+          "description": "GIN PROXY Recycle/SplitShare/Put/HealthyBarrier under NCCL_GIN_PROXY_NTHREADS=4 (AICOMRCCL-2017 / NVIDIA/nccl#2279)",
+          "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
+          "env_variables": {
+            "NCCL_GIN_PROXY_NTHREADS": "4"
           }
         }
       ]
@@ -4984,7 +5000,7 @@
     },
     {
       "name": "GIN Device MPI - Proxy Tests",
-      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall + GIN_PROXY_NTHREADS recycle/splitShare) over IB across two nodes",
       "config": "gin_device_mpi",
       "enabled": true
     },

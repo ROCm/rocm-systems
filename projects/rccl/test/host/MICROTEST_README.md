@@ -45,6 +45,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
     `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
+
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -190,6 +191,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 
+- **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
+  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
+  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
+  `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 
@@ -331,7 +338,7 @@ symbol.
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
-| `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
+| `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
@@ -692,7 +699,8 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
+`rccl-UnitTestsMicroGinHost` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -730,6 +738,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-HostUnitTests
 ```
 
