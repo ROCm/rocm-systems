@@ -5235,7 +5235,10 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
   //  print all the gpu metrics content, we need to setup
   //  the environment first.
   status_code = setup_gpu_metrics_reading(type);
-  if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
+  if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
+  if (!m_gpu_metrics_ptr) {
     // At this point we should have a valid gpu_metrics pointer.
     status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -5632,7 +5635,10 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
     return status_code;
   }
 
-  dev->dev_log_gpu_metrics(ostrstream);
+  status_code = dev->dev_log_gpu_metrics(ostrstream);
+  if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "

@@ -1283,14 +1283,19 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         joined = " ".join(cmd_fails)
         details.append(f"#### Command Tests (non-fatal)\n\nFailed: `{joined}`")
 
-    # 3. AMDSMI gtest output
-    gtest_log = results_dir / "amdsmi_tests.log"
-    if gtest_log.exists():
+    # 3. C++ test output
+    for filename, name in (
+        ("amdsmi_tests.log", "AMDSMI Tests"),
+        ("pcie_unit_tests.log", "PCIe Unit Tests"),
+    ):
+        gtest_log = results_dir / filename
+        if not gtest_log.exists():
+            continue
         text = gtest_log.read_text(encoding="utf-8", errors="replace")
         gtest_fails = text.count("[  FAILED  ]")
         if gtest_fails > 0:
-            failures.append(f"AMDSMI Tests ({gtest_fails})")
-            details.append(f"#### AMDSMI Tests \u2014 {gtest_fails} failure(s)\n\n" + _fenced(text))
+            failures.append(f"{name} ({gtest_fails})")
+            details.append(f"#### {name}: {gtest_fails} failure(s)\n\n" + _fenced(text))
 
     # 4. Python test outputs
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
