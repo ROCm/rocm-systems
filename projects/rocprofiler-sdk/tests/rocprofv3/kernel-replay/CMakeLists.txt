@@ -365,7 +365,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs/out_results.json --passes 2
-        --common-counters SQ_WAVES SQ_INSTS_VALU)
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-jobs-validate
@@ -414,7 +415,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs-att/out_results.json --passes 2
-        --common-counters SQ_WAVES SQ_INSTS_VALU --thread-trace)
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE --thread-trace)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-jobs-att-validate
