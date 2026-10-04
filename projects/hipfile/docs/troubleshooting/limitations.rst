@@ -6,7 +6,11 @@
 Limitations
 **********************************
 
-hipFile requires a direct path from the GPU to the storage device. The
+hipFile requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``. A kernel
+without peer-to-peer DMA support always falls back to compatibility mode,
+regardless of the storage configuration. See :ref:`hipfile-kernel-p2pdma`.
+
+hipFile also requires a direct path from the GPU to the storage device. The
 filesystem must be backed by a local NVMe device that either resides on the
 device's partition or is stacked on it through LVM.
 Any other interposing block layer between the filesystem and the device breaks

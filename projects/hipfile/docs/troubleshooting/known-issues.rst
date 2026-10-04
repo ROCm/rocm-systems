@@ -51,6 +51,36 @@ hipFile's fastpath is only supported on GPU physical functions (PFs).
 ``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
 when one is present. This warning won't change the exit code.
 
+The Ubuntu 22.04 default kernel does not support the fastpath
+=============================================================
+
+On Ubuntu 22.04 LTS, hipFile I/O runs entirely on the fallback path and never
+reaches the bandwidth the storage device is capable of, even when ``ais-check``
+reports fastpath-capable volumes.
+
+Ubuntu 22.04 LTS is a supported ROCm distribution, but its default 5.15 kernel is
+built without ``CONFIG_PCI_P2PDMA``. hipFile's fastpath requires that option in
+order to perform peer-to-peer DMA between the GPU and the storage device.
+
+Check the running kernel's configuration:
+
+.. code-block:: none
+
+  $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
+  # CONFIG_PCI_P2PDMA is not set
+
+``ais-check`` reports the same condition as ``Kernel P2PDMA support : False``.
+
+To work around this issue, install the Ubuntu 22.04 hardware enablement (HWE)
+kernel, which is based on 6.8 and enables the option:
+
+.. code-block:: none
+
+  $ sudo apt install linux-generic-hwe-22.04
+  $ sudo systemctl reboot
+
+See :ref:`hipfile-kernel-p2pdma` for other distributions.
+
 High memory utilization with hipFile
 ====================================
 
