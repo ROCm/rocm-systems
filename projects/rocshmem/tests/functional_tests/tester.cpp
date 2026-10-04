@@ -973,6 +973,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get WG Column-Major";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePutRowMajorStartCoordTestType:
+      test_name = "Tile Put Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetRowMajorStartCoordTestType:
+      test_name = "Tile Get Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveRowMajorStartCoordTestType:
+      test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorStartCoordTestType:
+      test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorStartCoordTestType:
+      test_name = "Tile Put WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorStartCoordTestType:
+      test_name = "Tile Get WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));

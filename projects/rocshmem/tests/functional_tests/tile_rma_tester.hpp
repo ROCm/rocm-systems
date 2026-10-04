@@ -45,6 +45,11 @@ class TileRMATester : public Tester {
   int tile_extent_0 = DEFAULT_TILE_ROWS;
   int tile_extent_1 = DEFAULT_TILE_COLS;
 
+  // Non-zero start_coord offset for the *StartCoord test variants.
+  // start_coord = (start_coord_offset, start_coord_offset); tensors are
+  // allocated with an extra border of this width in each dimension.
+  static constexpr int DEFAULT_START_COORD_OFFSET = 4;
+  int start_coord_offset = 0;
 
   // Symmetric heap allocations
   SymmetricTensorBuffer<float> *local_alloc = nullptr;
