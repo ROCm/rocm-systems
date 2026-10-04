@@ -28,6 +28,7 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import float_compare
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -1456,13 +1457,20 @@ def _vopc_functor(conv: str, rel: str) -> str:
     return f'[](auto a, auto b) {{ return {body}; }}'
 
 
+def _float_vopc_entry(suf: str, rel: str) -> tuple[str, str]:
+    """Float relations evaluate raw encodings through shared/comparison.h."""
+    if float_compare.is_float_relation(suf, rel):
+        return float_compare.lane_type(suf), float_compare.simd_functor(suf, rel)
+    lane_t, conv = _VOPC_SUFFIX[suf]
+    return lane_t, _vopc_functor(conv, rel)
+
+
 def _build_simd_vopc() -> dict[str, tuple[str, str]]:
     table: dict[str, tuple[str, str]] = {}
     # 16-/32-bit lane suffixes only; f64/i64/u64 (64-bit lane) wired separately.
     for suf in ('f16', 'f32'):
-        lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_FLOAT_RELS:
-            table[f'v_cmp_{rel}_{suf}_vopc'] = (lane_t, _vopc_functor(conv, rel))
+            table[f'v_cmp_{rel}_{suf}_vopc'] = _float_vopc_entry(suf, rel)
     for suf in ('i16', 'u16', 'i32', 'u32'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
@@ -1473,9 +1481,8 @@ def _build_simd_vopc() -> dict[str, tuple[str, str]]:
 def _build_simd_vopc64() -> dict[str, tuple[str, str]]:
     """64-bit-lane VOPC compares (f64/i64/u64), routed through the VOPC64 glue."""
     table: dict[str, tuple[str, str]] = {}
-    lane_t, conv = _VOPC_SUFFIX['f64']
     for rel in _VOPC_FLOAT_RELS:
-        table[f'v_cmp_{rel}_f64_vopc'] = (lane_t, _vopc_functor(conv, rel))
+        table[f'v_cmp_{rel}_f64_vopc'] = _float_vopc_entry('f64', rel)
     for suf in ('i64', 'u64'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
@@ -1638,11 +1645,10 @@ SIMD_VOP3_CLASS_F64: dict[str, str] = {
 # try_execute_vopc_vop3_int_simd (32-bit lane) or
 # try_execute_vopc64_vop3_int_simd (64-bit lane).
 #
-# Floating-point VOPC bodies in VOP3 form apply abs (std::fabs) then neg per
-# source on the already-widened/converted operand; the float-bucket tables
-# below build new functors that take the post-modifier value (no in-functor
-# widen), and the corresponding glue applies the modifier outside before
-# calling.
+# Floating-point VOPC bodies in VOP3 form read the raw encodings through the
+# same raw-lane glue; shared/comparison.h applies the captured abs/neg fields,
+# MODE input flushing and NaN ordering inside the functor. F16 sources occupy
+# 32-bit lanes and may select their half with true16 OPSEL.
 #
 # VOP3 fp adds two extra rels vs VOPC: 't' alongside 'tru' (both constant
 # always-true), so the table keys span the union of the two.
@@ -1677,57 +1683,26 @@ SIMD_VOPC_VOP3_INT_32: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_32
 SIMD_VOPC_VOP3_INT_64: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_64()
 
 
-def _build_simd_vopc_vop3_f32() -> dict[str, str]:
-    """VOP3 form of the f32 VOPC relations (16 from VOPC + 't' constant).
+def _build_simd_vopc_vop3_float() -> dict[str, tuple[str, str]]:
+    """VOP3 form of the f16/f32/f64 VOPC relations (16 from VOPC + 't').
 
-    Keyed by ``_vop3``; the functor is the same shape as the VOPC f32 one
-    (identity operand conversion), and operates on already-modifier-applied
-    `native<float>` arguments — the VOP3 fp32 glue applies abs/neg outside the
-    functor.
+    Keyed by ``_vop3``; values are (raw lane type, functor). Constant relations
+    ignore their operands.
     """
-    table: dict[str, str] = {}
-    _, conv = _VOPC_SUFFIX['f32']
-    for rel in _VOP3_FLOAT_RELS:
-        table[f'v_cmp_{rel}_f32_vop3'] = _vopc_functor(conv, rel)
+    modifiers = ('inst.inst_.abs', 'inst.inst_.neg')
+    table: dict[str, tuple[str, str]] = {}
+    for suf in ('f16', 'f32', 'f64'):
+        lane_t = float_compare.lane_type(suf)
+        for rel in _VOP3_FLOAT_RELS:
+            if float_compare.is_float_relation(suf, rel):
+                functor = float_compare.simd_functor(suf, rel, modifiers)
+            else:
+                functor = _vopc_functor('{x}', rel)
+            table[f'v_cmp_{rel}_{suf}_vop3'] = (lane_t, functor)
     return table
 
 
-SIMD_VOPC_VOP3_F32: dict[str, str] = _build_simd_vopc_vop3_f32()
-
-
-def _build_simd_vopc_vop3_f16() -> dict[str, str]:
-    """VOP3 form of the f16 VOPC relations (17 — same set as f32).
-
-    The f16 VOP3 glue widens raw lanes via util::f16_to_f32_simd and applies
-    abs/neg on the f32 outside the functor; the functor itself takes
-    already-widened `native<float>` arguments, so it is the same functor as
-    the f32 path (identity operand conversion).
-    """
-    table: dict[str, str] = {}
-    _, conv = _VOPC_SUFFIX['f32']
-    for rel in _VOP3_FLOAT_RELS:
-        table[f'v_cmp_{rel}_f16_vop3'] = _vopc_functor(conv, rel)
-    return table
-
-
-SIMD_VOPC_VOP3_F16: dict[str, str] = _build_simd_vopc_vop3_f16()
-
-
-def _build_simd_vopc_vop3_f64() -> dict[str, str]:
-    """VOP3 form of the f64 VOPC relations (17 — same set as f32/f16).
-
-    Lane type `double`; the glue applies abs/neg outside the functor on the
-    f64 value, so the functor itself takes already-modified `native<double>`
-    arguments and reuses the VOPC64 f64 builder (identity operand conversion).
-    """
-    table: dict[str, str] = {}
-    _, conv = _VOPC_SUFFIX['f64']
-    for rel in _VOP3_FLOAT_RELS:
-        table[f'v_cmp_{rel}_f64_vop3'] = _vopc_functor(conv, rel)
-    return table
-
-
-SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
+SIMD_VOPC_VOP3_FLOAT: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_float()
 
 
 # --- VOP3 integer/bitwise ternary (3-source) -------------------------------
@@ -2856,36 +2831,20 @@ def _simd_probe_line(
         writer_arg = f'{result_writer}, ' if result_writer is not None else ''
         suffix = '_RESULT' if result_writer is not None else ''
         return f'  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT{suffix}({writer_arg}{lane_t}, {cpp_op});'
-    # VOP3 form of the f32 VOPC relational compares (17 ops: 16 relations +
-    # 't' constant). Per-source abs/neg modifiers applied outside the functor
-    # via the fp32 VOPC glue; result-writer handling matches the integer path.
-    specvopcv3f32 = SIMD_VOPC_VOP3_F32.get(template_name)
-    if specvopcv3f32 is not None:
+    # VOP3 form of the f16/f32/f64 VOPC compares (17 ops each). Raw lanes go
+    # through the integer glue; the functor applies the captured abs/neg.
+    specvopcv3float = SIMD_VOPC_VOP3_FLOAT.get(template_name)
+    if specvopcv3float is not None:
+        lane_t, cpp_op = specvopcv3float
+        if lane_t == 'uint64_t':
+            macro = 'ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT'
+        elif true16_vop3 and '_f16_' in template_name:
+            macro = 'ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT'
+        else:
+            macro = 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT'
         writer_arg = f'{result_writer}, ' if result_writer is not None else ''
         suffix = '_RESULT' if result_writer is not None else ''
-        return (
-            f'  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32{suffix}({writer_arg}{specvopcv3f32});'
-        )
-    # VOP3 form of the f16 VOPC relational compares (17 ops). The glue widens
-    # raw lanes to f32 then applies abs/neg in f32 domain — matching the scalar
-    # body's f16_to_f32 -> std::fabs/-x order. Same functor as the f32 path.
-    specvopcv3f16 = SIMD_VOPC_VOP3_F16.get(template_name)
-    if specvopcv3f16 is not None:
-        macro = (
-            'ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_FP16'
-            if true16_vop3
-            else 'ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16'
-        )
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return f'  {macro}{suffix}({writer_arg}{specvopcv3f16});'
-    # VOP3 form of the f64 VOPC relational compares (17 ops). 64-bit-lane,
-    # per-source abs/neg modifiers applied in the f64 domain outside the functor.
-    specvopcv3f64 = SIMD_VOPC_VOP3_F64.get(template_name)
-    if specvopcv3f64 is not None:
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return f'  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64{suffix}({writer_arg}{specvopcv3f64});'
+        return f'  {macro}{suffix}({writer_arg}{lane_t}, {cpp_op});'
     # VOP3 integer/bitwise ternary ops (add3/or3/xor3/lshl_add/add_lshl/bfi).
     # Plain element-wise functor of (src0, src1, src2); no modifiers.
     spec3tern_true16 = SIMD_VOP3_TERNARY_TRUE16.get(template_name)

@@ -63,6 +63,12 @@ in the following table.
           Auto-detect is limited to gfx1250, the only architecture where the VMM
           path is validated. Use ``1`` to force it on elsewhere.
 
+    * - | ``NCCL_RMA_DISABLE``
+        | Disables the RMA proxy, the network path for one-sided RMA. The proxy
+          is never connected and windows are not registered with it.
+      - | ``0``: RMA proxy enabled (default).
+        | ``1``: RMA proxy disabled.
+
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
           the ``minCTAs`` field of ``ncclConfig_t``.
@@ -95,6 +101,15 @@ in the following table.
           ring kernel when two or more distinct roots appear in a group.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
+
+    * - | ``RCCL_HIERARCHICAL_LAZY_INIT``
+        | Controls when a communicator of eight or more nodes builds the
+          sub-communicators that hierarchical AllGather uses. Ignored when
+          ``RCCL_HIERARCHICAL_REDUCE_SCATTER=1``. All ranks in a communicator
+          must use the same value.
+      - | ``0``: Build them during communicator initialization (default).
+        | ``1``: Build them on the first AllGather eligible for hierarchical
+          AllGather, outside graph capture.
 
 Logging and debugging
 =====================
@@ -258,6 +273,23 @@ collected in the following table.
         | ``0``: Skips the automatic AINIC check. The size, architecture and
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
+
+    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
+        | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
+          size), that can select hierarchical AllGather, so that small startup
+          AllGathers such as PyTorch DDP's 8-byte one stay on the default path.
+          ``rccl-tests`` reports the total size, this value times the number of
+          ranks. All ranks in a communicator must use the same value.
+      - | Bytes per rank
+        | Default: ``16``
+        | ``0``: No lower bound.
+
+    * - | ``RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES_PER_RANK``
+        | Sets the smallest ReduceScatter, in bytes per rank (``recvcount`` x
+          type size), that can select hierarchical ReduceScatter.
+      - | Bytes per rank
+        | Default: ``16``
+        | ``0``: No lower bound.
 
 Network and topology
 ====================
@@ -453,6 +485,30 @@ in the following table.
         | Controls ring remapping for specific topologies.
       - | Remapping specification string
         | Used with Rome 4P2H topology
+
+    * - | ``NCCL_GIN_PLUGIN``
+        | Selects external GIN (GPU-Initiated Networking) plugins.
+      - | Comma-separated list of paths or short names
+        | A short name is resolved against the ``librccl-gin`` prefix, so
+          ``example`` loads ``librccl-gin-example.so``
+        | A plugin reporting the proxy device type is superseded by the built-in
+          GIN proxy. See :ref:`using-rccl-gin-plugin`
+
+    * - | ``NCCL_GIN_ENABLE``
+        | Controls whether any GIN backend is registered. RCCL-specific.
+      - | ``1``: Register GIN backends (default)
+        | ``0``: Register none, so GIN reports as unsupported
+
+    * - | ``NCCL_GIN_TYPE``
+        | Requires a specific GIN backend type, skipping all others.
+      - | ``-1``: Disables the generic filter, but does not auto-enable
+          the in-tree device backends
+        | ``2``: Proxy
+        | ``3``: GDAKI
+        | ``4``: GPI
+        | ``5``: EFA GDA
+        | ``6``: rocSHMEM GDA (required for that backend to initialize)
+        | ``7``: Anvil SDMA (also accepts unset)
 
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
