@@ -1913,10 +1913,520 @@ std::vector<ArithmeticCase> transcendental_policy_cases() {
   return cases;
 }
 
-class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
+std::vector<ArithmeticCase> minimum_maximum_cases() {
+  // Expected results from gfx1201: preserve the first NaN's sign and payload
+  // while quieting it, and honor input flushing only.
+  // Instruction encodings from llvm-mc -mcpu=gfx1201.
+  const auto make = [](std::string name, rj_code_arch_t arch, std::array<uint32_t, 3> words,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources,
+                       std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+    return ArithmeticCase{std::move(name),     arch, words,       std::move(sources),
+                          std::move(expected), mode, FE_TONEAREST};
+  };
+  constexpr rj_code_arch_t RDNA4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr std::array<uint32_t, 3> MAXIMUM_F32{0xd7660006u, 0x00020300u, 0u};
+  constexpr std::array<uint32_t, 3> MINIMUM_F32{0xd7650006u, 0x00020300u, 0u};
+  constexpr std::array<uint32_t, 3> MAXIMUM_F64{0xd7420006u, 0x00020500u, 0u};
+  constexpr std::array<uint32_t, 3> MINIMUM_F64{0xd7410006u, 0x00020500u, 0u};
+  constexpr std::array<uint32_t, 3> MAXIMUM_F16{0xd7680006u, 0x00020300u, 0u};
+  constexpr std::array<uint32_t, 3> MINIMUM_F16{0xd7670006u, 0x00020300u, 0u};
+  return {
+      make("MaximumF32QuietsSignalingSrc0", RDNA4, MAXIMUM_F32, {{0, 0x7f800001u}, {1, 0u}},
+           {{6, 0x7fc00001u}}, 0xf0u),
+      // A quiet src0 wins over a signaling src1 and keeps its sign.
+      make("MaximumF32PrefersSrc0Nan", RDNA4, MAXIMUM_F32, {{0, 0xffc00000u}, {1, 0x7f800001u}},
+           {{6, 0xffc00000u}}, 0xf0u),
+      make("MinimumF32QuietsSrc1", RDNA4, MINIMUM_F32, {{0, 1u}, {1, 0x7f800001u}},
+           {{6, 0x7fc00001u}}, 0xf0u),
+      make("MinimumF32FlushesInput", RDNA4, MINIMUM_F32, {{0, 0x807fffffu}, {1, 0u}},
+           {{6, 0x80000000u}}, 0x00u),
+      make("MinimumF32KeepsInput", RDNA4, MINIMUM_F32, {{0, 0x807fffffu}, {1, 0u}},
+           {{6, 0x807fffffu}}, 0xf0u),
+      // Only the input-flush MODE bit affects selection.
+      make("MaximumF32FlushInOnly", RDNA4, MAXIMUM_F32, {{0, 1u}, {1, 0u}}, {{6, 0u}}, 0x20u),
+      make("MaximumF32FlushOutOnly", RDNA4, MAXIMUM_F32, {{0, 1u}, {1, 0u}}, {{6, 1u}}, 0x10u),
+      make("MaximumF64QuietsSignalingSrc0", RDNA4, MAXIMUM_F64,
+           {{0, 1u}, {1, 0x7ff00000u}, {2, 0u}, {3, 0u}}, {{6, 1u}, {7, 0x7ff80000u}}, 0xf0u),
+      make("MinimumF64FlushesInput", RDNA4, MINIMUM_F64,
+           {{0, 0xffffffffu}, {1, 0x800fffffu}, {2, 0u}, {3, 0u}}, {{6, 0u}, {7, 0x80000000u}},
+           0x00u),
+      make("MaximumF16QuietsSignalingSrc0", RDNA4, MAXIMUM_F16, {{0, 0x7c01u}, {1, 0u}, {6, 0u}},
+           {{6, 0x7e01u}}, 0xf0u),
+      make("MinimumF16QuietsSrc1", RDNA4, MINIMUM_F16, {{0, 1u}, {1, 0x7c01u}, {6, 0u}},
+           {{6, 0x7e01u}}, 0xf0u),
+      make("MinimumF16FlushesInput", RDNA4, MINIMUM_F16, {{0, 0x83ffu}, {1, 0u}, {6, 0u}},
+           {{6, 0x8000u}}, 0x00u),
+      // Three-source forms apply the first operation to src0/src1, then combine src2.
+      make("Maximum3F32QuietsSrc2", RDNA4, {0xd62e0006u, 0x040a0300u, 0u},
+           {{0, 0u}, {1, 0u}, {2, 0x7f800001u}}, {{6, 0x7fc00001u}}, 0xf0u),
+      make("Minimum3F32FlushesSrc2", RDNA4, {0xd62d0006u, 0x040a0300u, 0u},
+           {{0, 0u}, {1, 0u}, {2, 0x807fffffu}}, {{6, 0x80000000u}}, 0x00u),
+      // The inner selection's NaN keeps its payload when src2 is also NaN.
+      make("MaximumMinimumF32PrefersInnerNan", RDNA4, {0xd66d0006u, 0x040a0300u, 0u},
+           {{0, 0u}, {1, 0x7f800001u}, {2, 0x7fc00000u}}, {{6, 0x7fc00001u}}, 0xf0u),
+      make("MinimumMaximumF32FlushesAll", RDNA4, {0xd66c0006u, 0x040a0300u, 0u},
+           {{0, 1u}, {1, 0u}, {2, 1u}}, {{6, 0u}}, 0x00u),
+      make("Maximum3F16KeepsNegativeNan", RDNA4, {0xd6300006u, 0x040a0300u, 0u},
+           {{0, 0xfd2du}, {1, 0x21c8u}, {2, 0xb723u}, {6, 0u}}, {{6, 0xff2du}}, 0xf0u),
+      make("Minimum3F16FlushesInput", RDNA4, {0xd62f0006u, 0x040a0300u, 0u},
+           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u),
+      make("MaximumMinimumF16QuietsSrc2", RDNA4, {0xd66f0006u, 0x040a0300u, 0u},
+           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u),
+      make("MinimumMaximumF16FlushesSrc2", RDNA4, {0xd66e0006u, 0x040a0300u, 0u},
+           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u),
+  };
+}
 
-TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
-  const ArithmeticCase &test = GetParam();
+std::vector<ArithmeticCase> min_max_num_cases() {
+  // Expected results from gfx1201: *_NUM prefers numbers over NaNs and orders
+  // -0 below +0. V_MED3_NUM uses V_MIN3_NUM whenever an input is NaN.
+  // Instruction encodings from llvm-mc -mcpu=gfx1201.
+  const auto rdna4 = [](std::string name, std::array<uint32_t, 3> words,
+                        std::vector<std::pair<uint32_t, uint32_t>> sources,
+                        std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+    return ArithmeticCase{std::move(name),    ROCJITSU_CODE_ARCH_RDNA4, words,
+                          std::move(sources), std::move(expected),      mode,
+                          FE_TONEAREST};
+  };
+  constexpr std::array<uint32_t, 3> MIN_NUM_F32_E64{0xd5150006u, 0x00020300u, 0u};
+  constexpr std::array<uint32_t, 3> MED3_NUM_F32{0xd6310006u, 0x040a0300u, 0u};
+  constexpr std::array<uint32_t, 3> MINMAX_NUM_F32{0xd6680006u, 0x040a0300u, 0u};
+  return {
+      // v_max_num_f32_e32 v6, v0, v1
+      rdna4("MaxNumF32OrdersSignedZero", {0x2c0c0300u, 0u, 0u}, {{0, 0x80000000u}, {1, 0u}},
+            {{6, 0u}}, 0xf0u),
+      rdna4("MinNumF32BothNanQuietsSrc0", MIN_NUM_F32_E64, {{0, 0x7f800001u}, {1, 0x7fc00000u}},
+            {{6, 0x7fc00001u}}, 0xf0u),
+      rdna4("MinNumF32IgnoresSignalingNan", MIN_NUM_F32_E64, {{0, 0x7f800001u}, {1, 0x3f800000u}},
+            {{6, 0x3f800000u}}, 0xf0u),
+      // v_max_num_f64_e32 v[6:7], v[0:1], v[2:3]
+      rdna4("MaxNumF64FlushesInput", {0x1c0c0500u, 0u, 0u}, {{0, 1u}, {1, 0u}, {2, 0u}, {3, 0u}},
+            {{6, 0u}, {7, 0u}}, 0x00u),
+      // v_min_num_f16_e32 v6, v0, v1
+      rdna4("MinNumF16BothNanKeepsSrc0Sign", {0x600c0300u, 0u, 0u},
+            {{0, 0xfe00u}, {1, 0x7e00u}, {6, 0u}}, {{6, 0xfe00u}}, 0xf0u),
+      rdna4("Max3NumF32FlushesSrc2", {0xd62a0006u, 0x040a0300u, 0u},
+            {{0, 0x80000000u}, {1, 0x80000000u}, {2, 1u}}, {{6, 0u}}, 0x00u),
+      rdna4("Min3NumF16OrdersSignedZero", {0xd62b0006u, 0x040a0300u, 0u},
+            {{0, 0u}, {1, 0x8000u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0xf0u),
+      rdna4("Med3NumF32NanSelectsMin3", MED3_NUM_F32, {{0, 0x7fc00000u}, {1, 1u}, {2, 0u}},
+            {{6, 0u}}, 0xf0u),
+      rdna4("Med3NumF32NegativeZeroMedian", MED3_NUM_F32,
+            {{0, 0x80000000u}, {1, 0u}, {2, 0x80000000u}}, {{6, 0x80000000u}}, 0xf0u),
+      rdna4("Med3NumF16FlushesInput", {0xd6320006u, 0x040a0300u, 0u},
+            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u),
+      rdna4("MinMaxNumF32IgnoresInnerNanPair", MINMAX_NUM_F32,
+            {{0, 0x7f800001u}, {1, 0x7fc00000u}, {2, 0x3f800000u}}, {{6, 0x3f800000u}}, 0xf0u),
+      rdna4("MaxMinNumF16OrdersSignedZero", {0xd66b0006u, 0x040a0300u, 0u},
+            {{0, 0x8000u}, {1, 0u}, {2, 0x3c00u}, {6, 0u}}, {{6, 0u}}, 0xf0u),
+      // v_dual_max_num_f32 v6, v0, v1 :: v_dual_mov_b32 v7, v2
+      // Expected from V_MAX_NUM_F32 rules; VOPD was not captured on hardware.
+      rdna4("DualMaxNumF32OrdersSignedZero", {0xca900300u, 0x06060102u, 0u},
+            {{0, 0x80000000u}, {1, 0u}, {2, 0x12345678u}}, {{6, 0u}, {7, 0x12345678u}}, 0xf0u),
+  };
+}
+
+struct MinmaxForm {
+  const char *name;
+  uint16_t op;
+  unsigned width;
+  unsigned sources;
+};
+
+// Every floating min/max operation routed through the common VOP3 stages.
+constexpr std::array<MinmaxForm, 30> kMinmaxForms = {{
+    {"MinNumF16", rdna4::kVMinNumF16Vop3, 16, 2},
+    {"MaxNumF16", rdna4::kVMaxNumF16Vop3, 16, 2},
+    {"MinimumF16", rdna4::kVMinimumF16Vop3, 16, 2},
+    {"MaximumF16", rdna4::kVMaximumF16Vop3, 16, 2},
+    {"MinNumF32", rdna4::kVMinNumF32Vop3, 32, 2},
+    {"MaxNumF32", rdna4::kVMaxNumF32Vop3, 32, 2},
+    {"MinimumF32", rdna4::kVMinimumF32Vop3, 32, 2},
+    {"MaximumF32", rdna4::kVMaximumF32Vop3, 32, 2},
+    {"MinNumF64", rdna4::kVMinNumF64Vop3, 64, 2},
+    {"MaxNumF64", rdna4::kVMaxNumF64Vop3, 64, 2},
+    {"MinimumF64", rdna4::kVMinimumF64Vop3, 64, 2},
+    {"MaximumF64", rdna4::kVMaximumF64Vop3, 64, 2},
+    {"Min3NumF16", rdna4::kVMin3NumF16Vop3, 16, 3},
+    {"Max3NumF16", rdna4::kVMax3NumF16Vop3, 16, 3},
+    {"Minimum3F16", rdna4::kVMinimum3F16Vop3, 16, 3},
+    {"Maximum3F16", rdna4::kVMaximum3F16Vop3, 16, 3},
+    {"MinmaxNumF16", rdna4::kVMinmaxNumF16Vop3, 16, 3},
+    {"MaxminNumF16", rdna4::kVMaxminNumF16Vop3, 16, 3},
+    {"MinimummaximumF16", rdna4::kVMinimummaximumF16Vop3, 16, 3},
+    {"MaximumminimumF16", rdna4::kVMaximumminimumF16Vop3, 16, 3},
+    {"Med3NumF16", rdna4::kVMed3NumF16Vop3, 16, 3},
+    {"Min3NumF32", rdna4::kVMin3NumF32Vop3, 32, 3},
+    {"Max3NumF32", rdna4::kVMax3NumF32Vop3, 32, 3},
+    {"Minimum3F32", rdna4::kVMinimum3F32Vop3, 32, 3},
+    {"Maximum3F32", rdna4::kVMaximum3F32Vop3, 32, 3},
+    {"MinmaxNumF32", rdna4::kVMinmaxNumF32Vop3, 32, 3},
+    {"MaxminNumF32", rdna4::kVMaxminNumF32Vop3, 32, 3},
+    {"MinimummaximumF32", rdna4::kVMinimummaximumF32Vop3, 32, 3},
+    {"MaximumminimumF32", rdna4::kVMaximumminimumF32Vop3, 32, 3},
+    {"Med3NumF32", rdna4::kVMed3NumF32Vop3, 32, 3},
+}};
+
+std::vector<ArithmeticCase> minmax_input_flush_cases() {
+  // Explicit expectations keep this independent of the helper's MODE decoding.
+  // Set F32 and F16/F64 differently, then vary each output-flush bit alone.
+  struct ModeCase {
+    uint32_t mode;
+    bool keep_f32;
+    bool keep_f16_f64;
+  };
+  constexpr std::array<ModeCase, 8> modes = {{
+      {0xf0u, true, true},
+      {0x00u, false, false},
+      {0x30u, true, false},
+      {0xc0u, false, true},
+      {0xe0u, false, true},
+      {0xd0u, true, true},
+      {0xb0u, true, false},
+      {0x70u, true, true},
+  }};
+  struct Form {
+    const char *name;
+    std::array<uint32_t, 3> words;
+    unsigned width;
+    bool minimum;
+  };
+  const auto vop2 = [](uint16_t op, unsigned width) {
+    const auto words =
+        rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = uint8_t(width == 64 ? 2 : 1), .vdst = 6});
+    return std::array<uint32_t, 3>{words[0], 0u, 0u};
+  };
+  const auto vop3 = [](uint16_t op, unsigned width) {
+    const auto words = rdna4::build_vop3(
+        op, {.vdst = 6, .src0 = 256, .src1 = uint16_t(width == 64 ? 258 : 257), .src2 = 258});
+    return std::array<uint32_t, 3>{words[0], words[1], 0u};
+  };
+  const std::array<Form, 22> forms = {{
+      {"MinNumF16E32", vop2(rdna4::kVMinNumF16Vop2, 16), 16, true},
+      {"MaxNumF16E32", vop2(rdna4::kVMaxNumF16Vop2, 16), 16, false},
+      {"MinNumF32E32", vop2(rdna4::kVMinNumF32Vop2, 32), 32, true},
+      {"MaxNumF32E32", vop2(rdna4::kVMaxNumF32Vop2, 32), 32, false},
+      {"MinNumF64E32", vop2(rdna4::kVMinNumF64Vop2, 64), 64, true},
+      {"MaxNumF64E32", vop2(rdna4::kVMaxNumF64Vop2, 64), 64, false},
+      {"MinNumF16E64", vop3(rdna4::kVMinNumF16Vop3, 16), 16, true},
+      {"MaxNumF16E64", vop3(rdna4::kVMaxNumF16Vop3, 16), 16, false},
+      {"MinNumF32E64", vop3(rdna4::kVMinNumF32Vop3, 32), 32, true},
+      {"MaxNumF32E64", vop3(rdna4::kVMaxNumF32Vop3, 32), 32, false},
+      {"MinNumF64E64", vop3(rdna4::kVMinNumF64Vop3, 64), 64, true},
+      {"MaxNumF64E64", vop3(rdna4::kVMaxNumF64Vop3, 64), 64, false},
+      {"MinimumF16", vop3(rdna4::kVMinimumF16Vop3, 16), 16, true},
+      {"MaximumF16", vop3(rdna4::kVMaximumF16Vop3, 16), 16, false},
+      {"MinimumF32", vop3(rdna4::kVMinimumF32Vop3, 32), 32, true},
+      {"MaximumF32", vop3(rdna4::kVMaximumF32Vop3, 32), 32, false},
+      {"MinimumF64", vop3(rdna4::kVMinimumF64Vop3, 64), 64, true},
+      {"MaximumF64", vop3(rdna4::kVMaximumF64Vop3, 64), 64, false},
+      // Ternary forms use separate SIMD helpers from the binary forms.
+      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true},
+      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false},
+      {"Min3NumF32", vop3(rdna4::kVMin3NumF32Vop3, 32), 32, true},
+      {"Max3NumF32", vop3(rdna4::kVMax3NumF32Vop3, 32), 32, false},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms)
+    for (const ModeCase &mode : modes) {
+      const bool keep = form.width == 32 ? mode.keep_f32 : mode.keep_f16_f64;
+      // min(-tiny, +0) is -tiny or -0; max(+tiny, +0) is +tiny or +0.
+      // The ternary cases add another +0 and have the same expected result.
+      const uint32_t sign = form.minimum ? (form.width == 16 ? 0x8000u : 0x80000000u) : 0u;
+      std::vector<std::pair<uint32_t, uint32_t>> sources;
+      std::vector<std::pair<uint32_t, uint32_t>> expected;
+      if (form.width == 64) {
+        sources = {{0, 1u}, {1, sign}, {2, 0u}, {3, 0u}};
+        expected = {{6, keep ? 1u : 0u}, {7, sign}};
+      } else {
+        // Poison the unused F16 halves, and check that the destination's high
+        // half survives. A read of the wrong source half would select a NaN.
+        const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
+        sources = {{0, high | sign | 1u}, {1, high}, {2, high}};
+        expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | sign | (keep ? 1u : 0u)}};
+      }
+      constexpr char HEX[] = "0123456789abcdef";
+      const std::string suffix = {HEX[mode.mode >> 4], HEX[mode.mode & 0xfu]};
+      cases.push_back({std::string(form.name) + "Mode" + suffix, ROCJITSU_CODE_ARCH_RDNA4,
+                       form.words, std::move(sources), std::move(expected), mode.mode,
+                       FE_TONEAREST});
+    }
+  // Equal inputs make every binary, nested and median form return that input.
+  // Test both signs with OMOD disabled so its zeroing cannot mask a missed flush.
+  for (const MinmaxForm &form : kMinmaxForms)
+    for (const ModeCase &mode : modes)
+      for (const bool negative : {false, true}) {
+        const bool keep = form.width == 32 ? mode.keep_f32 : mode.keep_f16_f64;
+        const uint64_t sign = negative ? uint64_t{1} << (form.width - 1) : 0;
+        const uint64_t input = sign | 1u;
+        const uint64_t result = sign | (keep ? 1u : 0u);
+        std::vector<std::pair<uint32_t, uint32_t>> sources;
+        std::vector<std::pair<uint32_t, uint32_t>> expected;
+        if (form.width == 64) {
+          sources = {{0, uint32_t(input)},
+                     {1, uint32_t(input >> 32)},
+                     {2, uint32_t(input)},
+                     {3, uint32_t(input >> 32)}};
+          expected = {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}};
+        } else {
+          const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
+          for (unsigned source = 0; source < form.sources; ++source)
+            sources.emplace_back(source, high | uint32_t(input));
+          expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(result)}};
+        }
+        cases.push_back({std::string(form.name) + "AllSources" +
+                             (negative ? "Negative" : "Positive") + "Mode" +
+                             std::to_string(mode.mode),
+                         ROCJITSU_CODE_ARCH_RDNA4, vop3(form.op, form.width), std::move(sources),
+                         std::move(expected), mode.mode, FE_TONEAREST});
+      }
+  return cases;
+}
+
+std::vector<ArithmeticCase> minmax_output_modifier_cases() {
+  // Expected bits come from gfx1201 captures with OMOD/CLAMP. The directed
+  // overflow cases were captured for all 30 min/max forms on 2026-10-02.
+  // Equal inputs let every form reuse the same output-stage expectations.
+  // The final samples explicitly check the order of combined modifiers.
+  struct Sample {
+    const char *name;
+    uint8_t omod;
+    bool clamp;
+    uint32_t mode;
+    uint64_t value;
+    uint64_t expected;
+    bool abs = false;
+    bool neg = false;
+  };
+  constexpr std::array<Sample, 30> f16 = {{
+      {"Mul2Subnormal", 1, false, 0xf0u, 0x0001u, 0x0000u},
+      {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000u, 0x0000u},
+      {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8400u, 0x8000u},
+      {"Mul4", 2, false, 0xf0u, 0x3c00u, 0x4400u},
+      {"Div2", 3, false, 0xf0u, 0x3c00u, 0x3800u},
+      {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7bffu, 0x7c00u},
+      {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xfbffu, 0xfbffu},
+      {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7bffu, 0x7bffu},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7bffu, 0x7c00u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7bffu, 0x7bffu},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7bffu, 0x7bffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7bffu, 0x7bffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xfbffu, 0xfbffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xfbffu, 0xfbffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xfbffu, 0xfc00u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xfbffu, 0xfbffu},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7bffu, 0x7c00u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7bffu, 0x7bffu},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7bffu, 0x7bffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7bffu, 0x7bffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xfbffu, 0xfbffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xfbffu, 0xfbffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xfbffu, 0xfc00u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xfbffu, 0xfbffu},
+      {"Mul2Nan", 1, false, 0xf0u, 0x7e00u, 0x7e00u},
+      {"ClampNan", 0, true, 0xf0u, 0x7e00u, 0x0000u},
+      {"ClampAboveOne", 0, true, 0xf0u, 0x7bffu, 0x3c00u},
+      {"ClampNegative", 0, true, 0xf0u, 0x83ffu, 0x0000u},
+      // abs(-0.75) * 2 clamps to 1; -abs(-0.75) * 2 is -1.5.
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xba00u, 0x3c00u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xba00u, 0xbe00u, true, true},
+  }};
+  constexpr std::array<Sample, 30> f32 = {{
+      {"Mul2Subnormal", 1, false, 0xf0u, 0x00000001u, 0x00000000u},
+      {"Mul2NegativeZero", 1, false, 0xf0u, 0x80000000u, 0x00000000u},
+      {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x80800000u, 0x80000000u},
+      {"Mul4", 2, false, 0xf0u, 0x3f800000u, 0x40800000u},
+      {"Div2", 3, false, 0xf0u, 0x3f800000u, 0x3f000000u},
+      {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xff7fffffu, 0xff7fffffu},
+      {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7f7fffffu, 0x7f800000u},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xff7fffffu, 0xff800000u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xff7fffffu, 0xff800000u},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7f7fffffu, 0x7f800000u},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7f7fffffu, 0x7f7fffffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xff7fffffu, 0xff7fffffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xff7fffffu, 0xff800000u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xff7fffffu, 0xff800000u},
+      {"Mul2Nan", 1, false, 0xf0u, 0x7fc00000u, 0x7fc00000u},
+      {"ClampNan", 0, true, 0xf0u, 0x7fc00000u, 0x00000000u},
+      {"ClampAboveOne", 0, true, 0xf0u, 0x7f7fffffu, 0x3f800000u},
+      {"ClampNegative", 0, true, 0xf0u, 0x807fffffu, 0x00000000u},
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xbf400000u, 0x3f800000u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xbf400000u, 0xbfc00000u, true, true},
+  }};
+  constexpr std::array<Sample, 30> f64 = {{
+      {"Mul2Subnormal", 1, false, 0xf0u, 0x1u, 0x0u},
+      {"Mul2NegativeZero", 1, false, 0xf0u, 0x8000000000000000u, 0x0u},
+      {"Div2NegativeMinNormal", 3, false, 0xf0u, 0x8010000000000000u, 0x8000000000000000u},
+      {"Mul4", 2, false, 0xf0u, 0x3ff0000000000000u, 0x4010000000000000u},
+      {"Div2", 3, false, 0xf0u, 0x3ff0000000000000u, 0x3fe0000000000000u},
+      {"Mul2OverflowNearest", 1, false, 0xf0u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {"Mul4OverflowTowardZero", 2, false, 0xffu, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {"Mul2OverflowFp16Ovfl", 1, false, 0x8000f0u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      // gfx1201 overflow captures: round toward +infinity / -infinity.
+      {"Mul2PositiveOverflowRoundUp", 1, false, 0xf5u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {"Mul2PositiveOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0x7fefffffffffffffu,
+       0x7ff0000000000000u},
+      {"Mul2PositiveOverflowRoundDown", 1, false, 0xfau, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {"Mul2PositiveOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0x7fefffffffffffffu,
+       0x7fefffffffffffffu},
+      {"Mul2NegativeOverflowRoundUp", 1, false, 0xf5u, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {"Mul2NegativeOverflowRoundUpFp16Ovfl", 1, false, 0x8000f5u, 0xffefffffffffffffu,
+       0xffefffffffffffffu},
+      {"Mul2NegativeOverflowRoundDown", 1, false, 0xfau, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {"Mul2NegativeOverflowRoundDownFp16Ovfl", 1, false, 0x8000fau, 0xffefffffffffffffu,
+       0xfff0000000000000u},
+      {"Mul4PositiveOverflowRoundUp", 2, false, 0xf5u, 0x7fefffffffffffffu, 0x7ff0000000000000u},
+      {"Mul4PositiveOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0x7fefffffffffffffu,
+       0x7ff0000000000000u},
+      {"Mul4PositiveOverflowRoundDown", 2, false, 0xfau, 0x7fefffffffffffffu, 0x7fefffffffffffffu},
+      {"Mul4PositiveOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0x7fefffffffffffffu,
+       0x7fefffffffffffffu},
+      {"Mul4NegativeOverflowRoundUp", 2, false, 0xf5u, 0xffefffffffffffffu, 0xffefffffffffffffu},
+      {"Mul4NegativeOverflowRoundUpFp16Ovfl", 2, false, 0x8000f5u, 0xffefffffffffffffu,
+       0xffefffffffffffffu},
+      {"Mul4NegativeOverflowRoundDown", 2, false, 0xfau, 0xffefffffffffffffu, 0xfff0000000000000u},
+      {"Mul4NegativeOverflowRoundDownFp16Ovfl", 2, false, 0x8000fau, 0xffefffffffffffffu,
+       0xfff0000000000000u},
+      {"Mul2Nan", 1, false, 0xf0u, 0x7ff8000000000000u, 0x7ff8000000000000u},
+      {"ClampNan", 0, true, 0xf0u, 0x7ff8000000000000u, 0x0u},
+      {"ClampAboveOne", 0, true, 0xf0u, 0x7fefffffffffffffu, 0x3ff0000000000000u},
+      {"ClampNegative", 0, true, 0xf0u, 0x800fffffffffffffu, 0x0u},
+      {"AbsMul2Clamp", 1, true, 0xf0u, 0xbfe8000000000000u, 0x3ff0000000000000u, true},
+      {"AbsNegMul2", 1, false, 0xf0u, 0xbfe8000000000000u, 0xbff8000000000000u, true, true},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const MinmaxForm &form : kMinmaxForms) {
+    const auto &samples = form.width == 16 ? f16 : form.width == 32 ? f32 : f64;
+    for (const Sample &sample : samples) {
+      const auto words =
+          rdna4::build_vop3(form.op, {.vdst = 6,
+                                      .abs = uint8_t(sample.abs ? (1u << form.sources) - 1 : 0u),
+                                      .clamp = uint8_t(sample.clamp),
+                                      .src0 = 256,
+                                      .src1 = uint16_t(form.width == 64 ? 258 : 257),
+                                      .src2 = 258,
+                                      .omod = sample.omod,
+                                      .neg = uint8_t(sample.neg ? (1u << form.sources) - 1 : 0u)});
+      std::vector<std::pair<uint32_t, uint32_t>> sources;
+      std::vector<std::pair<uint32_t, uint32_t>> expected;
+      if (form.width == 64) {
+        sources = {{0, uint32_t(sample.value)},
+                   {1, uint32_t(sample.value >> 32)},
+                   {2, uint32_t(sample.value)},
+                   {3, uint32_t(sample.value >> 32)}};
+        expected = {{6, uint32_t(sample.expected)}, {7, uint32_t(sample.expected >> 32)}};
+      } else {
+        // The F16 destination keeps its high half.
+        const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
+        sources = {{0, high | uint32_t(sample.value)},
+                   {1, high | uint32_t(sample.value)},
+                   {2, high | uint32_t(sample.value)}};
+        expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(sample.expected)}};
+      }
+      cases.push_back({std::string(form.name) + sample.name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       sample.mode,
+                       FE_TONEAREST});
+    }
+  }
+  return cases;
+}
+
+// VOP3 integral rounding completes before the shared OMOD/CLAMP stages.
+// These are explicit wiring expectations, not additional hardware captures.
+std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
+  struct Form {
+    const char *name;
+    uint16_t op;
+    unsigned width;
+    double positive_halved;  // round(1.5) / 2
+    double negative_doubled; // round(-abs(-1.5)) * 2
+    bool ceil;
+  };
+  constexpr std::array<Form, 8> forms = {{
+      {"CeilF32", rdna4::kVCeilF32Vop3, 32, 1.0, -2.0, true},
+      {"FloorF32", rdna4::kVFloorF32Vop3, 32, 0.5, -4.0, false},
+      {"TruncF32", rdna4::kVTruncF32Vop3, 32, 0.5, -2.0, false},
+      {"RndneF32", rdna4::kVRndneF32Vop3, 32, 1.0, -4.0, false},
+      {"CeilF64", rdna4::kVCeilF64Vop3, 64, 1.0, -2.0, true},
+      {"FloorF64", rdna4::kVFloorF64Vop3, 64, 0.5, -4.0, false},
+      {"TruncF64", rdna4::kVTruncF64Vop3, 64, 0.5, -2.0, false},
+      {"RndneF64", rdna4::kVRndneF64Vop3, 64, 1.0, -4.0, false},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const auto &form : forms) {
+    const auto bits = [&](double value) -> uint64_t {
+      return form.width == 32 ? std::bit_cast<uint32_t>(static_cast<float>(value))
+                              : std::bit_cast<uint64_t>(value);
+    };
+    const uint64_t sign = form.width == 32 ? 0x80000000u : 0x8000000000000000ull;
+    const uint64_t infinity = form.width == 32 ? 0x7f800000u : 0x7ff0000000000000ull;
+    const uint64_t quiet = form.width == 32 ? 0x00400000u : 0x0008000000000000ull;
+    const auto add = [&](const std::string &name, uint64_t input, uint64_t result,
+                         rdna4::Vop3BuilderFields fields, uint32_t mode = 0xf0u,
+                         int host_rounding = FE_TONEAREST) {
+      fields.vdst = 6;
+      fields.src0 = 256;
+      const auto words = rdna4::build_vop3(form.op, fields);
+      std::vector<std::pair<uint32_t, uint32_t>> sources{{0, uint32_t(input)}};
+      std::vector<std::pair<uint32_t, uint32_t>> expected{{6, uint32_t(result)}};
+      if (form.width == 64) {
+        sources.emplace_back(1, uint32_t(input >> 32));
+        expected.emplace_back(7, uint32_t(result >> 32));
+      }
+      cases.push_back({std::string(form.name) + name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       mode,
+                       host_rounding});
+    };
+    add("RoundThenHalf", bits(1.5), bits(form.positive_halved), {.omod = 3});
+    add("AbsNegThenRound", bits(-1.5), bits(form.negative_doubled),
+        {.abs = 1, .omod = 1, .neg = 1});
+    add("ScaleThenClamp", bits(2.0), bits(1.0), {.clamp = 1, .omod = 3});
+    add("PreserveNegativeZero", sign, sign, {});
+    add("ScaleNegativeZero", sign, 0u, {.omod = 1});
+    add("QuietNanBeforeScale", infinity | 0x42u, infinity | quiet | 0x42u, {.omod = 2});
+    add("ClampNan", infinity | quiet | 0x42u, 0u, {.clamp = 1, .omod = 1});
+    // Integral rounding preserves input denormals even when MODE would flush
+    // arithmetic inputs: ceil(tiny) * 2 = 2, while the other operations give 0.
+    add("TinyInput", 1u, bits(form.ceil ? 2.0 : 0.0), {.omod = 1}, 0u);
+
+    for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+      // Give the other format a different rounding mode to catch field mixups.
+      const uint32_t other = (rounding + 1) % 4;
+      const uint32_t mode =
+          0xf0u | (form.width == 32 ? rounding | (other << 2) : other | (rounding << 2));
+      const int host = rounding == 0 ? FE_TOWARDZERO : FE_TONEAREST;
+      const uint64_t positive = rounding == 0 || rounding == 1 ? infinity : infinity - 1;
+      const uint64_t negative = rounding == 0 || rounding == 2 ? infinity : infinity - 1;
+      add("PositiveOverflowMode" + std::to_string(rounding), infinity - 1, positive, {.omod = 1},
+          mode, host);
+      add("NegativeOverflowMode" + std::to_string(rounding), sign | (infinity - 1), sign | negative,
+          {.omod = 1}, mode, host);
+    }
+  }
+  return cases;
+}
+
+void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -1988,6 +2498,44 @@ TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
   }
   wave->halt();
 }
+
+class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) { expect_arithmetic_case(GetParam()); }
+
+// Restores the process force-scalar gate if an assertion leaves the test early.
+struct ForceScalarGuard {
+  bool original = util::force_scalar();
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
+};
+
+class ValuMinmaxFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuMinmaxFpModeTest, HonorsModeOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+class ValuIntegralRoundingModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuIntegralRoundingModeTest, ModifiersOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuIntegralRoundingModeTest,
+                         testing::ValuesIn(integral_rounding_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(TranscendentalPolicy, ValuFpModeTest,
                          testing::ValuesIn(transcendental_policy_cases()),
@@ -2073,6 +2621,29 @@ INSTANTIATE_TEST_SUITE_P(HostMxcsr, ValuFpModeTest, testing::ValuesIn(host_mxcsr
 
 INSTANTIATE_TEST_SUITE_P(ModifierEnvironment, ValuFpModeTest,
                          testing::ValuesIn(modifier_environment_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(MinimumMaximum, ValuMinmaxFpModeTest,
+                         testing::ValuesIn(minimum_maximum_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(MinMaxNum, ValuMinmaxFpModeTest, testing::ValuesIn(min_max_num_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(MinmaxInputFlush, ValuMinmaxFpModeTest,
+                         testing::ValuesIn(minmax_input_flush_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(MinmaxOutputModifiers, ValuMinmaxFpModeTest,
+                         testing::ValuesIn(minmax_output_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -2339,12 +2910,6 @@ std::vector<CompareInputFlushCase> compare_input_flush_cases() {
 }
 
 class ValuCompareInputFlushTest : public testing::TestWithParam<CompareInputFlushCase> {};
-
-// Restores the process force-scalar gate if an assertion leaves the test early.
-struct ForceScalarGuard {
-  bool original = util::force_scalar();
-  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
-};
 
 TEST_P(ValuCompareInputFlushTest, HonorsModeOnScalarAndSimdPaths) {
   const CompareInputFlushCase &test = GetParam();

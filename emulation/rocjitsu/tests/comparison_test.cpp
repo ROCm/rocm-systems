@@ -5,6 +5,9 @@
 /// @brief Unit tests for the staged floating-point VOPC relations.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -20,9 +23,11 @@
 namespace {
 
 namespace cmp = rocjitsu::amdgpu::comparison;
+namespace denorm = rocjitsu::amdgpu::input_denormal;
+namespace fmt = rocjitsu::amdgpu::fp_format;
 
-constexpr cmp::Policy kKeep{false};
-constexpr cmp::Policy kFlush{true};
+constexpr denorm::Policy kKeep{false};
+constexpr denorm::Policy kFlush{true};
 
 // ---------------------------------------------------------------------------
 // Reference: decode to double, flush by hand, compare with host IEEE operators.
@@ -73,12 +78,12 @@ bool reference(unsigned opcode, double a, double b) {
   }
 }
 
-template <typename Fmt, typename Rel> bool scalar(uint64_t a, uint64_t b, cmp::Policy policy) {
+template <typename Fmt, typename Rel> bool scalar(uint64_t a, uint64_t b, denorm::Policy policy) {
   using L = typename Fmt::Lane;
   return cmp::evaluate<Fmt, Rel>(static_cast<L>(a), static_cast<L>(b), policy);
 }
 
-template <typename Fmt> using RelationFn = bool (*)(uint64_t, uint64_t, cmp::Policy);
+template <typename Fmt> using RelationFn = bool (*)(uint64_t, uint64_t, denorm::Policy);
 
 template <typename Fmt> std::array<RelationFn<Fmt>, 16> relations() {
   return {&scalar<Fmt, cmp::F>,   &scalar<Fmt, cmp::Lt>,  &scalar<Fmt, cmp::Eq>,
@@ -120,7 +125,7 @@ template <typename Fmt> void expect_matches_reference(uint64_t a, uint64_t b) {
     const double da = decode<Fmt>(static_cast<typename Fmt::Lane>(a), flush);
     const double db = decode<Fmt>(static_cast<typename Fmt::Lane>(b), flush);
     for (unsigned opcode = 0; opcode < 16; ++opcode)
-      ASSERT_EQ(fns[opcode](a, b, cmp::Policy{flush}), reference(opcode, da, db))
+      ASSERT_EQ(fns[opcode](a, b, denorm::Policy{flush}), reference(opcode, da, db))
           << "opcode " << opcode << " a 0x" << std::hex << a << " b 0x" << b << " flush " << flush;
   }
 }
@@ -131,9 +136,9 @@ template <typename Fmt> void expect_matches_reference(uint64_t a, uint64_t b) {
 
 TEST(ComparisonTest, F16EveryEncodingAgainstSpecials) {
   for (uint64_t a = 0; a <= 0xffffu; ++a)
-    for (const uint64_t b : specials<cmp::F16>()) {
-      expect_matches_reference<cmp::F16>(a, b);
-      expect_matches_reference<cmp::F16>(b, a);
+    for (const uint64_t b : specials<fmt::F16>()) {
+      expect_matches_reference<fmt::F16>(a, b);
+      expect_matches_reference<fmt::F16>(b, a);
     }
 }
 
@@ -155,13 +160,13 @@ template <typename Fmt> void check_specials_and_random() {
   }
 }
 
-TEST(ComparisonTest, F32SpecialsAndRandom) { check_specials_and_random<cmp::F32>(); }
+TEST(ComparisonTest, F32SpecialsAndRandom) { check_specials_and_random<fmt::F32>(); }
 
-TEST(ComparisonTest, F64SpecialsAndRandom) { check_specials_and_random<cmp::F64>(); }
+TEST(ComparisonTest, F64SpecialsAndRandom) { check_specials_and_random<fmt::F64>(); }
 
 TEST(ComparisonTest, IgnoresBitsAboveTheF16Encoding) {
-  EXPECT_TRUE((cmp::evaluate<cmp::F16, cmp::Eq>(0xabcd3c00u, 0x00003c00u, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F16, cmp::Lt>(0xffff0000u, 0x00003c00u, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Eq>(0xabcd3c00u, 0x00003c00u, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Lt>(0xffff0000u, 0x00003c00u, kKeep)));
 }
 
 // ---------------------------------------------------------------------------
@@ -170,69 +175,61 @@ TEST(ComparisonTest, IgnoresBitsAboveTheF16Encoding) {
 // ---------------------------------------------------------------------------
 
 TEST(ComparisonTest, MatchesGfx1201InputFlush) {
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lt>(0x80000001u, 0x00000000u, kFlush)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Lt>(0x80000001u, 0x00000000u, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lt>(0x807fffffu, 0x80000000u, kFlush)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Lt>(0x807fffffu, 0x80000000u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lt>(0x80000001u, 0x00000000u, kFlush)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Lt>(0x80000001u, 0x00000000u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lt>(0x807fffffu, 0x80000000u, kFlush)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Lt>(0x807fffffu, 0x80000000u, kKeep)));
   EXPECT_FALSE(
-      (cmp::evaluate<cmp::F64, cmp::Lt>(uint64_t{0x8000000000000001}, uint64_t{0}, kFlush)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F64, cmp::Lt>(uint64_t{0x8000000000000001}, uint64_t{0}, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F16, cmp::Lt>(0x83ffu, 0x0000u, kFlush)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F16, cmp::Lt>(0x83ffu, 0x0000u, kKeep)));
+      (cmp::evaluate<fmt::F64, cmp::Lt>(uint64_t{0x8000000000000001}, uint64_t{0}, kFlush)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F64, cmp::Lt>(uint64_t{0x8000000000000001}, uint64_t{0}, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F16, cmp::Lt>(0x83ffu, 0x0000u, kFlush)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Lt>(0x83ffu, 0x0000u, kKeep)));
+}
+
+TEST(SourceModifierTest, FloatAdaptersPreserveNanBitsAndSignedZero) {
+  namespace src = rocjitsu::amdgpu::source_modifier;
+  // ABS then NEG leaves this negative signaling NaN's encoding intact.
+  const float nan32 = std::bit_cast<float>(0xff800042u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(src::apply_to_float(nan32, 0, 1u, 1u)), 0xff800042u);
+  // Source 1 uses bit 1 of ABS; neither the payload nor quiet bit changes.
+  const double nan64 = std::bit_cast<double>(uint64_t{0xfff0000000000042});
+  EXPECT_EQ(std::bit_cast<uint64_t>(src::apply_to_float(nan64, 1, 2u, 0u)),
+            uint64_t{0x7ff0000000000042});
+  EXPECT_EQ(std::bit_cast<uint32_t>(src::apply_to_float(0.0f, 2, 0u, 4u)), 0x80000000u);
 }
 
 TEST(ComparisonTest, AppliesModifiersBeforeTheFlush) {
   // v_cmp_lt_f16 -a, |b| with a = 0x0001: NEG makes -tiny, the flush makes -0.
-  EXPECT_FALSE((cmp::evaluate<cmp::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kFlush)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kFlush)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kKeep)));
   // ABS clears the sign before NEG sets it again.
-  EXPECT_EQ(cmp::modify<cmp::F32>(0x80000002u, true, true), 0x80000002u);
-  EXPECT_EQ(cmp::modify<cmp::F32>(0x80000002u, true, false), 0x00000002u);
+  EXPECT_EQ(rocjitsu::amdgpu::source_modifier::apply<fmt::F32>(0x80000002u, true, true),
+            0x80000002u);
+  EXPECT_EQ(rocjitsu::amdgpu::source_modifier::apply<fmt::F32>(0x80000002u, true, false),
+            0x00000002u);
   // The src1 modifiers come from bit 1 of each field.
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 1u, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 2u, kKeep)));
-}
-
-TEST(ComparisonTest, FlushKeepsSignAndSpecials) {
-  EXPECT_EQ(cmp::flush_input<cmp::F32>(0x807fffffu, kFlush), 0x80000000u);
-  EXPECT_EQ(cmp::flush_input<cmp::F32>(0x007fffffu, kFlush), 0x00000000u);
-  EXPECT_EQ(cmp::flush_input<cmp::F32>(0x00800000u, kFlush), 0x00800000u);
-  EXPECT_EQ(cmp::flush_input<cmp::F32>(0x7f800001u, kFlush), 0x7f800001u);
-  EXPECT_EQ(cmp::flush_input<cmp::F32>(0x807fffffu, kKeep), 0x807fffffu);
-  EXPECT_EQ(cmp::flush_input<cmp::F16>(0x83ffu, kFlush), 0x8000u);
-  EXPECT_EQ(cmp::flush_input<cmp::F64>(uint64_t{0x800fffffffffffff}, kFlush),
-            uint64_t{0x8000000000000000});
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 1u, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 2u, kKeep)));
 }
 
 TEST(ComparisonTest, NegatedRelationsAreTrueOnNaN) {
   constexpr uint32_t kQuiet = 0x7fc00000u;
   constexpr uint32_t kSignaling = 0xff800001u;
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lt>(kQuiet, 0u, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Nlt>(kQuiet, 0u, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Eq>(kSignaling, kSignaling, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Neq>(kSignaling, kSignaling, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lg>(0u, kQuiet, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::U>(0u, kQuiet, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::O>(0u, kQuiet, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::F>(kQuiet, kQuiet, kKeep)));
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::T>(kQuiet, kQuiet, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lt>(kQuiet, 0u, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Nlt>(kQuiet, 0u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Eq>(kSignaling, kSignaling, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Neq>(kSignaling, kSignaling, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lg>(0u, kQuiet, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::U>(0u, kQuiet, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::O>(0u, kQuiet, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::F>(kQuiet, kQuiet, kKeep)));
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::T>(kQuiet, kQuiet, kKeep)));
 }
 
 TEST(ComparisonTest, SignedZerosAreEqual) {
-  EXPECT_TRUE((cmp::evaluate<cmp::F32, cmp::Eq>(0x80000000u, 0x00000000u, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lt>(0x80000000u, 0x00000000u, kKeep)));
-  EXPECT_FALSE((cmp::evaluate<cmp::F32, cmp::Lg>(0x80000000u, 0x00000000u, kKeep)));
-}
-
-// ---------------------------------------------------------------------------
-// MODE gating.
-// ---------------------------------------------------------------------------
-
-TEST(ComparisonTest, FlushesWhenInputDenormalsAreDisabled) {
-  EXPECT_TRUE(cmp::Policy::make(0u).flush_inputs);
-  EXPECT_TRUE(cmp::Policy::make(2u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(1u).flush_inputs);
-  EXPECT_FALSE(cmp::Policy::make(3u).flush_inputs);
+  EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Eq>(0x80000000u, 0x00000000u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lt>(0x80000000u, 0x00000000u, kKeep)));
+  EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Lg>(0x80000000u, 0x00000000u, kKeep)));
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +246,7 @@ template <typename Fmt, typename Rel, typename V> void expect_simd_matches_scala
   std::mt19937_64 rng(0xc0ffee);
   while (values.size() % W != 0 || values.size() < 4 * W)
     values.push_back(static_cast<L>(rng()) & ~Fmt::kInfinity);
-  for (const cmp::Policy policy : {kKeep, kFlush})
+  for (const denorm::Policy policy : {kKeep, kFlush})
     for (std::size_t rotate = 0; rotate < W; ++rotate)
       for (std::size_t base = 0; base < values.size(); base += W) {
         alignas(64) std::array<L, W> a{};
@@ -292,12 +289,12 @@ TEST(ComparisonTest, SimdMatchesScalar) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
 #if __has_include(<experimental/simd>)
-    expect_every_simd_relation_matches_scalar<cmp::F16, util::native<uint32_t>>();
-    expect_every_simd_relation_matches_scalar<cmp::F32, util::native<uint32_t>>();
+    expect_every_simd_relation_matches_scalar<fmt::F16, util::native<uint32_t>>();
+    expect_every_simd_relation_matches_scalar<fmt::F32, util::native<uint32_t>>();
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-    expect_every_simd_relation_matches_scalar<cmp::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
+    expect_every_simd_relation_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
-    expect_every_simd_relation_matches_scalar<cmp::F64, util::native<uint64_t>>();
+    expect_every_simd_relation_matches_scalar<fmt::F64, util::native<uint64_t>>();
 #endif
 #endif
   }

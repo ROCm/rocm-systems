@@ -604,6 +604,9 @@ add_executable(
     scalar_buffer_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    input_denormal_test.cpp
+    minmax_test.cpp
+    output_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
