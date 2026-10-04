@@ -277,7 +277,11 @@ complete from their in-order completion rule.
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
 events are split by direction so that RAW and WAR hazards are checked
-independently.
+independently. Chunks containing only ordinary LDS accesses from the accessing
+wave can bypass the interval scan because those operations are ordered. A
+mixed chunk uses the scan until its count drains. The history remains available
+for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+memory operations still require their own completion checks.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
