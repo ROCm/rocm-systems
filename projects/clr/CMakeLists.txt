@@ -17,8 +17,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (AMD_COMPUTE_WIN)
-        # shared prebuilt libs are release, allows hip to be debug
+    if (AMD_COMPUTE_WIN AND NOT LIB_SRC_BUILD)
+        # prebuilt libs are release-only, force /MT to match
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
         add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
         add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
