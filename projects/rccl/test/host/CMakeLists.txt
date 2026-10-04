@@ -219,6 +219,30 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroRmaProxy -- host-only microtests for src/rma/rma_proxy.cc.
+  # Its own binary, not rccl-UnitTestsMicro: that target resolves
+  # ncclRmaProxyConnectOnce / ncclRmaProxyRegister / ncclRmaProxyDeregister from
+  # fakes/dev_runtime_micro_fakes.cc, and rma_proxy.cc defines all three, so
+  # linking the unit under test there is a duplicate symbol. The test TU carries
+  # the few externs with no owning fakes file (see its header comment).
+  set(TEST_MICRO_RMA_PROXY_SOURCE_FILES
+    rma-proxy-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/os_fakes.cc                    # src/os/linux.cc (ncclOsGetPageSize)
+    fakes/comm_fakes.cc                  # src/init.cc comm globals
+    fakes/rma_fakes.cc                   # src/rma/*.cc (ncclRmaProxyDestroyDesc)
+    fakes/mem_manager_fakes.cc           # src/misc/mem_manager.cc
+    fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc dmabuf export pointer
+    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/bootstrap_stubs.cc             # src/bootstrap.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getBusId + memory stack
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
@@ -800,6 +824,17 @@ if(_MICRO_BUILD_SYM_KERNELS)
 elseif(NOT BUILD_TESTS)
   message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRmaProxy -- src/rma/rma_proxy.cc
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
+  SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # rma/rma_proxy.cc is the only rma_proxy.cc in SRC_FILES, so hipify keeps the name.
+    RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
