@@ -5561,9 +5561,7 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 
   // The number of packets required in each buffer is at least equal to the
   // maximum number of waves supported by the device.
-  auto wavesPerCu =
-      dev().info().maxThreadsPerCU_ / dev().info().wavefrontWidth_;
-  auto numPackets = dev().info().maxComputeUnits_ * wavesPerCu;
+  auto numPackets = dev().info().maxComputeUnits_ * dev().info().maxWavesPerCU_;
 
   auto size = amd::getHostcallBufferSize(numPackets);
   auto align = amd::getHostcallBufferAlignment();

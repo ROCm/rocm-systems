@@ -43,8 +43,8 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   }
 
   // Find wave occupancy per CU => simd_per_cu * GPR usage
-  // Limited by SPI 32 per CU, hence 8 per SIMD
-  const size_t MaxWavesPerSimd = (device.isa().versionMajor() <= 9) ? 8 : 16;
+  const uint32_t simdPerCU = device.info().simdPerCU_;
+  const size_t MaxWavesPerSimd = device.info().maxWavesPerCU_ / simdPerCU;
   const size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
   const bool adjust_for_wave64 = device.isa().versionMajor() >= 10 && wavefrontSize == 64;
   const uint32_t VgprGranularity = adjust_for_wave64
@@ -82,13 +82,6 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     // bestBlockSize, giving a divide by zero when bestBlocksPerCU is computed.
     return hipErrorUnknown;
   }
-
-  // The table contains SIMD per CU, not per WGP, so when WGP mode is set
-  // on kernel metadata, multiply the number of SIMDs by 2, to account for
-  // 2CUs in 1 WGP.
-  const uint32_t simdPerCU = wrkGrpInfo->isWGPMode_
-      ? device.isa().simdPerCU() * 2
-      : device.isa().simdPerCU();
 
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
@@ -540,56 +533,6 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 }  // namespace hip
 
 namespace hip_impl {
-namespace {
-// based register usage for the device symbol and device capabilities, returns the maximum number
-// of threads that could be utilized
-int maxThreadsPerCU(const amd::device::Info& deviceInfo,
-                    const device::Kernel::WorkGroupInfo& wrkGrpInfo, amd::Isa isa) {
-  // Find wave occupancy per CU => simd_per_cu * GPR usage
-  size_t MaxWavesPerSimd;
-
-  if (isa.versionMajor() <= 9) {
-    MaxWavesPerSimd = 8;  // Limited by SPI 32 per CU, hence 8 per SIMD
-  } else {
-    MaxWavesPerSimd = 16;
-  }
-  size_t VgprWaves = MaxWavesPerSimd;
-  uint32_t VgprGranularity = deviceInfo.vgprAllocGranularity_;
-  size_t maxVGPRs = deviceInfo.vgprsPerSimd_;
-  size_t wavefrontSize = wrkGrpInfo.wavefrontSize_;
-  if (isa.versionMajor() >= 10) {
-    if (wavefrontSize == 64) {
-      maxVGPRs = maxVGPRs >> 1;
-      VgprGranularity = VgprGranularity >> 1;
-    }
-  }
-  if (wrkGrpInfo.usedVGPRs_ > 0) {
-    VgprWaves = maxVGPRs / amd::alignUp(wrkGrpInfo.usedVGPRs_, VgprGranularity);
-  }
-
-  if (VgprWaves == 0) {
-    // This should not happen ideally, but in case the value is
-    // incorrect, it can lead to a crash. By returning error, API can exit gracefully.
-    return hipErrorUnknown;
-  }
-
-  size_t GprWaves = VgprWaves;
-  if (wrkGrpInfo.usedSGPRs_ > 0) {
-    size_t maxSGPRs = deviceInfo.sgprsPerSimd_;
-    const size_t SgprWaves = maxSGPRs / amd::alignUp(wrkGrpInfo.usedSGPRs_, 16);
-    GprWaves = std::min(VgprWaves, SgprWaves);
-  }
-
-  // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
-  uint32_t simdPerCU = isa.simdPerCU();
-  if (wrkGrpInfo.isWGPMode_) {
-    simdPerCU *= 2;
-  }
-
-  const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
-  return alu_occupancy * wrkGrpInfo.wavefrontSize_;
-}
-}  // namespace
 
 // ================================================================================================
 // @launchConfig  a launch configuration that might have the cluster size unconfigured

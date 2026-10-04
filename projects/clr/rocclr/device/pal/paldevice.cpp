@@ -593,8 +593,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 
     info_.pcieDeviceId_ = palProp.deviceId;
     info_.pcieRevisionId_ = palProp.revisionId;
-    info_.maxThreadsPerCU_ = info_.wavefrontWidth_ * info_.simdPerCU_ *
-                             palProp.gfxipProperties.shaderCore.numWavefrontsPerSimd;
+    // simdPerCU_ already accounts for WGP mode
+    info_.maxWavesPerCU_ =
+        info_.simdPerCU_ * palProp.gfxipProperties.shaderCore.numWavefrontsPerSimd;
+    info_.maxThreadsPerCU_ = info_.wavefrontWidth_ * info_.maxWavesPerCU_;
 
     info_.cooperativeGroups_ = settings().enableCoopGroups_;
     info_.cooperativeMultiDeviceGroups_ = settings().enableCoopMultiDeviceGroups_;
