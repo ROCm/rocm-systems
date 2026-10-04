@@ -30,4 +30,9 @@ ncclResult_t IbCastMultiplaneEnabled(bool* enabled);
 // are filled and *nPips is set.  If the VIP is not in the map, *nPips == 0.
 ncclResult_t IbCastMultiplaneGetPipGids(const union ibv_gid* vipGid, union ibv_gid* pipGids, int* nPips);
 
+// Whether to replace the QP dgid with the local GID (loopback) on multi-plane
+// QPs. False only when a verbs shim (libmrcshim) defines
+// mrc_multiplane_override_dgid() returning false.
+bool IbCastMultiplaneOverrideDgid(void);
+
 #endif  // NET_IB_CAST_MULTIPLANE_H_
