@@ -5,6 +5,7 @@
  */
 
 #include "device/device.hpp"
+#include "device/memobjmap_erase.hpp"
 #include "thread/monitor.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -362,6 +363,69 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
+namespace {
+// Byte span an entry covers in the mem-obj maps: physical memory is keyed by
+// its handle, everything else by its allocation size.
+size_t MemObjSpan(amd::Memory* mem) {
+  return (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
+                                                  : mem->getSize();
+}
+}  // namespace
+
+MemObjMap::RemoveStatus MemObjMap::TryRemoveMemObj(const void* k, const amd::Memory* mem) {
+  // Non-fatal removal for user-facing frees (hipFree), where a pointer can
+  // legitimately be absent from the global map: on Windows an allocation may
+  // be tracked only in a per-device VA map, and external memory may be indexed
+  // elsewhere. Everything runs under one hold of the lock that guards both the
+  // global and the per-device maps, so the caller observes all-or-nothing:
+  //
+  // - k is a base key of mem in some map: erase, by identity, every entry in
+  //   every map that points at mem. An allocation can be indexed under several
+  //   aliases at once (host pointer, per-device VAs), and any entry left
+  //   behind would dangle once the caller releases the object.
+  // - mem is indexed, but never under k: the pointer is interior, or resolved
+  //   only by falling inside a covering allocation's [base, base + size)
+  //   (per-device VA ranges can numerically overlap unrelated allocations in
+  //   the global map). Erase nothing; the caller must reject the free rather
+  //   than release an allocation whose base the user never held.
+  // - mem is in no map at all: nothing to de-index and nothing can dangle;
+  //   warn for diagnostics and let the free proceed.
+  std::unique_lock lock(AllocatedLock_);
+  const uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  static const std::vector<Device*> kNoDevices;
+  const std::vector<Device*>& devs =
+      (Device::devices_ != nullptr) ? *Device::devices_ : kNoDevices;
+
+  bool base_match = ContainsKeyWithValue(MemObjMap_, key, mem);
+  for (auto it = devs.begin(); !base_match && it != devs.end(); ++it) {
+    base_match = ContainsKeyWithValue((*it)->devMemObjMap_, key, mem);
+  }
+  if (base_match) {
+    EraseEntriesWithValue(MemObjMap_, mem);
+    for (Device* dev : devs) {
+      EraseEntriesWithValue(dev->devMemObjMap_, mem);
+    }
+    return RemoveStatus::kRemovedAll;
+  }
+
+  bool tracked = ContainsValue(MemObjMap_, mem);
+  for (auto it = devs.begin(); !tracked && it != devs.end(); ++it) {
+    tracked = ContainsValue((*it)->devMemObjMap_, mem);
+  }
+  if (tracked) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
+            "TryRemoveMemObj: ptr %p is not a base address of memory %p (interior pointer "
+            "or overlapping-range resolution); leaving the maps untouched",
+            k, mem);
+    return RemoveStatus::kBaseMismatch;
+  }
+  ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
+          "TryRemoveMemObj: no map entry anywhere for memory %p freed via ptr %p "
+          "(external or per-device-only memory?); nothing to de-index",
+          mem, k);
+  return RemoveStatus::kNotTracked;
+}
+
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
@@ -422,25 +486,7 @@ amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
-
-  // Find the memory object in the map using upper_bound
-  auto it = MemObjMap_.upper_bound(key);
-  if (it == MemObjMap_.begin()) {
-    return nullptr;
-  }
-  --it;
-  amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key < it->first || key >= (it->first + mem_size)) {
-    return nullptr;
-  }
-
-  // Found - remove and return
-  MemObjMap_.erase(it);
-  return mem;
+  return EraseCoveringMemObj(MemObjMap_, reinterpret_cast<uintptr_t>(k), MemObjSpan);
 }
 
 void MemObjMap::FindMemObjBatch(const void* const* ptrs, size_t count,

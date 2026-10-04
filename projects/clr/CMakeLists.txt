@@ -125,6 +125,18 @@ if(CLR_BUILD_HIP)
         add_compile_definitions(BUILD_STATIC_LIBS)
     endif()
 endif()
+
+# Test switches. BUILD_TESTS (declared in opencl/) gates the OpenCL ocltst
+# suite; ROCCLR_BUILD_TESTS gates the host-side ROCclr unit tests and is
+# namespaced so a parent build that sets a generic BUILD_TESTS for some other
+# component cannot turn it on implicitly. CTest starts discovery from the
+# top-level build directory, so testing must be enabled here -- not in a
+# subdirectory -- for `ctest` to find either suite.
+option(ROCCLR_BUILD_TESTS "Enable building ROCclr host-side unit tests" OFF)
+if(BUILD_TESTS OR ROCCLR_BUILD_TESTS)
+    enable_testing()
+endif()
+
 if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
 elseif(HIP_PLATFORM STREQUAL "amd")
