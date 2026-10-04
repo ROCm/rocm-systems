@@ -810,7 +810,9 @@ exhaustion.
 Finally, NVLS is currently not compatible with multiple ranks within the same communicator using
 the same GPU. If ``NCCL_NVLS_ENABLE`` is set to 1, communicator initialization will fail when
 multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the default), NVLS will
-be silently disabled.
+be silently disabled. This applies to NCCL only. RCCL does not implement NVLS, so
+``NCCL_NVLS_ENABLE`` has no effect and multiple ranks per GPU never cause an NVLS initialization
+failure (see :ref:`env_NCCL_NVLS_ENABLE`).
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
 compatible with all configurations. It may exhaust resources and lock NCCL.
@@ -1845,6 +1847,9 @@ NCCL_NVLS_ENABLE
 
 Enable the use of NVLink SHARP (NVLS). NVLink SHARP is available in third-generation NVSwitch systems (NVLink4) with Hopper and later GPU architectures, allowing collectives such as ``ncclAllReduce`` to be offloaded to the NVSwitch domain.
 The default value is 2.
+
+In RCCL, this variable has no effect. RCCL does not implement NVLink SHARP, so no value allocates NVLink SHARP
+resources, and communicator initialization never fails because of them. The values below describe NCCL.
 
 Values accepted
 ^^^^^^^^^^^^^^^

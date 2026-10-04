@@ -76,6 +76,7 @@
         {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
         {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "Standalone.NvlsEnable_NoEffect", "description": "Verify NCCL_NVLS_ENABLE=0/1/2 does not fail init or AllReduce; log checks for NCCL's NVLS bind messages are tripwires for enabling the CUDA NVLS code", "test_filter": "Standalone.NvlsEnable_NoEffect"},
         {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
         {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
@@ -215,6 +216,17 @@
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_nvls": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroNvls",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "NvlsMicrotests", "description": "Host-only transport/nvls.cc microtests: the NVLS stubs leave NVLS off and never read NCCL_NVLS_ENABLE (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -270,6 +282,12 @@
       "name": "RCCL Microtests - sym_kernels.cc",
       "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_symkernels",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - nvls.cc",
+      "description": "rccl-UnitTestsMicroNvls (host-only transport/nvls.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_nvls",
       "enabled": true
     }
   ]

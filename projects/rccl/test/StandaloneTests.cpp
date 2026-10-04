@@ -6,6 +6,13 @@
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
@@ -388,5 +395,119 @@ namespace RcclUnitTesting
       for (auto& comm : comms)
         NCCLCHECK(ncclCommDestroy(comm));
     });
+  }
+
+  static std::string nvlsLogPath;
+  static void RemoveNvlsLog()
+  {
+    if (!nvlsLogPath.empty())
+      std::remove(nvlsLogPath.c_str());
+  }
+  struct NvlsLogRemover
+  {
+    ~NvlsLogRemover() { RemoveNvlsLog(); }
+  };
+
+  // Init + AllReduce across all devices, then check the RCCL log (NCCL_DEBUG_FILE) for NVLS activity.
+  static void RunAllReduceAndCheckNoNvls()
+  {
+    // A unique file created here, before RCCL reads NCCL_DEBUG_FILE at first init, so another
+    // local user cannot pre-create the log and make the checks below read planted content.
+    char logTemplate[] = "/tmp/rccl_nvls_enable_XXXXXX";
+    int const logFd = mkstemp(logTemplate);
+    ASSERT_GE(logFd, 0) << "mkstemp failed";
+    close(logFd);
+    std::string const logPath = logTemplate;
+    nvlsLogPath = logPath;
+    // The guard covers ASSERT_* early returns; HIPCALL failures exit(-1), which skips local
+    // destructors but still runs atexit handlers.
+    std::atexit(RemoveNvlsLog);
+    NvlsLogRemover removeLog;
+    ASSERT_EQ(setenv("NCCL_DEBUG_FILE", logPath.c_str(), 1), 0);
+
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+
+    std::vector<ncclComm_t> comms(numDevices);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    constexpr int N = 1024;
+    std::vector<int*> gpuInput(numDevices);
+    std::vector<int*> gpuOutput(numDevices);
+    std::vector<hipStream_t> stream(numDevices);
+    for (int rank = 0; rank < numDevices; rank++) {
+      std::vector<int> cpuInput(N, rank + 1);
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipStreamCreate(&stream[rank]));
+      HIPCALL(hipMalloc((void**)&gpuInput[rank], N * sizeof(int)));
+      HIPCALL(hipMalloc((void**)&gpuOutput[rank], N * sizeof(int)));
+      HIPCALL(hipMemcpy(gpuInput[rank], cpuInput.data(), N * sizeof(int), hipMemcpyHostToDevice));
+      HIPCALL(hipMemset(gpuOutput[rank], 0, N * sizeof(int)));
+    }
+
+    ASSERT_EQ(ncclSuccess, ncclGroupStart());
+    for (int rank = 0; rank < numDevices; rank++) {
+      ASSERT_EQ(ncclSuccess,
+                ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+    }
+    ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+
+    int const expected = numDevices * (numDevices + 1) / 2;
+    for (int rank = 0; rank < numDevices; rank++) {
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipStreamSynchronize(stream[rank]));
+      std::vector<int> cpuOutput(N);
+      HIPCALL(hipMemcpy(cpuOutput.data(), gpuOutput[rank], N * sizeof(int), hipMemcpyDeviceToHost));
+      for (int i = 0; i < N; i++)
+        ASSERT_EQ(cpuOutput[i], expected) << "rank " << rank << " element " << i;
+      ncclResult_t asyncErr;
+      ASSERT_EQ(ncclSuccess, ncclCommGetAsyncError(comms[rank], &asyncErr));
+      EXPECT_EQ(asyncErr, ncclSuccess);
+    }
+
+    for (int rank = 0; rank < numDevices; rank++) {
+      HIPCALL(hipSetDevice(rank));
+      HIPCALL(hipFree(gpuInput[rank]));
+      HIPCALL(hipFree(gpuOutput[rank]));
+      HIPCALL(hipStreamDestroy(stream[rank]));
+      ASSERT_EQ(ncclSuccess, ncclCommDestroy(comms[rank]));
+    }
+
+    std::ifstream logFile(logPath);
+    ASSERT_TRUE(logFile.is_open()) << "RCCL wrote no log to " << logPath;
+    std::stringstream log;
+    log << logFile.rdbuf();
+    EXPECT_NE(log.str().find("Init COMPLETE"), std::string::npos) << "log did not capture communicator init";
+    // Tripwires: both strings exist only in nvls.cc's `#if CUDART_VERSION >= 12010` branch, which
+    // RCCL does not compile today. They fail only if a future change enables that branch.
+    // NCCL's multicast bind failure, a WARN that fails initialization:
+    EXPECT_EQ(log.str().find("Failed to bind NVLink SHARP"), std::string::npos);
+    // Printed by NCCL's NVLS init whenever NCCL_NVLS_ENABLE is nonzero:
+    EXPECT_EQ(log.str().find("NVLS multicast support is"), std::string::npos);
+  }
+
+  /**
+   * \brief Verify NCCL_NVLS_ENABLE has no effect: RCCL does not implement NVLS, so no value
+   * attempts a multicast bind or fails communicator init the way NCCL 2.29+ can.
+   * ******************************************************************************************/
+  TEST(Standalone, NvlsEnable_NoEffect)
+  {
+    // Gated here rather than inside the isolated body: RUN_ISOLATED_TESTS ends in
+    // EXPECT_TRUE(), so a GTEST_SKIP() in the child is reported as a pass by the parent.
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    using Config = ProcessIsolatedTestRunner::TestConfig;
+    auto nvlsEnableIs = [](const char* value) {
+      return Config(std::string("NvlsEnable_NoEffect_") + value, RunAllReduceAndCheckNoNvls)
+        .withEnvironment({{"NCCL_NVLS_ENABLE", value},
+                          {"NCCL_DEBUG", "INFO"},
+                          {"NCCL_DEBUG_SUBSYS", "INIT,NVLS,REG"}})
+        .withTimeout(std::chrono::seconds(60));
+    };
+    RUN_ISOLATED_TESTS(nvlsEnableIs("0"), nvlsEnableIs("1"), nvlsEnableIs("2"));
   }
 }
