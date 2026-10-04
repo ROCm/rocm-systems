@@ -2815,6 +2815,38 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "gin_signal_reset": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "GIN_SignalReset",
+          "description": "GIN proxy resetSignal/resetCounter semantics: reset snapshots the signal cell into an offset instead of zeroing it; read, wait, shadow and 32-bit wrap are relative to that offset",
+          "test_filter": "GinMPIDeviceTests.SignalReset_*:GinMPIDeviceTests.CounterReset_*-GinMPIDeviceTests.*_MultiContext"
+        },
+        {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        }
+      ]
     }
   },
   "test_suites": [
@@ -3308,6 +3340,12 @@
       "name": "nccl4py Build Smoke",
       "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
       "config": "nccl4py_build_smoke",
+      "enabled": true
+    },
+    {
+      "name": "GIN Signal Reset - Proxy",
+      "description": "GIN proxy reset-without-zeroing for signals and counters over IB across two nodes",
+      "config": "gin_signal_reset",
       "enabled": true
     }
   ]
