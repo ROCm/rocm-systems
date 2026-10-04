@@ -14,7 +14,7 @@ The race detector focuses on pre-GFX12 architectures. Its current end-to-end
 coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
-and generic FLAT stores that require both STORECNT and DSCNT waits. This partial
+and address-dependent FLAT counter participation. This partial
 coverage does not establish complete counter, scheduling, or writeback support;
 issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
 and GFX11.
@@ -191,12 +191,41 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
 
-Generic `FLAT_*` instructions have two independent completion obligations:
-the vector-memory counter and the LDS counter. A wait on only one domain does
-not complete the race-detector event; both domains must be satisfied. The
-resolved route still determines whether the event accesses global memory or
-LDS. This currently assumes that all active lanes select the same memory space;
-mixed LDS/global lanes are tracked separately in #11456.
+Generic `FLAT_*` instructions select counter domains from their resolved memory
+requests. Global and scratch requests use the vector-memory counter; LDS
+requests use the LDS counter. An instruction with requests in both domains uses
+both counters. The runtime applies this conditional-participation model across
+AMD GPU targets, for loads, stores and atomics. Validation on every physical GPU
+architecture is not established.
+
+For uniform requests, the race detector uses only the selected memory domain.
+For example, on gfx950 with global addresses in every requesting lane, this use
+of `v8` has a sufficient wait:
+
+```asm
+flat_load_dword v8, v[0:1]
+s_waitcnt vmcnt(0)
+flat_store_dword v[2:3], v8
+```
+
+LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
+split counters. Routing preserves decoded completion ordering and independent
+obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
+a nonzero wait cannot prove a result ready.
+
+Functional counter acquisition and both runtime checkers use the selected memory
+domains. FLAT capacity constraints are applied after addresses are resolved.
+Before reading the address operands, neither domain is guaranteed to need a
+counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
+prove an older LDS result complete.
+
+A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
+observations still attach both obligations to the whole race-plugin event, so a
+consumer restricted to an already-completed lane group can still get a false
+report. `TODO(newling)` regression cases track this remaining #12237 gap. The
+core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
+tracks the groups separately. Mixed LDS/global functional execution remains
+limited by first-request-lane routing, tracked separately in #11456.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
