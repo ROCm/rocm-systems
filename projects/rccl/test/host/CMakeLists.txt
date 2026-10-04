@@ -299,6 +299,14 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
+  # Its own binary, not rccl-UnitTestsMicro: that target defines the GIN host
+  # entry points in fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
+  set(TEST_MICRO_GIN_HOST_SOURCE_FILES
+    gin-host-finalize-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -925,6 +933,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     ${_MICRO_MODE_DEFS}
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
+# Its own binary (not rccl-UnitTestsMicro): that target already defines the GIN
+# host entry points in fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
+  SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # Hipify keeps gin/gin_host.cc (no basename collision with another gin_host.cc).
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

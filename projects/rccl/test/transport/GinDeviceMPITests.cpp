@@ -2631,6 +2631,7 @@ TEST_F(GinMPIDeviceTests, CommDestroy_FreesAnvilInitContext) {
   const int liveBefore = ncclGinAnvilPluginTestLiveInitCtxCount();
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t comm = getActiveCommunicator();
 
   // ncclDevCommCreate is what drives ncclGinConnectOnce. Without a connected
@@ -2640,8 +2641,10 @@ TEST_F(GinMPIDeviceTests, CommDestroy_FreesAnvilInitContext) {
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  ASSERT_TRUE(comm->sharedRes->ginState.connected);
-  ASSERT_GT(ncclGinAnvilPluginTestLiveInitCtxCount(), liveBefore);
+  // EXPECT_ before the collective ASSERT_MPI_EQ: a fatal ASSERT_ return leaves
+  // the peer blocked in MPI_Allreduce.
+  EXPECT_TRUE(comm->sharedRes->ginState.connected);
+  EXPECT_GT(ncclGinAnvilPluginTestLiveInitCtxCount(), liveBefore);
 
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &devComm));
   ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());

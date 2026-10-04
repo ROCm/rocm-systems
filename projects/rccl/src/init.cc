@@ -599,9 +599,12 @@ static ncclResult_t commFree(ncclComm_t comm) {
     if (sharedResRefCount == 0) {
       // ncclGinHostFinalize left the backend records alive for this call; it owns
       // the plugin finalize that frees each ginInstance (AICOMRCCL-2739).
-      NCCLCHECK(ncclGinFinalize(comm));
-      comm->sharedRes->ginState.numActiveBackends = 0;
-      memset(comm->sharedRes->ginState.backends, 0, sizeof(comm->sharedRes->ginState.backends));
+      // Record and continue: a plugin finalize error must not skip the peers /
+      // streams / proxy / sharedRes frees below (those were unreachable before
+      // this PR because the finalize loop was zero-trip for a connected comm).
+      ncclResult_t ginFinalizeRet = ncclSuccess;
+      NCCLCHECKIGNORE(ncclGinFinalize(comm), ginFinalizeRet);
+      (void)ginFinalizeRet;
       for (int c = 0; c < MAXCHANNELS; c++) {
         if (comm->sharedRes->peers[c]) free(comm->sharedRes->peers[c]);
         if (comm->sharedRes->devPeers[c]) ncclCudaFree(comm->sharedRes->devPeers[c], comm->memManager);
