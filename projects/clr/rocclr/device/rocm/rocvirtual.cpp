@@ -4249,10 +4249,12 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
   profilingBegin(cmd);
 
-  bool force_blit = false;
-  if (amd::IS_HIP) {
-    // Always use blit for memset for HIP.
-    force_blit = true;
+  // HIP forces the blit path for memset. Under DTIF fast-copy, device allocations are
+  // HostMemoryDirectAccess, so uncaptured 1D fills may use the synchronous host path.
+  bool force_blit = amd::IS_HIP;
+  if (force_blit && HSA_ENABLE_DTIF_FAST_COPY) {
+    const bool is_1d = cmd.size()[1] == 1 && cmd.size()[2] == 1;
+    force_blit = !is_1d || cmd.getPktCapturingState();
   }
 
   if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(), cmd.surface(),
