@@ -33,6 +33,7 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -481,7 +482,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::string fullpath =
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -497,14 +499,28 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;
-
-  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
   f.close();
 
-  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  // strtoul() alone can't tell "parsed 0" from "parsed nothing" -- both leave
+  // the result at 0 -- so confirm real hex digits were consumed via endptr. A
+  // cleanly-parsed 0 is a legitimate "no blocks enabled" mask, not a failure.
+  // ULONG_MAX stays a failure sentinel regardless: no real ASIC defines all 64
+  // mask bits (see AMDSMI_GPU_BLOCK_LAST), so a full set of 1s means a garbled
+  // read, not a plausible value.
+  char* endptr = nullptr;
+  unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
+  bool parse_failed = tmp_str.empty() || endptr == tmp_str.c_str() || *endptr != '\0';
+  if (parse_failed || parsed == ULONG_MAX) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""
+       << "; parsed token: \"" << tmp_str << "\""
+       << "; reason: " << (parse_failed ? "unparsable token" : "implausible all-bits-set value")
+       << "; returning AMDSMI_STATUS_API_FAILED";
+    LOG_DEBUG(ss);
     return AMDSMI_STATUS_API_FAILED;
   }
 
+  *enabled_blocks = parsed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
