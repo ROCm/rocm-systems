@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <assert.h>
+#include <chrono>
 #include <stdio.h>
 #include <algorithm>
 #include <stdlib.h>
@@ -36,15 +37,7 @@
 
 #include "lib/aqlprofile/aqlprofile.hpp"
 
-#define CHECK_HSA(x)                                                                               \
-    {                                                                                              \
-        auto _status = (x);                                                                        \
-        if(_status != HSA_STATUS_SUCCESS)                                                          \
-        {                                                                                          \
-            std::cerr << __FILE__ << ':' << __LINE__ << std::endl;                                 \
-            abort();                                                                               \
-        }                                                                                          \
-    }
+#include "agent.hpp"
 
 extern "C" const uint32_t                         HSA_AMD_TOOL_PRIORITY = 25;
 decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled_fn =
@@ -95,6 +88,11 @@ iterate_agent_cb(hsa_agent_t agent, void* /*userdata*/)
 bool
 queue_submit(hsa_queue_t* queue, hsa_ext_amd_aql_pm4_packet_t* packet)
 {
+    using namespace std::chrono_literals;
+    hsa_signal_t signal{};
+    CHECK_HSA(hsa_signal_create(1, 0, nullptr, &signal));
+    packet->completion_signal = signal;
+
     const uint64_t write_idx = hsa_queue_add_write_index_relaxed_fn(queue, 1);
 
     size_t index      = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
@@ -109,17 +107,18 @@ queue_submit(hsa_queue_t* queue, hsa_ext_amd_aql_pm4_packet_t* packet)
     header->store(slot_data[0], std::memory_order_release);
     hsa_signal_store_screlease_fn(queue->doorbell_signal, write_idx);
 
-    int loops = 0;
-    while(hsa_queue_load_read_index_relaxed_fn(queue) <= write_idx)
+    if(hsa_signal_wait_scacquire(signal,
+                                 HSA_SIGNAL_CONDITION_LT,
+                                 1,
+                                 std::chrono::nanoseconds{10s}.count(),
+                                 HSA_WAIT_STATE_BLOCKED) != 0)
     {
-        loops++;
-        usleep(1);
-        if(loops > 10000)
-        {
-            std::cerr << "Packet submission failed!" << std::endl;
-            return false;
-        }
+        std::cerr << "PM4 packet completion signal timeout!" << std::endl;
+        CHECK_HSA(hsa_signal_destroy(signal));
+        return false;
     }
+
+    CHECK_HSA(hsa_signal_destroy(signal));
     return true;
 }
 
