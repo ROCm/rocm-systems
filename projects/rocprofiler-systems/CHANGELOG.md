@@ -85,6 +85,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   domain or trace region configured, the configured delay had no effect at all on
   when GPU data collection actually began.
 
+- LibIberty's source-build fallback (`ROCPROFSYS_BUILD_LIBIBERTY=ON`) now tries a
+  system install and a locally-staged tarball before ever downloading from GNU
+  mirrors, instead of downloading unconditionally. `DYNINST_BINUTILS_DOWNLOAD_URL`
+  continues to work as an explicit override.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd

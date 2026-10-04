@@ -65,67 +65,117 @@ elseif(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
-    rocprofiler_systems_message(STATUS
-                                "Attempting to build LibIberty as external project"
+
+    include("${CMAKE_CURRENT_LIST_DIR}/ResolveDependencySource.cmake")
+
+    # CHECK_COMMAND contract: must set LibIberty_FOUND_SYSTEM, and on TRUE, the
+    # same LibIberty_ROOT_DIR / LibIberty_INCLUDE_DIRS / LibIberty_LIBRARY_DIRS /
+    # LibIberty_LIBRARIES that find_package(LibIberty) itself sets as CACHE vars.
+    macro(_rocprofiler_systems_check_libiberty_system)
+        find_package(LibIberty)
+        set(LibIberty_FOUND_SYSTEM ${LibIberty_FOUND})
+    endmacro()
+
+    # Single source of truth for the binutils release used to build libiberty,
+    # shared with docker/Dockerfile.*.ci (which COPY this same file to stage a
+    # matching tarball at image-build time). Keeping this in one place avoids
+    # the version drift already seen with the Dockerfiles' unused, stale
+    # ELFUTILS_DOWNLOAD_VERSION ARG.
+    file(
+        STRINGS "${CMAKE_CURRENT_LIST_DIR}/binutils_version.txt"
+        _li_binutils_version
+        LIMIT_COUNT 1
+    )
+    string(STRIP "${_li_binutils_version}" _li_binutils_version)
+    rocprofiler_systems_add_cache_option(
+        BINUTILS_DOWNLOAD_VERSION "Version of binutils to download libiberty from" STRING
+        "${_li_binutils_version}"
     )
 
-    set(_li_root ${TPL_STAGING_PREFIX}/binutils)
-    set(_li_project_name rocprofiler-systems-libiberty-build)
-    set(_li_working_dir ${_li_root}/src/${_li_project_name})
-    set(_li_inc_dirs $<BUILD_INTERFACE:${_li_root}/include>)
-    set(_li_lib_dirs $<BUILD_INTERFACE:${_li_root}/lib>)
-    set(_li_libs
-        $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>
+    # ftp.gnu.org is GNU's own canonical server (fastest and most reliable in
+    # testing); ftpmirror.gnu.org is a third-party mirror redirector that has
+    # been observed to intermittently 502, so it's kept only as a fallback.
+    rocprofiler_systems_resolve_dependency_source(
+        NAME LibIberty
+        CHECK_COMMAND _rocprofiler_systems_check_libiberty_system
+        CACHE_FILENAME binutils-libiberty-src.tar.gz
+        VERSION "${BINUTILS_DOWNLOAD_VERSION}"
+        MIRROR_URLS
+            https://ftp.gnu.org/gnu/binutils/binutils-VERSION.tar.gz
+            https://ftpmirror.gnu.org/gnu/binutils/binutils-VERSION.tar.gz
+            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-VERSION.tar.gz
+        OVERRIDE_VAR DYNINST_BINUTILS_DOWNLOAD_URL
     )
-    set(_li_build_byproducts "${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    file(MAKE_DIRECTORY "${_li_root}/lib")
-    file(MAKE_DIRECTORY "${_li_root}/include")
+    if(LibIberty_FOUND_SYSTEM)
+        rocprofiler_systems_message(STATUS
+            "LibIberty found on system; skipping source build even though "
+            "ROCPROFSYS_BUILD_LIBIBERTY=ON"
+        )
+        set(_li_root ${LibIberty_ROOT_DIR})
+        set(_li_inc_dirs ${LibIberty_INCLUDE_DIRS})
+        set(_li_lib_dirs ${LibIberty_LIBRARY_DIRS})
+        set(_li_libs ${LibIberty_LIBRARIES})
+    else()
+        rocprofiler_systems_message(STATUS
+                                    "Attempting to build LibIberty as external project"
+        )
 
-    # Build only libiberty (not top-level "all"): full binutils needs bison, etc.
-    # bfd doc rules can invoke makeinfo; use a no-op so Texinfo is not required.
-    find_program(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP NAMES true)
-    if(NOT _ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP)
-        set(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP /usr/bin/true)
+        set(_li_root ${TPL_STAGING_PREFIX}/binutils)
+        set(_li_project_name rocprofiler-systems-libiberty-build)
+        set(_li_working_dir ${_li_root}/src/${_li_project_name})
+        set(_li_inc_dirs $<BUILD_INTERFACE:${_li_root}/include>)
+        set(_li_lib_dirs $<BUILD_INTERFACE:${_li_root}/lib>)
+        set(_li_libs
+            $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>
+        )
+        set(_li_build_byproducts "${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+        file(MAKE_DIRECTORY "${_li_root}/lib")
+        file(MAKE_DIRECTORY "${_li_root}/include")
+
+        # Build only libiberty (not top-level "all"): full binutils needs bison, etc.
+        # bfd doc rules can invoke makeinfo; use a no-op so Texinfo is not required.
+        find_program(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP NAMES true)
+        if(NOT _ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP)
+            set(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP /usr/bin/true)
+        endif()
+
+        include(ExternalProject)
+        ExternalProject_Add(
+            ${_li_project_name}
+            PREFIX ${_li_root}
+            URL ${LibIberty_RESOLVED_SOURCE}
+            BUILD_IN_SOURCE 1
+            CONFIGURE_COMMAND
+                ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3\ -Wno-error
+                CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3\ -Wno-error
+                MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} <SOURCE_DIR>/configure
+                --prefix=${_li_root}
+            BUILD_COMMAND make MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} all-libiberty
+            INSTALL_COMMAND ""
+        )
+
+        add_custom_command(
+            OUTPUT ${_li_build_byproducts}
+            COMMAND install
+            ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
+            COMMAND install
+            ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
+            DEPENDS ${_li_project_name}
+            COMMENT "Installing LibIberty..."
+        )
+
+        add_custom_target(
+            rocprofiler-systems-libiberty-install
+            ALL
+            DEPENDS ${_li_build_byproducts}
+        )
+
+        # For backward compatibility
+        set(IBERTY_FOUND TRUE)
+        set(IBERTY_BUILD TRUE)
     endif()
-
-    include(ExternalProject)
-    ExternalProject_Add(
-        ${_li_project_name}
-        PREFIX ${_li_root}
-        URL
-            ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            https://ftpmirror.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
-            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.46.0.tar.gz
-        BUILD_IN_SOURCE 1
-        CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3\ -Wno-error
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3\ -Wno-error
-            MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} <SOURCE_DIR>/configure
-            --prefix=${_li_root}
-        BUILD_COMMAND make MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} all-libiberty
-        INSTALL_COMMAND ""
-    )
-
-    add_custom_command(
-        OUTPUT ${_li_build_byproducts}
-        COMMAND install
-        ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
-        COMMAND install
-        ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
-        DEPENDS ${_li_project_name}
-        COMMENT "Installing LibIberty..."
-    )
-
-    add_custom_target(
-        rocprofiler-systems-libiberty-install
-        ALL
-        DEPENDS ${_li_build_byproducts}
-    )
-
-    # For backward compatibility
-    set(IBERTY_FOUND TRUE)
-    set(IBERTY_BUILD TRUE)
 endif()
 
 # -------------- EXPORT VARIABLES ---------------------------------------------
