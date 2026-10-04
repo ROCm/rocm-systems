@@ -35,5 +35,5 @@ test_categories:
     labels:
       - "rccl"
       - "full"
-      - "nightly"
+      - "full_regression"
       - "microtest"

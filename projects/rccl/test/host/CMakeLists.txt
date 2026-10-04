@@ -303,8 +303,11 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
   # Its own binary, not rccl-UnitTestsMicro: that target defines the GIN host
   # entry points in fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
+  # os_fakes.cc for ncclOsCpuCount / ncclOsSetAffinity: ncclGinProgress calls both,
+  # and the lean seams in the test TU deliberately exclude the broader fakes files.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-finalize-test.cc
+    fakes/os_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
