@@ -32,6 +32,7 @@
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
 #include <netdb.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -45,6 +46,12 @@ ssize_t micro_read(int, void*, size_t);
 int micro_close(int);
 int micro_socket(int, int, int);
 int micro_connect(int, const struct sockaddr*, socklen_t);
+int micro_bind(int, const struct sockaddr*, socklen_t);
+int micro_listen(int, int);
+int micro_accept(int, struct sockaddr*, socklen_t*);
+int micro_fcntl(int, int, ...);
+ssize_t micro_recv(int, void*, size_t, int);
+ssize_t micro_send(int, const void*, size_t, int);
 int micro_setsockopt(int, int, int, const void*, socklen_t);
 int micro_getaddrinfo(const char*, const char*, const struct addrinfo*, struct addrinfo**);
 void micro_freeaddrinfo(struct addrinfo*);
@@ -62,6 +69,12 @@ int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)))
 #define close micro_close
 #define socket micro_socket
 #define connect micro_connect
+#define bind micro_bind
+#define listen micro_listen
+#define accept micro_accept
+#define fcntl micro_fcntl
+#define recv micro_recv
+#define send micro_send
 #define setsockopt micro_setsockopt
 #define getaddrinfo micro_getaddrinfo
 #define freeaddrinfo micro_freeaddrinfo

@@ -58,6 +58,17 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
+# Pin the copied function-name table and its order to init.cc.
+foreach(_func_str_line
+    "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
+    "\"AlltoAllPivot\", \"AlltoAllGda\", \"AlltoAllvGda\","
+    "\"SendRecv\"};")
+  rccl_assert_source_line("${_rccl_src_root}/init.cc" "${_func_str_line}"
+    "client-support-test.cc: ncclFuncStr")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/client-support-test.cc" "${_func_str_line}"
+    "the production ncclFuncStr table")
+endforeach()
+unset(_func_str_line)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -72,6 +83,7 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
+    client-support-test.cc               # src/ras/client_support.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     ras-client-test.cc
@@ -87,6 +99,7 @@ function(rccl_define_micro_source_lists)
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
+    fakes/ras_fakes.cc
     fakes/ras_param_fakes.cc
     fakes/rma_fakes.cc
     fakes/comm_fakes.cc
@@ -744,6 +757,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
+    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
