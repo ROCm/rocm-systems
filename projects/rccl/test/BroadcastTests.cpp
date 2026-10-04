@@ -120,4 +120,41 @@ namespace RcclUnitTesting
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
+
+  // An explicit prepDataFunc crosses the parent/worker pipe. Workers are exec'd, so a
+  // raw parent code address would be invalid in them under ASLR.
+  TEST(Broadcast, ExplicitPrepareDataFunc)
+  {
+    TestBed testBed;
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclFloat32, ncclInt32});
+    if (dataTypes.empty())
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+
+    EXPECT_EQ(CollFuncPtrFromOffset(CollFuncPtrToOffset(nullptr)), &DefaultPrepareDataFunc);
+    EXPECT_EQ(CollFuncPtrFromOffset(CollFuncPtrToOffset(&DefaultPrepData_Broadcast)),
+              &DefaultPrepData_Broadcast);
+
+    int const totalRanks = testBed.ev.maxGpus;
+    OptionalColArgs options;
+    options.root = totalRanks - 1;
+
+    bool isCorrect = true;
+    for (int isMultiProcess = 0; isMultiProcess <= 1 && isCorrect; ++isMultiProcess)
+    {
+      if (!(testBed.ev.processMask & (1 << isMultiProcess))) continue;
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks,
+                                                  testBed.ev.GetGpuPriorityOrder()));
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataTypes[0], 4096, 4096, options);
+      testBed.AllocateMem();
+      testBed.PrepareData(-1, -1, -1, DefaultPrepData_Broadcast);
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    EXPECT_TRUE(isCorrect);
+    testBed.Finalize();
+  }
 }

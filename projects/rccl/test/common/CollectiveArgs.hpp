@@ -12,6 +12,12 @@
 
 namespace RcclUnitTesting
 {
+  enum MemAllocType
+  {
+    MEM_ALLOC_HIP           = 0, // Standard hipMalloc
+    MEM_ALLOC_MANAGED       = 1, // hipMallocManaged
+    MEM_ALLOC_SYMMETRIC_WIN = 2  // ncclMemAlloc + ncclCommWindowRegister
+  };
   // Enumeration of all collective functions currently supported
   typedef enum
   {
@@ -109,6 +115,21 @@ namespace RcclUnitTesting
   // e.g. For filling input / computing expected results
   typedef ErrCode (*CollFuncPtr)(CollectiveArgs &);
 
+  // Workers are exec'd copies of this binary, so under ASLR a parent code address
+  // is meaningless in the worker. A CollFuncPtr therefore crosses the pipe as an
+  // offset from DefaultPrepareDataFunc, which is constant within one executable
+  // image. nullptr maps to offset 0, i.e. DefaultPrepareDataFunc itself.
+  inline intptr_t CollFuncPtrToOffset(CollFuncPtr const func)
+  {
+    return func == nullptr ? 0 : reinterpret_cast<intptr_t>(func) -
+                                 reinterpret_cast<intptr_t>(&DefaultPrepareDataFunc);
+  }
+
+  inline CollFuncPtr CollFuncPtrFromOffset(intptr_t const offset)
+  {
+    return reinterpret_cast<CollFuncPtr>(reinterpret_cast<intptr_t>(&DefaultPrepareDataFunc) + offset);
+  }
+
   class CollectiveArgs
   {
   public:
@@ -131,10 +152,15 @@ namespace RcclUnitTesting
     PtrUnion       expected;
     PtrUnion       expectedGpu;        // Device-built expected (UT_DEVICE_DATA mode)
     bool           expectedOnDevice = false; // True once a prep func fills expectedGpu
+    bool           usesVerifiableData = false; // Input and expected come from the verifiable generator
     bool           inPlace;
     bool           useManagedMem;
     bool           userRegistered;
-    void*          commRegHandle;
+    void*          outputRegHandle;
+    void*          inputRegHandle;
+
+    ncclWindow_t    inputWin      = nullptr;      // Handle for ncclCommWindowRegister (input)
+    ncclWindow_t    outputWin     = nullptr;      // Handle for ncclCommWindowRegister (output)
     size_t         numInputBytesAllocated;
     size_t         numOutputBytesAllocated;
     size_t         numInputElementsAllocated;
@@ -188,5 +214,6 @@ namespace RcclUnitTesting
 
     // Returns true if collective function utilizes a root rank
     static bool UsesRoot(ncclFunc_t const funcType);
+    ErrCode AttachMem();
   };
 }

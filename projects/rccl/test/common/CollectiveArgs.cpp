@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "CollectiveArgs.hpp"
+#include "VerifiableData.hpp"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -19,14 +20,13 @@ namespace RcclUnitTesting
                                   int             const  streamIdx,
                                   OptionalColArgs const  &optionalColArgs)
   {
-    // Free scalar based on previous scalarMode
-    if (optionalColArgs.scalarMode != -1)
+    // Free scalar based on the previous scalarMode, including when the new
+    // arguments disable scalar mode.
+    if (this->localScalar.ptr != nullptr)
     {
-      if (this->localScalar.ptr != nullptr)
-      {
-        if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
-        if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
-      }
+      if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
+      if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
+      this->localScalar.Attach(nullptr);
     }
 
     this->globalRank        = globalRank;
@@ -36,6 +36,10 @@ namespace RcclUnitTesting
     this->dataType          = dataType;
     this->numInputElements  = numInputElements;
     this->numOutputElements = numOutputElements;
+    if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr)
+    {
+      CHECK_CALL(this->AttachMem());
+    }
     this->streamIdx         = streamIdx;
     this->options           = optionalColArgs;
 
@@ -57,6 +61,58 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  ErrCode CollectiveArgs::AttachMem()
+  {
+    // Calculate the current active bytes based on this iteration's element count
+    size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
+    size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
+
+    // For out-of-place, both pointers remain at the start of their respective base allocations.
+    // No attachment/offsetting is necessary.
+    if (!this->inPlace) return TEST_SUCCESS;
+
+    size_t requiredBytes = 0;
+    size_t allocatedBytes = 0;
+    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+    {
+      requiredBytes  = (this->globalRank + 1) * currentOutputBytes;
+      allocatedBytes = this->numInputBytesAllocated;
+    }
+    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+    {
+      requiredBytes  = (this->globalRank + 1) * currentInputBytes;
+      allocatedBytes = this->numOutputBytesAllocated;
+    }
+    else
+    {
+      requiredBytes  = std::max(currentInputBytes, currentOutputBytes);
+      allocatedBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
+    }
+    if (requiredBytes > allocatedBytes)
+    {
+      TEST_ERROR("Rank %d in-place %s needs %zu bytes but only %zu were allocated",
+            this->globalRank, ncclFuncNames[this->funcType], requiredBytes, allocatedBytes);
+      return TEST_FAIL;
+    }
+
+    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+    {
+      // inputGpu holds the base pointer. Offset outputGpu.
+      this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
+    }
+    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+    {
+      // outputGpu holds the base pointer. Offset inputGpu.
+      this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
+    }
+    else
+    {
+      // Both buffers share the exact same base pointer
+      this->outputGpu.Attach(this->inputGpu.ptr);
+    }
+    return TEST_SUCCESS;
+  }
+
   ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
                                       bool   const useManagedMem,
                                       bool   const userRegistered)
@@ -73,30 +129,27 @@ namespace RcclUnitTesting
 
     if (inPlace)
     {
-      if (this->funcType == ncclCollScatter)
+      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
       {
         CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.ptr);
       }
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+      CHECK_CALL(this->AttachMem());
     }
     else
     {
       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
+    CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
     // Device-data mode: a device-resident expected buffer for device-side validate.
@@ -108,6 +161,10 @@ namespace RcclUnitTesting
         (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
          || this->funcType == ncclCollReduceScatter))
     {
+      // userRegistered must be passed, otherwise in the case of symmetric memory,
+      // data validation failures show up with UT_DEVICE_DATA=1 but not with 0
+      // it is verified that even expected [CPU data] !=  expectedGpu .
+      // ncclMemAlloc() +  hipMallocManaged/hipMalloc is not compatible.
       CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
     }
 
@@ -131,6 +188,7 @@ namespace RcclUnitTesting
     // sub-case (which would validate against a stale expectedGpu). Device prep funcs set
     // it true only when they actually build expectedGpu.
     this->expectedOnDevice = false;
+    this->usesVerifiableData = false;
     CollFuncPtr prepFunc = (prepareDataFunc == nullptr ? DefaultPrepareDataFunc : prepareDataFunc);
     return prepFunc(*this);
   }
@@ -147,10 +205,13 @@ namespace RcclUnitTesting
 
     bool isMatch = true;
 
+    if (this->usesVerifiableData) return VerifiableValidate(*this);
+
     // Device-data mode: compare outputGpu vs the device-built expectedGpu on the GPU
     // (no D2H copy, no host element loop), using the same per-type tolerances as IsEqual.
     if (UtDeviceDataEnabled() && this->expectedOnDevice)
     {
+      CHECK_HIP(hipSetDevice(this->deviceId));
       size_t mismatches = 0;
       CHECK_CALL(PtrUnion::IsEqualDevice(this->dataType,
                                          this->numOutputElements,
@@ -210,25 +271,36 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // If in-place, either only inputGpu or outputGpu was allocated
+    // Free everything even if one release fails, then report the failure.
+    ErrCode status = TEST_SUCCESS;
+    auto track = [&status](ErrCode const result) { if (result != TEST_SUCCESS) status = result; };
+
+    // If in-place, either only inputGpu or outputGpu was allocated; the other
+    // is an alias into it and is cleared without being freed.
     if (this->inPlace)
     {
-      if (this->funcType == ncclCollGather)
-        this->outputGpu.FreeGpuMem();
+      if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+      {
+        track(this->outputGpu.FreeGpuMem(this->userRegistered));
+        this->inputGpu.Attach(nullptr);
+      }
       else
-        this->inputGpu.FreeGpuMem(this->userRegistered);
+      {
+        track(this->inputGpu.FreeGpuMem(this->userRegistered));
+        this->outputGpu.Attach(nullptr);
+      }
     }
     else
     {
-      this->inputGpu.FreeGpuMem(this->userRegistered);
-      this->outputGpu.FreeGpuMem(this->userRegistered);
+      track(this->inputGpu.FreeGpuMem(this->userRegistered));
+      track(this->outputGpu.FreeGpuMem(this->userRegistered));
     }
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
     if (this->expectedGpu.ptr != nullptr)
     {
-      this->expectedGpu.FreeGpuMem(this->userRegistered);
+      track(this->expectedGpu.FreeGpuMem(this->userRegistered));
     }
 
     if (this->localScalar.ptr != nullptr)
@@ -241,12 +313,12 @@ namespace RcclUnitTesting
     // Deallocate bias buffers if they were allocated
     if (this->options.useBias && this->numBiasBytesAllocated > 0)
     {
-      this->biasGpu.FreeGpuMem(this->userRegistered);
+      track(this->biasGpu.FreeGpuMem(this->userRegistered));
       this->biasCpu.FreeCpuMem();
       this->biasRegHandle = nullptr;
     }
 
-    return TEST_SUCCESS;
+    return status;
   }
 
   std::string CollectiveArgs::GetDescription() const

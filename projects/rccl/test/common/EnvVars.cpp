@@ -51,6 +51,9 @@ namespace RcclUnitTesting
     }
     int const fd = atoi(fdStr);
 
+    int hipRuntimeVersion = 0;
+    (void)hipRuntimeGetVersion(&hipRuntimeVersion);
+
     int numGpus = 0;
     if (hipGetDeviceCount(&numGpus) != hipSuccess)
     {
@@ -138,7 +141,8 @@ namespace RcclUnitTesting
       }
     }
 
-    // Serialize: numGpus, 5 arch flags, cpx flag, then numGpus priority ints.
+    // Serialize: runtime version, numGpus, 5 arch flags, cpx flag, then
+    // numGpus priority ints.
     auto writeAll = [fd](void const* buf, size_t len)
     {
       size_t off = 0;
@@ -152,6 +156,7 @@ namespace RcclUnitTesting
         off += (size_t)n;
       }
     };
+    writeAll(&hipRuntimeVersion, sizeof(hipRuntimeVersion));
     writeAll(&numGpus, sizeof(numGpus));
     writeAll(&isGfx94, sizeof(isGfx94));
     writeAll(&isGfx95, sizeof(isGfx95));
@@ -229,8 +234,9 @@ namespace RcclUnitTesting
       return true;
     };
 
-    int numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g1250 = 0, g90 = 0, cpx = 0;
-    bool ok = readAll(&numGpus, sizeof(numGpus)) && readAll(&g94, sizeof(g94))
+    int runtimeVersion = 0, numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g1250 = 0, g90 = 0, cpx = 0;
+    bool ok = readAll(&runtimeVersion, sizeof(runtimeVersion)) && readAll(&numGpus, sizeof(numGpus))
+              && readAll(&g94, sizeof(g94))
               && readAll(&g95, sizeof(g95)) && readAll(&g12, sizeof(g12))
               && readAll(&g1250, sizeof(g1250)) && readAll(&g90, sizeof(g90))
               && readAll(&cpx, sizeof(cpx));
@@ -251,6 +257,7 @@ namespace RcclUnitTesting
       return;
     }
 
+    hipRuntimeVersion = runtimeVersion;
     numDetectedGpus = numGpus;
     isGfx94 = (g94 != 0);
     isGfx95 = (g95 != 0);
@@ -301,11 +308,12 @@ namespace RcclUnitTesting
     // there and concurrent hipGetDeviceCount forks cause KFD contention.
     const bool isIsolatedChild = (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr);
 
-    // Collect GPU info (count / arch / CPX / priority). All HIP calls run inside a
+    // Collect GPU info (runtime version / count / arch / CPX / priority). All HIP calls run inside a
     // fork()+execv()'d probe child (DetectGpuInfo), so this is safe under
     // rocprofv3 --hip-trace; a bare fork()+HIP child deadlocks the tracer.
     // NOTE: HIP must not be used in this parent before the tests launch their own
     // child processes, hence the isolated probe.
+    hipRuntimeVersion = 0;
     numDetectedGpus = 0;
     isGfx94 = isGfx95 = isGfx12 = isGfx1250 = isGfx90 = false;
     bool             isCpxMode = false;
