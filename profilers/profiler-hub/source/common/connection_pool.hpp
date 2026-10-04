@@ -10,6 +10,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -64,6 +65,8 @@ public:
 
     /** @brief Blocks until a connection is free, then leases it to the caller. */
     [[nodiscard]] lease acquire();
+
+    [[nodiscard]] std::optional<lease> try_acquire();
 
     /**
      * @brief Acquires a connection and runs @p fn with it, on the calling

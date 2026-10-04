@@ -51,6 +51,17 @@ connection_pool::connection_pool(std::string_view file_path,
     }
 }
 
+std::optional<connection_pool::lease>
+connection_pool::try_acquire()
+{
+    std::scoped_lock lock{ m_mutex };
+    if(m_free.empty()) return std::nullopt;
+
+    connection* conn = m_free.front();
+    m_free.pop_front();
+    return lease{ *this, *conn };
+}
+
 connection_pool::lease
 connection_pool::acquire()
 {

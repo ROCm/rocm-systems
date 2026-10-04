@@ -45,6 +45,13 @@ target_compile_definitions(
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
 
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
+
 target_compile_definitions(
     profiler-hub_unit_tests
     PRIVATE PROFILER_HUB_SHARED_LIB="$<TARGET_FILE:profiler-hub>"

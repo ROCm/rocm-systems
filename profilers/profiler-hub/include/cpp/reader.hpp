@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace profiler_hub
 {
@@ -130,6 +131,21 @@ struct reader_t
     [[nodiscard]] reader_types::timeline_event_list_t get_events_for_track(
         reader_types::track_info_ptr_t      track,
         const reader_types::event_filter_t& filter = {}) const;
+
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
+        reader_types::event_type_t type) const;
+
+    using event_visitor_t = void (*)(void*                        context,
+                                     reader_types::timestamp_ns_t start,
+                                     reader_types::timestamp_ns_t end,
+                                     std::string_view             name);
+
+    void visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
+                                        reader_types::event_type_t            type,
+                                        size_t                                id_begin,
+                                        size_t                                id_end,
+                                        event_visitor_t                       visitor,
+                                        void* context) const;
 
     /**
      * @brief Get PMC/counter samples for a track within an optional time window

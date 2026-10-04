@@ -102,9 +102,15 @@ extern "C"
      * @note @p events->events and every ph_event_t::name in it point into
      *       memory owned by @p ctx and remain valid until @p ctx is freed.
      *       Unlike ph_get_track_list()/ph_get_node(), a later call to this
-     *       function does NOT invalidate an earlier one's result -- each
-     *       call gets its own private storage, safe to read concurrently
-     *       from multiple calls (including calls made via ph_future_get()).
+     *       function does NOT invalidate an earlier one's result, and the
+     *       arrays are safe to read concurrently from multiple calls
+     *       (including calls made via ph_future_get()).
+     * @note A request for a whole track (@p start_ts and @p end_ts both 0)
+     *       is answered from memory after the first call: repeated calls for
+     *       the same track return the same storage, so the arrays must be
+     *       treated as read-only. Events of a whole track are ordered by
+     *       ph_event_t::start. A request with a time window gets its own
+     *       private storage.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,
@@ -131,6 +137,12 @@ extern "C"
      *       function does NOT invalidate an earlier one's result -- each
      *       call gets its own private storage, safe to read concurrently
      *       from multiple calls (including calls made via ph_future_get()).
+     * @note A request for a whole track (@p start_ts and @p end_ts both 0)
+     *       is answered from memory after the first call: repeated calls for
+     *       the same track return the same storage, so the array must be
+     *       treated as read-only. Samples of a whole track are ordered by
+     *       ph_sample_t::timestamp. A request with a time window gets its own
+     *       private storage.
      */
     ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
                                      uint32_t          track_id,
