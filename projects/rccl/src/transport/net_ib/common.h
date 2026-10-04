@@ -727,6 +727,7 @@ ncclResult_t ncclIbDevices(int* ndev);
 ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
+// nQpsPerDev > 0: that many QPs per device. <= 0: NCCL_IB_QPS_PER_CONNECTION / RCCL_IB_QPS_PER_P2P.
 ncclResult_t ncclIbConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                                ncclNetDeviceHandle_t** sendDevComm, int nQpsPerDev, int envTrafficClass);
 ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
