@@ -22,9 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 /**
@@ -120,8 +118,8 @@ public:
     {
         bool newly_registered = false;
         {
-            std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
-            if(m_registered_gpus.count(rccl_device_idx) == 0)
+            std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
+            if(!m_registered_gpus.contains(rccl_device_idx))
             {
                 m_registered_gpus.insert(rccl_device_idx);
                 newly_registered = true;
@@ -142,7 +140,7 @@ public:
      */
     [[nodiscard]] std::uint64_t add_bytes(std::uint32_t rccl_device_idx, size_t bytes)
     {
-        std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
+        std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
         device_bytes += bytes;
         return device_bytes;
@@ -155,8 +153,8 @@ public:
      */
     [[nodiscard]] bool is_registered(std::uint32_t rccl_device_idx) const
     {
-        std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
-        return m_registered_gpus.count(rccl_device_idx) > 0;
+        std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
+        return m_registered_gpus.contains(rccl_device_idx);
     }
 
     /**
@@ -166,8 +164,8 @@ public:
      */
     [[nodiscard]] std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
     {
-        std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
-        auto it = m_cumulative_bytes_per_device.find(rccl_device_idx);
+        std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
+        auto const it = m_cumulative_bytes_per_device.find(rccl_device_idx);
         return (it != m_cumulative_bytes_per_device.end()) ? it->second : 0;
     }
 
@@ -177,22 +175,21 @@ public:
     void reset()
     {
         {
-            std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
+            std::unique_lock<std::mutex> const _lk{ m_registered_gpus_mutex };
             m_registered_gpus.clear();
         }
         {
-            std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
+            std::unique_lock<std::mutex> const _lk{ m_cumulative_mutex };
             m_cumulative_bytes_per_device.clear();
         }
     }
 
 private:
     std::shared_ptr<PmcRegistrar>                    m_pmc_registrar;
-    mutable std::mutex                               m_registered_gpus_mutex{};
-    std::unordered_set<std::uint32_t>                m_registered_gpus{};
-    mutable std::mutex                               m_cumulative_mutex{};
-    std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device{};
+    mutable std::mutex                               m_registered_gpus_mutex;
+    std::unordered_set<std::uint32_t>                m_registered_gpus;
+    mutable std::mutex                               m_cumulative_mutex;
+    std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device;
 };
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

@@ -58,8 +58,7 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);
   };
-  return std::lexicographical_compare(lhs_regs.begin(), lhs_regs.end(), rhs_regs.begin(),
-                                      rhs_regs.end(), less);
+  return std::ranges::lexicographical_compare(lhs_regs, rhs_regs, less);
 }
 
 bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
@@ -236,14 +235,12 @@ template <typename Predicate>
 void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEvent> &events,
                                       Predicate should_retire) {
   std::vector<PendingEvent> retired_events;
-  const auto retained =
-      std::remove_if(events.begin(), events.end(), [&](const PendingEvent &event) {
-        if (!should_retire(event))
-          return false;
-        retired_events.push_back(event);
-        return true;
-      });
-  events.erase(retained, events.end());
+  std::erase_if(events, [&](const PendingEvent &event) {
+    if (!should_retire(event))
+      return false;
+    retired_events.push_back(event);
+    return true;
+  });
   make_retired_generations_ready(state, retired_events);
 }
 
@@ -383,6 +380,14 @@ bool WaitcheckStateOps::has_xcnt_event(const PendingState &state, Predicate pred
   return false;
 }
 
+bool WaitcheckStateOps::has_xcnt_smem(const PendingState &state) {
+  return has_xcnt_event(state, is_xcnt_smem_event);
+}
+
+bool WaitcheckStateOps::has_xcnt_vmem(const PendingState &state) {
+  return has_xcnt_event(state, is_xcnt_vmem_event);
+}
+
 void WaitcheckStateOps::apply_xcnt_wait(PendingState &state, uint32_t count) {
   // SIInsertWaitcnts treats X_CNT as out of order while an SMEM
   // translation is pending. Only xcnt(0) proves that a particular scalar
@@ -440,7 +445,8 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
                                                                rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
     return false;
   }

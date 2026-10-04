@@ -1892,20 +1892,20 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   ASSERT_FALSE(cave.empty());
 
   // The probe body is copied exactly once, at the front of the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeSetpcS30S31), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeSetpcS30S31), 1);
   EXPECT_EQ(cave.front(), kProbeSetpcS30S31);
 
   // The call is present, through the cc-derived link pair and chosen target pair.
   const uint32_t swappc =
       build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
+  EXPECT_NE(std::ranges::find(cave, swappc), cave.end());
 
   // Re-derive the call target from the materialization delta and confirm it
   // lands on the copied body. s_getpc writes the VA of the next instruction; the
   // 64-bit add chain folds in (probe_target_offset - that VA).
   const size_t body_words = (p.trampoline_offset - p.probe_target_offset) / sizeof(uint32_t);
   const uint32_t getpc = build_s_getpc_b64(p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto getpc_it = std::find(cave.begin() + body_words, cave.end(), getpc);
+  const auto getpc_it = std::ranges::find(cave.begin() + body_words, cave.end(), getpc);
   ASSERT_NE(getpc_it, cave.end());
   const size_t cave_idx = static_cast<size_t>(getpc_it - cave.begin());
   const size_t tramp_idx = cave_idx - body_words; // index within the trampoline.
@@ -2021,7 +2021,7 @@ TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
   constexpr size_t kOriginalTextWords = 2;
   ASSERT_GT(text.size(), kOriginalTextWords);
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
 }
 
 // An immediate's value is the one part of an argument the probe declaration
@@ -2059,10 +2059,10 @@ TEST(InstrumentorProbePatch, PointsDifferingOnlyInImmediateValuesShareOneBody) {
   constexpr size_t kOriginalTextWords = 2;
   ASSERT_GT(text.size(), kOriginalTextWords);
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
   // One shared body, but each trampoline still materializes its own constant.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kFirstValue), 1);
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kSecondValue), 1);
+  EXPECT_EQ(std::ranges::count(cave, kFirstValue), 1);
+  EXPECT_EQ(std::ranges::count(cave, kSecondValue), 1);
 }
 
 // A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
@@ -2254,7 +2254,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
 
   // Deduped: the body's marker appears exactly once across the appended region.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
   EXPECT_EQ(cave.front(), kProbeMarkerMovS5); // body sits ahead of both trampolines.
 
   // Each trampoline emits its own call and targets the shared body's offset.
@@ -2262,7 +2262,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
     EXPECT_EQ(p.probe_target_offset, kCaveStart);
     const uint32_t swappc =
         build_s_swappc_b64(p.link_pair_base, p.target_pair_base, ROCJITSU_CODE_ARCH_CDNA4);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), swappc), cave.end());
+    EXPECT_NE(std::ranges::find(cave, swappc), cave.end());
   }
 }
 
@@ -2304,11 +2304,11 @@ TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
 
   // Each distinct body is copied exactly once.
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS6), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS5), 1);
+  EXPECT_EQ(std::ranges::count(cave, kProbeMarkerMovS6), 1);
   // ...and in request order: body A (marker mov s5) precedes body B (marker s6).
-  const auto a_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS5);
-  const auto b_it = std::find(cave.begin(), cave.end(), kProbeMarkerMovS6);
+  const auto a_it = std::ranges::find(cave, kProbeMarkerMovS5);
+  const auto b_it = std::ranges::find(cave, kProbeMarkerMovS6);
   ASSERT_NE(a_it, cave.end());
   ASSERT_NE(b_it, cave.end());
   EXPECT_LT(a_it, b_it);
@@ -2586,9 +2586,9 @@ protected:
   void expect_drain_before_store(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op) {
     const auto drain = build_wait_all_loads_complete(a_.arch);
-    auto op = std::search(cave.begin(), cave.end(), first_spill_op.begin(), first_spill_op.end());
+    auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
-    EXPECT_NE(std::search(cave.begin(), op, drain.begin(), drain.end()), op)
+    EXPECT_NE(std::ranges::search(std::ranges::subrange(cave.begin(), op), drain).begin(), op)
         << "no load drain before the first spill op";
   }
 
@@ -2602,11 +2602,11 @@ protected:
                                  const std::vector<uint32_t> &first_spill_op,
                                  const std::vector<uint32_t> &first_fill_load) {
     const auto drain = build_wait_all_loads_complete(a_.arch);
-    auto op = std::search(cave.begin(), cave.end(), first_spill_op.begin(), first_spill_op.end());
+    auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
-    auto fill = std::search(op, cave.end(), first_fill_load.begin(), first_fill_load.end());
+    auto fill = std::ranges::search(std::ranges::subrange(op, cave.end()), first_fill_load).begin();
     ASSERT_NE(fill, cave.end());
-    EXPECT_NE(std::search(op, fill, drain.begin(), drain.end()), fill)
+    EXPECT_NE(std::ranges::search(std::ranges::subrange(op, fill), drain).begin(), fill)
         << "no load drain after the call return, before the first spill fill";
   }
 
@@ -2616,10 +2616,9 @@ protected:
   void expect_vgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t vgpr, uint32_t off) {
     const auto store = build_scratch_store_dword(vgpr, off, a_.arch);
     const auto load = build_scratch_load_dword(vgpr, off, a_.arch);
-    EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end())
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for v" << vgpr;
-    EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end())
-        << "missing load for v" << vgpr;
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for v" << vgpr;
   }
 
   // Assert s`sgpr`'s spill words are in `cave`: writelane + scratch store (prologue)
@@ -2631,13 +2630,12 @@ protected:
     const auto store = build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
     const auto load = build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
     const auto readlane = build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    EXPECT_NE(std::search(cave.begin(), cave.end(), writelane.begin(), writelane.end()), cave.end())
+    EXPECT_NE(std::ranges::search(cave, writelane).begin(), cave.end())
         << "missing writelane for s" << sgpr;
-    EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end())
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for s" << sgpr;
-    EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end())
-        << "missing load for s" << sgpr;
-    EXPECT_NE(std::search(cave.begin(), cave.end(), readlane.begin(), readlane.end()), cave.end())
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for s" << sgpr;
+    EXPECT_NE(std::ranges::search(cave, readlane).begin(), cave.end())
         << "missing readlane for s" << sgpr;
   }
 
@@ -2647,10 +2645,9 @@ protected:
   void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
     const auto store = build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
     const auto load = build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
-    EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end())
+    EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for acc" << acc;
-    EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end())
-        << "missing load for acc" << acc;
+    EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for acc" << acc;
   }
 
   // Assert the standard single-VGPR spill in `caved`: v2 stored/reloaded at slot 64,
@@ -2659,7 +2656,7 @@ protected:
   void expect_vgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
     const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
     expect_drain_before_store(cave, store);
     expect_drain_after_return(cave, store,
@@ -2674,7 +2671,7 @@ protected:
   void expect_sgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/64);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
     const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
     const std::vector<uint32_t> writelane_words{writelane.begin(), writelane.end()};
     expect_drain_before_store(cave, writelane_words);
@@ -2692,7 +2689,7 @@ protected:
   void expect_acc_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
     const auto store = build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
     expect_drain_before_store(cave, store);
     expect_drain_after_return(
@@ -2710,7 +2707,7 @@ protected:
     expect_acc_spill_present(cave, /*acc=*/1, /*off=*/68);
     expect_acc_spill_present(cave, /*acc=*/2, /*off=*/72);
     expect_acc_spill_present(cave, /*acc=*/3, /*off=*/76);
-    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
     EXPECT_EQ(caved.scratch, 80u);
   }
 
@@ -2780,9 +2777,9 @@ protected:
     ASSERT_FALSE(cave.empty());
     const auto drain = build_wait_all_loads_complete(arch());
     size_t count = 0;
-    for (auto it = std::search(cave.begin(), cave.end(), drain.begin(), drain.end());
-         it != cave.end();
-         it = std::search(it + drain.size(), cave.end(), drain.begin(), drain.end()))
+    for (auto it = std::ranges::search(cave, drain).begin(); it != cave.end();
+         it = std::ranges::search(std::ranges::subrange(it + drain.size(), cave.end()), drain)
+                  .begin())
       ++count;
     EXPECT_GE(count, 2u) << "a no-spill probe envelope must still be bracketed by boundary drains";
   }
@@ -2833,10 +2830,10 @@ TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedVgpr) {
   const std::vector<uint32_t> &cave = caved.cave;
   const auto store = build_scratch_store_dword(2, 64, arch());
   const auto load = build_scratch_load_dword(2, 64, arch());
-  const auto store_it = std::search(cave.begin(), cave.end(), store.begin(), store.end());
-  const auto load_it = std::search(cave.begin(), cave.end(), load.begin(), load.end());
+  const auto store_it = std::ranges::search(cave, store).begin();
+  const auto load_it = std::ranges::search(cave, load).begin();
   const uint32_t store_wait = build_wait_stores_complete(arch());
-  const auto store_wait_it = std::find(cave.begin(), cave.end(), store_wait);
+  const auto store_wait_it = std::ranges::find(cave, store_wait);
   ASSERT_NE(store_wait_it, cave.end()) << "missing RDNA4 store-counter fence before the reload";
   EXPECT_LT(store_it, store_wait_it) << "store-counter fence must follow the store";
   EXPECT_LT(store_wait_it, load_it) << "store-counter fence must precede the reload";
@@ -3028,7 +3025,7 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/68);
   // AccVGPR acc0 -> slot 72, straight to scratch via the acc bit.
   expect_acc_spill_present(cave, /*acc=*/0, /*off=*/72);
-  EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(arch())), cave.end());
+  EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(arch())), cave.end());
 
   // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
   EXPECT_EQ(caved.scratch, 76u);
@@ -3059,8 +3056,7 @@ TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
       patch_spill({kMovV3S8, kMovV4S9, endpgm()}, {kMovS8Zero, kMovS9Zero, setpc()}, 64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/8, /*off=*/64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/9, /*off=*/68);
-  EXPECT_NE(std::find(caved.cave.begin(), caved.cave.end(), build_wait_loads_complete(arch())),
-            caved.cave.end());
+  EXPECT_NE(std::ranges::find(caved.cave, build_wait_loads_complete(arch())), caved.cave.end());
   EXPECT_EQ(caved.scratch, 72u);
 }
 

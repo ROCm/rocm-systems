@@ -93,11 +93,11 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
-    * - | ``HSA_HOTSWAP_DISABLE``
-        | Stops the runtime from loading the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. The tool loads by default whenever such an agent is present.
+    * - | ``HSA_HOTSWAP_ENABLE``
+        | Enables automatic loading of the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. Automatic loading is disabled by default and only occurs when explicitly enabled and a supported agent is present. This variable does not prevent explicit loading through ``HSA_TOOLS_LIB``.
       - ``0``
-      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Load the HotSwap tool when a supported agent is present.
-        | Any other value: Never load the HotSwap tool.
+      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Skip automatic loading of the HotSwap tool.
+        | Any other value: Automatically load the HotSwap tool when a supported agent is present.
 
     * - | ``HSA_DISABLE_GFX12_STRICT``
         | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.

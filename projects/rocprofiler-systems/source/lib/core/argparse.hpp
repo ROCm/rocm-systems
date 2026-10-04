@@ -16,9 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 struct parser_data;
 
@@ -64,13 +62,13 @@ resolve_output_format(const strset_t& tokens);
 
 struct env_snapshot
 {
-    std::unordered_set<std::string> initial = {};
-    std::vector<std::string>        current = {};
+    std::unordered_set<std::string> initial;
+    std::vector<std::string>        current;
     // Owns its keys: callers may pass temporaries (e.g. std::string{key}) into
     // update_env, so storing string_view here would dangle once they die.
-    std::unordered_set<std::string> updated      = {};
-    std::string                     dl_libpath   = {};
-    std::string                     omni_libpath = {};
+    std::unordered_set<std::string> updated;
+    std::string                     dl_libpath;
+    std::string                     omni_libpath;
 
     // Convenience wrapper: hides the (current, updated, initial) plumbing
     // and the join delimiter, so callers stop reaching into three fields.
@@ -87,8 +85,8 @@ struct env_snapshot
 
 struct parse_outcome
 {
-    std::vector<std::string> command    = {};
-    std::string              launcher   = {};
+    std::vector<std::string> command;
+    std::string              launcher;
     bool                     monochrome = false;
     bool                     debug      = false;
     bool                     fork_exec  = false;
@@ -97,12 +95,12 @@ struct parse_outcome
 
 struct registration_config
 {
-    vsettings_set_t                 processed_settings = {};
-    std::unordered_set<std::string> processed_environs = {};
-    std::unordered_set<std::string> processed_groups   = {};
-    grouping_filter_t               grouping_filter    = default_grouping_filter;
-    setting_filter_t                setting_filter     = default_setting_filter;
-    environ_filter_t                environ_filter     = default_environ_filter;
+    vsettings_set_t                 processed_settings;
+    std::unordered_set<std::string> processed_environs;
+    std::unordered_set<std::string> processed_groups;
+    grouping_filter_t               grouping_filter = default_grouping_filter;
+    setting_filter_t                setting_filter  = default_setting_filter;
+    environ_filter_t                environ_filter  = default_environ_filter;
 };
 
 struct parser_data
@@ -132,5 +130,4 @@ add_group_arguments(parser_t&, const std::string&, parser_data&, bool _add_group
 
 parser_data&
 add_extended_arguments(parser_t&, parser_data&);
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

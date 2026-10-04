@@ -146,6 +146,7 @@ extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
 extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
+extern int64_t ncclParamP2pLL128Enable();
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -224,7 +225,6 @@ RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns the process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when the env var
 // is unset or held no valid token. A UNDEF result means no env override was applied, so per-call and
@@ -487,6 +487,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm == NULL) return ncclSuccess;
 
   NCCLCHECK(ncclCeFinalize(comm));
+  NCCLCHECK(ncclRmaCeFinalize(comm));
 
   if (comm->nNodes == 1) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
@@ -610,6 +611,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->nvlsSupport) NCCLCHECK(ncclNvlsFree(comm));
 #endif
 
+  // Must run before the destructor loop frees the host-pinned workStarted/workCompleted/workPhases
+  // the profiler thread polls, and before the free(comm->abortFlag) it loads through pt->abortFlag.
+  NCCLCHECK(ncclProfilerThreadDestroy(comm));
+
   struct ncclDestructor* dtor = comm->destructorHead;
   while (dtor != nullptr) {
     NCCLCHECK(dtor->fn(dtor));
@@ -651,7 +656,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
        comm->rank, comm->nRanks, comm->cudaDev, comm->busId, comm->commHash, abort ? "Abort" : "Destroy");
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
-  NCCLCHECK(ncclProfilerThreadDestroy(comm));
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   if (sharedResRefCount == 0) {
     NCCLCHECK(ncclNetFinalize(comm));
@@ -754,6 +758,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
+  comm->hierarchicalEligible = false;
+  comm->hierarchicalLazyCalls = 0;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
@@ -803,6 +809,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStreamTag = 0;
+  comm->addonStopEvent = nullptr;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold
@@ -1973,8 +1980,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       allXgmi &= isXGMI;
     }
   }
-  // Initialize num P2P LL buffers for this communicator
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1;
+  // Initialize num P2P LL buffers for this communicator. gfx1250 internodal LL128 needs the
+  // NET staging buffer even when NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset: ENABLE=1 is the
+  // opt-in (any nRanks). Default ENABLE=-1 does not use LL128, so it does not auto-allocate.
+  comm->allocP2pNetLLBuffers =
+    rcclAllocP2pNetLLBuffers(comm->cudaArch, nNodes, nranks, ncclParamP2pLL128Enable(),
+                             ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[5] = {ringGraph, treeGraph, collNetDirectGraph, collNetChainGraph, nvlsGraph};
@@ -2923,9 +2934,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->cudaArch = cudaArch;
   comm->archName = archName;
   comm->cuCount = cuCount;
-  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS / NCCL_LL128_SHMEM_ELEMS_PER_THREAD
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
+  comm->ll128ShmemElemsPerThread = rcclLL128ShmemElemsPerThreadFromArch(comm->archName);
+  comm->archThresholds = rcclGetArchThresholds(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
@@ -3044,23 +3057,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       if (!compactRanks) {
         INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
-        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-        // honor user input if user explicitly disables PAT
-        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
-        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
-        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-        comm->forcePatEnable = false;
-        // inherit PXN disable from parent comm
-        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
-        comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+        comm->hierarchicalEligible = true;
+        // Hierarchical ReduceScatter has no lazy trigger.
+        if (rcclParamHierarchicalLazyInit() == 1 && rcclParamHierarchicalReduceScatter() != 1) {
+          INFO(NCCL_INIT, "Hierarchical collectives: deferring sub-communicator setup to the first eligible AllGather");
+        } else {
+          NCCLCHECKGOTO(rcclEnsureHierarchicalComms(comm), res, fail);
+        }
       }
     }
   }
@@ -3130,6 +3133,47 @@ fail:
   } else { \
     INFO(NCCL_ENV, "Comm config " fieldStr " set to " format, config->field); \
   }
+
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) {
+  if (comm->hierarchicalTempBuffer != nullptr) return ncclSuccess;
+  const size_t size = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                     rcclParamHierarchicalReduceScatter() == 1);
+  return ncclCudaMalloc(&comm->hierarchicalTempBuffer, size, comm->memManager);
+}
+
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) {
+  if (comm->hierarchicalCommsInitialized || !comm->hierarchicalEligible) return ncclSuccess;
+
+  ncclResult_t res = ncclSuccess;
+  const int parentBlocking = comm->config.blocking;
+  int node_id = comm->rankToNode[comm->rank];
+  int local_rank = comm->rankToLocalRank[comm->rank];
+  const char* patEnableEnv = nullptr;
+  bool userDisabledPat = false;
+
+  // A non-blocking split can return before the child exists, so split synchronously.
+  comm->config.blocking = 1;
+  NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, exit);
+  // honor user input if user explicitly disables PAT
+  patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+  userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+  comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
+  NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, exit);
+  comm->forcePatEnable = false;
+  // inherit PXN disable from parent comm
+  comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+  NCCLCHECKGOTO(rcclReserveHierarchicalTempBuffer(comm), res, exit);
+  comm->hierarchicalCommsInitialized = true;
+  INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+       comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+
+exit:
+  comm->config.blocking = parentBlocking;
+  comm->forcePatEnable = false;
+  // Never retried: a failed split can leave peers mid-exchange on the parent's bootstrap.
+  if (res != ncclSuccess) comm->hierarchicalEligible = false;
+  return res;
+}
 
 static ncclResult_t envConfigOverride(ncclComm_t comm) {
   ncclResult_t ret = ncclSuccess;
@@ -3996,6 +4040,7 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t proxyStopResult = ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
 
@@ -4047,8 +4092,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     }
   }
 
-  if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
-    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank, ret);
+  proxyStopResult = ncclProxyStop(comm);
+  if (proxyStopResult != ncclSuccess) {
+    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank,
+         proxyStopResult);
+    if (ret == ncclSuccess) ret = proxyStopResult;
   } else if (comm->finalizeCalled) {
     TRACE_CALL("ncclCommFinalize(%p)", comm);
     INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx commId 0x%" PRIx64 " - Finalize COMPLETE", comm,

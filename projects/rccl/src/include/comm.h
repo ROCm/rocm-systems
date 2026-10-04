@@ -254,6 +254,7 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  rcclSymkExtract symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
@@ -748,6 +749,12 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  // Set at init when a hierarchical collective is enabled and the topology permits
+  // it; cleared if building the sub-communicators fails. Eligible but not yet
+  // initialized means RCCL_HIERARCHICAL_LAZY_INIT deferred them.
+  bool hierarchicalEligible;
+  // Eligible AllGathers seen while the deferred setup is pending.
+  uint64_t hierarchicalLazyCalls;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,
@@ -817,6 +824,10 @@ struct ncclComm {
     [RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES]
     [3]; // for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
   struct ncclTuningContext_t tuningContext;
+
+  // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
+  // NULL on architectures without a dedicated threshold table (falls back to env-var params).
+  const struct rcclArchThresholds* archThresholds;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */
@@ -939,6 +950,10 @@ struct ncclComm {
   // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
   // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
+  // The event the addon collective's last kernel carries as its stopEvent, in place of a standalone
+  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
+  // rcclTakeAddonStopEvent, which hands it out.
+  hipEvent_t addonStopEvent;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1024,6 +1039,8 @@ struct ncclComm {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+  // [RCCL] Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD
+  int ll128ShmemElemsPerThread;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
@@ -1161,6 +1178,16 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
   int op1 = int(h) ^ int(op);
   // Since builtin values are preserved, we also have to preserve their preimage.
   return op1 < int(ncclNumOps) ? op : ncclRedOp_t(op1);
+}
+
+// Returns the stop event for the collective's last stream operation. The result is nullptr while
+// capturing, and after an earlier launch in the same collective has taken it. Only the launch that
+// ends the collective may call this: rcclAddonLaunchEnd reads the cleared field as "a kernel will
+// record it" and skips the standalone record.
+static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
+  hipEvent_t stopEvent = comm->addonStopEvent;
+  comm->addonStopEvent = nullptr;
+  return stopEvent;
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
