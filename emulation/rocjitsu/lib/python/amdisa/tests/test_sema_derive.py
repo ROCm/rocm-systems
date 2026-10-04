@@ -1289,25 +1289,35 @@ class TestDeriveVectorUnary:
             assert 'write_lane(vdst, lane, static_cast<uint32_t>' not in cpp
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'decode_helper', 'encode_helper'),
+        ('low_fmt', 'count', 'decode_helper', 'simd_format'),
         [
-            (
-                'V_CVT_SCALE_PK16_BF16_BF6',
-                'unpack_pk16_bf16_bf6',
-                'util::bf6_e3m2_to_f32',
-                'util::f32_to_bf16_rne_mode',
-            ),
-            (
-                'V_CVT_SCALE_PK8_F32_FP4',
-                'unpack_pk8_f32_fp4',
-                'util::fp4_e2m1_to_f32',
-                'std::bit_cast<uint32_t>',
-            ),
+            ('fp4', 8, 'util::fp4_e2m1_to_f32', 'Fp4E2m1'),
+            ('fp6', 16, 'util::fp6_e2m3_to_f32', 'Fp6E2m3'),
+            ('bf6', 16, 'util::bf6_e3m2_to_f32', 'Bf6E3m2'),
+            ('fp8', 8, 'util::fp8_e4m3_to_f32', 'Fp8E4m3'),
+            ('bf8', 8, 'util::bf8_e5m2_to_f32', 'Bf8E5m2'),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ('wide_fmt', 'encode_helper', 'wide_format'),
+        [
+            ('f32', 'std::bit_cast<uint32_t>', 'F32'),
+            ('f16', 'util::f32_to_f16_mode', 'F16'),
+            ('bf16', 'util::f32_to_bf16_rne_mode', 'Bf16'),
         ],
     )
     def test_cvt_scale_unpack_conversions_use_scaled_generator(
-        self, name, op, decode_helper, encode_helper
+        self,
+        low_fmt,
+        count,
+        decode_helper,
+        simd_format,
+        wide_fmt,
+        encode_helper,
+        wide_format,
     ):
+        name = f'V_CVT_SCALE_PK{count}_{wide_fmt.upper()}_{low_fmt.upper()}'
+        op = f'unpack_pk{count}_{wide_fmt}_{low_fmt}'
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
         assert sem.semantic_class == 'vector_cvt_scale'
@@ -1316,13 +1326,22 @@ class TestDeriveVectorUnary:
         cpp = gen_vector_cvt_scale(
             ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
         )
-        assert decode_helper in cpp
+        decoded = f'{decode_helper}(static_cast<uint8_t>(code))'
+        assert 'auto read_scaled_code = [&](uint32_t index) -> uint32_t' in cpp
+        assert (
+            f'amdgpu::is_mxfp_unpack_exceptional<amdgpu::MxfpFormat::{simd_format}>'
+            '(code, static_cast<uint8_t>(scale_byte))' in cpp
+        )
+        assert (
+            f'amdgpu::convert_mxfp_unpack_scalar<amdgpu::MxfpFormat::{simd_format}, '
+            f'amdgpu::MxfpWideFormat::{wide_format}>'
+            '(code, static_cast<uint8_t>(scale_byte), wf.fp16_ovfl())' in cpp
+        )
+        assert cpp.count('amdgpu::convert_mxfp_unpack_scalar<') == 1
         if encode_helper.endswith('_mode'):
-            assert (
-                f'{encode_helper}(read_scaled_src(index) * scale, wf.fp16_ovfl())'
-                in cpp
-            )
+            assert f'{encode_helper}({decoded} * scale, wf.fp16_ovfl())' in cpp
         else:
+            assert f'float value = {decoded} * scale;' in cpp
             assert encode_helper in cpp
         assert 'util::e8m0_to_f32' in cpp
         assert '((inst_.opsel & 0x3u) * 8u)' in cpp
@@ -1330,42 +1349,56 @@ class TestDeriveVectorUnary:
             'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
             not in cpp
         )
-        assert 'read_scaled_src(index) * scale' in cpp
+        assert f'{decoded} * scale' in cpp
+        assert 'amdgpu::scale_mxfp_scalar' not in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
         assert 'write_vgpr_region' in cpp
         assert 'dst_region.set_lane' in cpp
+        assert 'if (!amdgpu::simd_force_scalar() && wf.exec() != 0)' in cpp
+        assert 'amdgpu::try_execute_mxfp_cvt_scale_simd<' in cpp
+        assert f'amdgpu::MxfpFormat::{simd_format}' in cpp
+        assert 'amdgpu::MxfpDirection::Unpack, false>' in cpp
+        assert 'wf, simd_dst_base, simd_src_base, src1, src1,' in cpp
+        assert cpp.index('if (!(exec & (1ULL << lane))) continue;') < cpp.index(
+            'uint32_t dst_base'
+        )
+        assert cpp.index('auto src_region') < cpp.index('auto dst_region')
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'read_helper', 'encode_helper'),
+        ('name', 'op', 'read_helper', 'encode_helper', 'simd_format'),
         [
             (
                 'V_CVT_SCALEF32_PK16_BF6_BF16',
                 'pack_pk16_bf6_bf16',
                 'util::bf16_to_f32',
                 'util::f32_to_bf6_e3m2_rne',
+                'Bf6E3m2',
             ),
             (
                 'V_CVT_SCALEF32_PK8_FP4_F32',
                 'pack_pk8_fp4_f32',
                 'std::bit_cast<float>',
                 'util::f32_to_fp4_e2m1_rne',
+                'Fp4E2m1',
             ),
             (
                 'V_CVT_SCALEF32_PK8_FP8_F32',
                 'pack_pk8_fp8_f32',
                 'std::bit_cast<float>',
                 'util::f32_to_fp8_e4m3_rne_mode',
+                'Fp8E4m3',
             ),
             (
                 'V_CVT_SCALEF32_PK8_BF8_F32',
                 'pack_pk8_bf8_f32',
                 'std::bit_cast<float>',
                 'util::f32_to_bf8_e5m2_rne_mode',
+                'Bf8E5m2',
             ),
         ],
     )
     def test_cvt_scalef32_pack_conversions_use_scaled_generator(
-        self, name, op, read_helper, encode_helper
+        self, name, op, read_helper, encode_helper, simd_format
     ):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
@@ -1385,11 +1418,18 @@ class TestDeriveVectorUnary:
             in cpp
         )
         assert 'util::e8m0_to_f32' not in cpp
+        assert 'is_mxfp_unpack_exceptional' not in cpp
+        assert 'convert_mxfp_unpack_scalar' not in cpp
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
+        assert 'amdgpu::divide_mxfp_scalar' not in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
         assert 'read_vgpr_region' in cpp
         assert 'write_vgpr_region' in cpp
+        assert 'amdgpu::try_execute_mxfp_cvt_scale_simd<' in cpp
+        assert f'amdgpu::MxfpFormat::{simd_format}' in cpp
+        assert 'amdgpu::MxfpDirection::Pack, false>' in cpp
+        assert 'wf, simd_dst_base, simd_src_base, src1, src1,' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1447,6 +1487,10 @@ class TestDeriveVectorUnary:
         assert f'{encode_helper}(value, seed, wf.fp16_ovfl())' in cpp
         assert 'seed = util::prng_advance(seed)' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
+        assert 'amdgpu::divide_mxfp_scalar' not in cpp
+        assert 'amdgpu::try_execute_mxfp_cvt_scale_simd<' in cpp
+        assert 'amdgpu::MxfpDirection::Pack, true>' in cpp
+        assert 'wf, simd_dst_base, simd_src_base, src2, src1,' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
