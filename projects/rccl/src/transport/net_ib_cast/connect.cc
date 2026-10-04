@@ -51,20 +51,6 @@ static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
 }
 
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
-enum ncclIbChannelType {
-  ncclIbChannelTypeCts = 0,
-  ncclIbChannelTypeData = 1,
-  ncclIbChannelTypeMax = 2
-};
-
-struct ncclChannelToUd {
-  int channelId;
-  bool udId;
-  bool udAllocated;
-};
-
-static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
-static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
@@ -437,7 +423,6 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 
 static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs, struct ncclIbQp* qp) {
   struct ibv_qp_init_attr qpInitAttr;
-  enum ncclIbChannelType channel_type = (createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
   memset(&qpInitAttr, 0, sizeof(struct ibv_qp_init_attr));
   qpInitAttr.qp_context = createQpAttrs->qpContext;
   qpInitAttr.send_cq = createQpAttrs->cq;
@@ -480,6 +465,9 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
+  // The PD is shared and its uDMA mask takes effect at QP creation, so keep
+  // the mask update and ibv_create_qp together under the device lock.
+  std::lock_guard<std::mutex> lock(IbCastDevs[createQpAttrs->ibDevN].mutex);
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
     // When only one sharing group exists, alternate UDMA engine per QP within
     // the group so both DMA engines are utilized.  With multiple groups the
@@ -490,18 +478,11 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
-    if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
-    }
-    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-    } else {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-    }
+    // Split each connection's QPs across both uDMAs; the parity of the channel
+    // ID's bits staggers the starting uDMA across channels.
+    const bool highUd = __builtin_parity(static_cast<unsigned>(createQpAttrs->channelId)) ^
+                        (createQpAttrs->qpIndexInDev & 1);
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, highUd ? IONIC_UDMA_MASK_HIGH : IONIC_UDMA_MASK_LOW);
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
@@ -920,6 +901,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.isCtsEnabled = comm->useCtsOffload;
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
+    qpCreateAttrs.qpIndexInDev = qpIndex / comm->base.vProps.ndevs;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = comm->base.isP2p;
@@ -1739,6 +1721,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;
+    qpCreateAttrs.qpIndexInDev = qpIndex / rComm->base.vProps.ndevs;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = rComm->base.isP2p;
