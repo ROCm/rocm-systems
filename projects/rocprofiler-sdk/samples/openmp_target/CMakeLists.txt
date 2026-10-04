@@ -86,9 +86,11 @@ rocprofiler_samples_get_preload_env(PRELOAD_ENV openmp-target-sample-client)
 rocprofiler_samples_get_ld_library_path_env(
     LIBRARY_PATH_ENV rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
 
+# ROCPROFILER_LIBRARY_CTOR initializes rocprofiler-sdk from the preloaded library's
+# constructor, which runs before the OpenMP runtime's own initialization.
 set(openmp-target-sample-env
     ${PRELOAD_ENV} ${LIBRARY_PATH_ENV} "OMP_NUM_THREADS=2" "OMP_TARGET_OFFLOAD=mandatory"
-    "OMP_DISPLAY_ENV=1" "ROCR_VISIBLE_DEVICES=0")
+    "OMP_DISPLAY_ENV=1" "ROCR_VISIBLE_DEVICES=0" "ROCPROFILER_LIBRARY_CTOR=1")
 
 add_test(NAME openmp-target-sample COMMAND $<TARGET_FILE:openmp-target-sample>)
 
