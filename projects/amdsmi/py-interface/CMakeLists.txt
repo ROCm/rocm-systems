@@ -121,6 +121,7 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/LICENSE
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES
         ${PY_BUILD_DIR}/setup.py
     DEPENDS
         python_wrapper
@@ -128,6 +129,7 @@ add_custom_command(
         # restage the package; the notices at least should not go stale.
         ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
+        ${PROJECT_SOURCE_DIR}/THIRD_PARTY_NOTICES
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/setup.py ${PY_BUILD_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
@@ -142,6 +144,9 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/THIRD_PARTY_NOTICES
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/
 )
 
@@ -166,6 +171,7 @@ add_custom_target(
         ${PY_PACKAGE_DIR}/LICENSE
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
         ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES
         ${PY_BUILD_DIR}/setup.py
         ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME}
 )

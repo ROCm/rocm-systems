@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_addc.h"
 #include "amd_smi/impl/amd_smi_cper.h"
 
 #ifndef AMDSMI_TEST_MOCK_DIR
@@ -204,8 +205,9 @@ TEST(GpuUnit, CperMockSeverityMaskRejectAll) {
 }
 
 // The fixture's crashdump section is amdgpu's 0xB0-byte fatal shape, shorter than
-// sizeof(cper_sec_crashdump). Its payload is scrubbed, so the registers of a real
-// MI308X fatal record (SMU GfxMmhubError, AFID 30) are written back in.
+// sizeof(cper_sec_crashdump). Its payload is scrubbed, so the valid-bits word, the
+// register array size and the registers of a real MI308X fatal record (SMU
+// GfxMmhubError, AFID 30) are written back in.
 TEST(GpuUnit, CperMockFatalRecordDecodesAfid) {
   std::vector<char> rec = ReadFixture("cper_fatal.cper");
   ASSERT_GE(rec.size(), sizeof(amdsmi_cper_hdr_t) + sizeof(struct cper_sec_desc));
@@ -217,15 +219,24 @@ TEST(GpuUnit, CperMockFatalRecordDecodesAfid) {
   ASSERT_EQ(desc->sec_length, 0xB0u);
   ASSERT_EQ(desc->sec_offset + desc->sec_length, hdr->record_length);
 
-  EXPECT_TRUE(cper_decode(hdr, rec.size()).empty()) << "scrubbed payload decoded an AFID";
+  std::vector<int> afids;
+  EXPECT_EQ(cper_get_afids(rec.data(), rec.size(), &afids), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(afids.empty()) << "scrubbed payload decoded an AFID";
 
   constexpr uint16_t kAcaRegisterContext = 1;
+  constexpr uint64_t kOneErrorInfoOneContext = ((uint64_t{1} << 2) | (uint64_t{1} << 8));
   constexpr uint64_t kRegs[] = {0xBAA00000003B0000ULL, 0, 0x0001100103B30401ULL, 0x905ULL};
+  constexpr uint16_t kRegsSize = sizeof(kRegs);
   const size_t data_off = desc->sec_offset + offsetof(struct cper_sec_crashdump, data);
   const size_t dump_off = data_off + offsetof(struct cper_sec_crashdump_data, dump);
   ASSERT_LE(dump_off + sizeof(kRegs), rec.size());
+  std::memcpy(rec.data() + desc->sec_offset + offsetof(struct cper_sec_crashdump, reserved1),
+              &kOneErrorInfoOneContext, sizeof(kOneErrorInfoOneContext));
   std::memcpy(rec.data() + data_off, &kAcaRegisterContext, sizeof(kAcaRegisterContext));
+  std::memcpy(rec.data() + data_off + offsetof(struct cper_sec_crashdump_data, reg_arr_size),
+              &kRegsSize, sizeof(kRegsSize));
   std::memcpy(rec.data() + dump_off, kRegs, sizeof(kRegs));
 
-  EXPECT_EQ(cper_decode(hdr, rec.size()), std::vector<int>{30});
+  EXPECT_EQ(cper_get_afids(rec.data(), rec.size(), &afids), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(afids, std::vector<int>{30});
 }
