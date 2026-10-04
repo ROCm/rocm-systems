@@ -14,7 +14,6 @@
  */
 
 #include <cstdint>
-#include <cstring>
 #include <vector>
 #include <gtest/gtest.h>
 
@@ -126,27 +125,6 @@ TEST(NetIbCastUdma, AllEnginesUsed) {
   }
 }
 
-// =====================================================================
-// 6. QP-sharing path: computed mask matches 1u << (selector % udmaCount)
-// =====================================================================
-
-TEST(NetIbCastUdma, SharingPathMaskComputation) {
-  // Simulates the sharing-path formula: mask = 1u << (selector % udmaCount)
-  for (uint8_t udmaCount : {1, 2, 3, 4, 8}) {
-    for (int selector = 0; selector < 16; selector++) {
-      uint8_t mask = 1u << (selector % udmaCount);
-      // Verify it's a valid single-bit mask within range
-      EXPECT_NE(mask, 0u);
-      EXPECT_EQ(mask & (mask - 1), 0u) << "not power of two";
-      // Engine index must be < udmaCount
-      uint8_t engine = 0;
-      uint8_t m = mask;
-      while (m >>= 1) engine++;
-      EXPECT_LT(engine, udmaCount)
-        << "selector=" << selector << " udmaCount=" << (int)udmaCount;
-    }
-  }
-}
 
 // =====================================================================
 // 7. Error handling: null pointer, zero udmaCount, zero channels
@@ -181,6 +159,86 @@ TEST(NetIbCastUdma, BackwardCompatWith2Engines) {
   for (int i = 0; i < nChannels; i++) {
     uint8_t expected = (i % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
     EXPECT_EQ(masks[i], expected) << "channel " << i;
+  }
+}
+
+// =====================================================================
+// 9. Normalize helper: zero from driver falls back to 2
+// =====================================================================
+
+TEST(NetIbCastUdma, NormalizeUdmaCountZeroFallback) {
+  // Zero (driver unavailable or too old) → fallback to 2
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(0), 2);
+  // Non-zero values within range pass through unchanged
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(1), 1);
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(2), 2);
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(4), 4);
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(8), 8);
+  // Values exceeding uint8_t mask width are clamped to 8
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(9), 8);
+  EXPECT_EQ(ncclIbCastNormalizeUdmaCount(255), 8);
+}
+
+// =====================================================================
+// 10. Shared helper produces identical masks to production formula
+// =====================================================================
+
+TEST(NetIbCastUdma, SharedHelperMatchesProductionFormula) {
+  // Verify that ncclIbCastUdmaRoundRobinMask produces the same result
+  // as the inline formula 1u << (cursor % udmaCount) that was used
+  // before the shared helper was extracted.
+  for (uint8_t udmaCount : {1, 2, 3, 4, 8}) {
+    uint8_t cursor = 0;
+    for (int i = 0; i < 32; i++) {
+      uint8_t expected = 1u << (i % udmaCount);
+      uint8_t actual = ncclIbCastUdmaRoundRobinMask(udmaCount, &cursor);
+      EXPECT_EQ(actual, expected)
+        << "udmaCount=" << (int)udmaCount << " iteration=" << i;
+    }
+    // cursor should have wrapped around and be at 32 % udmaCount
+    EXPECT_EQ(cursor, 32 % udmaCount)
+      << "udmaCount=" << (int)udmaCount;
+  }
+}
+
+// =====================================================================
+// 11. Cross-channel round-robin: consecutive channels get distinct
+//     engines, cycling through all udmaCount engines.
+// =====================================================================
+
+TEST(NetIbCastUdma, CrossChannelDistribution) {
+  // Simulate what the production non-sharing path does: each new channel
+  // gets the next engine in the round-robin sequence.  Verify that after
+  // allocating udmaCount channels, all engines are used exactly once,
+  // and the pattern repeats.
+  for (uint8_t udmaCount : {1, 2, 4, 8}) {
+    int nChannels = udmaCount * 3;
+    std::vector<uint8_t> masks(nChannels, 0);
+    ASSERT_EQ(ncclIbCastTestUdmaRoundRobin(udmaCount, nChannels, masks.data()),
+              ncclSuccess);
+
+    // Verify cross-channel distribution: within each full cycle of
+    // udmaCount channels, every engine appears exactly once.
+    for (int cycle = 0; cycle < 3; cycle++) {
+      std::vector<bool> seen(udmaCount, false);
+      for (uint8_t e = 0; e < udmaCount; e++) {
+        uint8_t mask = masks[cycle * udmaCount + e];
+        uint8_t engine = 0;
+        for (uint8_t m = mask; m >>= 1; ) engine++;
+        ASSERT_LT(engine, udmaCount);
+        EXPECT_FALSE(seen[engine])
+          << "udmaCount=" << (int)udmaCount
+          << " cycle=" << cycle << " engine=" << (int)engine
+          << " appeared twice";
+        seen[engine] = true;
+      }
+      for (uint8_t e = 0; e < udmaCount; e++) {
+        EXPECT_TRUE(seen[e])
+          << "udmaCount=" << (int)udmaCount
+          << " cycle=" << cycle << " engine=" << (int)e
+          << " never used";
+      }
+    }
   }
 }
 

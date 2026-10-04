@@ -9,6 +9,7 @@
 #include "p2p_resiliency_recovery_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "net_ib_cast_inspect.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -508,9 +509,9 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
             }
             IbCastDevs[IbCastNDevs].context = context;
-            {
-              uint8_t udmaCount = wrap_ionicdv_ctx_get_udma_count(context);
-              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = (udmaCount > 0) ? udmaCount : 2;
+            if (IbCastAinicRoce) {
+              uint8_t raw = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = ncclIbCastNormalizeUdmaCount(raw);
             }
             IbCastDevs[IbCastNDevs].pdRefs = 0;
             IbCastDevs[IbCastNDevs].pd = NULL;
@@ -543,11 +544,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
 
-            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u", d,
-                 devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
+            INFO(NCCL_NET,
+                 "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u",
+                 d, devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],
                  IbCastDevs[IbCastNDevs].speed, context, IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar,
-                 IbCastDevs[IbCastNDevs].oooRqSize, IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount);
+                 IbCastDevs[IbCastNDevs].oooRqSize,
+                 IbCastAinicRoce ? IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount : 0u);
 
             IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
@@ -743,7 +746,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
-  if (ibDev->capsProvider.mlx5.dataDirect) {
+  if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ibDev->capsProvider.mlx5.dataDirect) {
     props->forceFlush = 1;
   }
   props->latency = 0; // Not set

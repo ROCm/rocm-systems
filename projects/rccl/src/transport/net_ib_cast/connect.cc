@@ -12,6 +12,7 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "multiplane.h"
+#include "net_ib_cast_inspect.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -480,7 +481,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
-  uint8_t udmaCount = IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount;
+  uint8_t udmaCount = IbCastAinicRoce ? IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount : 2;
 
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
     // When only one sharing group exists, alternate UDMA engine per QP within
@@ -495,11 +496,13 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
     if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-      uint8_t lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
+      uint8_t* cursor = &nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
+      // Capture the engine index before the helper advances the cursor;
+      // the mask is 1u << udId by construction, so no log2 recovery needed.
+      uint8_t udId = *cursor;
+      (void)ncclIbCastUdmaRoundRobinMask(udmaCount, cursor);
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = udId;
       nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-        (lud + 1) % udmaCount;
     }
     uint8_t udId = nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId;
     INFO(NCCL_NET, "NET/IB: AINIC QP ibDev=%d channel=%d chanType=%d udmaCount=%u udId=%u mask=0x%02x",
@@ -756,8 +759,7 @@ extern "C" ncclResult_t ncclIbCastTestUdmaRoundRobin(uint8_t udmaCount, int nCha
   if (outMasks == NULL || udmaCount == 0 || nChannels <= 0) return ncclInvalidArgument;
   uint8_t cursor = 0;
   for (int ch = 0; ch < nChannels; ch++) {
-    outMasks[ch] = 1u << cursor;
-    cursor = (cursor + 1) % udmaCount;
+    outMasks[ch] = ncclIbCastUdmaRoundRobinMask(udmaCount, &cursor);
   }
   return ncclSuccess;
 }

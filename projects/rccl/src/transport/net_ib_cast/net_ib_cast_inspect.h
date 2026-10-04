@@ -50,7 +50,30 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
-/* ── UDMA pinning introspection (host-only, no HW needed for the unit test). ── */
+/* ── UDMA pinning shared helpers and introspection ── */
+
+/* Normalize a raw UDMA count from the driver.  A zero value (driver too old
+ * or symbol unavailable) falls back to 2 to match legacy 2-engine behavior.
+ * The UDMA mask is a uint8_t, so at most 8 engines (bits 0-7) are addressable;
+ * clamp to avoid shifting a bit off the end.
+ * Used by both init.cc (production) and unit tests. */
+#define NCCL_IB_CAST_UDMA_MAX_ENGINES ((uint8_t)(sizeof(uint8_t) * 8))
+static inline uint8_t ncclIbCastNormalizeUdmaCount(uint8_t raw) {
+  if (raw == 0) return 2;
+  return (raw > NCCL_IB_CAST_UDMA_MAX_ENGINES) ? NCCL_IB_CAST_UDMA_MAX_ENGINES : raw;
+}
+
+/* Compute the single-bit UDMA mask for the next channel/QP in a round-robin
+ * sequence.  *cursor is the current engine index (0-based) and is advanced to
+ * the next engine on return.  This is the exact function called by both the
+ * production QP-creation path (ncclIbCreateQpIonic) and the test inspect API,
+ * so host-only unit tests cover the shipped code path.
+ * Returns mask = 1u << old_cursor. */
+static inline uint8_t ncclIbCastUdmaRoundRobinMask(uint8_t udmaCount, uint8_t* cursor) {
+  uint8_t mask = 1u << (*cursor);
+  *cursor = (*cursor + 1) % udmaCount;
+  return mask;
+}
 
 /* Simulates the UDMA round-robin assignment for nChannels channels on a device
  * with udmaCount UDMA engines. Writes the assigned UDMA mask (1u << udId) for
