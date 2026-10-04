@@ -12,6 +12,7 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "multiplane.h"
+#include "net_ib_cast_inspect.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -59,12 +60,12 @@ enum ncclIbChannelType {
 
 struct ncclChannelToUd {
   int channelId;
-  bool udId;
+  uint8_t udId;
   bool udAllocated;
 };
 
 static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
-static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
+static uint8_t nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
@@ -480,28 +481,33 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
+  uint8_t udmaCount = IbCastAinicRoce ? IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount : 2;
+
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
     // When only one sharing group exists, alternate UDMA engine per QP within
-    // the group so both DMA engines are utilized.  With multiple groups the
+    // the group so all DMA engines are utilized.  With multiple groups the
     // existing per-group alternation already distributes across engines.
     int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
                         ? createQpAttrs->qpIdx
                         : createQpAttrs->qpSharingGroupIdx;
-    uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
+    uint8_t mask = 1u << (udmaSelector % udmaCount);
+    INFO(NCCL_NET, "NET/IB: AINIC QP ibDev=%d qpIdx=%d udmaCount=%u udmaSelector=%d mask=0x%02x (sharing)",
+         createQpAttrs->ibDevN, createQpAttrs->qpIdx, udmaCount, udmaSelector, mask);
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
     if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
+      uint8_t* cursor = &nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
+      // Capture the engine index before the helper advances the cursor;
+      // the mask is 1u << udId by construction, so no log2 recovery needed.
+      uint8_t udId = *cursor;
+      (void)ncclIbCastUdmaRoundRobinMask(udmaCount, cursor);
+      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = udId;
       nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
     }
-    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-    } else {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-    }
+    uint8_t udId = nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId;
+    INFO(NCCL_NET, "NET/IB: AINIC QP ibDev=%d channel=%d chanType=%d udmaCount=%u udId=%u mask=0x%02x",
+         createQpAttrs->ibDevN, createQpAttrs->channelId, channel_type, udmaCount, udId, 1u << udId);
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, 1u << udId);
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
@@ -747,6 +753,55 @@ extern "C" int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const 
   if (nRemote < 0 || nRemote > NCCL_IB_MAX_DEVS_PER_NIC) return 0;
   for (int i = 0; i < nRemote; i++) memcpy(r[i].raw, remoteGids + (size_t)i * 16, 16);
   return subnetMatchesAny(&l, r, nRemote, prefixLen) ? 1 : 0;
+}
+
+extern "C" ncclResult_t ncclIbCastTestUdmaRoundRobin(uint8_t udmaCount, int nChannels, uint8_t* outMasks) {
+  if (outMasks == NULL || udmaCount == 0 || nChannels <= 0) return ncclInvalidArgument;
+  uint8_t cursor = 0;
+  for (int ch = 0; ch < nChannels; ch++) {
+    outMasks[ch] = ncclIbCastUdmaRoundRobinMask(udmaCount, &cursor);
+  }
+  return ncclSuccess;
+}
+
+extern "C" uint8_t ncclIbCastTestGetDevUdmaCount(int ibDevN) {
+  if (ibDevN < 0 || ibDevN >= IbCastNDevs) return 0;
+  return IbCastDevs[ibDevN].capsProvider.ionic.udmaCount;
+}
+
+// ncclIbCastGetUdmaState — read per-QP UDMA index from the driver via
+// ionic_dv_qp_get_udma_idx.  Allows functional tests to verify that the
+// round-robin UDMA pinning was actually programmed on the QPs.
+extern "C" ncclResult_t ncclIbCastGetUdmaState(void* comm, struct ncclIbCastUdmaState* out) {
+  if (!comm || !out) return ncclInvalidArgument;
+  memset(out, 0, sizeof(*out));
+
+  // ncclIbNetCommBase is the first member of both ncclIbSendComm and
+  // ncclIbRecvComm, so a direct reinterpret_cast is safe.
+  struct ncclIbSendComm* sComm = reinterpret_cast<struct ncclIbSendComm*>(comm);
+  struct ncclIbNetCommBase* base = &sComm->base;
+
+  int n = std::min(std::max(base->nqps, 0), NCCL_IB_MAX_QPS);
+  out->nqps = n;
+
+  // Read udmaCount from the first device's capsProvider.
+  struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(base, 0);
+  if (devBase && devBase->ibDevN >= 0 && devBase->ibDevN < IbCastNDevs) {
+    out->udmaCount = IbCastDevs[devBase->ibDevN].capsProvider.ionic.udmaCount;
+  }
+
+  for (int i = 0; i < n; i++) {
+    struct ncclIbQp* qp = base->activeQps[i];
+    if (qp && qp->qp) {
+      uint8_t idx = wrap_ionicdv_qp_get_udma_idx(qp->qp);
+      if (idx != 0xFF) {
+        out->udmaIdx[i] = idx;
+        out->queryOk[i] = true;
+      }
+    }
+  }
+
+  return ncclSuccess;
 }
 
 // Given remote GIDs (one per PF on the remote side), find a local merged IB

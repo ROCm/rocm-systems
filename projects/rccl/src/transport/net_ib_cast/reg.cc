@@ -31,7 +31,7 @@ static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void*
       if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
         /* DMA-BUF support */
-        if (!IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
+        if (IbCastDevs[base->ibDevN].ibProvider != IB_PROVIDER_MLX5 || !IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
           NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags));
         } else {
           NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
