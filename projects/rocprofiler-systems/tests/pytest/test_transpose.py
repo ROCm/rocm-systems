@@ -20,6 +20,7 @@ It also validates outputs including:
 """
 
 from __future__ import annotations
+import re
 import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
@@ -439,4 +440,115 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             result,
             subtest_name="ROCpd GPU perf counter validation",
             rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
+        )
+
+
+TRANSPOSE_ARGS = ["2", "100", "50"]
+
+SAMPLE_TRANSPOSE_FLAG_CASES = [
+    pytest.param(
+        ["--trace-periods", "0:10"],
+        {"ROCPROFSYS_TRACE_PERIODS": "0:10"},
+        id="trace_periods",
+    ),
+    pytest.param(
+        ["--trace-clock-id", "realtime"],
+        {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": r"0(\.0+)?"},
+        marks=pytest.mark.xfail(
+            reason="transpose HIP-aborts when --trace-clock-id is set",
+            strict=False,
+        ),
+        id="trace_clock_id",
+    ),
+    pytest.param(
+        ["--profile-diff", "{diff_path}"],
+        {
+            "ROCPROFSYS_DIFF_OUTPUT": "true",
+            "ROCPROFSYS_INPUT_PATH": "{diff_path}",
+        },
+        id="profile_diff",
+    ),
+    pytest.param(
+        ["--mode", "trace"],
+        {"ROCPROFSYS_MODE": "trace"},
+        id="mode",
+    ),
+    pytest.param(
+        ["--unified-memory-output-path", "{um_path}"],
+        {"ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": "{um_path}"},
+        id="unified_memory_output_path",
+    ),
+    pytest.param(
+        ["--kokkosp-deep-copy"],
+        {"ROCPROFSYS_KOKKOSP_DEEP_COPY": "true"},
+        id="kokkosp_deep_copy",
+    ),
+    pytest.param(
+        ["--use-code-coverage"],
+        {"ROCPROFSYS_USE_CODE_COVERAGE": "true"},
+        id="use_code_coverage",
+    ),
+    pytest.param(
+        ["--cpu-metrics", "frequency,load"],
+        {"ROCPROFSYS_CPU_METRICS": "frequency,load"},
+        id="cpu_metrics",
+    ),
+    pytest.param(
+        ["--sampling-cputime-signal", "12"],
+        {"ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL": "12"},
+        id="sampling_cputime_signal",
+    ),
+    pytest.param(
+        ["--perfetto-shmem-size-hint-kb", "8192"],
+        {"ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB": "8192"},
+        id="perfetto_shmem_size_hint_kb",
+    ),
+]
+
+
+def _sample_cli_paths(
+    test_output_dir: Path, flag_args: list[str], expected_env: dict[str, str]
+) -> dict[str, str]:
+    paths = {
+        "um_path": str(test_output_dir / "um-reports"),
+        "diff_path": str(test_output_dir / "diff-input"),
+    }
+    if any("{" in arg for arg in flag_args) or any(
+        "{" in value for value in expected_env.values()
+    ):
+        (test_output_dir / "um-reports").mkdir(parents=True, exist_ok=True)
+        (test_output_dir / "diff-input").mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("sample-transpose-cli")
+class TestSampleTransposeCli(RocprofsysTest):
+    @pytest.mark.parametrize("flag_args, expected_env", SAMPLE_TRANSPOSE_FLAG_CASES)
+    def test_flag_sets_expected_env_and_artifacts(
+        self, flag_args, expected_env, transpose_env, test_output_dir
+    ):
+        paths = _sample_cli_paths(test_output_dir, flag_args, expected_env)
+        resolved_flags = [arg.format(**paths) for arg in flag_args]
+        pass_regex = []
+        for key, value in expected_env.items():
+            if "{" in value:
+                pass_regex.append(f"{key}={re.escape(value.format(**paths))}")
+            else:
+                pass_regex.append(f"{key}={value}")
+
+        result = self.run_test(
+            "sampling",
+            target="transpose",
+            env=transpose_env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=resolved_flags,
+            check_target_arch=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API Call Validation",
+            categories=["hip_runtime_api"],
         )
