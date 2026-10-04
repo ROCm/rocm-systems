@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "transport.h"
 #include <cfloat>
+#include <algorithm>
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 
@@ -359,7 +360,7 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   bool isLL = ncclSymkLLKernelMask() >> k & 1;
   bool isAG = ncclSymkAGKernelMask() >> k & 1;
   bool isAR = ncclSymkARKernelMask() >> k & 1;
-  bool isRS = ncclSymkRSKernelMask() >> k & 1;
+  [[maybe_unused]] bool isRS = ncclSymkRSKernelMask() >> k & 1;
   constexpr double GBps = (1 << 30) / 1.e6;
   double baseLat, smBw, peakBw;
   double withinPeakFactor = 1.025;
@@ -511,6 +512,20 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
     return ncclSuccess;
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // On gfx950 AllGather's store kernel overtakes LL well before the shared cost model switches, so LL
+  // gives way wherever the store kernel can run, unless the user forced or narrowed the choice.
+  if (tuning->symKernelId == ncclSymkKernelId_AllGather_LL && ncclSymkIsGfx950(inputs->comm) &&
+      !inputs->comm->tuningContext.forced[inputs->func] && (valid_kmask >> ncclSymkKernelId_AllGather_ST & 1) &&
+      (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
+      (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
+      ncclSymkGfx950AllGatherPrefersStore(inputs->comm->nRanks, inputs->nBytes)) {
+    tuning->valid = 0;
+    tuning->timeUs = -1.0;
+    return ncclSuccess;
+  }
+#endif
+
   float kTime = 0.0f;
   int kBlocks = 0;
   queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks);
@@ -525,10 +540,20 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
   tuning->maxChannels = kBlocks;
-  // LL and the vector LSA kernels size themselves for ncclSymkMaxThreads. GIN carves its pipeline
-  // roles out of blockDim.x and symCheckTmaLaunch() requires the full launch for Tma, so both keep it.
+  struct ncclComm* comm = inputs->comm;
+  bool isLL = (tuning_kmask & ncclSymkLLKernelMask()) != 0;
+  bool isLsa = (tuning_kmask & ncclSymkLsaKernelMask()) != 0;
+  // GIN carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
+  // for Tma, so both keep it.
   bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
-  tuning->nWarps = fullWidth ? ncclSymkWarpsPerBlock : ncclSymkMaxThreads / inputs->comm->WarpSize;
+  int nThreads = ncclSymkMaxThreads;
+  if (fullWidth) {
+    nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
+  } else if (ncclSymkIsGfx950(comm) && isLsa) {
+    // The width tuning is fitted to the gfx950 LSA kernels.
+    nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
+  }
+  tuning->nWarps = std::max(1, nThreads / comm->WarpSize);
 #else
   tuning->nWarps = 16;
 #endif

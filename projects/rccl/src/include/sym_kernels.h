@@ -29,10 +29,15 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
-// [RCCL] Launch width for the non-LL symmetric kernels. LL sizes itself from ncclSymkMaxThreads.
+// [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
 // This was tuned for TDM, so if you need to change it, please add a constexpr function that 
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
+
+// Widest LL block the gfx950 symmetric kernels launch, worth 5 to 10% at the sizes where it removes an
+// epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
+// host allocates; the kernels take their slot stride from blockDim.
+constexpr int ncclSymkGfx950LLThreads = 512;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
@@ -173,6 +178,19 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+bool ncclSymkIsGfx950(struct ncclComm* comm);
+#endif
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Block width the gfx950 symmetric kernels launch at, split out of the symmetric tuning model so the
+// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective without width bands.
+int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
+// Whether AllGather should take the store kernel over LL on gfx950, where the shared cost model
+// keeps LL well past the point the store kernel overtakes it.
+bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes);
+#endif
+
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
 bool ncclSymkTmaAvailable(struct ncclComm* comm);
 // NCCL_SYM_TMA_ENABLE=2: take the DMA-staged kernel regardless of predicted time or message size.
@@ -197,6 +215,7 @@ int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();
 int ncclSymkTmaKernelMask();
 int ncclSymkGinKernelMask();
+int ncclSymkLsaKernelMask();
 int ncclSymkAGKernelMask();
 int ncclSymkARKernelMask();
 int ncclSymkRSKernelMask();
