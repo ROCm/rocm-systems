@@ -439,6 +439,70 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
     return all_events;
 }
 
+namespace
+{
+
+const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+statements_for(const data_storage::schema_v3::read_statements& stmts,
+               reader_types::event_type_t                      type)
+{
+    if(type == reader_types::event_type_t::kernel_dispatch)
+        return stmts.kernel_dispatch_statements();
+    if(type == reader_types::event_type_t::memory_allocate)
+        return stmts.memory_allocate_statements();
+    if(type == reader_types::event_type_t::memory_copy)
+        return stmts.memory_copy_statements();
+    return stmts.region_statements();
+}
+
+}  // namespace
+
+std::optional<std::pair<size_t, size_t>>
+reader_t::impl::get_event_id_span(reader_types::event_type_t type)
+{
+    const auto rows = statements_for(*m_read_statements, type).id_span().to_vector();
+    if(rows.empty() || !rows.front().min_id.has_value() ||
+       !rows.front().max_id.has_value())
+        return std::nullopt;
+    return std::pair{ rows.front().min_id.value(), rows.front().max_id.value() };
+}
+
+void
+reader_t::impl::visit_track_events_in_id_range(
+    const reader_types::track_info_ptr_t& track,
+    reader_types::event_type_t            type,
+    size_t                                id_begin,
+    size_t                                id_end,
+    reader_t::event_visitor_t             visitor,
+    void*                                 context)
+{
+    const auto topo_it = m_catalog->track_to_topology.find(track);
+    if(topo_it == m_catalog->track_to_topology.end()) return;
+    const auto& topo = topo_it->second;
+
+    std::optional<size_t> last_id;
+    std::string_view      last_name;
+
+    statements_for(*m_read_statements, type)
+        .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
+        .for_each([&](const data_storage::schema_v3::timeline_event_result& row) {
+            std::string_view name;
+            if(row.display_name_id.has_value())
+            {
+                if(last_id != row.display_name_id)
+                {
+                    const auto it = m_catalog->string_utility.find(*row.display_name_id);
+                    last_name     = it != m_catalog->string_utility.end()
+                                        ? std::string_view{ it->second }
+                                        : std::string_view{};
+                    last_id       = row.display_name_id;
+                }
+                name = last_name;
+            }
+            visitor(context, row.start_timestamp, row.end_timestamp, name);
+        });
+}
+
 reader_types::timeline_event_list_t
 reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& track,
                                           const reader_types::event_filter_t&   filter)

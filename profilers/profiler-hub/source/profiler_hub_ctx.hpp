@@ -63,14 +63,33 @@ private:
         uint64_t                                            end_ts);
 
     static size_t default_thread_pool_size();
+    static size_t default_connection_count();
+
+    ph_sample_list_t get_cached_track_samples(
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_sample_t> build_sorted_track_samples(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    ph_event_list_t get_cached_track_events(
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_event_t> build_sorted_track_events(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track);
+
+    std::vector<ph_event_t> build_thread_track_events(
+        profiler_hub::common::connection&                   conn,
+        const profiler_hub::reader_types::track_info_ptr_t& track,
+        size_t                                              parts);
 
     std::string         m_file_path;
     ph_schema_version_t m_schema_version;
 
-    static constexpr size_t                         k_connection_count = 5;
     std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,
-                                                             k_connection_count,
+                                                             default_connection_count(),
                                                              m_catalog };
 
     profiler_hub::reader_types::track_info_list_t m_tracks;
@@ -92,6 +111,21 @@ private:
         profiler_hub::reader_types::timeline_event_list_t events;
         std::vector<ph_event_t>                           c_events;
     };
+    struct track_events_entry
+    {
+        std::once_flag          once;
+        std::vector<ph_event_t> events;
+    };
+    std::mutex m_track_cache_mutex;
+    std::unordered_map<uint32_t, std::unique_ptr<track_events_entry>>
+        m_track_events_cache;
+    struct track_samples_entry
+    {
+        std::once_flag           once;
+        std::vector<ph_sample_t> samples;
+    };
+    std::unordered_map<uint32_t, std::unique_ptr<track_samples_entry>>
+                                         m_track_samples_cache;
     std::mutex                           m_track_results_mutex;
     std::deque<track_events_result_t>    m_track_events_results;
     std::deque<std::vector<ph_sample_t>> m_track_samples_results;

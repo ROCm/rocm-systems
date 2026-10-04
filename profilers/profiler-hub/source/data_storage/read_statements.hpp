@@ -159,6 +159,12 @@ struct pmc_info_result
     std::string                extdata;
 };
 
+struct id_span_result
+{
+    std::optional<size_t> min_id;
+    std::optional<size_t> max_id;
+};
+
 struct timeline_event_result
 {
     size_t id{};
@@ -382,6 +388,7 @@ struct read_statements
         initialize_kernel_dispatch_timeline_event_statements();
         initialize_memory_allocate_timeline_event_statements();
         initialize_memory_copy_timeline_event_statements();
+        initialize_id_span_statements();
 
         initialize_detail_statements();
         initialize_event_id_statements();
@@ -470,6 +477,12 @@ struct read_statements
 
     using timeline_event_track_filtered_func_t = std::function<sqlite_backend::result_set<
         timeline_event_result>(size_t, size_t, size_t, size_t)>;
+
+    using timeline_event_track_range_filtered_func_t =
+        std::function<sqlite_backend::result_set<
+            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+
+    using id_span_func_t = std::function<sqlite_backend::result_set<id_span_result>()>;
 
     using timeline_event_track_and_time_filtered_func_t =
         std::function<sqlite_backend::result_set<timeline_event_result>(size_t,
@@ -620,6 +633,8 @@ struct read_statements
         timeline_event_time_filtered_func_t           time_filtered;
         timeline_event_track_filtered_func_t          track_filtered;
         timeline_event_track_and_time_filtered_func_t track_and_time_filtered;
+        timeline_event_track_range_filtered_func_t    track_range_filtered;
+        id_span_func_t                                id_span;
 
         // Only set for kernel_dispatch/memory_allocate/memory_copy (region
         // has no agent_id/queue_id/stream_id columns).
@@ -1383,6 +1398,21 @@ private:
             &timeline_event_result::tid,
             &timeline_event_result::track_id);
 
+        out.track_range_filtered = m_backend->create_read_statement_executor<
+            timeline_event_result,
+            bind_types<size_t, size_t, size_t, size_t, size_t>>(
+            unfiltered_sql + " WHERE " + own_track_where + " AND " + a + ".id >= ? AND " +
+                a + ".id < ?",
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
+
         if(!agent_id_column.has_value()) return;
 
         const auto agent_col = a + "." + agent_id_column.value();
@@ -1446,6 +1476,20 @@ private:
             &timeline_event_result::pid,
             &timeline_event_result::tid,
             &timeline_event_result::track_id);
+    }
+
+    void initialize_id_span_statements()
+    {
+        auto make_span = [&](const std::string_view table) {
+            return m_backend->create_read_statement_executor<id_span_result>(
+                fmt::format("SELECT MIN(id), MAX(id) FROM {}_{}", table, m_uuid),
+                &id_span_result::min_id,
+                &id_span_result::max_id);
+        };
+        m_region_statements.id_span          = make_span("rocpd_region");
+        m_kernel_dispatch_statements.id_span = make_span("rocpd_kernel_dispatch");
+        m_memory_allocate_statements.id_span = make_span("rocpd_memory_allocate");
+        m_memory_copy_statements.id_span     = make_span("rocpd_memory_copy");
     }
 
     void initialize_region_timeline_event_statements()

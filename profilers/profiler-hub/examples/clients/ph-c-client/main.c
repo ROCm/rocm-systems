@@ -10,6 +10,7 @@
 #endif
 
 #define MAX_BENCH_ENTRIES 32
+#define PRINT_LIMIT       3
 
 static const char* g_bench_labels[MAX_BENCH_ENTRIES];
 static double      g_bench_ms[MAX_BENCH_ENTRIES];
@@ -157,7 +158,7 @@ track_category_name(ph_track_category_t category)
 }
 
 static void
-print_tracks(const ph_track_list_t* tracks)
+print_tracks(const ph_track_list_t* tracks, uint32_t limit)
 {
     printf("\n=== Tracks (%d) ===\n", tracks->list_size);
     printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %-16s %-16s %s\n",
@@ -175,7 +176,7 @@ print_tracks(const ph_track_list_t* tracks)
            "min_value",
            "max_value",
            "name");
-    for(uint32_t i = 0; i < tracks->list_size; ++i)
+    for(uint32_t i = 0; i < tracks->list_size && i < limit; ++i)
     {
         const ph_track_t* track        = &tracks->tracks[i];
         char              min_text[32] = "-";
@@ -201,6 +202,10 @@ print_tracks(const ph_track_list_t* tracks)
                min_text,
                max_text,
                track->track_name);
+    }
+    if(tracks->list_size > limit)
+    {
+        printf("... %u more tracks not shown\n", tracks->list_size - limit);
     }
 }
 
@@ -255,10 +260,11 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
     TIME_CALL("ph_get_track_events (all)",
               ph_get_track_events(ctx, track_id, 0, 0, &events));
 
-    printf("\n=== Events for track %d (%d, showing first 5) ===\n",
+    printf("\n=== Events for track %d (%d, showing first %d) ===\n",
            track_id,
-           events.list_size);
-    print_events(&events, 5);
+           events.list_size,
+           PRINT_LIMIT);
+    print_events(&events, PRINT_LIMIT);
 
     if(events.list_size == 0) return;
 
@@ -278,12 +284,13 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
     TIME_CALL("ph_get_track_events (slice)",
               ph_get_track_events(ctx, track_id, slice_start, slice_end, &slice));
 
-    printf("\n=== Events for track %d in [%lu, %lu] (%d, showing first 5) ===\n",
+    printf("\n=== Events for track %d in [%lu, %lu] (%d, showing first %d) ===\n",
            track_id,
            (unsigned long) slice_start,
            (unsigned long) slice_end,
-           slice.list_size);
-    print_events(&slice, 5);
+           slice.list_size,
+           PRINT_LIMIT);
+    print_events(&slice, PRINT_LIMIT);
 }
 
 static void
@@ -293,10 +300,11 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
     TIME_CALL("ph_get_track_samples (all)",
               ph_get_track_samples(ctx, track_id, 0, 0, &samples));
 
-    printf("\n=== Samples for track %d (%d, showing first 5) ===\n",
+    printf("\n=== Samples for track %d (%d, showing first %d) ===\n",
            track_id,
-           samples.list_size);
-    print_samples(&samples, 5);
+           samples.list_size,
+           PRINT_LIMIT);
+    print_samples(&samples, PRINT_LIMIT);
 
     if(samples.list_size == 0) return;
 
@@ -316,12 +324,13 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
     TIME_CALL("ph_get_track_samples (slice)",
               ph_get_track_samples(ctx, track_id, slice_start, slice_end, &slice));
 
-    printf("\n=== Samples for track %d in [%lu, %lu] (%d, showing first 5) ===\n",
+    printf("\n=== Samples for track %d in [%lu, %lu] (%d, showing first %d) ===\n",
            track_id,
            (unsigned long) slice_start,
            (unsigned long) slice_end,
-           slice.list_size);
-    print_samples(&slice, 5);
+           slice.list_size,
+           PRINT_LIMIT);
+    print_samples(&slice, PRINT_LIMIT);
 }
 
 typedef struct
@@ -351,10 +360,11 @@ demo_async_track_events(ph_ctx_t ctx, uint32_t track_id)
 
     if(job.status == PH_RESULT_SUCCESS)
     {
-        printf("\n=== Async events for track %d (%d, showing first 5) ===\n",
+        printf("\n=== Async events for track %d (%d, showing first %d) ===\n",
                track_id,
-               job.result.list_size);
-        print_events(&job.result, 5);
+               job.result.list_size,
+               PRINT_LIMIT);
+        print_events(&job.result, PRINT_LIMIT);
     }
 
     ph_future_free(ctx, future);
@@ -376,7 +386,10 @@ read_track_samples_task(void* user_data)
 }
 
 static void
-read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
+read_all_tracks_async(ph_ctx_t               ctx,
+                      const ph_track_list_t* tracks,
+                      const char*            run_name,
+                      const char*            bench_label)
 {
     const uint32_t       n            = tracks->list_size;
     ph_future_t*         futures      = malloc(sizeof(ph_future_t) * n);
@@ -425,9 +438,9 @@ read_all_tracks_async(ph_ctx_t ctx, const ph_track_list_t* tracks)
         }
     }
     const double read_ms = monotonic_ms() - t0;
-    record_bench("read all tracks (async)", read_ms);
+    record_bench(bench_label, read_ms);
 
-    printf("\n=== Read all tracks (async), all data ===\n");
+    printf("\n=== Read all tracks (async), all data: %s ===\n", run_name);
     printf("tracks:          %d (%lu duration, %lu counter)\n",
            n,
            duration_tracks,
@@ -459,7 +472,7 @@ main(int argc, char** argv)
     print_node_info(&node.info);
     print_agents(&node.agents);
     print_processes(&node.process_list);
-    print_tracks(&node.track_list);
+    print_tracks(&node.track_list, PRINT_LIMIT);
 
     uint32_t duration_track_id = 0;
     uint32_t counter_track_id  = 0;
@@ -475,7 +488,9 @@ main(int argc, char** argv)
         demo_track_samples(ctx, counter_track_id);
     }
 
-    read_all_tracks_async(ctx, &node.track_list);
+    read_all_tracks_async(
+        ctx, &node.track_list, "1st run (cold)", "read all tracks 1st (cold)");
+    read_all_tracks_async(ctx, &node.track_list, "2nd run", "read all tracks 2nd run");
 
     TIME_CALL("ph_ctx_free", ph_ctx_free(ctx));
 
