@@ -161,9 +161,8 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
                                 "database open failed!");
     }
 
-    for(const auto* pragma : { "PRAGMA cache_size = -262144",      // ~256MB page cache
-                               "PRAGMA temp_store = MEMORY",       // no disk temp b-trees
-                               "PRAGMA mmap_size = 1073741824" })  // 1GB mmap window
+    for(const auto* pragma : { "PRAGMA cache_size = -16384",    // ~16MB page cache
+                               "PRAGMA temp_store = MEMORY" })  // no disk temp b-trees
     {
         try
         {
