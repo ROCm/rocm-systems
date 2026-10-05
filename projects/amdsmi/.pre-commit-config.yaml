@@ -17,6 +17,8 @@
 #   SKIP=ruff-format git commit
 #   SKIP=gersemi git commit
 
+minimum_pre_commit_version: '3.0.0'
+
 exclude: |
   (?x)
     docs/
@@ -28,7 +30,6 @@ exclude: |
     | esmi_ib_library/
     | ualoe_lib/
     | third_party/
-minimum_pre_commit_version: '3.0.0'
 fail_fast: false
 
 repos:
