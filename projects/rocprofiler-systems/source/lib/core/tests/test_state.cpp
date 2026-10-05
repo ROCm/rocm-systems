@@ -37,7 +37,7 @@ TEST_F(ProcessStateTest, default_state_is_pre_init)
 
 TEST_F(ProcessStateTest, set_advances_state_and_returns_previous)
 {
-    auto _prior = process_state::set(process_state_value::init);
+    auto const _prior = process_state::set(process_state_value::init);
     EXPECT_EQ(_prior, process_state_value::pre_init);
     EXPECT_EQ(process_state::get(), process_state_value::init);
 }
@@ -54,7 +54,7 @@ TEST_F(ProcessStateTest, reset_bypasses_validation_and_returns_to_pre_init)
 {
     process_state::set(process_state_value::finalized);
 
-    auto _prior = process_state::reset();
+    auto const _prior = process_state::reset();
     EXPECT_EQ(_prior, process_state_value::finalized);
     EXPECT_EQ(process_state::get(), process_state_value::pre_init);
 }
@@ -66,7 +66,7 @@ TEST_F(ThreadStateTest, default_state_is_enabled)
 
 TEST_F(ThreadStateTest, set_returns_previous_value)
 {
-    auto _prior = thread_state::set(thread_state_value::internal);
+    auto const _prior = thread_state::set(thread_state_value::internal);
     EXPECT_EQ(_prior, thread_state_value::enabled);
     EXPECT_EQ(thread_state::get(), thread_state_value::internal);
 }
@@ -84,7 +84,7 @@ TEST_F(ThreadStateTest, pop_on_empty_history_is_a_no_op)
 {
     thread_state::set(thread_state_value::internal);
 
-    auto _v = thread_state::pop();
+    auto const _v = thread_state::pop();
     EXPECT_EQ(_v, thread_state_value::internal);
     EXPECT_EQ(thread_state::get(), thread_state_value::internal);
 }
@@ -93,18 +93,18 @@ TEST_F(ThreadStateTest, push_and_pop_are_no_ops_once_completed)
 {
     thread_state::set(thread_state_value::completed);
 
-    auto _pushed = thread_state::push(thread_state_value::internal);
+    auto const _pushed = thread_state::push(thread_state_value::internal);
     EXPECT_EQ(_pushed, thread_state_value::completed);
     EXPECT_EQ(thread_state::get(), thread_state_value::completed);
 
-    auto _popped = thread_state::pop();
+    auto const _popped = thread_state::pop();
     EXPECT_EQ(_popped, thread_state_value::completed);
 }
 
 TEST_F(ThreadStateTest, scoped_guard_restores_state_on_destruction)
 {
     {
-        auto _guard = thread_state::scoped(thread_state_value::internal);
+        auto const _guard = thread_state::scoped(thread_state_value::internal);
         EXPECT_EQ(thread_state::get(), thread_state_value::internal);
     }
     EXPECT_EQ(thread_state::get(), thread_state_value::enabled);
@@ -112,10 +112,10 @@ TEST_F(ThreadStateTest, scoped_guard_restores_state_on_destruction)
 
 TEST_F(ThreadStateTest, nested_scoped_guards_restore_in_lifo_order)
 {
-    auto _outer = thread_state::scoped(thread_state_value::internal);
+    auto const _outer = thread_state::scoped(thread_state_value::internal);
     EXPECT_EQ(thread_state::get(), thread_state_value::internal);
     {
-        auto _inner = thread_state::scoped(thread_state_value::enabled);
+        auto const _inner = thread_state::scoped(thread_state_value::enabled);
         EXPECT_EQ(thread_state::get(), thread_state_value::enabled);
     }
     EXPECT_EQ(thread_state::get(), thread_state_value::internal);

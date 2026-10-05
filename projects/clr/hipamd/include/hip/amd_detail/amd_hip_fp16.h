@@ -142,10 +142,10 @@ struct __half {
   }
 #endif
 
-// MANIPULATORS - DEVICE ONLY
+// MANIPULATORS - INTEGRAL
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   template <typename T, Enable_if_t<__hip_internal::is_integral<T>{}>* = nullptr>
-  __device__ __half& operator=(T x) {
+  __HOST_DEVICE__ __half& operator=(T x) {
     data = static_cast<_Float16>(x);
     return *this;
   }
@@ -964,17 +964,18 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
 
 namespace __hip_internal {
 template <>
-struct NumericLimits<__half> {
-    static constexpr __half maximum() {
-      __half_raw raw { .x = 0x7C00U };
-      return __half(raw);
-    }
-    static constexpr __half minimum() {
-      __half_raw raw { .x = 0xFC00U };
-      return __half(raw);
-    }
+struct ExclusiveScanIdentity<__half> {
+  static constexpr __half maximum() {
+    __half_raw raw { .x = 0x7C00U };
+    return __half(raw);
+  }
+  static constexpr __half minimum() {
+    __half_raw raw { .x = 0xFC00U };
+    return __half(raw);
+  }
 };
 }  // namespace __hip_internal
+
 #endif  // defined(__clang__) && defined(__HIP__)
 
 // Math functions
