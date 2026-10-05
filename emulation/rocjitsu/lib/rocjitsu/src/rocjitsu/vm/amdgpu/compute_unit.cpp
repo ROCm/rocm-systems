@@ -1029,8 +1029,9 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     uint64_t lanes;
     uint8_t bytes;
   };
-  // Instruction has at most three explicit destinations, plus a special result.
-  std::array<Destination, 4> destinations;
+  // Block transfers can select any subset of 32 DWORD destinations. Other
+  // instructions have at most three explicit destinations plus a special result.
+  std::array<Destination, 32> destinations;
   size_t num_destinations = 0;
   auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
     assert(num_destinations < destinations.size());
@@ -1077,10 +1078,19 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
                               : !sram_ecc() && d.d16_lo ? 0x3
                                                         : MemoryWaitScoreboard::kFullDwordByteMask;
         auto add_vector = [&](uint32_t base, uint32_t width, uint8_t byte_mask) {
-          if (width)
-            append({RegClass::VGPR, static_cast<uint16_t>(base - wf.vgpr_alloc().base),
-                    static_cast<uint8_t>(width)},
-                   d.exec_mask, byte_mask);
+          const auto logical_base = static_cast<uint16_t>(base - wf.vgpr_alloc().base);
+          if (d.block_dword_mask != 0xffffffffu) {
+            // Completion preserves M0-disabled words; they are not pending
+            // writes. The instruction still issues its counter entry below.
+            assert(width <= 32);
+            for (uint32_t word = 0; word < width; ++word)
+              if (d.block_dword_mask & (uint32_t{1} << word))
+                append({RegClass::VGPR, static_cast<uint16_t>(logical_base + word), 1}, d.exec_mask,
+                       byte_mask);
+          } else if (width) {
+            append({RegClass::VGPR, logical_base, static_cast<uint8_t>(width)}, d.exec_mask,
+                   byte_mask);
+          }
         };
         // Match completion's all-or-nothing destination validation, including
         // the independent pointer result of LDS stack operations.
@@ -1144,6 +1154,23 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
         const auto sequence = scoreboard.issue_xcnt(xcnt_completion, xscalar);
         const RegisterAccess registers(wf);
         auto add_source = [&](RegisterRef reg) {
+          if (inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+            const auto &d = *inst.data_as<VectorMemState>();
+            // A masked block store's 32-VGPR operand is its data, while its
+            // address operands remain live even when they overlap a mask hole.
+            if (!d.is_load && d.block_dword_mask != 0xffffffffu && reg.cls == RegClass::VGPR &&
+                reg.width == 32) {
+              for (uint32_t word = 0; word < 32; ++word)
+                if (d.block_dword_mask & (uint32_t{1} << word))
+                  scoreboard.add({sequence,
+                                  wf.pc,
+                                  vector_lanes,
+                                  {RegClass::VGPR, static_cast<uint16_t>(reg.index + word), 1},
+                                  counter,
+                                  MemoryWaitScoreboard::kFullDwordByteMask});
+              return;
+            }
+          }
           scoreboard.add({sequence, wf.pc, reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0},
                           reg, counter, MemoryWaitScoreboard::kFullDwordByteMask});
         };
