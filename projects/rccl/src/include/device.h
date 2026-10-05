@@ -245,12 +245,12 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
-#define NCCL_GPU_PRODUCER 0x40 // RCCL: recv payload is written by a peer GPU kernel, not by a proxy or copy engine
+#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
 
-// RCCL: gfx950 Simple recv must acquire the tail at system scope unless a GPU kernel or a GDR NIC wrote the payload.
-__host__ __device__ constexpr bool ncclRecvTailNeedsSysAcquire(int connFlags) {
-  return (connFlags & (NCCL_GPU_PRODUCER | NCCL_DIRECT_NIC)) == 0;
+// RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
+__host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
+  return (connFlags & NCCL_GPU_PRODUCER) == 0;
 }
 
 #define NCCL_REGULAR_BUFFER 0x00

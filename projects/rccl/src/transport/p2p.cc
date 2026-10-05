@@ -528,6 +528,9 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
          channelId, connIndex, myInfo->rank, myInfo->busId, peerInfo->rank, peerInfo->busId, intermediateRank,
          comm->peerInfo[intermediateRank].busId, useReadStr, comm, comm->nRanks);
   }
+  if (!useMemcpy) {
+    send->conn.flags |= NCCL_GPU_PRODUCER;
+  }
 
   memset(&req, '\0', sizeof(req));
   req.size = sendSize;

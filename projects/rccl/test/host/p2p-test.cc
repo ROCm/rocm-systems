@@ -3555,6 +3555,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_SameProcessPeer_SelectsDirectAndFillsConnect
     EXPECT_EQ(info->read, 0);
     EXPECT_TRUE(send_.conn.flags & NCCL_P2P_WRITE);
     EXPECT_FALSE(send_.conn.flags & NCCL_P2P_READ);
+    EXPECT_TRUE(send_.conn.flags & NCCL_GPU_PRODUCER);
 
     // Setup drove the proxy with a Setup message.
     EXPECT_EQ(lastProxyMsg_, ncclProxyMsgSetup);
@@ -3614,6 +3615,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_CrossProcessCuMemPeer_SelectsCumem)
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_CUMEM);
+    EXPECT_TRUE(send_.conn.flags & NCCL_GPU_PRODUCER);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3718,6 +3720,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_IntermediateHop_SelectsIntermediateAndRoutes
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_INTERMEDIATE);
     EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 1);
+    EXPECT_TRUE(send_.conn.flags & NCCL_GPU_PRODUCER);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3818,10 +3821,20 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCuMemPeer_SelectsCumem)
     p2pTransport.recv.free(&comm_, &recv);
 }
 
-TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_LeavesTailOnSysAcquire)
+// RAII guard for p2p.cc's file-static useMemcpy. The fixture's SetUp has already latched initCeOperation(), so the
+// ScopedHook(g_loadParam, ForceP2pUseCudaMemcpy()) + ncclP2pUsesMemcpy() idiom cannot flip it here; set and restore it.
+struct ScopedUseMemcpy {
+    explicit ScopedUseMemcpy(int value) : saved_(useMemcpy) { useMemcpy = value; }
+    ~ScopedUseMemcpy() { useMemcpy = saved_; }
+    ScopedUseMemcpy(const ScopedUseMemcpy&)            = delete;
+    ScopedUseMemcpy& operator=(const ScopedUseMemcpy&) = delete;
+private:
+    int saved_;
+};
+
+TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_KeepsSysAcquire)
 {
-    useMemcpy = 1;
-    std::unique_ptr<int, void (*)(int*)> restoreMemcpy(&useMemcpy, [](int* v) { *v = 0; });
+    std::optional<ScopedUseMemcpy> ceMode(std::in_place, 1);
     ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
     InstallTopo(/*read=*/0);
     InstallHappyProxy();
@@ -3834,28 +3847,49 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_LeavesTailOnSysAcquire)
     EXPECT_EQ(static_cast<p2pResources*>(recv.transportResources)->type, P2P_IPC);
     EXPECT_TRUE(recv.conn.flags & NCCL_P2P_WRITE);
     EXPECT_FALSE(recv.conn.flags & NCCL_GPU_PRODUCER);
-    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(recv.conn.flags));
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(recv.conn.flags));
 
-    restoreMemcpy.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
+    ceMode.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
     p2pTransport.recv.free(&comm_, &recv);
 }
 
-TEST(RecvTailAcquireMicrotest, ProxyOrCopyEnginePublishedPayload_NeedsSysAcquire)
+TEST_F(P2pSetupMicrotest, SendSetup_CopyEngineMode_KeepsSysAcquire)
 {
-    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(0));  // NET/CollNet no-GDR, SHM
-    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(NCCL_P2P_WRITE));  // P2P CE
-    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(NCCL_P2P_READ | NCCL_NVLS_MIN_POLL));
+    std::optional<ScopedUseMemcpy> ceMode(std::in_place, 1);
+    ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSuccess);
+
+    EXPECT_EQ(static_cast<p2pResources*>(send_.transportResources)->type, P2P_IPC);
+    EXPECT_TRUE(send_.conn.flags & NCCL_P2P_WRITE);
+    EXPECT_FALSE(send_.conn.flags & NCCL_GPU_PRODUCER);
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(send_.conn.flags));
+
+    ceMode.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
+    p2pTransport.send.free(&comm_, &send_);
 }
 
-TEST(RecvTailAcquireMicrotest, GpuOrGdrNicProducedPayload_StaysRelaxed)
+TEST(ConnStepAcquireMicrotest, ProxyOrCopyEnginePublishedStep_NeedsSysAcquire)
 {
-    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_WRITE));
-    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_READ));
-    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER));
-    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_DIRECT_NIC));
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(0));  // NET/CollNet no-GDR, SHM
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(NCCL_DIRECT_NIC));  // NET/CollNet GDR: the CPU proxy still publishes the step
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(NCCL_P2P_WRITE));  // P2P CE
+    EXPECT_TRUE(ncclConnStepNeedsSysAcquire(NCCL_P2P_READ | NCCL_NVLS_MIN_POLL));
 }
 
-TEST(RecvTailAcquireMicrotest, GpuProducerBitIsDistinctFromOtherConnFlags)
+TEST(ConnStepAcquireMicrotest, GpuPublishedStep_StaysRelaxed)
+{
+    EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_WRITE));
+    EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_READ));
+    EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER));
+}
+
+TEST(ConnStepAcquireMicrotest, GpuProducerBitIsDistinctFromOtherConnFlags)
 {
     EXPECT_EQ(NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL), 0);
 }
