@@ -14,7 +14,7 @@ The first domains are:
 - `device`: portable current-device property contracts, plus GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
-- `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
+- `peer_query`: peer-to-peer attribute, atomic-capability, and AMD link-type query invalid-input contracts
 - `peer_access`: peer-access enable/disable invalid-input and lifecycle contracts
 - `peer_copy`: single-device self-peer 1D/3D copy and invalid-device peer-copy contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts

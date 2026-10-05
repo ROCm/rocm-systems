@@ -23,6 +23,8 @@ void SkipIfP2PAttributeUnsupported(int device) {
     HIP_SKIP_TEST("hipDeviceGetP2PAttribute is not supported by this runtime path.");
   }
 }
+
+constexpr hipAtomicOperation kAtomicOperation = hipAtomicOperationIntegerAdd;
 }  // namespace
 
 // @asserts: hipDeviceGetP2PAttribute - rejects a same-device (src==dst) P2P attribute query with a non-success status
@@ -51,6 +53,61 @@ HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejecte
   REQUIRE(hipDeviceGetP2PAttribute(&value, kP2PAttribute, device_count, device) != hipSuccess);
   REQUIRE(hipDeviceGetP2PAttribute(&value, kP2PAttribute, device, -1) != hipSuccess);
   REQUIRE(hipDeviceGetP2PAttribute(&value, kP2PAttribute, device, device_count) != hipSuccess);
+}
+
+// @asserts: hipDeviceGetP2PAtomicCapabilities - rejects a null capabilities array, a null operations array, and a zero operation count with a non-success status
+HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_NullOrEmptyArgs_AreRejected) {
+  unsigned int capabilities = 0;
+  const hipAtomicOperation operations[] = {kAtomicOperation};
+
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(nullptr, operations, 1, 0, 1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, nullptr, 1, 0, 1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 0, 0, 1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(nullptr, nullptr, 0, 0, 1) != hipSuccess);
+}
+
+// @asserts: hipDeviceGetP2PAtomicCapabilities - rejects a same-device (src==dst) query and out-of-range or negative device ids with a non-success status
+HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_SelfOrInvalidDevice_IsRejected) {
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count <= 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+  }
+
+  unsigned int capabilities = 0;
+  const hipAtomicOperation operations[] = {kAtomicOperation};
+
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 1, 0, 0) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 1, -1, 0) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 1, 0, -1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 1, device_count, 0) !=
+          hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(&capabilities, operations, 1, 0, device_count) !=
+          hipSuccess);
+}
+
+// The device-id checks run before the per-operation validation, so an invalid
+// operation is only reachable with two distinct valid devices.
+// @asserts: hipDeviceGetP2PAtomicCapabilities - rejects an operation value outside the hipAtomicOperation enum with a non-success status
+HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_InvalidOperation_IsRejected) {
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count <= 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+  }
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  unsigned int capabilities[2] = {0, 0};
+  const hipAtomicOperation below_range[] = {static_cast<hipAtomicOperation>(-1)};
+  const hipAtomicOperation above_range[] = {static_cast<hipAtomicOperation>(0x7fffffff)};
+  // A valid leading entry must not mask an invalid one later in the array.
+  const hipAtomicOperation mixed[] = {kAtomicOperation, static_cast<hipAtomicOperation>(0x7fffffff)};
+
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(capabilities, below_range, 1, 0, 1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(capabilities, above_range, 1, 0, 1) != hipSuccess);
+  REQUIRE(hipDeviceGetP2PAtomicCapabilities(capabilities, mixed, 2, 0, 1) != hipSuccess);
 }
 
 // BACKEND-DIFF: hipExtGetLinkTypeAndHopCount is an AMD extension (link-type and
