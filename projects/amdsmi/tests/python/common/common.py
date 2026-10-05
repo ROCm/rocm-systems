@@ -879,7 +879,7 @@ class Common:
                 else:
                     print(msg)
                 if isinstance(data, dict) or isinstance(data, list):
-                    print(json.dumps(data, sort_keys=False, indent=4), flush=True)
+                    print(json.dumps(data, sort_keys=False, indent=4, default=str), flush=True)
                 else:
                     print(data)
         return
@@ -1358,29 +1358,50 @@ class Common:
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
             return []
 
-    def skip_without_cpu(self):
-        """CPU socket handles, skipping the calling test when there are none.
+    def _skip_cpu_if_unsupported(self, handles):
+        """Skip the calling CPU test when the host CPU cannot be exercised.
 
-        For CPU tests that iterate handles inline (rather than through
-        Test_API_Per_CPU) but still need to skip cleanly on CPU-less hosts.
+        Two cases are treated as "CPU not supported":
+          * no CPU handles were enumerated (library initialized without CPUs), and
+          * the CPU/platform does not implement the HSMP mailbox (e.g. STX APUs),
+            probed with the lightweight amdsmi_get_cpu_hsmp_proto_ver() query. A
+            driver node may exist while the platform still rejects HSMP messages,
+            so an actual probe is more reliable than checking for /dev/hsmp.
         """
-        handles = self._cpu_socket_handles()
         if not handles:
             msg = "\tNo CPU processors found; skipping CPU-specific test"
             self.print(msg)
             raise unittest.SkipTest(msg)
+        sockets = self._cpu_socket_handles()
+        if not sockets:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        try:
+            amdsmi.amdsmi_get_cpu_hsmp_proto_ver(sockets[0])
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            msg = "\tCPU does not support the HSMP/ESMI interface; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+
+    def skip_without_cpu(self):
+        """CPU socket handles, skipping the calling test when the CPU is unsupported.
+
+        For CPU tests that iterate handles inline (rather than through
+        Test_API_Per_CPU) but still need to skip cleanly on CPU-less or
+        HSMP-unsupported hosts.
+        """
+        handles = self._cpu_socket_handles()
+        self._skip_cpu_if_unsupported(handles)
         return handles
 
     def skip_without_cpu_core(self):
-        """CPU core handles, skipping the calling test when there are none.
+        """CPU core handles, skipping the calling test when the CPU is unsupported.
 
         Core-handle counterpart to skip_without_cpu() for inline-iterating tests.
         """
         handles = self._cpu_core_handles()
-        if not handles:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.print(msg)
-            raise unittest.SkipTest(msg)
+        self._skip_cpu_if_unsupported(handles)
         return handles
 
     def _Test_API_Per_Handles(self, handles, label, **kwargs):
@@ -1389,10 +1410,7 @@ class Common:
         func_name, func = next(iterator)
         del params[func_name]
 
-        if not handles:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.print(msg)
-            raise unittest.SkipTest(msg)
+        self._skip_cpu_if_unsupported(handles)
 
         raise_exception = None
         for i in range(len(handles) + 1):
