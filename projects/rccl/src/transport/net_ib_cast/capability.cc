@@ -25,16 +25,14 @@ static void IbCastCapProbeUd(struct ncclIbDev* dev) {
   bool supported = false;
   struct ibv_pd* pd = NULL;
   struct ibv_cq* cq = NULL;
-  struct ncclIbQp probeQp;
-  memset(&probeQp, 0, sizeof(probeQp));
+  struct ncclIbQp probeQp{};
 
   if (wrap_ibv_alloc_pd(&pd, dev->context) != ncclSuccess || pd == NULL) goto cleanup;
   if (wrap_ibv_create_cq(&cq, dev->context, NCCL_IB_RESILIENCY_PORT_RECOVERY_CQ_SIZE, NULL, NULL, 0) != ncclSuccess ||
       cq == NULL)
     goto cleanup;
   {
-    struct ncclIbQpCreateAttr createAttr;
-    memset(&createAttr, 0, sizeof(createAttr));
+    struct ncclIbQpCreateAttr createAttr{};
     IbCastQpCreateAttrInitSharing(&createAttr);
     createAttr.type = IBV_QPT_UD;
     createAttr.cq = cq;
@@ -64,13 +62,11 @@ static void IbCastCapProbeRdmaRead(struct ncclIbDev* dev) {
   struct ibv_pd* pd = NULL;
   struct ibv_cq* cq = NULL;
   struct ibv_mr* mr = NULL;
-  struct ncclIbQp probeQp;
-  memset(&probeQp, 0, sizeof(probeQp));
+  struct ncclIbQp probeQp{};
   // [0] is the READ source, [1] the destination.
   volatile uint64_t buf[2] = {pattern, 0};
   int gidIndex = 0;
-  union ibv_gid gid;
-  memset(&gid, 0, sizeof(gid));
+  union ibv_gid gid{};
 
   if (wrap_ibv_alloc_pd(&pd, dev->context) != ncclSuccess || pd == NULL) goto cleanup;
   if (wrap_ibv_create_cq(&cq, dev->context, 1, NULL, NULL, 0) != ncclSuccess || cq == NULL) goto cleanup;
@@ -79,8 +75,7 @@ static void IbCastCapProbeRdmaRead(struct ncclIbDev* dev) {
       mr == NULL)
     goto cleanup;
   {
-    struct ncclIbQpCreateAttr createAttr;
-    memset(&createAttr, 0, sizeof(createAttr));
+    struct ncclIbQpCreateAttr createAttr{};
     IbCastQpCreateAttrInitSharing(&createAttr);
     createAttr.type = IBV_QPT_RC;
     createAttr.cq = cq;
