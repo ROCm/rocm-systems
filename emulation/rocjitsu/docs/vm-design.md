@@ -205,6 +205,16 @@ dispatch admission, retry scheduling, and synchronous fault cancellation
 callbacks. Temporary unavailability retains command and cursor-publication state
 for retry; cancellation stops resident waves before submission resources are
 released.
+For native rings, CP captures `command_access`, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending publication even when
+execution is suspended. The processor traverses packets and nested IBs, captures
+access for submitted streams as needed, and commits/publishes packet retirement
+through `read_pointer_journal`. The retry callback sets `command_retry_pending`,
+which CP clears before resuming. Dispatch admission appends to `dispatches.entries`;
+CP retires these entries before packet processing continues. On terminal publication
+failure, the processor sets `publication_faulted` before invoking cancellation.
+The cancellation callback marks the queue faulted, cancels pending work, and notifies
+failed submissions while preserving the publication failure.
 The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service
 uses bounded queue turns for event-loop fairness and retains CP queue
 serialization.

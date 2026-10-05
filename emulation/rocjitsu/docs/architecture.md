@@ -49,8 +49,8 @@ See [simdojo.md](simdojo.md) for the full design.
 See [vm-design.md](vm-design.md) for the full hardware model design.
 Models the GPU hardware pipeline:
 
-- **CommandProcessor** — Monitors compute doorbells, fetches AQL and supported
-  PM4 packets from ring buffers, parses kernel descriptors, and dispatches
+- **CommandProcessor** — Monitors compute doorbells, fetches AQL packets, prepares native
+  PM4 ring submissions for the PM4 processor, parses kernel descriptors, and dispatches
   workgroups to CUs. It does not own or execute SDMA queues.
 - **ComputeUnit** — Executes wavefronts. Manages SGPR/VGPR register
   files, LDS, and scratch memory. Supports functional and cycle-accurate
@@ -111,7 +111,16 @@ Models the GPU hardware pipeline:
   admission, retry scheduling, and synchronous fault cancellation callbacks.
   Temporary unavailability retains command and cursor-publication state for retry;
   cancellation stops resident waves before submission resources are released.
-  CP retains queue scheduling and dispatch completion.
+  CP retains queue scheduling and dispatch completion. For native rings, CP captures
+  the VM snapshot, initializes the consumer cursor, builds root submissions from
+  doorbells, and retries pending cursor publication even while execution is suspended.
+  The processor traverses submitted packets and IBs and commits/publishes their
+  retirement through the shared cursor journal. Its `retry` callback must set
+  `command_retry_pending`; CP clears it when resuming. The `dispatch` callback adds
+  admitted work to `dispatches.entries`, which CP retires before processing resumes.
+  The processor sets `publication_faulted` before requesting cancellation on a
+  terminal publication failure; the cancellation callback marks the queue faulted,
+  cancels pending work, and notifies failed submissions.
 - **PCI/VFIO adapters** — PCI configuration, BAR/MMIO, DMA, interrupts, and
   transport-session lifetime. These adapt accesses into `GpuVm` and the shared
   block models; they do not contain alternate CP, MES, SDMA, or shader models.
@@ -189,7 +198,7 @@ Queue lifecycle is shared without forcing unrelated protocols into one execution
 engine. AQL, PM4, and SDMA use `GpuQueueRegistry`, reusable `QueueBindingFactory` objects,
 and unique per-registration `QueueBinding` objects. PM4 and SDMA share
 `ConsumerCursorJournal` for retry-safe consumer publication; SDMA and the
-restricted PM4 compute-queue path share `CircularRingReader` for wrap-safe
+production PM4 compute-ring path share `CircularRingReader` for wrap-safe
 fetches. AQL and SDMA expose the same `PacketProcessResult` envelope
 and core processor operation. The common layer validates only
 protocol-independent status,

@@ -122,8 +122,14 @@ protected:
   Pm4PacketProcessorTest() : memory(std::make_shared<FlatMemory>()) {
     address_space = vm.register_translated(1, memory, memory);
     context.arch = ROCJITSU_CODE_ARCH_RDNA4;
-    context.retry = [this] { status = Pm4TestStatus::Blocked; };
-    context.fault_queue = [this] { status = Pm4TestStatus::Faulted; };
+    context.retry = [this] {
+      queue.command_retry_pending = true;
+      status = Pm4TestStatus::Blocked;
+    };
+    context.fault_queue = [this] {
+      queue.faulted = true;
+      status = Pm4TestStatus::Faulted;
+    };
     context.flush_caches = [] {};
     context.dispatch = [this](const std::array<uint32_t, 4> &dimensions) {
       dispatches.push_back(dimensions);
@@ -152,6 +158,8 @@ protected:
   }
 
   Pm4TestStatus service() {
+    // Model CP resuming the queue on its next scheduling turn.
+    queue.command_retry_pending = false;
     status = Pm4TestStatus::Ready;
     process_pm4_packets(queue, &vm, context);
     return status;

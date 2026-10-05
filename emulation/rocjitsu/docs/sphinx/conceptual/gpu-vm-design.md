@@ -64,6 +64,14 @@ PM4 compute rings and DRM indirect-buffer submissions are processed in
 `pm4/pm4_packet_processor`. Packet fetching, opcode effects, register updates,
 IB traversal, and cursor publication operate on CP-owned queue state. CP supplies
 cache flushing, dispatch admission, retry scheduling, and fault cancellation.
+For native rings, CP captures the VM snapshot, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending cursor publication
+even while execution is suspended. The processor traverses those submissions and
+nested IBs and commits/publishes packet retirement through the shared cursor journal.
+Retry sets `command_retry_pending` until CP resumes the queue; dispatch admission
+appends to `dispatches.entries` until CP retires the work. The processor marks
+`publication_faulted` before requesting cancellation on a terminal publication
+failure.
 
 SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
 packet processor; no SDMA packet logic is part of the CP. A completion tracker

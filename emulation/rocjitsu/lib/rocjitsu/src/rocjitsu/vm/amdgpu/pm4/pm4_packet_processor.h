@@ -27,19 +27,30 @@ struct Pm4ExecutionContext {
   std::function<void()> flush_caches;
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
   /// @details The initiator determines whether dimensions count threads or groups.
-  /// CP records admitted work in the queue; processing pauses while it is pending.
+  /// CP appends admitted work to queue.dispatches.entries; processing pauses
+  /// until CP retires those entries.
   std::function<void(const std::array<uint32_t, 4> &)> dispatch;
   /// @brief Preserve the owner's retry scheduling at the original execution points.
-  /// @details Mark the queue retry-pending and arrange a later CP scheduling turn.
+  /// @details Set queue.command_retry_pending and arrange a later CP scheduling
+  /// turn. CP clears the flag before resuming processing.
   std::function<void()> retry;
   /// @brief Cancel through CP at the original execution points, including exception scope.
-  /// @details CP owns queue fault marking, pending-work cancellation, and failure notification.
+  /// @details Set queue.faulted, cancel pending work, and notify failed submissions.
+  /// The processor sets queue.publication_faulted before calling this callback
+  /// on terminal cursor-publication failures; CP preserves that failure state.
   std::function<void()> fault_queue;
 };
 
 /// @brief Process a bounded turn of a native ring or DRM indirect-buffer stream.
 /// @details Fetch, opcode effects, IB traversal, and cursor publication live here.
 /// The caller owns serialization, scheduling, dispatch admission, and cancellation.
+/// For native rings, CP captures queue.command_access, initializes the consumer
+/// cursor, creates root submissions from doorbells, and retries pending cursor
+/// publication even while execution is suspended. This processor traverses those
+/// submissions and nested IBs, captures access for submitted streams as needed,
+/// and commits/publishes packet retirement through queue.read_pointer_journal.
+/// queue.commands and queue.command_access retain progress across turns; the
+/// retry and dispatch callbacks must update the shared fields documented above.
 /// A VM must be attached before commands can execute; idle queues do not access it.
 /// Returns when idle, waiting for dispatch retirement, blocked, faulted, or at the
 /// packet budget. Retry and fault handling are reported through context callbacks.
