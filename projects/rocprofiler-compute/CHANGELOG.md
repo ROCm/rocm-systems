@@ -49,6 +49,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* Renamed the roofline options so they all start with `--roofline`. The old names still work, but show a warning. The help lists each old name next to its new name.
+  * Profile mode:
+    * `--roof-only` is now `--roofline`
+    * `--bench-only` is now `--roofline-bench-only`
+    * `--device` is now `--roofline-device`
+
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
 * `-m/--mem-level` now accepts `ALL`, which is also its default.
@@ -93,6 +99,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 ### Known issues
 
