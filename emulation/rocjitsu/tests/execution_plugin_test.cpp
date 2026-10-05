@@ -5976,6 +5976,98 @@ TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
   EXPECT_TRUE(trailing_access_reports_race(/*flat_store_first=*/false));
 }
 
+TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
+  for (uint32_t local_lane : {0u, 1u}) {
+    for (bool load : {false, true}) {
+      for (bool flat_first : {false, true}) {
+        for (uint32_t probe : {0u, 1u, 2u}) {
+          SCOPED_TRACE(testing::Message() << "local_lane=" << local_lane << " load=" << load
+                                          << " flat_first=" << flat_first << " probe=" << probe);
+          PluginFixture f(2, "cdna5", 32, 128);
+          PluginSinkConfig sink_config;
+          StringSink &sink = sink_config.emplace<StringSink>();
+          auto plugin = std::make_unique<RaceDetectorPlugin>();
+          auto *plugin_ptr = plugin.get();
+          f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+          ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+          f.soc->set_plugin_group(f.plugin_group_);
+          f.plugin_group_->onInit();
+          auto *cu = f.cu();
+          constexpr uint64_t shared_base = 0x0001'0000'0000'0000ULL;
+          cu->set_apertures(shared_base, shared_base + 0xffff, 0, 0);
+          auto *flat_wave = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+          auto *ds_wave = cu->dispatch_wf(0, 0x200, 128, 256, 32);
+          ASSERT_NE(flat_wave, nullptr);
+          ASSERT_NE(ds_wave, nullptr);
+          flat_wave->set_exec(0x3);
+          ds_wave->set_exec(1);
+          cu->allocate_lds(256); // Exercise aperture translation with a nonzero allocation base.
+          const uint32_t lds_base = cu->allocate_lds(512);
+          flat_wave->set_lds_base(lds_base);
+          ds_wave->set_lds_base(lds_base);
+          std::array<amdgpu::Wavefront *, 2> waves{flat_wave, ds_wave};
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 256, waves);
+
+          const std::array<uint32_t, 3> probe_addresses{lds_base + 64 + 12, lds_base + 160 + 12,
+                                                        lds_base + 256 + 12};
+          auto route_ds = [&] {
+            auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+            state->elem_size = 4;
+            state->num_elems = 1;
+            state->is_load = !load;
+            state->exec_mask = state->lane_mask = 1;
+            state->wf_size = 32;
+            state->dst_reg_base = ds_wave->vgpr_alloc().base;
+            state->per_lane_addr[0] = probe_addresses[probe];
+            TestMemoryInstruction inst(std::move(state));
+            f.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *ds_wave);
+          };
+          if (!flat_first)
+            route_ds();
+          const uint32_t vb = flat_wave->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 3; ++lane) {
+            // The global address is also a valid LDS offset numerically. It
+            // must not enter the LDS interval set, nor may inactive lane 2.
+            const uint64_t addr = lane == local_lane ? shared_base + 64
+                                  : lane == 2        ? shared_base + 256
+                                                     : lds_base + 160;
+            cu->write_vgpr(vb, lane, static_cast<uint32_t>(addr));
+            cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(addr >> 32));
+            for (uint32_t reg = 8; reg < 12; ++reg)
+              cu->write_vgpr(vb + reg, lane, 0);
+          }
+          const auto words =
+              cdna5::build_vflat(load ? cdna5::kFlatLoadB128Vflat : cdna5::kFlatStoreB128Vflat,
+                                 {.saddr = 124,
+                                  .vdst = uint8_t(load ? 8 : 0),
+                                  .vsrc = uint8_t(load ? 0 : 8),
+                                  .vaddr = 0});
+          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *flat_wave).succeeded());
+          test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *flat_wave);
+
+          auto *plugin_state =
+              static_cast<RaceWavefrontState *>(flat_wave->plugin_state(plugin_ptr->slot_index()));
+          auto &events = plugin_state->race_state->getDetector()->events();
+          const EventId flat_event{flat_first ? 0 : 1};
+          ASSERT_EQ(events.totalAllocated(), flat_first ? 1 : 2);
+          EXPECT_EQ(events.execMask(flat_event), 0x3u);
+          EXPECT_EQ(events.ldsIntervals(flat_event).getTotalBytes(), 16);
+          EXPECT_TRUE(events.ldsIntervals(flat_event).contains(probe_addresses[0]));
+          EXPECT_FALSE(events.ldsIntervals(flat_event).contains(probe_addresses[1]));
+          EXPECT_FALSE(events.ldsIntervals(flat_event).contains(probe_addresses[2]));
+          EXPECT_EQ(events.registers(flat_event).size(), load ? 4u : 0u);
+          if (flat_first)
+            route_ds();
+          EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, probe == 0);
+        }
+      }
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
   PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
                   /*sgprs_per_wf=*/128);
