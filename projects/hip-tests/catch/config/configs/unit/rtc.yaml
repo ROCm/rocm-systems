@@ -50,9 +50,6 @@ rtc:
     tags: [link]
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "SWDEV-450909: Test failed in stress testing Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [link]
   Unit_RTC_LinkerAPI:
     <<: *level_2
@@ -84,8 +81,8 @@ rtc:
   Unit_hiprtc_stdheaders:
     <<: *level_2
     disabled:
-      targets: [amd_wsl, asan]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted; AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [asan]
+      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted; AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
     tags: [header]
   Unit_Rtc_MathConstants_header:
     <<: *level_2
@@ -122,9 +119,6 @@ rtc:
     tags: [compile]
   Unit_hiprtcGpuRdcComplrOptnTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327 Needs to be re-triaged AIRUNTIME-2744"
     tags: [compile]
   Unit_hiprtcEnabledDenormalsComplrOptnTst:
     <<: *level_2
@@ -152,9 +146,6 @@ rtc:
     tags: [compile]
   Unit_hiprtcDisabledSlpVectorizeComplrOptnTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327 Needs to be re-triaged AIRUNTIME-2744"
     tags: [compile]
   Unit_hiprtcDefineMacroComplrOptnTst:
     <<: *level_2
@@ -170,9 +161,6 @@ rtc:
     tags: [compile]
   Unit_hiprtcRpassInlineComplrOptnTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327 Needs to be re-triaged AIRUNTIME-2744"
     tags: [compile]
   Unit_hiprtcEnabledConversionErrComplrOptnTst:
     <<: *level_2
@@ -233,9 +221,6 @@ rtc:
     tags: [compile]
   Unit_hiprtcCombiComplrOptnTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327 Needs to be re-triaged AIRUNTIME-2744"
     tags: [compile]
   Unit_Rtc_CoopReduce:
     <<: *level_2

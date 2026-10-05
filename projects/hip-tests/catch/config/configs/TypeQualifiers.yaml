@@ -5,6 +5,6 @@ TypeQualifiers:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-396615 mGPUs not considered correctly gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "SWDEV-396615 mGPUs not considered correctly gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_2
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_2

@@ -30,14 +30,11 @@ streamperthread:
   Unit_hipStreamPerThread_MultiThread:
     <<: *level_2
     disabled:
-      targets: [amd_linux, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "(amd_linux) === Test does not reflect a valid use case - SWDEV-569454; (amd_wsl) Disabling test tracked SWDEV-395683; (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454 Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      targets: [amd_linux, nvidia_linux, nvidia_windows]
+      reason: "(amd_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454 Needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_2:
     <<: *level_2
@@ -76,16 +73,13 @@ streamperthread:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
     tags: [stream]
   Unit_hipGetProcAddress_spt_Memcpy2D:
     <<: *level_2
     tags: [stream, image]
   Unit_hipGetProcAddress_spt_Memcpy3D:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [stream]
   Unit_hipGetProcAddress_spt_LaunchKernel:
     <<: *level_2

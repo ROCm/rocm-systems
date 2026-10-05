@@ -5,18 +5,12 @@ syncthreads:
     unsupported:
       targets: [amd_windows]
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Basic:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Zero:
     <<: *level_2
@@ -41,9 +35,6 @@ syncthreads:
     unsupported:
       targets: [amd_windows]
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Zero:
     <<: *level_2
@@ -68,9 +59,6 @@ syncthreads:
     unsupported:
       targets: [amd_windows]
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Zero:
     <<: *level_2

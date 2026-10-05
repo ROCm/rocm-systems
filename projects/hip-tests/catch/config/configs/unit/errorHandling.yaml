@@ -22,9 +22,6 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -36,9 +33,6 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy2DAsync:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
@@ -84,9 +78,6 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -98,9 +89,6 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy2DAsync:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
@@ -111,10 +99,10 @@ errorHandling:
   Unit_hipDynamicLogging_Positive_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: hipDynamicLoggingTest() == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      targets: [amd_windows]
+      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: hipDynamicLoggingTest() == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_2
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: output.size() > 0 -> 0 > 0. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      targets: [amd_windows]
+      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: output.size() > 0 -> 0 > 0. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"

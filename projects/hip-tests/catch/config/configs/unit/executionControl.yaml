@@ -4,7 +4,7 @@ executionControl:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3: attr.constSizeBytes != kConstSizeBytes (defect EXSWHTEC-242). AIRUNTIME-XXXX gfx1201 (amd_windows) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: attr.constSizeBytes != kConstSizeBytes (defect EXSWHTEC-242). AIRUNTIME-XXXX gfx1201 (amd_windows) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncGetAttributes_Negative_Parameters:
     <<: *level_2
@@ -17,9 +17,6 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Below tests are failing PSDB Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_2
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
@@ -61,7 +58,7 @@ executionControl:
     tags: [kernel, launch]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-244 Needs to be re-triaged on amd_linux, amd_wsl AIRUNTIME-2744"
+      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-244 gfx1201 (amd_wsl) FAIL: localError == hipErrorInvalidValue -> 101 == 1. AIRUNTIME-XXXX Needs to be re-triaged on amd_linux AIRUNTIME-2744"
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [kernel, launch]
@@ -77,9 +74,6 @@ executionControl:
   Unit_hipLaunchByPtr_Verify_Capture: *level_2
   Unit_hipGetProcAddress_KernelLaunchApis:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [kernel]
   Unit_hipGetProcAddress_CallbackActivityAPIs:
     <<: *level_2
@@ -89,15 +83,9 @@ executionControl:
     tags: [kernel]
   Unit_hipFuncSetCacheConfig_Positive_Basic:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: intermittent Seg fault failure Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Negative_Parameters:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: intermittent Seg fault failure Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_2

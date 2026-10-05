@@ -83,9 +83,6 @@ device:
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_NegTst:
     <<: *level_2
@@ -173,9 +170,6 @@ device:
     tags: [config, P0]
   Unit_hipGetDeviceFlags_Positive_Context:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipGetSetDeviceFlags_InvalidFlag:
     <<: *level_2
@@ -197,9 +191,6 @@ device:
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Positive:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Note: UUID returned empty on some windows nodes Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Negative:
     <<: *level_2
@@ -224,15 +215,12 @@ device:
     tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) self-skips: Skipping because this machine has total GPUs < 2. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) self-skips: Skipping because this machine has total GPUs < 2. gfx1201 (amd_wsl) self-skips: Skipping because this machine has total GPUs < 2. Needs to be re-triaged AIRUNTIME-2744"
     tags: [query, multigpu, P0]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
@@ -326,15 +314,9 @@ device:
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Negative_Parameters:
     <<: *level_2
@@ -342,14 +324,14 @@ device:
   Unit_hipDeviceReset_Positive_Basic:
     <<: *level_2
     disabled:
-      targets: [amd_wsl, nvidia_windows]
-      reason: "(amd_wsl) Note: Windows disabled; (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged AIRUNTIME-2744"
+      targets: [nvidia_windows]
+      reason: "(nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
     tags: [synchronization, P0]
   Unit_hipDeviceReset_Positive_Threaded:
     <<: *level_2
     disabled:
-      targets: [amd_wsl, nvidia_windows]
-      reason: "(amd_wsl) Note: Windows disabled; (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged AIRUNTIME-2744"
+      targets: [nvidia_windows]
+      reason: "(nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
     tags: [synchronization, P0]
   Unit_hipDeviceSetMemPool_Positive_Basic:
     <<: *level_2
@@ -374,9 +356,6 @@ device:
     tags: [init, smoke, P0]
   Unit_hipInit_Negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [init, P0]
   Unit_hipInitDevice_Positive_Basic:
     <<: *level_2
@@ -456,21 +435,15 @@ device:
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_2
     tags: [P0]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device:
     <<: *level_2
     tags: [P0]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
     <<: *level_2
     tags: [P0]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: Test disabled due to defect - EXSWHTEC-207 Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcGetMemHandle_Negative_Handle_For_Freed_Memory:
     <<: *level_2
     tags: [P0]
@@ -482,16 +455,13 @@ device:
     tags: [P0]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     tags: [P0]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcOpenMemHandle_Multiproc: *level_2
   Unit_hipIpcOpenMemHandle_Multiproc_Child:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Multiproc child; needs 2nd process/device — not locally verifiable on single-GPU gfx1030. Further investigation needed. gfx1201 (amd_windows) self-skips: This test must be launched by parent multiprocess test. Needs to be re-triaged on amd_wsl, amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process/device — not locally verifiable on single-GPU gfx1030. Further investigation needed. gfx1201 (amd_windows) self-skips: This test must be launched by parent multiprocess test. gfx1201 (amd_wsl) self-skips: This test must be launched by parent multiprocess test. Needs to be re-triaged on amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"

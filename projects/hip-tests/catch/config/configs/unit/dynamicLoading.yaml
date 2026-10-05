@@ -4,7 +4,7 @@ dynamicLoading:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3: device-kernels-from-library REQUIRE(testResult==true) fails. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) FAIL 3/3: device-kernels-from-library REQUIRE(testResult==true) fails. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: testResult == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
     <<: *level_2
@@ -15,36 +15,18 @@ dynamicLoading:
   Unit_hipGetProcAddress_Positive:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_Negative:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_spt_Positive:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_spt_Negative:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipGetProcAddress_With_spt_CompilerOption:
     <<: *level_2
     tags: [module]
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
