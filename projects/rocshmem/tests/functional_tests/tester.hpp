@@ -209,10 +209,16 @@
   X(TilePutWaveColumnMajor,    164)  \
   X(TileGetWaveRowMajor,       165)  \
   X(TileGetWaveColumnMajor,    166)  \
-  X(TilePutWGRowMajor,         167)  \
-  X(TilePutWGColumnMajor,      168)  \
-  X(TileGetWGRowMajor,         169)  \
-  X(TileGetWGColumnMajor,      170)
+  X(TilePutWGRowMajor,              167)  \
+  X(TilePutWGColumnMajor,           168)  \
+  X(TileGetWGRowMajor,              169)  \
+  X(TileGetWGColumnMajor,           170)  \
+  X(TilePutRowMajorStartCoord,      171)  \
+  X(TileGetRowMajorStartCoord,      172)  \
+  X(TilePutWaveRowMajorStartCoord,  173)  \
+  X(TileGetWaveRowMajorStartCoord,  174)  \
+  X(TilePutWGRowMajorStartCoord,    175)  \
+  X(TileGetWGRowMajorStartCoord,    176)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
