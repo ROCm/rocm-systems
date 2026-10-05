@@ -361,6 +361,55 @@ set_tests_properties(
             "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
 )
 
+# --cpu-thread-budget has to reach the allocation plan through the config copy the
+# launcher writes. gfx942_cdna3.json asks for 32, so a configured row of 1 can only
+# come from the flag -- once per accepted spelling, since wrappers forwarding a
+# single opaque token cannot split a flag from its value.
+set(_rj_cdna3_config "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json")
+add_test(
+    NAME RocjitsuCpuThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget 1 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuCpuThreadBudgetAssigned
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget=1 --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudget
+    RocjitsuCpuThreadBudgetAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsNonNumeric
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget four --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsNonNumeric
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget requires an unsigned integer"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsAttach
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config} --attach
+        --cpu-thread-budget 1 -- true
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsAttach
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget cannot be combined with --attach"
+)
+
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
@@ -522,9 +571,9 @@ add_executable(
     completion_tracker_test.cpp
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
-    pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
-    pm4_queue_controller_test.cpp
+    packet_processor_contract_test.cpp
+    pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
@@ -554,12 +603,14 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     transcendental_test.cpp
+    comparison_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
+    patch/smem_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -586,12 +637,14 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
+    cube_instruction_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
@@ -615,8 +668,14 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    swmmac_k64_simd_benchmark.cpp
+    swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
+    simd_correctness/swmmac_k64_simd_exact_test.cpp
+    simd_correctness/smfmac_simd_exact_test.cpp
+    simd_correctness/swmmac_k128_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -668,6 +727,7 @@ add_executable(
     execution_plugin_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
+    race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
@@ -784,7 +844,7 @@ endif()
 rj_add_gtest_tests(
     rocjitsu_tests
     TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*"
+        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
 
 # RequestExitWakesAllPartitions may require several runs to show regression
@@ -871,6 +931,28 @@ target_link_libraries(
 )
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
+
+add_executable(waitcheck_stream_test analysis/waitcheck_stream_test.cpp)
+target_link_libraries(
+    waitcheck_stream_test
+    PRIVATE
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_stream_test WARNINGS)
+rj_add_gtest_tests(waitcheck_stream_test)
+if(CMAKE_NM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME WaitcheckStream.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:waitcheck_stream_test>
+            -DWAITCHECK_ARCHIVE=$<TARGET_FILE:rocjitsu_waitcheck_internal>
+            -DREQUIRED_MODEL_ARCHES=cdna3,cdna4,cdna5,rdna3,rdna3_5,rdna4 -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_waitcheck_stream_symbols.cmake
+    )
+endif()
 
 # Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -1260,6 +1342,30 @@ get_filename_component(
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
+rj_add_test(
+    NAME "EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
+        --cpu-thread-budget
+        4
+        --
+        $<TARGET_FILE:rocjitsu_tests>
+        --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
+        "--cpu-thread-budget"
+        "4"
+        "--"
+        "bin/rocjitsu_tests"
+        "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)
     foreach(
@@ -1585,6 +1691,18 @@ rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_dependencies(hsa_hooks_unit_test rocjitsu_hooks)
+    add_test(
+        NAME HsaHooksAbi.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DHOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks>
+            -DTEST_HOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks_testing> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hsa_hooks_symbols.cmake
+    )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         hsa_hotswap_rocjitsu_unit_test
         dbt/hsa_hotswap_rocjitsu_unit_test.cpp
@@ -1698,6 +1816,29 @@ target_compile_definitions(
 
 # --- Interposer loader initialization regression tests ---
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep inline register accessors in a separate DSO without linking core
+    # objects into it, so missing exports cannot be hidden by static linkage.
+    add_library(register_observer_probe MODULE register_observer_probe.cpp)
+    target_link_libraries(register_observer_probe PRIVATE util simdojo_headers)
+    rj_configure_target(register_observer_probe LIB)
+
+    add_executable(register_observer_abi_test register_observer_abi_test.cpp)
+    target_link_libraries(register_observer_abi_test PRIVATE ${CMAKE_DL_LIBS})
+    rj_configure_target(register_observer_abi_test TEST)
+    add_dependencies(
+        register_observer_abi_test
+        register_observer_probe
+        rocjitsu_shared
+    )
+    add_test(
+        NAME ExecutionPluginAbi.RegisterAccessModuleLoads
+        COMMAND
+            register_observer_abi_test $<TARGET_FILE:rocjitsu_shared>
+            $<TARGET_FILE:register_observer_probe>
+    )
+endif()
+
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
 rj_configure_target(early_mmap_preload TEST)
 add_dependencies(early_mmap_preload rocjitsu_shared)
@@ -1747,8 +1888,41 @@ add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
+# Present servers pass real DRM descriptors through IPC. A second preload
+# supplies that identity on GPU-less runners, beneath rocjitsu's stat wrappers.
+add_library(host_drm_preload SHARED host_drm_preload_test.cpp)
+rj_configure_target(host_drm_preload TEST)
+target_link_libraries(host_drm_preload PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(interposer_dup_test host_drm_preload)
+if(RJ_INSTALL_TESTS)
+    install(
+        TARGETS host_drm_preload
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+    )
+endif()
+foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
+    rj_add_test(
+        NAME "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
+        COMMAND
+            ${RJ_CLI}
+            --config "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+            -- $<TARGET_FILE:interposer_dup_test>
+            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
+        ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            --config "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
+            -- bin/interposer_dup_test
+            "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
+        INSTALL_ENVIRONMENT
+            "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+endforeach()
+
 function(rj_add_interposer_test_suite _suite)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "ENVIRONMENT")
     set(_config "${RJ_CDNA4_KMD_CONFIG}")
     set(_suffix "")
     if(ARG_CONFIG)
@@ -1767,6 +1941,7 @@ function(rj_add_interposer_test_suite _suite)
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
+            ENVIRONMENT ${ARG_ENVIRONMENT}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             INSTALL_COMMAND
@@ -1776,6 +1951,7 @@ function(rj_add_interposer_test_suite _suite)
                 "--"
                 "bin/interposer_dup_test"
                 "--gtest_filter=${_suite}.${_case}"
+            INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
         )
     endforeach()
 endfunction()
@@ -1814,13 +1990,38 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    CanonicalSysfsPathsRetainSimulatedDevice
     DeviceInfoReportsActiveCuCount
     OpensWithinCurrentDescriptorLimit
+    PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
 
 set(_rj_interposer_pm4_tests
+    SparseReplacementPreservesResidentTail
+    SubmissionFenceQueryPollsAndWaitsForCompletion
+    SubmissionFenceSequencesAreLocalToContextAndEngine
+    SubmissionFenceQueryRejectsInvalidIdentityAndReportsFailure
+    SubmissionFenceQueryRetiresOldHistory
+    TransferWaitsForSubmissionWithoutWaitingForCompletion
+    GraphicsRegistersRetainAllPacketForms
+    ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState
+    DispatchInterleaveShadowIsQualifiedForGfx12
+    ComputeTranslationPrefetchIgnoresPfpSelector
+    StreamoutQuerySamplesAllFourMemoryCounterPairs
+    StreamoutQueryEventMarksZeroCounterSamplesValid
+    InterleavedDispatchExecutesDirectAndIndirectShaders
+    ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters
+    ContextRegisterLoadRejectsRangeOverflow
+    ContextRegisterLoadsRejectComputeEngine
+    ClearStatePushPopRestoresContextAcrossSubmissions
+    ClearStateResetUsesRdna3Defaults
+    InvalidClearStateFailsBeforeFollowingWrite
+    ShadowRegisterLoadsUseSparseMemoryOffsets
+    MemoryAtomicsApplyIntegerOperationsAtBothWidths
+    InvalidMemoryPacketsFailFenceWithoutWritingMemory
+    MalformedPackedGraphicsRegistersFailFence
     DependencyDefersMemoryWriteAndCompletion
     MalformedPacketFailsCompletion
     FaultedQueueRejectsNewSubmission
@@ -1835,7 +2036,9 @@ set(_rj_interposer_pm4_tests
     TimelineSubmissionWaitsForEarlierQueue
     RepeatedTimelineTransfersVisitSharedDependenciesOnce
     GraphicsQueueAcceptsBufferOwnershipFlushEvents
+    ComputeQueueAcceptsPipelineStatisticsControls
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
+    ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch
     GridProductOverflowFailsFence
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
@@ -1898,6 +2101,7 @@ rj_add_interposer_test_suite(
 
 rj_add_interposer_test_suite(
     InterposerGemTest
+    SparseReservationsPreserveRangesAndFileOwnership
     GemNamespaceIsPrivateButSharedByDuplicates
     IndependentDrmFilesRejectOverlappingMappings
     ReusedDmabufFdMintsDistinctHandles
@@ -1927,6 +2131,18 @@ set(_rj_interposer_syncobj_tests
 rj_add_interposer_test_suite(
     InterposerSyncobjTest
     ${_rj_interposer_syncobj_tests}
+)
+set(_rj_signal_exit_env)
+if(RJ_ENABLE_TSAN)
+    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
+    # allocates and frees memory, so disable only this test's signal-safety
+    # diagnostic; retain TSan's race and mutex checks.
+    set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
+endif()
+rj_add_interposer_test_suite(
+    InterposerSyncobjTest
+    TimelineWaitAllowsThreadExitFromSignal
+    ENVIRONMENT ${_rj_signal_exit_env}
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---

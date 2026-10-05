@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
@@ -131,7 +132,9 @@ struct nic_traits
 
         std::set<std::string> available_names;
         for(const auto& device : devices)
+        {
             available_names.insert(device->get_name());
+        }
 
         for(auto& device : devices)
         {
@@ -168,7 +171,7 @@ struct nic_traits
                 }
                 LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
                          device->get_index(), device->get_name());
-                auto supported = device->get_supported_metrics();
+                auto const supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
             }
             else
@@ -199,7 +202,7 @@ struct nic_traits
         }
         for(const auto& requested : filter.names)
         {
-            if(available_names.find(requested) == available_names.end())
+            if(!available_names.contains(requested))
             {
                 LOG_WARNING("Requested AI NIC device '{}' not found. "
                             "Available device(s): [{}]",
@@ -213,9 +216,10 @@ struct nic_traits
         size_t nic_index = 0;
         for(const auto& entry : entries)
         {
-            agent cur_agent{ agent_type::nic,
+            const size_t device_index = entry.device->get_index();
+            agent        cur_agent{ agent_type::nic,
                              0,
-                             nic_index,
+                             device_index,
                              static_cast<std::uint32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
@@ -224,7 +228,7 @@ struct nic_traits
                              "AI NIC",
                              "AI NIC",
                              0,
-                             {} };
+                                    {} };
 
             get_agent_manager_instance().insert_agent(cur_agent);
             nic_index++;

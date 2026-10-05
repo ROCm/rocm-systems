@@ -59,7 +59,10 @@ single_file_sink::set_append_mode(append_mode_config config) noexcept
 void
 single_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
 {
-    if(bytes.empty()) return;
+    if(bytes.empty())
+    {
+        return;
+    }
 
     if(m_output_disabled)
     {
@@ -70,7 +73,9 @@ single_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
     }
 
     if(m_buffer.capacity() < m_buffer.size() + bytes.size())
+    {
         m_buffer.reserve(m_buffer.size() + bytes.size() + bytes.size() / 8);
+    }
 
     static constexpr std::size_t SINGLE_FILE_BUFFER_WARN_THRESHOLD =
         std::size_t{ 1 } * 1024 * 1024 * 1024;  // 1 GiB
@@ -179,8 +184,10 @@ single_file_sink::finalize()
     if(m_buffer.empty())
     {
         if(dmp::rank() == 0)
+        {
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
                       filename);
+        }
         m_output_disabled = false;
         return;
     }

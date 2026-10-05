@@ -96,16 +96,20 @@ get_default_permit()
     const auto&           m = get_category_map();
     for(const char* cat : { "init", "sync", "rma", "collective", "reduction" })
     {
-        auto it = m.find(cat);
+        auto const it = m.find(cat);
         if(it != m.end())
+        {
             for(const auto& api : it->second)
+            {
                 out.insert(api);
+            }
+        }
     }
     return out;
 }
 
-// Expand tokens to API names: if token is a category name, add all APIs in that category;
-// otherwise add the token as an API name.
+// Expand tokens to API names: if token is a category name, add all APIs in that
+// category; otherwise add the token as an API name.
 inline std::set<std::string>
 expand_tokens_to_apis(const std::set<std::string>& tokens)
 {
@@ -113,12 +117,18 @@ expand_tokens_to_apis(const std::set<std::string>& tokens)
     const auto&           m = get_category_map();
     for(const auto& tok : tokens)
     {
-        auto it = m.find(tok);
+        auto const it = m.find(tok);
         if(it != m.end())
+        {
             for(const auto& api : it->second)
+            {
                 out.insert(api);
+            }
+        }
         else
+        {
             out.insert(tok);
+        }
     }
     return out;
 }
@@ -231,7 +241,10 @@ shmem_gotcha<SHMEMPolicy>::configure()
     for(size_t i = 0; i < shmem_gotcha_t::capacity(); ++i)
     {
         auto* itr = static_cast<gotcha_data_t*>(shmem_gotcha_t::at(i));
-        if(itr) itr->verbose = -1;
+        if(itr)
+        {
+            itr->verbose = -1;
+        }
     }
 
     shmem_gotcha_t::get_initializer() = []() {
@@ -450,10 +463,12 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // are expanded to all APIs in that category.
     shmem_gotcha_t::get_reject_list() = []() {
         std::set<std::string> tokens;
-        auto                  reject_list =
+        auto const            reject_list =
             rocprofsys::common::get_env<std::string>(env_vars::SHMEM_REJECT_LIST, "");
         for(const auto& itr : rocprofsys::common::delimit(reject_list))
+        {
             tokens.insert(itr);
+        }
         return shmem_categories::expand_tokens_to_apis(tokens);
     };
 
@@ -462,18 +477,27 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // collective + reduction (communication and init only; atomics and memory excluded).
     // Set to "all" to permit every bound API; or list categories/APIs to trace.
     shmem_gotcha_t::get_permit_list() = []() {
-        auto permit_list =
+        auto const permit_list =
             rocprofsys::common::get_env<std::string>(env_vars::SHMEM_PERMIT_LIST, "");
         std::set<std::string> tokens;
         for(const auto& itr : rocprofsys::delimit(permit_list))
+        {
             tokens.insert(itr);
-        if(tokens.empty()) return shmem_categories::get_default_permit();
-        if(tokens.count("all"))
+        }
+        if(tokens.empty())
+        {
+            return shmem_categories::get_default_permit();
+        }
+        if(tokens.contains("all"))
         {
             std::set<std::string> all_apis;
             for(const auto& kv : shmem_categories::get_category_map())
+            {
                 for(const auto& api : kv.second)
+                {
                     all_apis.insert(api);
+                }
+            }
             return all_apis;
         }
         return shmem_categories::expand_tokens_to_apis(tokens);
@@ -530,7 +554,7 @@ shmem_gotcha<SHMEMPolicy>::pause()
     static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
                   "shmem_gotcha<Policy>::pause requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> const _lk{ s_mutex };
     using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(false);
 }
@@ -543,7 +567,7 @@ shmem_gotcha<SHMEMPolicy>::resume()
     static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
                   "shmem_gotcha<Policy>::resume requires Policy to expose "
                   "shmem_bundle_t and shmem_gotcha_t");
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> const _lk{ s_mutex };
     using shmem_gotcha_t = SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(true);
 }
