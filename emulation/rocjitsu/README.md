@@ -78,6 +78,23 @@ HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when `hipcc` or `libhsa-runtime64` is
 not found.
 
+Floating-point mode tests run in 16 batches to share process startup and
+GoogleTest registration. Per-case fixtures and assertions are unchanged.
+Run all batches with:
+
+```bash
+ctest --test-dir build -L '^fp-mode$' --output-on-failure
+```
+
+Each batch writes per-case GoogleTest results under `build/tests/gtest-results/`.
+Installed tests use the same batches and write results under `gtest-results/`
+in the installed test directory. To select individual cases or a family, run
+the dedicated executable with a GoogleTest filter:
+
+```bash
+build/tests/rocjitsu_fp_mode_tests --gtest_filter='BinaryF32/ValuFpModeTest.*'
+```
+
 ## Running HIP workloads
 
 ```bash

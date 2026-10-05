@@ -655,7 +655,6 @@ add_executable(
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
-    valu_fp_mode_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
@@ -847,6 +846,44 @@ rj_add_gtest_tests(
     TEST_FILTER
         "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
+
+# GoogleTest registers every parameter before applying its filter. Keep the FP
+# matrices out of unrelated test processes and amortize registration across
+# batches. Sharding includes new cases and helper tests without a filter list.
+add_executable(rocjitsu_fp_mode_tests valu_fp_mode_test.cpp)
+target_link_libraries(
+    rocjitsu_fp_mode_tests
+    PRIVATE
+        ${RJ_OBJECT_LIBS}
+        util
+        flatbuffers
+        Threads::Threads
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_fp_mode_tests TEST)
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rocjitsu_fp_mode_tests)
+endif()
+
+set(_rj_fp_mode_shards 16)
+math(EXPR _rj_fp_mode_last_shard "${_rj_fp_mode_shards} - 1")
+foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
+    set(_shard_env
+        "GTEST_TOTAL_SHARDS=${_rj_fp_mode_shards}"
+        "GTEST_SHARD_INDEX=${_shard}"
+    )
+    set(_shard_output
+        "--gtest_output=xml:gtest-results/rocjitsu_fp_mode_${_shard}.xml"
+    )
+    rj_add_test(
+        NAME "ValuFpModeTest.Shard${_shard}"
+        COMMAND $<TARGET_FILE:rocjitsu_fp_mode_tests> "${_shard_output}"
+        ENVIRONMENT ${_shard_env}
+        INSTALL_COMMAND "bin/rocjitsu_fp_mode_tests" "${_shard_output}"
+        INSTALL_ENVIRONMENT ${_shard_env}
+        LABELS fp-mode
+    )
+endforeach()
 
 # RequestExitWakesAllPartitions may require several runs to show regression
 # (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
