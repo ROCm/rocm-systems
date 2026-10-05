@@ -592,6 +592,7 @@ add_executable(
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
+    kfd_events_test.cpp
     decode_smoke_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
