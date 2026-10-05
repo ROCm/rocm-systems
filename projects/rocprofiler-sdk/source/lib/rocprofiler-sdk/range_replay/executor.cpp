@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/range_replay/retained_kernarg.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa.h>
@@ -87,7 +88,8 @@ tracked_pointers(hsa_agent_t agent)
 }
 
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
-// with each kernel's alignment honored.
+// with each kernel's alignment honored. The block is retained for the agent's next range when this
+// one finishes (see retained_kernarg.hpp).
 class kernarg_staging
 {
 public:
@@ -99,28 +101,37 @@ public:
     kernarg_staging(kernarg_staging&&)                 = delete;
     kernarg_staging& operator=(kernarg_staging&&) = delete;
 
-    // Reserve space for `dispatches` and record each one's offset. Returns false if the kernarg
-    // pool allocation fails.
-    bool reserve(const hsa::Queue& queue, const std::vector<recorded_dispatch_t>& dispatches)
+    // Reserve space for `dispatches` and record each one's offset, reusing the block retained from
+    // an earlier range on this agent when it fits. Returns false if the kernarg pool allocation
+    // fails.
+    bool reserve(const hsa::Queue&                       queue,
+                 rocprofiler_agent_id_t                  agent_id,
+                 const std::vector<recorded_dispatch_t>& dispatches)
     {
         auto placement = plan_kernarg_layout(dispatches);
         m_offsets      = std::move(placement.offsets);
+        m_agent_id     = agent_id;
 
         const auto total = placement.total;
         if(total == 0) return true;
+
+        m_block = take_retained_kernarg_block(agent_id);
+        if(kernarg_block_fits(m_block.capacity, total)) return true;
+        free_kernarg_block(m_block);
 
         const auto& ext  = queue.ext_api();
         const auto  pool = queue.get_agent().kernarg_pool();
         if(pool.handle == 0 || ext.hsa_amd_memory_pool_allocate_fn == nullptr) return false;
 
-        if(ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &m_base) != HSA_STATUS_SUCCESS ||
-           m_base == nullptr)
+        void* base = nullptr;
+        if(ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &base) != HSA_STATUS_SUCCESS ||
+           base == nullptr)
             return false;
 
-        m_free_fn  = ext.hsa_amd_memory_pool_free_fn;
+        m_block    = kernarg_block_t{base, total, ext.hsa_amd_memory_pool_free_fn};
         auto agent = queue.get_agent().get_hsa_agent();
         if(ext.hsa_amd_agents_allow_access_fn != nullptr)
-            ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, m_base);
+            ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, base);
 
         return true;
     }
@@ -138,22 +149,24 @@ public:
                 continue;
             }
 
-            auto* slot = static_cast<uint8_t*>(m_base) + m_offsets[i];
+            auto* slot = static_cast<uint8_t*>(m_block.base) + m_offsets[i];
             std::memcpy(slot, dispatches[i].kernarg.data(), dispatches[i].kernarg.size());
             packets[i].kernel_dispatch.kernarg_address = slot;
         }
     }
 
+    // Must not run while a pass submitted from this block can still be executing: the next range
+    // on the agent refills it.
     void reset()
     {
-        if(m_base != nullptr && m_free_fn != nullptr) m_free_fn(m_base);
-        m_base = nullptr;
+        if(m_block.base != nullptr)
+            retain_kernarg_block(m_agent_id, std::exchange(m_block, kernarg_block_t{}));
     }
 
 private:
-    void* m_base                     = nullptr;
-    hsa_status_t (*m_free_fn)(void*) = nullptr;
-    std::vector<size_t> m_offsets    = {};
+    kernarg_block_t        m_block    = {};
+    rocprofiler_agent_id_t m_agent_id = {.handle = 0};
+    std::vector<size_t>    m_offsets  = {};
 };
 }  // namespace
 
@@ -309,7 +322,7 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     if(!exit_snapshot.ok) return ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED;
 
     auto staging = kernarg_staging{};
-    if(!staging.reserve(queue, ctx.record.dispatches()))
+    if(!staging.reserve(queue, ctx.agent_id, ctx.record.dispatches()))
         return ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED;
 
     auto packets = build_pass_packets(ctx.record.dispatches());
