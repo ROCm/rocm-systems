@@ -54,6 +54,9 @@ DEPRECATED_OPTIONS = {
     "--mem-level": "Use --roofline-mem-level instead.",
     "--roofline-data-type": "Use --roofline-data-types instead.",
     "--retain-rocpd-output": ".db files will be retained automatically.",
+    "--no-roof": (
+        "To skip roofline, select blocks with -b or --set that do not include block 4."
+    ),
 }
 
 
@@ -449,7 +452,11 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="Profile without collecting roofline data.",
+        help=(
+            "DEPRECATED: to skip roofline, select blocks with -b or --set that "
+            "do not include block 4.\n"
+            "Profile without collecting roofline data."
+        ),
     )
     profile_group.add_argument(
         "remaining",

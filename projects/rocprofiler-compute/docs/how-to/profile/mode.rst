@@ -206,8 +206,8 @@ Notice the two main stages in ROCm Compute Profiler's **default** profiling rout
 1. The first stage collects all the counters needed for ROCm Compute Profiler analysis
    (omitting any filters you have provided).
 
-2. The second stage collects data for the roofline analysis (this stage can be
-   disabled using ``--no-roof``).
+2. The second stage collects data for the roofline analysis (this stage is
+   skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
 
 At the end of profiling, you can find all resulting ``csv`` files in a
 :ref:`SoC <def-soc>`-specific target directory; for
@@ -726,7 +726,7 @@ To see a list of available sets, use the ``--list-sets`` option.
 Standalone roofline
 ===================
 
-Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
+Roofline analysis occurs on any profile mode run, unless ``-b`` or ``--set`` selects blocks that do not include block 4.
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roofline`` option.
 This option checks if there is existing roofline benchmark data in the workload directory (``roofline.csv``):
@@ -848,7 +848,7 @@ This is useful for:
 .. note::
 
   * ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--speed-of-light``,
-    ``--memory-chart``, ``--roofline``, or ``--no-roof``.
+    ``--memory-chart``, ``--roofline``, or the deprecated ``--no-roof``.
   * ``--bench-only`` is the old name. It still works, but shows a warning.
 
 .. code-block:: shell-session
@@ -1275,7 +1275,6 @@ process, which exits normally and writes its counter data. For example:
    $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
        rocprof-compute profile \
        --iteration-multiplexing \
-       --no-roof \
        --name vllm-offline -- \
        python offline_inference.py
 

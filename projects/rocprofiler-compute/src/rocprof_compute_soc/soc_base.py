@@ -788,7 +788,7 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-        # Roofline can be skipped via --no-roof
+        # Roofline can be skipped via the deprecated --no-roof
         # Roofline not supported on MI 100
         # If -b or --set selected blocks, roofline (block 4) must be one of them
         if (

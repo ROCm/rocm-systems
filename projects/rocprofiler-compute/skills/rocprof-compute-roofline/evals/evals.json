@@ -43,11 +43,11 @@
       "skill_should_trigger": true,
       "prompt": "my rocprof-compute report has no roofline section, what went wrong?",
       "expected_behavior": [
-        "checks whether the profile used --no-roof",
+        "checks whether the profile used --no-roof or a -b/--set selection without block 4",
         "checks whether the architecture supports the roofline microbenchmarks before advising a re-profile"
       ],
       "unexpected_behavior": [
-        "tells the user to re-profile without --no-roof when the architecture is the actual reason"
+        "tells the user to re-profile to get roofline when the architecture is the actual reason"
       ]
     },
     {

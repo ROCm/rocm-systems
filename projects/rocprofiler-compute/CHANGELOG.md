@@ -57,6 +57,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The old roofline option names (`--roof-only`, `--bench-only`, `--device`, `--sort`, `--mem-level`, and `--roofline-data-type`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
+* `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
+
 ### Known issues
 
 ## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
