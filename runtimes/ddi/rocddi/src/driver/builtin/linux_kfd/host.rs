@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! CPU-only backing implemented as an owned anonymous Linux mapping.
 //!
 //! Host allocation is independent of GPU activation and therefore works for

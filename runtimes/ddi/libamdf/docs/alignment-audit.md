@@ -1,16 +1,14 @@
-# AMDF implementation and planning alignment
+<!-- SPDX-License-Identifier: MIT -->
 
-Updated on 2026-09-24 for the ROCm Systems runtime workspace.
+# AMDF implementation audit
 
-The audit covers the public headers, Rust provider, ABI tests, and tracked
-design and contract documents. Its
-acceptance criterion is an unchanged AMDF frontend over the private rocddi
-core. Private Rust types and caller policy must not become competing public
-APIs or imply capabilities that the provider has not qualified.
+This audit records the relationship between the public headers, the AMDF
+frontend, the rocddi core, and the checked qualification. The headers define
+the ABI; private Rust types do not extend that contract.
 
 ## Sources and authority
 
-The seven [vendored headers](../../../api-headers/README.md) are synchronized
+The seven [vendored headers](../../../../api-headers/README.md) are synchronized
 from `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461` with only the approved
 AMD copyright and MIT license preamble substitution. These headers define the ABI; the
 [support map](api-support.md) describes what this implementation supports. The
@@ -20,13 +18,13 @@ upstream CTS and consumer sources were inspected at that same revision.
 
 | Requirement | Result and evidence |
 |---|---|
-| Preserve the AMDF public ABI | Imported AMDF headers remain libamdf's sole ABI source. Generated bindings and compiled layout probes match them; the shared library exports only `amdf_query_api`. libamdf and rocddi are private Rust packages. |
-| Keep API frontends independently preloadable | libamdf and libhsa build separate `cdylib` artifacts, link the private rocddi `rlib`, and load independently through `LD_PRELOAD`. Same-process coexistence is not claimed while each artifact contains separate process-global native state. |
+| Preserve the AMDF public ABI | Imported AMDF headers remain libamdf's sole ABI source. Generated bindings and compiled layout probes match them; `amdf_query_api` is the AMDF entry point in the shared image. libamdf and rocddi are private Rust packages. |
+| Keep API frontends independently preloadable | The AMDF and HSA library names resolve to one combined shared image. Either name may be loaded alone or both may be loaded in one process; both ABIs then use one rocddi process context. The AMDF static archive is separate. |
 | Account for all callable services | The [support map](api-support.md) covers all 38 core ABI-v3 and six GPU-v1 table slots, including validation-only and unsupported paths. XDNA is absent. Table presence does not qualify every endpoint or request. |
 | Preserve AMDF memory identity and cache semantics | [Memory implementation](../src/memory.rs) distinguishes mismatched physical identity from unavailable identity, requires the selected registration cacheability, and qualifies concrete and prospective write-back visibility recipes. C and Rust regression coverage exercises these distinctions and output preservation. |
 | Establish complete ordered access sets | Multi-device SYSTEM CREATE and REGISTER use one common VA, pass the ordered distinct GPU-ID list through mapping retries, reuse a mapping for repeated consumers of one VM, and publish one immutable access record per requested device. LOCAL CREATE additionally requires the physical owner and a cached directional direct-XGMI or validated-PCIe route for every peer, allocates on the owner independently of request order, and maps the same backing through each distinct VM. SYSTEM IMPORT is qualified for one native VM; distinct-GPU IMPORT remains unadvertised. |
 | Keep device production explicit | AQL and SDMA families advertise device production, but a queue acquires the KFD doorbell BO only when creation requires that capability. The owner mapping is immediate. A peer mapping requires the same instance, common VA coverage, and successful KFD attachment of the ring, indices, and doorbell. Hardware execution remains a separate gate. |
-| Keep ownership and control lightweight | [Shared boundary rules](../src/support.rs) explain caller provenance, borrowed parents, destruction serialization, and output publication. The private rocddi [Driver](../../rocddi/src/driver.rs) owns native control; cached queries need no native call or global registry. |
+| Keep ownership and control lightweight | [Shared boundary rules](../src/support.rs) explain caller provenance, borrowed parents, destruction serialization, and output publication. The private rocddi [Driver](../../../src/driver.rs) owns native control; cached queries need no native call or global registry. |
 | Honor method-level cost contracts | API-table negotiation and cached endpoint, family, scope, device, memory, mapping, and address queries use retained immutable or atomic state without allocation, locks, lazy initialization, or ownership-counter updates. Pair queries directly compose the two supplied sites. User status is the documented native-observation path; wait calls are the explicit synchronization path. |
 | Publish exact queue encodings | Family format features propagate unchanged through created queue and mapping information. GFX1201 PM4 reports ACQUIRE_MEM GCR, SDMA 7.0.1 reports GCR plus explicit-system FENCE, and AQL reports the zero baseline. |
 | Separate queue transport from application completion | [Queue documentation](../README.md) distinguishes producer reservations, release publication, consumption, and application resource lifetime. The GFX1201 multiple-producer workload observes unpublished reservations and later packets blocked behind an INVALID hole. |
@@ -60,58 +58,17 @@ move-owned value only after success. Unsupported source classes and failed
 imports preserve the external value and output. Distinct-GPU and LOCAL imports
 remain unadvertised.
 
-Repeated entry-point safety comments were replaced with shared boundary
-obligations and comments explaining actual ownership transitions. Rustfmt also
-collapsed redundant closure blocks; those formatting changes add no behavior.
+## Verification and remaining limits
 
-## Planning disposition
+The [validation record](../tests/README.md) gives runnable source and ABI
+checks and identifies the GFX1201 binary used for hardware results. The
+[support map](api-support.md) states which API requests are implemented and
+which remain unadvertised. Source and ABI checks do not qualify device
+coherence, firmware behavior, or a second platform backend.
 
-Local plans and historical evidence are non-authoritative inputs and are not
-required to build or interpret the tracked API. They remain outside the
-portable runtime migration set. The support map, this record, and validation
-results retain the current decisions needed by a fresh checkout.
-
-## Verification and next gates
-
-The current workspace contains 308 passing Rust tests. The recorded AMDF
-checks also include formatting, strict Clippy and Rustdoc, imported-header
-and generated-layout verification, shared/static C smoke, C++20 header checks,
-export checks, the AArch64 source gate, and historical CTS linkage/lifetime
-configurations. The 2026-09-24 native memory smoke and pinned dynamic GPU CTS
-passed under PROCESS and INSTANCE on the current source.
-The 2026-09-17 AMDF runs contain 62 tests per configuration: each INSTANCE
-run passed 38 and skipped 24, while each PROCESS
-run passed 51 and skipped 11. The PROCESS runs include the direct-PM4 copy and
-concurrent device-recreation workloads. Exact commands, counts, and hardware
-limits are in the [validation record](../tests/README.md).
-
-The GFX1201 workloads activate a device through the imported tables and check
-64 SYSTEM-memory SDMA copies, 64 private and 64 host-visible LOCAL SDMA
-round trips under both lifetimes, 64 registered-host SDMA copies, and 384 single-producer plus 128 four-thread
-multiple-producer scratch-backed AQL copy-add dispatches per linkage. The AQL
-workload also passed with WC LOCAL source and target in both lifetimes. The
-registered workload verifies subpage-offset caller buffers, page-cover metadata,
-independent GPU addresses, exact access, directional cache pairs, eight ring
-wraps, and caller ownership after destruction. The LOCAL workload verifies private-map rejection and public WC mapping,
-exact access, prospective and concrete cache pairs, CPU and SDMA access,
-8 or 16 ring wraps, completion, consumption, results, untouched tails, and
-cleanup.
-AQL additionally covers low/normal/high queue creation and execution, exact KFD
-priority values, fixed private-segment execution, exact single/multiple HSA
-queue-control types, atomic reservation uniqueness, an unpublished frontier,
-out-of-order later publication, MMIO doorbell ordering, geometry validation,
-and queue-lifetime scratch borrowing. A separate two-dispatch control proves
-concurrent progress without a barrier; inserting a zero-dependency barrier-AND
-with the barrier bit blocks the follower until the predecessor completes.
-Priority execution does not establish a relative service, fairness, or latency
-guarantee.
-
-Remaining gates include deliberate fault execution, dependency-bearing AQL
-barriers, barrier-OR, additional device cache-pair recipes, foreign and LOCAL
-external-memory interop, LOCAL/VRAM peer hardware execution, kernel queues,
-live reset and unplug, cross-runtime stress, additional targets, and AArch64 GPU
-execution. Same- and peer-device production, distinct-device activation,
-SYSTEM-memory access, and source/unit-qualified LOCAL peer routing lack hardware
-qualification on the current host. Each capability must remain unadvertised or
-reject unsupported requests until its full execution and failure paths are
-qualified.
+The current backend supports Linux x86-64 and AArch64 builds; GPU execution has
+been exercised on one x86-64 GFX1201 host. Peer-device execution, live reset
+and unplug, AArch64 GPU execution, and cross-runtime stress still need
+hardware qualification. The combined shared image has one rocddi process
+context for both frontend ABIs. The separately linked AMDF static archive
+does not share that context.

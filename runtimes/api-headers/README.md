@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # Runtime API Headers
 
 This directory contains static, dependency-free API headers intended for both
@@ -7,7 +9,7 @@ The headers are organized by API family under `include/`:
 
 - `abce`: Accelerated Blit Copy Engine, the header-only SDMA copy library; see
   `include/abce/README.md`.
-- `amdf`: AMD Framework API headers.
+- `amdf`: AMD Fabric API headers.
 - `hsa`: Heterogeneous System Architecture API headers.
 - `uapi`: Linux userspace API headers used by ROCm runtimes.
 
