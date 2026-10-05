@@ -3014,21 +3014,39 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
 
   // Apply the per-call algSelection filter. A registry mask bit IS its cost-model tuning id, so a
   // general row sits at (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
-  // Env (NCCL_ALGO/NCCL_PROTO) is a global override that wins over per-call algSelection for any
-  // function it forced, matching ncclMakeSymmetricTaskList (src/scheduler/symmetric_sched.cc).
+  // Only NCCL_ALGO/NCCL_PROTO set tuningContext.forced[], so only those two win over a per-call
+  // algSelection here, matching ncclMakeSymmetricTaskList (src/scheduler/symmetric_sched.cc).
+  // RCCL_OVERRIDE_ALGO/RCCL_OVERRIDE_PROTO do NOT, and getAlgoInfo discards their error, so a
+  // selection that blanks the overridden cell drops the override behind a WARN.
   uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
   uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
   // generalMask == 0 means the selection named no general row (symmetric-only, e.g. "SYMK_LL").
   // Leave the table alone: the symmetric scheduler may still decline, and this table is the
   // fallback it declines to.
   if (generalMask != 0) {
+    bool anyLeft = false;
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) {
+          table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        } else if (table[a][p] != NCCL_ALGO_PROTO_IGNORE) {
+          anyLeft = true;
+        }
       }
+    }
+    // Every named row was already ineligible on this comm (e.g. NVLS_SIMPLE without NVLS), so the
+    // selection cannot be honored. forceAlgSelection defaults to 1 and nccl.h.in documents that as
+    // an error; without this topoGetAlgoInfo would silently fall back to RING/SIMPLE instead.
+    if (!anyLeft && info->forceAlgSelection) {
+      WARN("algSelection names only general algorithm(s) that are unavailable for %s",
+           ncclFuncToString(info->func));
+      return ncclInvalidArgument;
     }
   }
 
+  // Note: narrowing the table is not the whole story. getAlgoInfo rewrites info->algorithm and
+  // info->protocol after the argmin for a few arch/size windows (e.g. gfx950 1-node AllReduce at
+  // :3287) without consulting algMask, so a selection inside one of those windows is still a no-op.
   return ncclSuccess;
 }
 

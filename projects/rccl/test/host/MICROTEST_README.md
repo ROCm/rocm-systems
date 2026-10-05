@@ -111,6 +111,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
     `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
     `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
+  - `tuning/cost_model.cc` (`COST_MODEL_CC_PATH`, from `cost-model-test.cc`);
+    suite `CostModelMicrotest.*`. Covers the `modelMap[]` registry, its
+    correspondence with `config/algorithm_registry.cc` (also `#include`d, via
+    `ALGORITHM_REGISTRY_CC_PATH`), the per-id dispatch, and the init-time
+    `enabled[][]` seeding and env narrowing. The TU defines `ncclFuncStr` (from
+    `src/init.cc`, which this binary does not compile; `parseList` uses it as its
+    prefix table) and `ncclSymkKernelIdToString` (from `src/sym_kernels.cc`; the
+    generated `sym_kernels_host.cc` does NOT carry it). Do not duplicate either
+    in `fakes/`, and do not add `fakes/sym_kernels_index_fakes.cc` -- its
+    `ncclSymkGetKernelIndex`/`ncclSymkKernelList*` collide with the generated
+    file. `ncclFuncStr` is pinned to production by a configure-time
+    `rccl_assert_source_line` check plus a `static_assert` on
+    `NCCL_NUM_FUNCTIONS`.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result

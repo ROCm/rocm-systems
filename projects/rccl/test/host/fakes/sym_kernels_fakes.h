@@ -30,8 +30,10 @@ extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
 
 // ncclSymkLLKernelMask/ncclSymkDynamicSmemKernelMask/ncclSymkGetKernelIndex/ncclSymkKernelIdToString/
-// ncclSymkMakeDevWork seams live in sym_kernels_index_fakes.h, not here (rccl-UnitTestsMicro links the
-// real sym_kernels_host.cc, which defines those symbols for real -- a duplicate-symbol error if faked here too).
+// ncclSymkMakeDevWork seams live in sym_kernels_index_fakes.h, not here. rccl-UnitTestsMicro cannot link
+// that file at all: the generated sym_kernels_host.cc already defines ncclSymkGetKernelIndex and the
+// kernel-list tables. The other four are NOT in the generated file, so a TU in that binary needing one
+// defines it itself (cost-model-test.cc does, for ncclSymkKernelIdToString).
 
 void ResetSymKernelsFakes();
 
