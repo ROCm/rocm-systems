@@ -10,7 +10,9 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <exception>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <tuple>
@@ -222,12 +224,24 @@ ph_ctx::build_thread_track_events(
     };
 
     std::atomic<size_t> next{ 0 };
+    std::atomic<bool>   failed{ false };
+    std::mutex          error_mutex;
+    std::exception_ptr  first_error;
     const auto          worker = [&](profiler_hub::common::connection& worker_conn) {
-        for(size_t i = next.fetch_add(1); i < items.size(); i = next.fetch_add(1))
+        try
         {
-            auto& item = items[i];
-            worker_conn.reader().visit_track_events_in_id_range(
-                track, item.type, item.begin, item.end, visitor, &item.out);
+            for(size_t i = next.fetch_add(1); i < items.size() && !failed.load();
+                i        = next.fetch_add(1))
+            {
+                auto& item = items[i];
+                worker_conn.reader().visit_track_events_in_id_range(
+                    track, item.type, item.begin, item.end, visitor, &item.out);
+            }
+        } catch(...)
+        {
+            const std::scoped_lock lock{ error_mutex };
+            if(!first_error) first_error = std::current_exception();
+            failed.store(true);
         }
     };
 
@@ -243,6 +257,8 @@ ph_ctx::build_thread_track_events(
         }
         worker(conn);
     }
+
+    if(first_error) std::rethrow_exception(first_error);
 
     size_t total = 0;
     for(const auto& item : items)
