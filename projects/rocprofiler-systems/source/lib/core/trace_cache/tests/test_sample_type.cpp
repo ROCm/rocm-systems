@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <variant>
 #include <vector>
 
 using namespace rocprofsys::trace_cache;
@@ -171,8 +172,8 @@ TEST_F(sample_type_test, region_sample_get_size)
     const region_sample sample(789, "test_function", 1100, 1200, 10000, 20000,
                                "frame1\nframe2", "arg1=1, arg2=hello", "hip");
 
-    const size_t expected_size = sizeof(std::uint64_t) * 5 + sizeof(size_t) * 4 + 13 +
-                                 13 + 18 + 3 + sizeof(char) * 4;
+    const size_t expected_size = sizeof(std::uint64_t) * 5 + sizeof(size_t) * 6 + 13 +
+                                 13 + 18 + 3 + sizeof(char) * 5;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
@@ -180,6 +181,58 @@ TEST_F(sample_type_test, region_sample_get_size)
 TEST_F(sample_type_test, region_sample_type_identifier)
 {
     EXPECT_EQ(region_sample::type_identifier, type_identifier_t::region);
+}
+
+TEST_F(sample_type_test, region_sample_component_annotations_serialize_deserialize)
+{
+    const std::vector<component_annotation_value> values = { 0.000163198,
+                                                             std::int64_t{ 7 },
+                                                             std::uint64_t{ 9 } };
+    const region_sample original(
+        789, "test_function", 1100, 1200, 10000, 20000, "{}", "arg1=1", "host",
+        "thread_cpu_clock\nmajor_page_faults\nunsigned_counter\n", values);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto const    deserialized = deserialize<region_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.annotation_labels, original.annotation_labels);
+    EXPECT_EQ(deserialized.annotation_values, values);
+    EXPECT_TRUE(std::holds_alternative<double>(deserialized.annotation_values[0]));
+    EXPECT_TRUE(std::holds_alternative<std::int64_t>(deserialized.annotation_values[1]));
+    EXPECT_TRUE(std::holds_alternative<std::uint64_t>(deserialized.annotation_values[2]));
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+}
+
+TEST_F(sample_type_test, region_sample_component_annotations_default_to_empty)
+{
+    const region_sample original(789, "test_function", 1100, 1200, 10000, 20000, "{}", "",
+                                 "host");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto const    deserialized = deserialize<region_sample>(buffer_ptr);
+
+    EXPECT_TRUE(deserialized.annotation_labels.empty());
+    EXPECT_TRUE(deserialized.annotation_values.empty());
+}
+
+TEST_F(sample_type_test, region_sample_get_size_includes_component_annotations)
+{
+    const std::string_view                        labels = "thread_cpu_clock\n";
+    const std::vector<component_annotation_value> values = { 0.5 };
+    const region_sample sample(789, "test_function", 1100, 1200, 10000, 20000,
+                               "frame1\nframe2", "arg1=1, arg2=hello", "hip", labels,
+                               values);
+
+    const size_t expected_size = sizeof(std::uint64_t) * 5 + sizeof(size_t) * 6 + 13 +
+                                 13 + 18 + 3 + labels.size() + sizeof(char) * 5 +
+                                 values.size() * sizeof(component_annotation_value);
+
+    EXPECT_EQ(get_size(sample), expected_size);
 }
 
 TEST_F(sample_type_test, region_sample_empty_strings)

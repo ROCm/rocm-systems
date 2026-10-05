@@ -8,6 +8,7 @@
 
 #include "core/categories.hpp"
 #include "core/common_types.hpp"
+#include "core/trace_cache/sample_type.hpp"
 
 #include <cstdint>
 #include <gmock/gmock.h>
@@ -594,7 +595,8 @@ struct gmock_region_sink
 {
     MOCK_METHOD(void, store_region,
                 (std::uint64_t thread_id, std::string name, std::uint64_t start_ts,
-                 std::uint64_t end_ts, std::string category, std::string args),
+                 std::uint64_t end_ts, std::string category, std::string args,
+                 rocprofsys::trace_cache::component_annotations component_annotations),
                 (const));
 };
 
@@ -622,11 +624,13 @@ struct mock_clock_source
 
 struct mock_region_sink
 {
-    void store_region(std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
-                      std::uint64_t end_ts, const char* category, const char* args) const
+    void store_region(  // NOLINT(readability-function-size)
+        std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
+        std::uint64_t end_ts, const char* category, const char* args,
+        const rocprofsys::trace_cache::component_annotations& component_annotations) const
     {
-        test_globals::g_region_sink_gmock->store_region(thread_id, name, start_ts, end_ts,
-                                                        category, args);
+        test_globals::g_region_sink_gmock->store_region(
+            thread_id, name, start_ts, end_ts, category, args, component_annotations);
     }
 };
 
@@ -646,6 +650,16 @@ struct mock_region_policy
 };
 
 using mocked_region_cache_t = rocprofsys::utility::category_region<mock_region_policy>;
+
+using annotations_t = rocprofsys::trace_cache::component_annotations;
+
+annotations_t
+make_annotations(std::string_view label, double value)
+{
+    annotations_t annotations;
+    annotations.add(label, value);
+    return annotations;
+}
 }  // namespace
 
 class category_region_policy_test : public ::testing::Test
@@ -680,7 +694,7 @@ TEST_F(category_region_policy_test, cache_start_records_injected_clock_without_e
     EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(1).WillOnce(Return(1234u));
     // a push must not resolve the thread or emit a region
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _, _))
         .Times(0);
 
     region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
@@ -710,9 +724,9 @@ TEST_F(category_region_policy_test, cache_stop_emits_region_through_injected_sea
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
         .Times(1)
         .WillOnce(Return(42u));
-    EXPECT_CALL(
-        *test_globals::g_region_sink_gmock,
-        store_region(42u, std::string{ "region" }, 100u, 500u, std::string{ "cat" }, _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(42u, std::string{ "region" }, 100u, 500u,
+                             std::string{ "cat" }, _, _))
         .Times(1);
 
     region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
@@ -730,7 +744,7 @@ TEST_F(category_region_policy_test, cache_stop_without_open_entry_touches_no_sea
 
     EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(0);
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _, _))
         .Times(0);
 
     region.cache_stop("missing", "cat");
@@ -756,7 +770,7 @@ TEST_F(category_region_policy_test, cache_stop_pops_only_the_innermost_frame)
     // 100
     EXPECT_CALL(
         *test_globals::g_region_sink_gmock,
-        store_region(9u, std::string{ "region" }, 200u, 300u, std::string{ "cat" }, _))
+        store_region(9u, std::string{ "region" }, 200u, 300u, std::string{ "cat" }, _, _))
         .Times(1);
 
     region.cache_start("region", "cat", serialize_name_value_pairs("outer", 1));
@@ -787,7 +801,7 @@ TEST_F(category_region_policy_test, cache_stop_emits_zero_thread_id_when_unresol
         .WillOnce(Return(0u));
     EXPECT_CALL(
         *test_globals::g_region_sink_gmock,
-        store_region(0u, std::string{ "region" }, 10u, 20u, std::string{ "cat" }, _))
+        store_region(0u, std::string{ "region" }, 10u, 20u, std::string{ "cat" }, _, _))
         .Times(1);
 
     region.cache_start("region", "cat");
@@ -810,12 +824,126 @@ TEST_F(category_region_policy_test, cache_stop_forwards_serialized_args_to_sink)
         .Times(1)
         .WillOnce(Return(3u));
     // the args serialized at start flow verbatim into the sink at stop
-    EXPECT_CALL(
-        *test_globals::g_region_sink_gmock,
-        store_region(3u, std::string{ "region" }, 10u, 20u, std::string{ "cat" }, args))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(3u, std::string{ "region" }, 10u, 20u, std::string{ "cat" },
+                             args, annotations_t{}))
         .Times(1);
 
     region.cache_start("region", "cat", args);
+    region.cache_stop("region", "cat");
+}
+
+TEST_F(category_region_policy_test, cache_stop_forwards_component_annotations_to_sink)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    const auto component_annotations    = make_annotations("thread_cpu_clock", 0.5);
+    constexpr std::uint64_t k_thread_id = 3u;
+    constexpr std::uint64_t k_start_ts  = 10u;
+    constexpr std::uint64_t k_end_ts    = 20u;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(k_start_ts))
+        .WillOnce(Return(k_end_ts));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(k_thread_id));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(k_thread_id, std::string{ "region" }, k_start_ts, k_end_ts,
+                             std::string{ "cat" }, _, component_annotations))
+        .Times(1);
+
+    region.cache_start("region", "cat");
+    region.append_component_annotations("region", "cat", component_annotations);
+    region.cache_stop("region", "cat");
+}
+
+TEST_F(category_region_policy_test, append_component_annotations_touches_no_seams)
+{
+    using ::testing::_;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(0);
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _, _))
+        .Times(0);
+
+    region.append_component_annotations("region", "cat", make_annotations("x", 1.0));
+}
+
+TEST_F(category_region_policy_test,
+       append_component_annotations_without_open_entry_is_dropped)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    constexpr std::uint64_t k_thread_id = 3u;
+    constexpr std::uint64_t k_start_ts  = 10u;
+    constexpr std::uint64_t k_end_ts    = 20u;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(k_start_ts))
+        .WillOnce(Return(k_end_ts));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .Times(1)
+        .WillOnce(Return(k_thread_id));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(k_thread_id, std::string{ "region" }, k_start_ts, k_end_ts,
+                             std::string{ "cat" }, _, annotations_t{}))
+        .Times(1);
+
+    region.append_component_annotations("region", "cat", make_annotations("x", 1.0));
+    region.cache_start("region", "cat");
+    region.cache_stop("region", "cat");
+}
+
+TEST_F(category_region_policy_test, component_annotations_attach_to_innermost_frame_only)
+{
+    using ::testing::_;
+    using ::testing::InSequence;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    const auto inner_annotations             = make_annotations("thread_cpu_clock", 0.25);
+    constexpr std::uint64_t k_thread_id      = 9u;
+    constexpr std::uint64_t k_outer_start_ts = 100u;
+    constexpr std::uint64_t k_inner_start_ts = 200u;
+    constexpr std::uint64_t k_inner_end_ts   = 300u;
+    constexpr std::uint64_t k_outer_end_ts   = 400u;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(k_outer_start_ts))
+        .WillOnce(Return(k_inner_start_ts))
+        .WillOnce(Return(k_inner_end_ts))
+        .WillOnce(Return(k_outer_end_ts));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
+        .WillRepeatedly(Return(k_thread_id));
+
+    {
+        const InSequence ordered;
+        EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                    store_region(k_thread_id, std::string{ "region" }, k_inner_start_ts,
+                                 k_inner_end_ts, std::string{ "cat" }, _,
+                                 inner_annotations))
+            .Times(1);
+        EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                    store_region(k_thread_id, std::string{ "region" }, k_outer_start_ts,
+                                 k_outer_end_ts, std::string{ "cat" }, _,
+                                 annotations_t{}))
+            .Times(1);
+    }
+
+    region.cache_start("region", "cat");
+    region.cache_start("region", "cat");
+    region.append_component_annotations("region", "cat", inner_annotations);
+    region.cache_stop("region", "cat");
     region.cache_stop("region", "cat");
 }
 
@@ -831,7 +959,7 @@ TEST_F(category_region_policy_test, append_cache_args_touches_no_seams)
 
     EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(0);
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _, _))
         .Times(0);
 
     const entry_key key{ .name = "region", .category = "cat" };
@@ -861,11 +989,13 @@ TEST_F(category_region_policy_test, flush_emits_every_pending_entry_then_clears)
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
         .Times(1)
         .WillOnce(Return(7u));
-    EXPECT_CALL(*test_globals::g_region_sink_gmock,
-                store_region(7u, std::string{ "r1" }, 10u, 999u, std::string{ "cat" }, _))
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(7u, std::string{ "r1" }, 10u, 999u, std::string{ "cat" }, _, _))
         .Times(1);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock,
-                store_region(7u, std::string{ "r2" }, 20u, 999u, std::string{ "cat" }, _))
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(7u, std::string{ "r2" }, 20u, 999u, std::string{ "cat" }, _, _))
         .Times(1);
 
     region.cache_start("r1", "cat");
@@ -892,14 +1022,17 @@ TEST_F(category_region_policy_test, flush_emits_one_region_per_outstanding_frame
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
         .Times(1)
         .WillOnce(Return(5u));
-    EXPECT_CALL(*test_globals::g_region_sink_gmock,
-                store_region(5u, std::string{ "rec" }, 1u, 100u, std::string{ "cat" }, _))
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(5u, std::string{ "rec" }, 1u, 100u, std::string{ "cat" }, _, _))
         .Times(1);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock,
-                store_region(5u, std::string{ "rec" }, 2u, 100u, std::string{ "cat" }, _))
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(5u, std::string{ "rec" }, 2u, 100u, std::string{ "cat" }, _, _))
         .Times(1);
-    EXPECT_CALL(*test_globals::g_region_sink_gmock,
-                store_region(5u, std::string{ "rec" }, 3u, 100u, std::string{ "cat" }, _))
+    EXPECT_CALL(
+        *test_globals::g_region_sink_gmock,
+        store_region(5u, std::string{ "rec" }, 3u, 100u, std::string{ "cat" }, _, _))
         .Times(1);
 
     region.cache_start("rec", "cat");
@@ -923,7 +1056,7 @@ TEST_F(category_region_policy_test, flush_on_empty_map_emits_nothing)
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread())
         .Times(1)
         .WillOnce(Return(1u));
-    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _, _))
         .Times(0);
 
     region.flush_pending_cached_entries();

@@ -65,8 +65,9 @@ using timestamp_t = std::uint64_t;
 
 struct pending_cache_entry
 {
-    timestamp_t start_ts = 0;
-    std::string args;
+    timestamp_t                                    start_ts = 0;
+    std::string                                    args;
+    rocprofsys::trace_cache::component_annotations component_annotations;
 };
 
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
@@ -94,16 +95,18 @@ struct wall_clock_source
 
 struct trace_cache_region_sink
 {
-    void store_region(std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
-                      std::uint64_t end_ts, const char* category,
-                      const char* args_str) const
+    void store_region(  // NOLINT(readability-function-size)
+        std::uint64_t thread_id, const char* name, std::uint64_t start_ts,
+        std::uint64_t end_ts, const char* category, const char* args_str,
+        const rocprofsys::trace_cache::component_annotations& component_annotations) const
     {
         constexpr size_t      NO_CORRELATION_ID = 0;
         constexpr const char* CALLSTACK         = "{}";
         rocprofsys::trace_cache::get_buffer_storage().store(
-            rocprofsys::trace_cache::region_sample{ thread_id, name, NO_CORRELATION_ID,
-                                                    NO_CORRELATION_ID, start_ts, end_ts,
-                                                    CALLSTACK, args_str, category });
+            rocprofsys::trace_cache::region_sample{
+                thread_id, name, NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts, end_ts,
+                CALLSTACK, args_str, category, component_annotations.labels,
+                component_annotations.values });
     }
 };
 
@@ -402,6 +405,18 @@ struct category_region
         }
     }
 
+    void append_component_annotations(
+        const char* name, std::string_view category,
+        rocprofsys::trace_cache::component_annotations component_annotations)
+    {
+        auto const key = entry_key{ .name = name, .category = std::string{ category } };
+        auto const itr = map_name_to_args.find(key);
+        if(itr != map_name_to_args.end() && !itr->second.empty())
+        {
+            itr->second.back().component_annotations = std::move(component_annotations);
+        }
+    }
+
     void cache_stop(const char* name, std::string_view category)
     {
         const entry_key key{ .name = name, .category = std::string{ category } };
@@ -419,7 +434,7 @@ struct category_region
             const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
 
             cache_region(thread_id, name, entry.start_ts, end_ts, std::string{ category },
-                         entry.args);
+                         entry.args, entry.component_annotations);
         }
     }
 
@@ -438,19 +453,20 @@ struct category_region
             for(const auto& entry : entry_stack)
             {
                 cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
-                             entry.args);
+                             entry.args, entry.component_annotations);
             }
         }
         map_name_to_args.clear();
     }
 
 private:
-    void cache_region(std::uint64_t thread_id, const std::string& name,
-                      std::uint64_t start_ts, std::uint64_t end_ts,
-                      const std::string& category, const std::string& args_str = {})
+    void cache_region(  // NOLINT(readability-function-size)
+        std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
+        std::uint64_t end_ts, const std::string& category, const std::string& args_str,
+        const rocprofsys::trace_cache::component_annotations& component_annotations)
     {
         sink_.store_region(thread_id, name.c_str(), start_ts, end_ts, category.c_str(),
-                           args_str.c_str());
+                           args_str.c_str(), component_annotations);
     }
 
     Policy::clock_type                                    clock_{};
@@ -756,6 +772,12 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         {
             if(get_use_timemory())
             {
+                if(config::get_caching_perfetto() && config::get_perfetto_annotations())
+                {
+                    region_cache::instance().append_component_annotations(
+                        name.data(), category_name,
+                        tracing::collect_timemory_annotations(CategoryT{}, name.data()));
+                }
                 tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
             }
         }

@@ -8,6 +8,7 @@
 #include "core/concepts.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "core/utility.hpp"
 #include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
 #include <cstdint>
@@ -17,7 +18,9 @@
 
 #include "logger/debug.hpp"
 
+#include <tuple>
 #include <type_traits>
+#include <vector>
 
 namespace rocprofsys::tracing
 {
@@ -196,6 +199,34 @@ namespace tim::operation
 {
 using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
 
+namespace detail
+{
+template <typename Tp, typename DataT>
+auto
+component_label_value_data(Tp& obj, int)
+    -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
+                                                                    obj.label_array(),
+                                                                    obj.get()))
+{
+    auto const labels = obj.label_array();
+    auto const data   = obj.get();
+    auto const size   = std::min<size_t>(labels.size(), data.size());
+    return std::make_tuple(size, labels, data);
+}
+
+template <typename Tp, typename DataT>
+auto
+component_label_value_data(Tp& obj, long)
+{
+    using strvec_t         = std::vector<std::string>;
+    using datavec_t        = std::vector<DataT>;
+    size_t const    size   = 1;
+    strvec_t const  labels = { obj.get_label() };
+    datavec_t const data   = { obj.get() };
+    return std::tuple<size_t, strvec_t, datavec_t>{ size, labels, data };
+}
+}  // namespace detail
+
 template <typename Tp>
 struct annotate<perfetto_event_context_t, Tp>
 {
@@ -210,41 +241,17 @@ struct annotate<perfetto_event_context_t, Tp>
             using value_type = Tp::value_type;
             if constexpr(!std::is_void_v<value_type>)
             {
-                auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
-                for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+                auto obj_data =
+                    detail::component_label_value_data<Tp, decltype(obj.get())>(obj, 0);
+                for(size_t i = 0; i < std::get<0>(obj_data); ++i)
                 {
-                    auto&& _label = std::get<1>(_obj_data).at(i);
-                    auto&& _value = std::get<2>(_obj_data).at(i);
-                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
+                    auto&& label = std::get<1>(obj_data).at(i);
+                    auto&& value = std::get<2>(obj_data).at(i);
+                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, label, value);
                 }
             }
             (void) _ctx;
         }
-    }
-
-private:
-    template <typename T, typename DataT>
-    static auto sfinae_data(T& obj, int)
-        -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
-                                                                        obj.label_array(),
-                                                                        obj.get()))
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        auto const _labels = obj.label_array();
-        auto const _data   = obj.get();
-        auto const _size   = std::min<size_t>(_labels.size(), _data.size());
-        return std::make_tuple(_size, _labels, _data);
-    }
-
-    template <typename T, typename DataT>
-    static auto sfinae_data(T& obj, long)
-    {
-        using strvec_t          = std::vector<std::string>;
-        using datavec_t         = std::vector<DataT>;
-        size_t const    _size   = 1;
-        strvec_t const  _labels = { obj.get_label() };
-        datavec_t const _data   = { obj.get() };
-        return std::tuple<size_t, strvec_t, datavec_t>{ _size, _labels, _data };
     }
 };
 
@@ -253,9 +260,28 @@ struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
 {
     using base_type = annotate<perfetto_event_context_t, Tp>;
 
-    auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
+    auto operator()(Tp& obj, perfetto_event_context_t& ctx) const
     {
-        return base_type::operator()(obj, _ctx);
+        return base_type::operator()(obj, ctx);
+    }
+};
+
+template <typename Tp>
+struct component_annotate
+{
+    void operator()(Tp&                                               obj,
+                    ::rocprofsys::trace_cache::component_annotations& annotations) const
+    {
+        using value_type = Tp::value_type;
+        if constexpr(!std::is_void_v<value_type>)
+        {
+            auto const obj_data =
+                detail::component_label_value_data<Tp, decltype(obj.get())>(obj, 0);
+            for(size_t i = 0; i < std::get<0>(obj_data); ++i)
+            {
+                annotations.add(std::get<1>(obj_data).at(i), std::get<2>(obj_data).at(i));
+            }
+        }
     }
 };
 }  // namespace tim::operation

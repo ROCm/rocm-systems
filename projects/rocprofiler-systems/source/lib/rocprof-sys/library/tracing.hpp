@@ -13,6 +13,7 @@
 #include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "core/utility.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
@@ -386,6 +387,23 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
                 });
         }
     }
+}
+
+/// \brief Collects the values of the timemory components running for the region
+/// \p name. The result is empty when no bundle is running for the region.
+template <typename CategoryT>
+inline trace_cache::component_annotations
+collect_timemory_annotations(CategoryT, const char* name)
+{
+    trace_cache::component_annotations annotations;
+    auto const                         timemory_data = get_timemory(CategoryT{}, name);
+    if(timemory_data.first)
+    {
+        timemory_data.first->stop();
+        timemory_data.first->template invoke_with<tim::operation::component_annotate>(
+            perfetto_annotate_component_types{}, annotations);
+    }
+    return annotations;
 }
 
 /// \brief This function is used to take an existing lambda accepting a

@@ -8,8 +8,10 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -367,6 +369,42 @@ get_size(const memory_allocate_sample& item)
                              static_cast<std::uint64_t>(item.stream_handle));
 }
 
+using component_annotation_value = std::variant<double, std::int64_t, std::uint64_t>;
+
+static_assert(std::is_trivially_copyable_v<component_annotation_value>,
+              "the cache serializer copies vector items byte-wise");
+
+/// Values of the timemory components running for a region. The i-th label, taken from
+/// the delimiter-terminated \c labels, names the i-th entry of \c values.
+struct component_annotations
+{
+    static constexpr std::string_view k_label_delimiter = "\n";
+
+    std::string                             labels;
+    std::vector<component_annotation_value> values;
+
+    bool operator==(const component_annotations&) const = default;
+
+    template <typename Number>
+    void add(std::string_view label, Number value)
+    {
+        labels += label;
+        labels += k_label_delimiter;
+        if constexpr(std::is_floating_point_v<Number>)
+        {
+            values.emplace_back(static_cast<double>(value));
+        }
+        else if constexpr(std::is_signed_v<Number>)
+        {
+            values.emplace_back(static_cast<std::int64_t>(value));
+        }
+        else
+        {
+            values.emplace_back(static_cast<std::uint64_t>(value));
+        }
+    }
+};
+
 struct region_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::region;
@@ -377,7 +415,9 @@ struct region_sample : cacheable_t
         std::uint64_t correlation_id_internal_in,
         std::uint64_t correlation_id_ancestor_in, std::uint64_t start_timestamp_in,
         std::uint64_t end_timestamp_in, std::string_view call_stack_in,
-        std::string_view args_str_in, std::string_view category_in)
+        std::string_view args_str_in, std::string_view category_in,
+        std::string_view                        annotation_labels_in = {},
+        std::vector<component_annotation_value> annotation_values_in = {})
     : thread_id(thread_id_in)
     , name(name_in)
     , correlation_id_internal(correlation_id_internal_in)
@@ -387,17 +427,21 @@ struct region_sample : cacheable_t
     , call_stack(call_stack_in)
     , args_str(args_str_in)
     , category(category_in)
+    , annotation_labels(annotation_labels_in)
+    , annotation_values(std::move(annotation_values_in))
     {}
 
-    std::uint64_t    thread_id;
-    std::string_view name;
-    std::uint64_t    correlation_id_internal;
-    std::uint64_t    correlation_id_ancestor;
-    std::uint64_t    start_timestamp;
-    std::uint64_t    end_timestamp;
-    std::string_view call_stack;
-    std::string_view args_str;
-    std::string_view category;
+    std::uint64_t                           thread_id;
+    std::string_view                        name;
+    std::uint64_t                           correlation_id_internal;
+    std::uint64_t                           correlation_id_ancestor;
+    std::uint64_t                           start_timestamp;
+    std::uint64_t                           end_timestamp;
+    std::string_view                        call_stack;
+    std::string_view                        args_str;
+    std::string_view                        category;
+    std::string_view                        annotation_labels;
+    std::vector<component_annotation_value> annotation_values;
 };
 
 template <>
@@ -407,7 +451,7 @@ serialize(std::uint8_t* buffer, const region_sample& item)
     utility::store_value(buffer, item.thread_id, item.name, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.start_timestamp,
                          item.end_timestamp, item.call_stack, item.args_str,
-                         item.category);
+                         item.category, item.annotation_labels, item.annotation_values);
 }
 
 template <>
@@ -418,7 +462,7 @@ deserialize(std::uint8_t*& buffer)
     utility::parse_value(buffer, item.thread_id, item.name, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.start_timestamp,
                          item.end_timestamp, item.call_stack, item.args_str,
-                         item.category);
+                         item.category, item.annotation_labels, item.annotation_values);
     return item;
 }
 
@@ -429,7 +473,8 @@ get_size(const region_sample& item)
     return utility::get_size(item.thread_id, item.name, item.correlation_id_internal,
                              item.correlation_id_ancestor, item.start_timestamp,
                              item.end_timestamp, item.call_stack, item.args_str,
-                             item.category);
+                             item.category, item.annotation_labels,
+                             item.annotation_values);
 }
 
 struct in_time_sample : cacheable_t

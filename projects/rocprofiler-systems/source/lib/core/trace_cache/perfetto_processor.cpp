@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "common/delimit.hpp"
 #include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
@@ -27,6 +28,7 @@
 #include "logger/debug.hpp"
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <nlohmann/json.hpp>
@@ -914,6 +916,31 @@ perfetto_processor_t::handle(const region_sample& _rs)
         annotate_perfetto(ctx, annotations);
     };
 
+    auto add_component_annotations = [&](::perfetto::EventContext ctx) {
+        if(!m_use_annotations || _rs.annotation_values.empty())
+        {
+            return;
+        }
+
+        const auto labels = delimit(std::string{ _rs.annotation_labels },
+                                    component_annotations::k_label_delimiter);
+
+        std::vector<annotation_entry> annotations;
+        for(std::size_t i = 0; i < std::min(labels.size(), _rs.annotation_values.size());
+            ++i)
+        {
+            annotations.push_back(
+                { .key   = labels[i],
+                  .value = std::visit(
+                      [](auto number) -> decltype(annotation_entry::value) {
+                          return number;
+                      },
+                      _rs.annotation_values[i]) });
+        }
+
+        annotate_perfetto(ctx, annotations);
+    };
+
     // Emit on the originating thread's track so multi-threaded runs keep one track
     // per thread (as the live path does implicitly via the calling thread), instead
     // of collapsing every thread onto the single replay thread.
@@ -937,7 +964,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
         }
 
         core::perfetto::pop_perfetto_track(CategoryT{}, _name.data(), thread_track,
-                                           _end_ts);
+                                           _end_ts, add_component_annotations);
     };
 
     auto const try_category = [&](auto category_tag) {
