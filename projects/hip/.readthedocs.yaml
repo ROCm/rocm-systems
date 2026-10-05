@@ -12,6 +12,9 @@ python:
    install:
    - requirements: projects/hip/docs/sphinx/requirements.txt
 
+conda:
+   environment: projects/hip/docs/environment.yml # needed until ubuntu ships doxygen >= 1.9.8
+
 build:
    os: ubuntu-22.04
    tools:
