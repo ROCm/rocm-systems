@@ -131,6 +131,22 @@ class TestMetricLine:
         assert "BW" in result
         assert "N/A" in result
 
+    def test_precision(self):
+        result = mem_chart_common.metric_line("Scratch", 32 / 1024, " KB", precision=3)
+        assert "0.031 KB" in result
+
+
+class TestBuildCuPanel:
+    def test_stat_precision_defaults_to_one(self):
+        panel = mem_chart_common.build_cu_panel(20, stats=[("LDS Alloc", 2.0, " KB")])
+        assert "2.0 KB" in panel.renderable
+
+    def test_stat_precision_override_keeps_sub_kb_values(self):
+        panel = mem_chart_common.build_cu_panel(
+            20, stats=[("Scratch", 32 / 1024, " KB", 3)]
+        )
+        assert "0.031 KB" in panel.renderable
+
 
 class TestFormatMemChartHeading:
     @pytest.mark.parametrize(

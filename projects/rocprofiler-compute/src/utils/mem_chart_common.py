@@ -102,9 +102,10 @@ def metric_line(
     value: Any,  # noqa: ANN401
     unit: str = "%",
     color: str = "bright_green",
+    precision: int = 1,
 ) -> str:
     """Rich markup line: 'label value_with_unit' in *color*."""
-    return f"{label} {colored(format_value(value, unit), color)}"
+    return f"{label} {colored(format_value(value, unit, precision), color)}"
 
 
 def progress_bar(percent: Optional[float], width: int = 10) -> str:
@@ -248,7 +249,8 @@ def build_cu_panel(
 ) -> Panel:
     """Build the Compute Units panel.
 
-    *stats*: list of (label, value, unit) tuples to display.
+    *stats*: list of (label, value, unit[, precision]) tuples to display;
+    precision defaults to 1 decimal place.
     Falls back to decorative placeholder text when omitted.
     *title*: panel title; RDNA-style charts pass "WGPs".
     """
@@ -256,13 +258,14 @@ def build_cu_panel(
         # Borders and padding leave CU_PANEL_W - 4 columns for text
         text_width = CU_PANEL_W - 4
         lines: list[str] = []
-        for label, value, unit in stats:
-            rendered = format_value(value, unit)
+        for label, value, unit, *rest in stats:
+            precision = rest[0] if rest else 1
+            rendered = format_value(value, unit, precision)
             if len(label) + 1 + len(rendered) > text_width:
                 lines.append(label)
                 lines.append(colored(rendered, "bright_green"))
             else:
-                lines.append(metric_line(label, value, unit))
+                lines.append(metric_line(label, value, unit, precision=precision))
         content = "\n".join(lines)
     else:
         content = (

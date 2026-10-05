@@ -235,7 +235,7 @@ def _build_cu_and_l0(
         ("Wave Occ", metrics["wave_occ"], " waves/WGP"),
         ("vGPRs", metrics["vgpr"], ""),
         ("sGPRs", metrics["sgpr"], ""),
-        ("Scratch", scratch_kb, " KB"),
+        ("Scratch", scratch_kb, " KB", 3),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]

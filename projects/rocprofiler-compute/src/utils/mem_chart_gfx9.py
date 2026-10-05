@@ -599,7 +599,7 @@ def create_mem_chart_diagram(
         ("Wave Occ", metrics["wave_occ"], " waves/CU"),
         ("vGPRs", metrics["vgpr"], ""),
         ("sGPRs", metrics["sgpr"], ""),
-        ("Scratch", scratch_kb, " KB"),
+        ("Scratch", scratch_kb, " KB", 3),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]

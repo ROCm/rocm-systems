@@ -480,7 +480,7 @@ def create_mem_chart_diagram(
         ("Wave Occ", m.get("Wavefront Occupancy"), " waves/WGP"),
         ("vGPRs", m.get("VGPR"), ""),
         ("sGPRs", m.get("SGPR"), ""),
-        ("Scratch", scratch_kb, " KB"),
+        ("Scratch", scratch_kb, " KB", 3),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", m.get("Workgroups"), ""),
     ]
