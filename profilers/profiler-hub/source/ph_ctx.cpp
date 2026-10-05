@@ -1,8 +1,8 @@
-#include "profiler_hub_ctx.hpp"
+#include "ph_ctx.hpp"
 #include "debug.hpp"
+#include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
-#include "profiler_hub_future.hpp"
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
@@ -77,7 +77,7 @@ ph_ctx::ph_ctx(std::string_view trace_path)
     initialize_track_list();
     initialize_node_agents();
     initialize_node_processes();
-    initilaize_node_info();
+    initialize_node_info();
 }
 
 ph_ctx::~ph_ctx()
@@ -124,7 +124,7 @@ ph_ctx::owns_future(ph_future* future) const
 }
 
 ph_schema_version_t
-ph_ctx::get_storage_version()
+ph_ctx::get_schema_version()
 {
     return m_schema_version;
 }
@@ -216,7 +216,7 @@ ph_ctx::initialize_track_list()
 }
 
 void
-ph_ctx::initilaize_node_info()
+ph_ctx::initialize_node_info()
 {
     m_c_node = std::make_unique<ph_node_t>();
     m_nodes  = m_catalog->nodes;

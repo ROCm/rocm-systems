@@ -27,7 +27,7 @@ struct ph_ctx
     ph_ctx(ph_ctx&&)                 = delete;
     ph_ctx& operator=(ph_ctx&&)      = delete;
 
-    [[nodiscard]] ph_schema_version_t get_storage_version();
+    [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
     [[nodiscard]] ph_node_t           get_node();
     bool has_track(uint32_t track_id) const { return m_track_by_id.contains(track_id); }
@@ -57,7 +57,7 @@ struct ph_ctx
 
 private:
     void initialize_track_list();
-    void initilaize_node_info();
+    void initialize_node_info();
     void initialize_node_agents();
     void initialize_node_processes();
 

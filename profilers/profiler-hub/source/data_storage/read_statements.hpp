@@ -1003,9 +1003,9 @@ private:
                                  "MIN(T.start) AS min_start",
                                  "MAX(T.end) AS max_end")
                          .from("rocpd_sample", "S")
-                         .cross_join(fmt::format("{}_{}", table, m_uuid),
-                                     "T",
-                                     "T.event_id = S.event_id")
+                         .join_in_order(fmt::format("{}_{}", table, m_uuid),
+                                        "T",
+                                        "T.event_id = S.event_id")
                          .group_by("T.nid", "T.pid", "T.tid", "S.track_id")
                          .get_query_string();
             return m_backend->create_read_statement_executor<track_thread_sample_result>(

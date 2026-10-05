@@ -113,31 +113,32 @@ TEST_F(connection_pool_test, acquire_blocks_until_a_connection_is_released)
     EXPECT_TRUE(acquired);
 }
 
-TEST_F(connection_pool_test, run_sync_returns_the_result_of_the_callable)
+TEST_F(connection_pool_test, with_connection_returns_the_result_of_the_callable)
 {
     const auto pool = make_pool(1);
 
-    const auto span = pool->run_sync([](common::connection& connection) {
+    const auto span = pool->with_connection([](common::connection& connection) {
         return connection.reader().get_event_id_span(reader_types::event_type_t::region);
     });
 
     EXPECT_TRUE(span.has_value());
 }
 
-TEST_F(connection_pool_test, run_sync_gives_the_connection_back_after_the_call)
+TEST_F(connection_pool_test, with_connection_gives_the_connection_back_after_the_call)
 {
     const auto pool = make_pool(1);
 
-    std::ignore = pool->run_sync([](common::connection&) { return 0; });
+    std::ignore = pool->with_connection([](common::connection&) { return 0; });
 
     EXPECT_TRUE(pool->try_acquire().has_value());
 }
 
-TEST_F(connection_pool_test, run_sync_gives_the_connection_back_when_the_callable_throws)
+TEST_F(connection_pool_test,
+       with_connection_gives_the_connection_back_when_the_callable_throws)
 {
     const auto pool = make_pool(1);
 
-    EXPECT_THROW(std::ignore = pool->run_sync([](common::connection&) -> int {
+    EXPECT_THROW(std::ignore = pool->with_connection([](common::connection&) -> int {
         throw std::runtime_error("read failed");
     }),
                  std::runtime_error);

@@ -1,6 +1,6 @@
+#include "ph_ctx.hpp"
+#include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
-#include "profiler_hub_ctx.hpp"
-#include "profiler_hub_future.hpp"
 
 #include <memory>
 #include <optional>
@@ -97,7 +97,7 @@ ph_get_schema_version(ph_ctx_t ctx, ph_schema_version_t* version)
     }
 
     return guard_call([ctx, version]() {
-        const auto ctx_version = ctx->get_storage_version();
+        const auto ctx_version = ctx->get_schema_version();
         version->major         = ctx_version.major;
         version->minor         = ctx_version.minor;
         version->patch         = ctx_version.patch;
