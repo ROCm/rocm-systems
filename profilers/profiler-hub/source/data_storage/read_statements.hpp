@@ -1302,17 +1302,16 @@ private:
         std::string_view name_expression,
         std::string_view event_join = {})
     {
-        const auto a   = std::string(alias);
         const auto sql = fmt::format(
-            "SELECT {a}.start, {a}.end, {name} FROM {table}_{uuid} {a} {event_join} "
-            "LEFT JOIN rocpd_sample S ON S.event_id = {a}.event_id "
-            "WHERE {a}.nid = ? AND {a}.pid = ? AND {a}.tid = ? AND S.track_id IS NULL "
-            "AND {a}.id >= ? AND {a}.id < ?",
-            fmt::arg("a", a),
-            fmt::arg("name", name_expression),
-            fmt::arg("table", table),
-            fmt::arg("uuid", m_uuid),
-            fmt::arg("event_join", event_join));
+            "SELECT {0}.start, {0}.end, {1} FROM {2}_{3} {0} {4} "
+            "LEFT JOIN rocpd_sample S ON S.event_id = {0}.event_id "
+            "WHERE {0}.nid = ? AND {0}.pid = ? AND {0}.tid = ? AND S.track_id IS NULL "
+            "AND {0}.id >= ? AND {0}.id < ?",
+            alias,
+            name_expression,
+            table,
+            m_uuid,
+            event_join);
 
         return m_backend->create_read_statement_executor<
             event_range_result,
