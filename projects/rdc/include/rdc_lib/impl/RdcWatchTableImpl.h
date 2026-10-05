@@ -141,9 +141,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< SMI. Returns RDC_ST_NOT_FOUND without touching SMI or logging when
   //!< (gpu, field) is not in `watched` (dropped at rdc_health_set).
   rdc_status_t get_start_end_values(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
-                                    uint32_t gpu_index, rdc_field_t field,
-                                    uint64_t start_timestamp, rdc_field_value* start_value,
-                                    rdc_field_value* end_value);
+                                    uint32_t gpu_index, rdc_field_t field, uint64_t start_timestamp,
+                                    rdc_field_value* start_value, rdc_field_value* end_value);
   rdc_status_t pcie_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
                           uint32_t gpu_index, rdc_health_response_t* response);
   rdc_status_t xgmi_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
