@@ -313,14 +313,23 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsa(ncclSymkDevWorkArg
 
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
-    // Threads numbered over rank.
-    int t =
-      flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
-    int tn = nBlocks * blockDim.x;
+    // One group of warps per scale-up member so every package is pulled from at
+    // once. On a mesh each package pair has its own link, and visiting one package
+    // at a time would leave all but one of them idle. Grouping warps rather than
+    // blocks keeps the groups even when the block count is not a multiple of the
+    // package count, such as one block per CU or fewer blocks than packages.
+    int nWarps = nBlocks * (blockDim.x / WARP_SIZE);
+    int w = flattenIx(block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
+    int nGroups = min(nWarps, scaleUp.nRanks);
+    int group = w % nGroups;
+    int nGroupWarps = nWarps / nGroups + (group < nWarps % nGroups ? 1 : 0);
+    // Threads numbered over the group.
+    int t = (w / nGroups) * WARP_SIZE + threadIdx.x % WARP_SIZE;
+    int tn = nGroupWarps * WARP_SIZE;
     bool inPlace = input == output + rank * nAllElts;
     // Packages are visited starting from our own so they don't all pull from the
     // same one at once.
-    for (int k = 0; k < scaleUp.nRanks; k++) {
+    for (int k = group; k < scaleUp.nRanks; k += nGroups) {
       int su = scaleUp.rank + k;
       if (su >= scaleUp.nRanks) su -= scaleUp.nRanks;
       ncclSymPtr<char> slot = output + ncclTeamRankToWorld(handler.comm, scaleUp, su) * nAllElts;
