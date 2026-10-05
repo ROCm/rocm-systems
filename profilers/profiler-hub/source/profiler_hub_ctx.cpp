@@ -458,7 +458,8 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end())
+    if(track_it == m_track_by_id.end() ||
+       track_it->second->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
@@ -481,7 +482,8 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end())
+    if(track_it == m_track_by_id.end() ||
+       track_it->second->category != profiler_hub::reader_types::track_kind_t::pmc_agent)
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }

@@ -625,6 +625,7 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
                                              const reader_types::event_filter_t& filter)
 {
     if(!track || !track->node_info) return {};
+    if(track->category != reader_types::track_kind_t::pmc_agent) return {};
 
     const auto nid = track->node_info->node_id;
 
