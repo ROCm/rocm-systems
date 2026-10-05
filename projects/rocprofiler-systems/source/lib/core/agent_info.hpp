@@ -7,9 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <rocprofiler-sdk/agent.h>
 
-namespace rocprofsys
-{
-namespace agent_info
+namespace rocprofsys::agent_info
 {
 
 inline std::string
@@ -203,7 +201,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
                             : -1;
 
     // Normalize JSON string by escaping quotes to prepare for SQL insertion
-    auto normalize_json_string = [](nlohmann::json& json_data) {
+    auto const normalize_json_string = [](nlohmann::json& json_data) {
         auto   json_str = json_data.dump();
         size_t pos      = 0;
         while((pos = json_str.find('"', pos)) != std::string::npos)
@@ -217,5 +215,4 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     return normalize_json_string(data);
 }
 
-}  // namespace agent_info
-}  // namespace rocprofsys
+}  // namespace rocprofsys::agent_info

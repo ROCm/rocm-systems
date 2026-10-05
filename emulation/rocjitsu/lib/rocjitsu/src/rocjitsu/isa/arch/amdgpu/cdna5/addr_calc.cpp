@@ -4,6 +4,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -210,24 +212,38 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
 }
 
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
-                                               uint32_t access_size_bytes) {
+                                               uint32_t access_size_bytes,
+                                               amdgpu::ScalarMemState *state) {
   assert(access_size_bytes != 0);
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
   if (!base)
     return std::nullopt;
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
-  uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
+  const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
+  const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
+  off &= ~static_cast<int64_t>(align_mask);
   if (has_smem_offset(inst.soffset)) {
     auto soffset = read_sreg_m0_operand(wf, inst.soffset);
     if (!soffset)
       return std::nullopt;
-    off += static_cast<int64_t>(*soffset) * scale;
+    off += (static_cast<uint64_t>(*soffset) * scale) & ~align_mask;
   }
-  uint64_t addr = *base + off;
-  assert(util::is_aligned(addr, std::min<uint64_t>(access_size_bytes, 4u)) &&
-         "gfx1250 scalar memory address must satisfy access alignment");
-  return addr;
+  if (buffer_load) {
+    auto word2 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 2);
+    auto word3 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 3);
+    if (!word2 || !word3)
+      return std::nullopt;
+    const auto resource =
+        decode_buffer_resource(uint32_t(*base), uint32_t(*base >> 32), *word2, *word3);
+    // Scalar loads ignore STRIDE_SCALE; CDNA5 uses a 57-bit base and 45-bit size.
+    const uint64_t bound =
+        (resource.num_records * (resource.raw_stride ? resource.raw_stride : 1)) & ~align_mask;
+    amdgpu::addr_calc::scalar_buffer_load_mask(state, off, bound);
+    return (resource.base_address & ~align_mask) + off;
+  }
+  return (*base & ~align_mask) + off;
 }
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
@@ -312,7 +328,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   // descriptor sourced from TTMPs lives in the trap-temporary file, and
   // read_sgpr() would fetch whatever the allocation holds at that index.
   const uint32_t sb_sel = inst.rsrc;
-  if (!amdgpu::scalar_selector_range_is_backed(wf, sb_sel, 4)) {
+  if (!amdgpu::addr_calc::buffer_resource_range_is_backed(wf, sb_sel)) {
     amdgpu::reject_vector_memory_access(d);
     return;
   }

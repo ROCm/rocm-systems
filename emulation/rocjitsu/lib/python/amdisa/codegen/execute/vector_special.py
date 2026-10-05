@@ -1014,7 +1014,7 @@ def _gen_division_result(
     mode = 'f16_f64' if is_f64 else 'f32'
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
-        L.append('  const uint64_t vcc = wf.vcc();')
+        L.append('  const uint64_t vcc = wf.vcc_mask(exec);')
     elif is_vop3:
         L.append(
             f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'
@@ -1076,6 +1076,18 @@ def gen_vector_dot(
         L.append('    }')
     elif op == 'dot2c' and dtype == 'f32':
         # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
+        L.append('    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||')
+        L.append('        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {')
+        L.append(
+            f'      if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))'
+        )
+        L.append('        a = util::f32_to_f16(std::bit_cast<float>(a));')
+        L.append(
+            '      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);'
+        )
+        L.append(f'      amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
+        L.append('      continue;')
+        L.append('    }')
         L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
         L.append(
             '    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'
@@ -1367,6 +1379,7 @@ def gen_vector_cvt_pk(
     opsel: str = '0u',
     dtype: str | None = None,
     is_vop3: bool = False,
+    has_abs: bool = False,
     fp8_format_select: str | None = None,
     arch_name: str = '',
 ) -> str:
@@ -1417,11 +1430,14 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<int16_t>(util::round_to_nearest_even(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));'
+                '      return static_cast<int16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0)));'
             )
             L.append('    };')
             L.append('    int16_t lo = cvt_i16(s0);')
@@ -1430,7 +1446,7 @@ def gen_vector_cvt_pk(
             L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<uint16_t>(util::round_to_nearest_even(std::clamp(f * 65535.0f, 0.0f, 65535.0f)));'
+                '      return static_cast<uint16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0)));'
             )
             L.append('    };')
             L.append('    uint16_t lo = cvt_u16(s0);')
@@ -1445,6 +1461,9 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
         L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(

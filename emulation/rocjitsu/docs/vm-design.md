@@ -31,13 +31,12 @@ execution.
 | `amdgpu/sdma_ring_consumer.h/cpp` | `SdmaRingConsumer`: per-queue ring cursor, fetch, retry, execution, and retirement publication |
 | `amdgpu/sdma_packet_processor.h/cpp` | SdmaPacketProcessor: SDMA packet decoding and effects over caller-owned typed continuation state |
 | `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
-| `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
-| `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
-| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: per-queue ring traversal, retry, and cursor publication owned by the CP |
-| `amdgpu/pm4_queue_controller.h/cpp` | Pm4QueueController: CP-owned PM4 queue, VM snapshot, retry, and cursor-publication state |
-| `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
+| `amdgpu/aql/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
+| `amdgpu/pm4/pm4_packet_processor.h/cpp` | Production PM4 fetch, opcode effects, register updates, IB traversal, and cursor publication |
+| `amdgpu/pm4/pm4.h` | PM4 opcodes, registers, scratch leases, and persistent submission state |
+| `amdgpu/dispatch_entry.h` | ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication |
 | `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
-| `amdgpu/aql_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the AQL command processor |
+| `amdgpu/compute_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the unified compute command processor |
 
 ---
 
@@ -85,10 +84,16 @@ VMID/PASID as lifetime identity.
 
 An address-space slot generation changes when a slot is destroyed and reused.
 Its translation epoch changes when a root is replaced or invalidated. A
-`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
-one lock for the duration of an operation. This prevents a multi-page access
-from combining an old root with a replacement backing and provides
-`VmCacheNamespace` for virtually indexed clean caches. Access results are
+`GpuVmAccess` selects an immutable translator/backing generation under the
+registry lock. Ordinary snapshots share its retirement state; each pinned
+snapshot has independent retirement state and survives root replacement.
+Invalidation and unregistration revoke both kinds. Access methods hold a shared
+revocation lease, allowing an in-flight access to finish without combining an
+old root with a replacement backing. The captured handle and epoch provide
+`VmCacheNamespace` for virtually indexed clean caches. Functional instruction
+fetch reuses an ordinary snapshot within a quantum and checks `is_current()`
+before reuse; the access method still takes a lease and checks for retirement.
+Access results are
 typed as complete, temporarily unavailable, faulted, or malformed; transport
 availability is not encoded as a fake mapping in `GpuMemory`.
 
@@ -176,12 +181,12 @@ its published read pointer. These front ends must not duplicate scheduling,
 ring fetch, packet decoding, retry, or cursor-publication state. The command
 processor serves compute queues only and has no SDMA implementation or state.
 
-The AQL command processor, restricted PM4 compute-queue path, and SDMA
-scheduler use the same compile-time packet-processor interface and
+The AQL command processor and SDMA scheduler use the same compile-time
+packet-processor interface and
 `PacketProcessResult` envelope, not a common execution engine. SDMA may suspend
 after a partial effect, so its ring consumer owns an opaque typed continuation
 that only `SdmaPacketProcessor`
-interprets; AQL and PM4 block only before committing an effect and can restart
+interprets; AQL blocks only before committing an effect and can restart
 the same request. The common `required_bytes` field requests more head-packet
 input; `retirement_bytes` reports the eventual cursor advance and can include a
 protocol-defined skipped extent, which the ring owner must bound against its ring
@@ -189,13 +194,32 @@ and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publicat
 and completion remain outside packet processors. Guest-controlled AQL validation failures are
 reported through the typed packet/admission result and fault only their queue;
 internal invariant violations remain exceptions.
-The firmware-free PM4 path supports a restricted compute-queue packet subset,
+The firmware-free PM4 path supports the modeled compute-queue packet subset,
 rather than general PM4. MES maps its MQD and address space, but submits the
 queue through `GpuQueueRegistry` to a selected command processor. The binding
 retains only a CP registration token; the CP-owned queue controller retains the
-VM snapshot, ring traversal, packet processor, and retry-safe cursor publication.
-The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service runs
-outside the AQL queue lock and uses bounded queue turns for event-loop fairness.
+VM snapshot and retry-safe cursor publication state. The production packet
+processor in `pm4/` performs ring traversal, opcode effects, register updates,
+and nested IB traversal over that CP-owned state. CP supplies cache flushing,
+dispatch admission, retry scheduling, and synchronous fault cancellation
+callbacks. Temporary unavailability retains command and cursor-publication state
+for retry; cancellation stops resident waves before submission resources are
+released. A snapshot captured before GART publication is unready and must be
+released before retrying, so the next turn can capture the published binding.
+Once ready, the snapshot stays pinned through execution and retirement publication.
+For native rings, CP captures `command_access`, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending publication even when
+execution is suspended. The processor traverses packets and nested IBs, captures
+access for submitted streams as needed, and commits/publishes packet retirement
+through `read_pointer_journal`. The retry callback sets `command_retry_pending`,
+which CP clears before resuming. Dispatch admission appends to `dispatches.entries`;
+CP retires these entries before packet processing continues. On terminal publication
+failure, the processor sets `publication_faulted` before invoking cancellation.
+The cancellation callback marks the queue faulted, cancels pending work, and notifies
+failed submissions while preserving the publication failure.
+The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service
+uses bounded queue turns for event-loop fairness and retains CP queue
+serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
 while a consumed ring cursor, dispatch completion, or queue-idle signal still
@@ -350,6 +374,42 @@ have not been written back, so crediting it would be worse than losing it: the
 owner would retire the grid and fire the completion signal for workgroups that
 never executed. KFD teardown is what reaches this window, since it removes
 replicas in XCD order while a later owner is still registered.
+
+### Queue exceptions and debugger notification
+
+A trap exception has one owner for its complete mask. The send site records
+whether the debugger or ROCr owns it; trap completion preserves that decision.
+Runtime delivery freezes all replicas of the logical queue before publishing
+one shared exception status and interrupt. Status publication and acknowledgment
+polling use checked atomic memory accesses. An inaccessible status or an unchanged
+status at the runtime acknowledgment deadline is a failed delivery, so the
+exception remains available to a later debugger. When a debugger was attached at
+the send site, its retained queue status also survives a successful ROCr
+acknowledgment and becomes queryable when a matching exception bit is enabled.
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume.
+While the runtime ownership result is pending, resume reports a queue error and
+preserves the stopped waves, saved CWSR image, and exception gate. Once the result
+is committed, the debugger can retry recovery. Successful recovery clears the
+exception gate on every replica, preserves independent runtime and debugger
+suspension reasons, and schedules deferred queue work when all gates open.
+
+Debugger publication separates the event from the notifier transport. Queue
+status stays hidden while a write is in flight so a failed publication can roll
+back a debugger-only stop. If QUERY arrives after reading the wake but before
+that write commits, or while an overlapping ROCr reservation hides the event,
+the session records a replacement-wake obligation. Once
+status is visible, the retry worker sends that wake under the session lock,
+without hiding the event again. The recovery write is bounded and holds no CU
+or allocation lock. Retained events, including queue creation, survive transport
+failures until acknowledged. Process events are already queryable during a
+write; their claims record which bits QUERY consumed so completion cannot mark
+a later event as already notified.
+
+The notifier uses a disposable child because another holder of the shared file
+description can change its blocking mode. Application signal handlers are
+blocked before cloning and remain blocked in the child; the parent restores
+its original mask. A deadline bounds the parent's wait, and a process-owned
+reaper handles a child that has not exited after cancellation.
 
 ### Event-Driven Dispatch
 

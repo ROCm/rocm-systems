@@ -63,7 +63,16 @@ enum InstFlags : uint64_t {
   /// @brief The destination value is the scalar bitwise pure OR of the source operands
   /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
   /// regardless of the others.
-  RESULT_OR = (1ULL << 15)
+  RESULT_OR = (1ULL << 15),
+  /// @brief Candidate for an asynchronous memory completion counter, including
+  /// instructions with no memory payload or register result.
+  MEMORY_WAIT_PRODUCER = (1ULL << 16),
+  /// @brief Instruction contains an embedded memory-completion wait field.
+  EMBEDDED_MEMORY_WAIT = (1ULL << 17),
+  /// @brief This execution skipped a conditional memory-counter register result.
+  MEMORY_WAIT_RESULT_SUPPRESSED = (1ULL << 18),
+  /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
+  XCNT_DRAIN = (1ULL << 19)
 };
 
 class BasicBlock;
@@ -103,9 +112,9 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// Thread-local because each CU partition thread has its own decoder/pool.
-  /// Instructions are wholly owned by their CU and always allocated/freed
-  /// on the same thread.
+  /// @details Pool users must allocate and free on the bound thread, with the
+  /// decoder outliving its pooled instructions. CU execution instead forces
+  /// heap allocation so instructions can survive quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
@@ -195,6 +204,13 @@ public:
   /// and must not be called. No virtual dispatch.
   /// This is a low-level backend callback. AMDGPU callers should use the CU's
   /// execute_instruction() API to reset and check simulator execution failures.
+  /// @details Decoded non-memory instructions without DynamicInstState may be
+  /// reused across waves without a reset. Executors must read register values,
+  /// EXEC and other execution state from the current context, and restore any
+  /// temporary operand delegates before returning. Put persistent per-issue
+  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// per-execution member flags must be assigned on every execution, as with
+  /// set_memory_wait_result_written().
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -217,6 +233,7 @@ public:
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
+  /// @details An instruction retaining this state cannot enter a decoded cache.
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
@@ -287,6 +304,20 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+  /// @brief Whether this instruction can increment a memory completion counter.
+  bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
+  /// @brief Record whether a conditional producer wrote its result this time.
+  /// @details Conditional executors set this on every execution, including reuse.
+  void set_memory_wait_result_written(bool written) {
+    if (written)
+      flags_ &= ~MEMORY_WAIT_RESULT_SUPPRESSED;
+    else
+      flags_ |= MEMORY_WAIT_RESULT_SUPPRESSED;
+  }
+  bool memory_wait_result_written() const { return !(flags_ & MEMORY_WAIT_RESULT_SUPPRESSED); }
+
+  /// @brief Whether the instruction includes a memory completion wait field.
+  bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
 
   /// @brief Return decoded AMDGPU memory-issue metadata, when present.
   /// @details AMDGPU generated memory-instruction constructors populate this

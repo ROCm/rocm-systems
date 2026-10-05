@@ -17,9 +17,7 @@
 #include <variant>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 /// Annotation key-value pair for perfetto events.
@@ -129,5 +127,4 @@ private:
     bool m_perfetto_annotations{ false };
 };
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -13,10 +13,8 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
-class GpuVm;
 class L2Cache;
 class RequestMtypeResolver;
-enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -47,7 +45,8 @@ public:
 
   /// @param addr_base_offset Low bits of a uniform address contribution applied after
   /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
-  /// contribution from moving logical dword boundaries.
+  /// contribution from moving logical swizzle-unit boundaries.
+  /// @param swizzle_unit Bytes per swizzle unit (4 or 16).
   /// @param element_lane_masks Empty when every element uses @p lane_mask;
   /// otherwise contains exactly @p num_elems masks. In the latter form,
   /// @p lane_mask is the union of lanes valid for at least one element.
@@ -55,11 +54,13 @@ public:
                        uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
                        bool request_l1_bypass, uint32_t wf_size, uint32_t vmid = 0,
                        uint32_t addr_stride = 0, uint32_t addr_base_offset = 0,
-                       std::span<const uint64_t> element_lane_masks = {});
+                       std::span<const uint64_t> element_lane_masks = {},
+                       uint32_t swizzle_unit = 4);
 
   /// @param addr_base_offset Low bits of a uniform address contribution applied after
   /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
-  /// contribution from moving logical dword boundaries.
+  /// contribution from moving logical swizzle-unit boundaries.
+  /// @param swizzle_unit Bytes per swizzle unit (4 or 16).
   /// @param element_lane_masks Empty when every element uses @p lane_mask;
   /// otherwise contains exactly @p num_elems masks. In the latter form,
   /// @p lane_mask is the union of lanes valid for at least one element.
@@ -67,7 +68,8 @@ public:
                         uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
                         uint32_t wf_size, uint32_t vmid = 0, uint32_t addr_stride = 0,
                         uint32_t addr_base_offset = 0,
-                        std::span<const uint64_t> element_lane_masks = {});
+                        std::span<const uint64_t> element_lane_masks = {},
+                        uint32_t swizzle_unit = 4);
 
   void invalidate(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all();
@@ -91,6 +93,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuVm *gpu_vm_ = nullptr;
+  VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;

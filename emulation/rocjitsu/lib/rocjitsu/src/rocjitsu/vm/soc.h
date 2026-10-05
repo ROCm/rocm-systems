@@ -53,6 +53,7 @@ public:
     uint32_t num_iods = 0;   ///< Number of I/O Dies (0 = no IOD modeling).
     amdgpu::Xcd::Config xcd; ///< Config applied to each XCD.
     simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL; ///< Execution mode.
+    uint32_t scratch_slots_per_cu = 0; ///< Zero preserves the CU execution-slot default.
   };
 
   /// @brief Construct a named SoC from configuration.
@@ -122,13 +123,13 @@ public:
 
   /// @brief Pick the XCD command processor that will own a HW queue.
   ///
-  /// @details On real MI300X hardware, the MES firmware distributes HW queues
-  /// across XCDs. Use the process-local queue ordinal so equivalent queues from
-  /// independent processes compete for the same XCD resources. The owner reads
-  /// the queue's ring and holds each dispatch's completion signal. It is not the
-  /// only XCD that runs the work: a queue marked HwQueue::xcd_fanout spreads each
-  /// dispatch over every XCD, and which XCD owns the queue does not change the
-  /// workgroup-to-XCD mapping.
+  /// @details The simulated-KFD frontend uses the process-local queue ordinal so
+  /// equivalent queues from independent processes compete for the same XCD
+  /// resources. The owner reads the queue's ring and holds each dispatch's
+  /// completion signal. It is not the only XCD that runs the work: a queue
+  /// marked for XCD fan-out spreads each dispatch over every XCD, and which XCD
+  /// owns the queue does not change the workgroup-to-XCD mapping. PCI/MES queue
+  /// placement is narrower while its discovery profile advertises one XCC.
   ///
   /// @returns Pointer to the selected CommandProcessor, or nullptr if no XCDs.
   amdgpu::CommandProcessor *assign_queue_owner_cp(uint32_t queue_ordinal) {
@@ -244,11 +245,12 @@ public:
   ///
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
-  /// calls the pool. The effective width is clamped to the largest CU count of
-  /// any command processor in the SoC. One pool retains width-1 workers shared
-  /// across the SoC. CPs can submit and execute concurrently; each submission
-  /// uses its caller and at most width-1 workers, and joins only its own work.
-  /// With E engine threads, the total CU execution capacity is E + width - 1.
+  /// calls the pool. The effective width is clamped to one plus the sum of
+  /// CUs-1 across nonempty XCDs. One pool retains width-1 workers shared across
+  /// the SoC. CPs can submit and execute concurrently; each submission uses its
+  /// caller and at most min(width, active CUs)-1 workers, and joins only its own
+  /// work. With E engine threads, the total engine/CU thread count is
+  /// E + width - 1; fewer concurrent XCDs can leave some workers idle.
   void set_dispatch_threads(uint32_t threads);
   /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
   uint32_t dispatch_threads() const { return dispatch_threads_; }

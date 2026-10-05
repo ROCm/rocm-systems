@@ -90,6 +90,8 @@ def test_single_node(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
                 assert record["coll_perf"]["coll"] == "AllReduce", \
                     f"Record at line {lineno} in {dump_file} should be AllReduce, got '{record['coll_perf']['coll']}'"
                 assert record["header"]["n_ranks"] == 8, \
@@ -174,6 +176,8 @@ def test_single_node_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 # Validate standard fields
                 assert record["coll_perf"]["coll"] == "AllReduce", \
@@ -286,6 +290,8 @@ def test_multinode(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
                 assert record["coll_perf"]["coll"] == "AllReduce", \
                     f"Record at line {lineno} in {dump_file} should be AllReduce, got '{record['coll_perf']['coll']}'"
                 assert record["header"]["n_ranks"] == total_processes, \
@@ -405,6 +411,8 @@ def test_multinode_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 # Validate standard fields
                 assert record["coll_perf"]["coll"] == "AllReduce", \
