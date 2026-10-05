@@ -297,10 +297,20 @@ struct HrrDiskSpaceBig {
   unsigned char bytes[3000];
 };
 
+// One launch record carrying it stays under the check interval of a 64 KiB file
+// system, and two go over it.
+struct HrrDiskSpaceMid {
+  unsigned char bytes[1400];
+};
+
 }  // namespace
 
 __global__ void hrr_disk_space_big_arg(HrrDiskSpaceBig big, int* out) {
   if (threadIdx.x == 0) out[0] = big.bytes[0] + big.bytes[sizeof(big.bytes) - 1];
+}
+
+__global__ void hrr_disk_space_mid_arg(HrrDiskSpaceMid mid, int* out) {
+  if (threadIdx.x == 0) out[0] = mid.bytes[0] + mid.bytes[sizeof(mid.bytes) - 1];
 }
 
 // ===========================================================================
@@ -508,6 +518,39 @@ TEST_CASE("Unit_HRR_DiskSpace_LargeEventCheckedBeforeWrite_Direct", "[.][hrr-dir
 
   arm_fixed(kBelowReserve);
   hipLaunchKernelGGL(hrr_disk_space_big_arg, dim3(1), dim3(64), 0, nullptr, big, out);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  disarm();
+
+  int host = 0;
+  HRR_HIP_CHECK(hipMemcpy(&host, out, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(host == 7);
+  HRR_HIP_CHECK(hipFree(scratch));
+  HRR_HIP_CHECK(hipFree(out));
+}
+
+TEST_CASE("Unit_HRR_DiskSpace_EventsCheckedAcrossInterval_Direct", "[.][hrr-direct]") {
+  begin_workload();
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, sizeof(int)));
+  HrrDiskSpaceMid mid{};
+  mid.bytes[0] = 3;
+  mid.bytes[sizeof(mid.bytes) - 1] = 4;
+
+  // The first launch writes the code object while free space is plenty.
+  hipLaunchKernelGGL(hrr_disk_space_mid_arg, dim3(1), dim3(64), 0, nullptr, mid, out);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  // A one-block blob reaches the interval, so the count starts again from here.
+  void* scratch = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&scratch, kBlock));
+  copy_to_device(scratch, 970, kBlock);
+
+  // Neither record reaches the interval alone. The second one makes the check
+  // due, and that check has to run before it is written.
+  arm_fixed(kBelowReserve);
+  hipLaunchKernelGGL(hrr_disk_space_mid_arg, dim3(1), dim3(64), 0, nullptr, mid, out);
+  hipLaunchKernelGGL(hrr_disk_space_mid_arg, dim3(1), dim3(64), 0, nullptr, mid, out);
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipDeviceSynchronize());
   disarm();
@@ -742,6 +785,44 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_LargeEventCheckedBeforeWrite) {
         ev.kernel_launch->kernel_name.find("hrr_disk_space_big_arg") != std::string::npos)
       ++launches;
   CHECK(launches == 1);
+}
+
+// Records under the check interval are checked before the one that makes the
+// check due is written, so less than one interval goes in unchecked, however
+// the bytes add up.
+HRR_TEST_CASE(Unit_HRR_DiskSpace_EventsCheckedAcrossInterval) {
+  ScopedDir cap(cap_dir("event_interval"));
+  const WorkloadRun run = run_workload("Unit_HRR_DiskSpace_EventsCheckedAcrossInterval_Direct",
+                                       cap.path, kTotal64K);
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  hrr::Archive arc;
+  load_stopped_archive(cap.path, run, arc);
+
+  // Everything recorded from the scratch copy on, the last check that passed.
+  const uint64_t interval = check_interval(kTotal64K);
+  size_t from = arc.events.size();
+  for (size_t i = 0; i < arc.events.size(); ++i)
+    if (arc.events[i].header().event_type == HRR_API_HIPMEMCPY &&
+        arc.events[i].memcpy_ev.kind == static_cast<int32_t>(hipMemcpyHostToDevice) &&
+        arc.events[i].memcpy_ev.size == kBlock)
+      from = i;
+  REQUIRE(from < arc.events.size());
+  uint64_t unchecked = 0;
+  size_t launches = 0;
+  for (size_t i = from; i < arc.events.size(); ++i) {
+    const auto& ev = arc.events[i];
+    unchecked += ev.header().payload_length;
+    if (ev.kernel_launch != nullptr &&
+        ev.kernel_launch->kernel_name.find("hrr_disk_space_mid_arg") != std::string::npos) {
+      // Each launch alone stays under the interval, so it takes the counted path.
+      CHECK(ev.header().payload_length < interval);
+      ++launches;
+    }
+  }
+  INFO("unchecked " << unchecked << " interval " << interval << " launches " << launches);
+  CHECK(unchecked < interval);
+  CHECK(launches < 2);
 }
 
 // Event records count toward the next check like blobs do, so a run of
