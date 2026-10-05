@@ -515,7 +515,6 @@ static void atfork_child() {
   // atfork_prepare clears it, or hold g_emergency_manifest_busy, which
   // atfork_prepare does not take. That thread does not exist in the child.
   g_buf_busy.clear(std::memory_order_release);
-  g_emergency_manifest_busy.clear(std::memory_order_release);
   // Only async-signal-safe work from here: drop the parent's events fd and
   // forget its paths, so neither shutdown nor the crash path writes into the
   // parent's archive. reopen_after_fork() opens the child's.
