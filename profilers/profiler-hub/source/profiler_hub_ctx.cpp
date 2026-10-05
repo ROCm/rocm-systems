@@ -28,6 +28,24 @@ env_size(const char* name, size_t fallback)
     return static_cast<size_t>(std::strtoull(value, nullptr, 10));
 }
 
+profiler_hub::reader_types::event_filter_t
+make_window_filter(uint64_t start_ts, uint64_t end_ts)
+{
+    using bound_t = profiler_hub::reader_types::timestamp_ns_t;
+
+    constexpr auto max_bound =
+        static_cast<bound_t>(std::numeric_limits<std::int64_t>::max());
+
+    profiler_hub::reader_types::event_filter_t filter;
+    if(start_ts != 0 || end_ts != 0)
+    {
+        filter.time_window.start = std::min<bound_t>(start_ts, max_bound);
+        filter.time_window.end =
+            (end_ts != 0) ? std::min<bound_t>(end_ts, max_bound) : max_bound;
+    }
+    return filter;
+}
+
 ph_track_category_t
 to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
 {
@@ -147,15 +165,7 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                               uint64_t start_ts,
                               uint64_t end_ts)
 {
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = start_ts;
-        filter.time_window.end =
-            (end_ts != 0) ? end_ts
-                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
-                                std::numeric_limits<std::int64_t>::max());
-    }
+    const auto filter = make_window_filter(start_ts, end_ts);
 
     track_events_result_t result;
     result.events = conn.reader().get_events_for_track(track, filter);
@@ -421,15 +431,7 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
                                uint64_t start_ts,
                                uint64_t end_ts)
 {
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = start_ts;
-        filter.time_window.end =
-            (end_ts != 0) ? end_ts
-                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
-                                std::numeric_limits<std::int64_t>::max());
-    }
+    const auto filter = make_window_filter(start_ts, end_ts);
 
     const auto samples = conn.reader().get_counter_events_for_track(track, filter);
 
