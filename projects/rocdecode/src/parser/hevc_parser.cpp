@@ -311,6 +311,19 @@ int HevcVideoParser::SendPicForDecode() {
 
     for (i = 0; i < num_poc_st_foll_; i++) {
         buf_idx = ref_pic_set_st_foll_[i]; // buffer index in DPB
+        // ref_pic_set_st_foll_[i] is pre-initialized to DPB slot 0 and is only overwritten when a
+        // picture with the matching POC is found in the DPB. A CRA that starts the coded video
+        // sequence names pictures in its RPS that were never decoded, so the entry stays at slot 0
+        // and would be emitted as a real surface index - at that moment the picture being decoded,
+        // i.e. referencing itself. 8.3.2 requires "no reference picture" here, so emit the entry as
+        // invalid instead.
+        if (dpb_buffer_.frame_buffer_list[buf_idx].use_status == kNotUsed || dpb_buffer_.frame_buffer_list[buf_idx].pic_order_cnt != poc_st_foll_[i]) {
+            pic_param_ptr->ref_frames[ref_idx].pic_idx = 0xFF;
+            pic_param_ptr->ref_frames[ref_idx].poc = 0;
+            pic_param_ptr->ref_frames[ref_idx].flags = RocdecHevcPicture_INVALID;
+            ref_idx++;
+            continue;
+        }
         pic_param_ptr->ref_frames[ref_idx].pic_idx = dpb_buffer_.frame_buffer_list[buf_idx].dec_buf_idx;
         pic_param_ptr->ref_frames[ref_idx].poc = dpb_buffer_.frame_buffer_list[buf_idx].pic_order_cnt;
         pic_param_ptr->ref_frames[ref_idx].flags = 0; // assume frame picture for now
@@ -325,8 +338,12 @@ int HevcVideoParser::SendPicForDecode() {
         ref_idx++;
     }
 
+    // Pad the unused tail of the list. pic_idx alone does not mark an entry as absent; set poc and
+    // the invalid flag too so the whole entry is well-defined.
     for (i = ref_idx; i < 15; i++) {
         pic_param_ptr->ref_frames[i].pic_idx = 0xFF;
+        pic_param_ptr->ref_frames[i].poc = 0;
+        pic_param_ptr->ref_frames[i].flags = RocdecHevcPicture_INVALID;
     }
 
     pic_param_ptr->picture_width_in_luma_samples = sps_ptr->pic_width_in_luma_samples;

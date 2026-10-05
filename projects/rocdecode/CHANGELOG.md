@@ -14,6 +14,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
+* Fixed HEVC decode failure when a CRA picture starts the coded video sequence on a decoder reused with a new parser. Short-term "follow" reference set entries that name a picture absent from the DPB are now marked invalid instead of being emitted as real surface indices.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
