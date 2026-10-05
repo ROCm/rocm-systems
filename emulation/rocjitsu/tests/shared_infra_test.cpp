@@ -2319,6 +2319,36 @@ TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
 }
 
+TEST(L1VectorCacheTest, ScratchDwordRunsCoalesceAndRespectElementMasks) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  constexpr unsigned kLanes = 32;
+  constexpr uint64_t kBase = 0x8000;
+  std::array<uint64_t, kLanes> addrs{};
+  std::array<uint32_t, kLanes> values{};
+  for (unsigned lane = 0; lane < kLanes; ++lane) {
+    addrs[lane] = kBase + lane * sizeof(uint32_t);
+    values[lane] = lane + 1;
+  }
+  constexpr uint64_t kMask = 0xffffffff;
+  // A hole in the element mask must split the run and preserve the skipped lane.
+  constexpr std::array<uint64_t, 1> kElementMasks = {kMask & ~(uint64_t{1} << 7)};
+  ASSERT_EQ(l1.store(addrs.data(), kMask, 4, 1, reinterpret_cast<const uint8_t *>(values.data()),
+                     amdgpu::Mtype::UC, false, kLanes, 0, kLanes * 4, 0, kElementMasks),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+  EXPECT_EQ(mem.read32(addrs[7]), 0u);
+  std::array<uint32_t, kLanes> loaded{};
+  ASSERT_EQ(l1.load(addrs.data(), kMask, 4, 1, reinterpret_cast<uint8_t *>(loaded.data()),
+                    amdgpu::Mtype::UC, false, false, kLanes, 0, kLanes * 4, 0, kElementMasks),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  values[7] = 0;
+  EXPECT_EQ(loaded, values);
+}
+
 TEST(L1VectorCacheTest, ScratchDwordCrossesInterleaveBoundary) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
