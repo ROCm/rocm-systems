@@ -828,6 +828,15 @@ inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) 
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 
+// Registered-path CE lower bound. Shares the same env vars and table field as
+// rcclCeNonRegMinTab so that RCCL_CE_COLL_MIN_BYTES applies symmetrically.
+inline size_t rcclCeRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMinMsgBytes() : rcclParamCeCollMinBytes();
+  if (param >= 0) return (size_t)param;
+  if (table == nullptr) return 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
+}
+
 inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMaxMsgBytes() : rcclParamCeCollMaxBytes();
   if (param >= 0) return (size_t)param;
@@ -889,7 +898,8 @@ inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, 
   const bool recvReg = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
   if (!recvReg) return false;
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
-  return regMax == kThreshUnlimited || totalBytes <= regMax;
+  const size_t regMin = rcclCeRegMinTab(table, ncclFuncAllGather);
+  return totalBytes >= regMin && (regMax == kThreshUnlimited || totalBytes <= regMax);
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
                                             ncclSymRegType_t winRegType, bool graphMode) {
@@ -2057,7 +2067,8 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
     const size_t a2aCeRegMax = rcclCeRegMaxTab(archTable, ncclFuncAlltoAll);
-    const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes <= a2aCeRegMax;
+    const size_t a2aCeRegMin = rcclCeRegMinTab(archTable, ncclFuncAlltoAll);
+    const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes >= a2aCeRegMin && totalBytes <= a2aCeRegMax;
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem && a2aCeRegWindow &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;

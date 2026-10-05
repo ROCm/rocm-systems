@@ -933,12 +933,14 @@ threshold table introduced for gfx1250.
           collectives, overriding the table.
 
     * - | ``RCCL_CE_COLL_MIN_BYTES``
-        | Overrides the minimum message size for non-AllReduce CE paths.
+        | Overrides the minimum message size for non-AllReduce CE paths,
+          on both the registered-window and non-registered (scratch) paths.
           When ``-1`` (default), the value is resolved from ``ceNonRegMin[func]``
-          in the per-arch table. Messages below this size are not eligible for
-          the non-registered CE path even when CTAPolicy_ZERO is active.
+          in the per-arch table. Messages below this size skip CE even when
+          CTAPolicy_ZERO is active and the size is within ``ceRegMax`` or
+          ``ceNonRegMax``.
       - | ``-1``: Resolved from the per-arch table (default).
-        | ``N`` (bytes): Use ``N`` as the CE minimum size for non-AllReduce paths.
+        | ``N`` (bytes): Use ``N`` as the CE minimum size for all non-AllReduce paths.
 
     * - | ``RCCL_SYM_K_MAX_BYTES``
         | Overrides the symmetric-kernel upper bound for all collectives.
