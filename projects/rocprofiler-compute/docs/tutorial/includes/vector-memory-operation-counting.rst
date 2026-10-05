@@ -38,7 +38,7 @@ Finally, we generate our ``rocprof-compute profile`` as follows.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n vmem --no-roof -- ./vmem
+   $ rocprof-compute profile -n vmem -- ./vmem
 
 .. _flat-experiment-design:
 
@@ -657,7 +657,7 @@ And profiled using ROCm Compute Profiler:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n stack --no-roof -- ./stack
+   $ rocprof-compute profile -n stack -- ./stack
    <...>
    $ rocprof-compute analyze -p workloads/stack/mi200/  -b 10.3 16.3.11 -n per_kernel
    <...>
