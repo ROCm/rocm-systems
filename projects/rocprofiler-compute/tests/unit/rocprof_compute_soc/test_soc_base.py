@@ -126,7 +126,6 @@ Panel Config:
         config_dir=tmp_path,
         filter_blocks=[],
         membw_analysis=False,
-        roof_only=False,
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
