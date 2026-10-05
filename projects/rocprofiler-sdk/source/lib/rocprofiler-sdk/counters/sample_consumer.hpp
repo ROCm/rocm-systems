@@ -30,7 +30,6 @@
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <new>
 #include <thread>
@@ -58,7 +57,7 @@ public:
         exited.store(false);
 
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumer = std::make_unique<std::thread>(&consumer_thread_t::consumer_loop, this);
+        consumer = std::thread(&consumer_thread_t::consumer_loop, this);
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
 
@@ -70,17 +69,16 @@ public:
         cv.notify_all();
 
         if(!exited) cv.wait(lk, [&] { return exited.load(); });
-        if(consumer && consumer->joinable()) consumer->join();
-        consumer.reset();
+        if(consumer.joinable()) consumer.join();
     }
 
-    // fork copies this object but not the consumer thread. Leak that thread and
-    // replace the mutex and condition variable so the child can exit.
+    // fork copies this object but not the consumer thread. Replace the thread
+    // handle, mutex, and condition variable so the child can exit.
     void release_after_fork()
     {
         valid.store(false);
         exited.store(true);
-        consumer.release();
+        ::new(static_cast<void*>(&consumer)) std::thread();
         ::new(static_cast<void*>(&cv)) std::condition_variable();
         ::new(static_cast<void*>(&mut)) std::mutex();
     }
@@ -124,15 +122,15 @@ protected:
         }
     }
 
-    consume_func_t               consume_fn;
-    std::atomic<bool>            valid{false};
-    std::atomic<bool>            exited{true};
-    std::mutex                   mut;
-    std::atomic<size_t>          write_ptr{0};
-    std::atomic<size_t>          read_ptr{0};
-    std::array<DataType, SIZE>   buffer;
-    std::unique_ptr<std::thread> consumer{};
-    std::condition_variable      cv;
+    consume_func_t             consume_fn;
+    std::atomic<bool>          valid{false};
+    std::atomic<bool>          exited{true};
+    std::mutex                 mut;
+    std::atomic<size_t>        write_ptr{0};
+    std::atomic<size_t>        read_ptr{0};
+    std::array<DataType, SIZE> buffer;
+    std::thread                consumer{};
+    std::condition_variable    cv;
 };
 
 }  // namespace counters

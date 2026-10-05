@@ -170,19 +170,14 @@ callback_thread_slot()
     return _v;
 }
 
-void
-callback_consumer_child_fork()
-{
-    callback_thread_slot()->release_after_fork();
-}
-
 callback_consumer_t&
 callback_thread_get()
 {
     auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
     static std::once_flag once;
-    std::call_once(once,
-                   []() { ::pthread_atfork(nullptr, nullptr, callback_consumer_child_fork); });
+    std::call_once(once, []() {
+        ::pthread_atfork(nullptr, nullptr, []() { callback_thread_slot()->release_after_fork(); });
+    });
     return consumer;
 }
 }  // namespace
