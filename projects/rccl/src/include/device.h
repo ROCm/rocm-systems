@@ -247,6 +247,8 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_DIRECT_NIC 0x04
 #define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
+static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
+              "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
 
 // RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
 __host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {

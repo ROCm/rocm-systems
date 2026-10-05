@@ -3849,13 +3849,13 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_KeepsSysAcquire)
     EXPECT_FALSE(recv.conn.flags & NCCL_GPU_PRODUCER);
     EXPECT_TRUE(ncclConnStepNeedsSysAcquire(recv.conn.flags));
 
-    ceMode.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
+    ceMode.reset();  // setup never opened the CE shm segment, so recv free must skip its CE arm
     p2pTransport.recv.free(&comm_, &recv);
 }
 
 TEST_F(P2pSetupMicrotest, SendSetup_CopyEngineMode_KeepsSysAcquire)
 {
-    std::optional<ScopedUseMemcpy> ceMode(std::in_place, 1);
+    ScopedUseMemcpy ceMode(1);
     ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
     InstallTopo(/*read=*/0);
     InstallXgmiLink();
@@ -3870,7 +3870,6 @@ TEST_F(P2pSetupMicrotest, SendSetup_CopyEngineMode_KeepsSysAcquire)
     EXPECT_FALSE(send_.conn.flags & NCCL_GPU_PRODUCER);
     EXPECT_TRUE(ncclConnStepNeedsSysAcquire(send_.conn.flags));
 
-    ceMode.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
     p2pTransport.send.free(&comm_, &send_);
 }
 
@@ -3887,11 +3886,6 @@ TEST(ConnStepAcquireMicrotest, GpuPublishedStep_StaysRelaxed)
     EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_WRITE));
     EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_READ));
     EXPECT_FALSE(ncclConnStepNeedsSysAcquire(NCCL_GPU_PRODUCER));
-}
-
-TEST(ConnStepAcquireMicrotest, GpuProducerBitIsDistinctFromOtherConnFlags)
-{
-    EXPECT_EQ(NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL), 0);
 }
 
 TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)

@@ -109,7 +109,8 @@ class Primitives<T, RedOp, Fan, Direct,
     // To be revisited for correctness on gfx1250
 #if defined(__gfx950__)
     // Only steps a peer GPU kernel publishes poll relaxed; proxy or copy-engine published steps keep #6497's acquire.
-    if (sysAcquire) {
+    // Relaxed is only safe when ld_volatile_global payload loads are sys-scope (DWORDX4 builtins), as with skip_fence.
+    if (sysAcquire || !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS) {
       return ld_acquire_sys_global(ptr);
     }
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
