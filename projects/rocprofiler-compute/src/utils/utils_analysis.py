@@ -4,10 +4,13 @@
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 from utils import csv_compression
 from utils.logger import (
@@ -738,13 +741,26 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
     )
 
 
-def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
+def process_rocpd_csv(
+    df: pd.DataFrame,
+    pass_layout: Optional["PassLayout"] = None,
+) -> pd.DataFrame:
     """
     Merge counters across unique dispatches from the
     input dataframe and return processed dataframe.
+
+    When ``pass_layout`` is provided and the long frame has ``Pass_Key``,
+    duplicated counters keep a base column (first pass in natural order)
+    plus per-pass shadow columns ``{counter}@pass:{pass_key}``.
     """
     if df.empty:
         return df
+
+    use_provenance = (
+        pass_layout is not None
+        and hasattr(pass_layout, "has_duplicates")
+        and "Pass_Key" in df.columns
+    )
 
     data: list[dict[str, Any]] = []
 
@@ -770,8 +786,11 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        if use_provenance:
+            row.update(_merge_counters_with_pass_provenance(group_df, pass_layout))
+        else:
+            # Each counter will become its own column (last write wins).
+            row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
     df = pd.DataFrame(data)
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.
@@ -779,6 +798,31 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
+
+
+def _merge_counters_with_pass_provenance(
+    group_df: pd.DataFrame,
+    pass_layout: "PassLayout",
+) -> dict[str, Any]:
+    """Build base + shadow counter columns for one dispatch group."""
+    from utils.metrics.pass_provenance import natural_pass_sort_key
+
+    merged: dict[str, Any] = {}
+    for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
+        values_by_pass: dict[str, Any] = {}
+        for pass_key, value in zip(
+            counter_rows["Pass_Key"], counter_rows["Counter_Value"]
+        ):
+            values_by_pass[str(pass_key)] = value
+        ordered_passes = sorted(values_by_pass, key=natural_pass_sort_key)
+        first_pass = ordered_passes[0]
+        merged[str(counter_name)] = values_by_pass[first_pass]
+        if str(counter_name) in pass_layout.duplicated:
+            for pass_key in ordered_passes:
+                merged[pass_layout.qualified_column(str(counter_name), pass_key)] = (
+                    values_by_pass[pass_key]
+                )
+    return merged
 
 
 def get_matrix_ops_type(gpu_series: str) -> str:

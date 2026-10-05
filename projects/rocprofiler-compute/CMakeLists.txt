@@ -997,6 +997,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# Same-pass bind (SPP analyze)
+add_test(
+    NAME test_pass_provenance
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pass_provenance.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_pass_provenance.py
+        ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_counter_grouping_buckets
     COMMAND
@@ -1145,6 +1154,7 @@ if(${ENABLE_COVERAGE})
         test_rocprofv3_avail_interface
         test_soc_base
         test_counter_grouping_single_pass
+        test_pass_provenance
         test_counter_grouping_buckets
         test_tty
         test_file_io
