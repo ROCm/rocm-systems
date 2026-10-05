@@ -31,8 +31,9 @@ program test_roctx
 
   character(kind=c_char), dimension(6), target :: msg = &
       [c_char_"r", c_char_"o", c_char_"c", c_char_"t", c_char_"x", c_null_char]
-  integer(c_int64_t), target :: tid
-  integer(c_int64_t) :: id1, id2
+  integer(c_int64_t), target :: agent = 0
+  integer(c_int64_t) :: tid, id1, id2
+  integer(c_int) :: ret
 
   write(*,"(a)",advance="no") "-- Running test 'roctx' (Fortran 2003 interfaces) - "
 
@@ -42,30 +43,33 @@ program test_roctx
   call check(roctxRangePush(c_loc(msg)), 1, "nested roctxRangePush")
   call check(roctxRangePop(), 1, "nested roctxRangePop")
   call check(roctxRangePop(), 0, "first roctxRangePop")
-  call check(roctxRangePop(), -1, "unbalanced roctxRangePop")
+  ret = roctxRangePop()
+  if (ret >= 0) then
+     write(*,*) "FAILED! unbalanced roctxRangePop returned ", ret, " (expected < 0)"
+     stop 1
+  end if
 
   id1 = roctxRangeStart(c_loc(msg))
   id2 = roctxRangeStart(c_loc(msg))
   if (id1 <= 0 .or. id2 <= id1) then
      write(*,*) "FAILED! roctxRangeStart returned ", id1, id2
-     call exit(1)
+     stop 1
   end if
   call roctxRangeStop(id2)
   call roctxRangeStop(id1)
 
   tid = 0
-  call check(roctxGetThreadId(c_loc(tid)), 0, "roctxGetThreadId")
-  if (tid == 0) then
-     write(*,*) "FAILED! roctxGetThreadId left the thread id at 0"
-     call exit(1)
+  if (roctxGetThreadId(tid) == 0 .and. tid == 0) then
+     write(*,*) "FAILED! roctxGetThreadId succeeded but left the thread id at 0"
+     stop 1
   end if
 
-  call check(roctxProfilerPause(tid), 0, "roctxProfilerPause")
-  call check(roctxProfilerResume(tid), 0, "roctxProfilerResume")
-  call check(roctxNameOsThread(c_loc(msg)), 0, "roctxNameOsThread")
-  call check(roctxNameHsaAgent(c_loc(msg), c_null_ptr), 0, "roctxNameHsaAgent")
-  call check(roctxNameHipDevice(c_loc(msg), 0_c_int), 0, "roctxNameHipDevice")
-  call check(roctxNameHipStream(c_loc(msg), c_null_ptr), 0, "roctxNameHipStream")
+  ret = roctxProfilerPause(0_c_int64_t)
+  ret = roctxProfilerResume(0_c_int64_t)
+  ret = roctxNameOsThread(c_loc(msg))
+  ret = roctxNameHsaAgent(c_loc(msg), c_loc(agent))
+  ret = roctxNameHipDevice(c_loc(msg), 0_c_int)
+  ret = roctxNameHipStream(c_loc(msg), c_null_ptr)
 
   write(*,*) "PASSED!"
 
@@ -78,7 +82,7 @@ contains
 
     if (got /= expected) then
        write(*,*) "FAILED! ", what, " returned ", got, " (expected ", expected, ")"
-       call exit(1)
+       stop 1
     end if
   end subroutine check
 

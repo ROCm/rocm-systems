@@ -4,7 +4,7 @@
 
 @PACKAGE_INIT@
 
-set(ROCTX_FORTRAN_COMPILER_DIR "@ROCTX_FORTRAN_COMPILER_DIR@")
+set(_roctx_built_dir "@ROCTX_FORTRAN_COMPILER_DIR@")
 set(_roctx_libdir "@PACKAGE_ROCTX_FORTRAN_LIBDIR@")
 set(_roctx_incdir "@PACKAGE_ROCTX_FORTRAN_INCLUDEDIR@")
 
@@ -52,25 +52,39 @@ function(_roctx_dir_matches DIR FC OUT)
   endif()
 endfunction()
 
-set(_roctx_dir "")
-if(EXISTS "${_roctx_incdir}/${_roctx_fc}/roctx.mod")
-  set(_roctx_dir "${_roctx_fc}")
-else()
-  _roctx_dir_matches("${ROCTX_FORTRAN_COMPILER_DIR}" "${_roctx_fc}" _roctx_ok)
-  if(_roctx_ok)
-    set(_roctx_dir "${ROCTX_FORTRAN_COMPILER_DIR}")
-  endif()
-endif()
+file(GLOB _roctx_avail RELATIVE "${_roctx_incdir}" "${_roctx_incdir}/*")
 
-if(NOT _roctx_dir)
-  file(GLOB _roctx_avail RELATIVE "${_roctx_incdir}" "${_roctx_incdir}/*")
-  set(roctx-fortran_FOUND FALSE)
-  string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
-      "This project builds with ${_roctx_fc}, but no roctx.mod for it is installed "
-      "under ${_roctx_incdir}. Available: ${_roctx_avail}. "
-      "A Fortran .mod cannot be shared across compilers; rebuild the bindings "
-      "with ${_roctx_fc}, or set ROCTX_FORTRAN_COMPILER_DIR to the directory to use.")
-  return()
+if(DEFINED ROCTX_FORTRAN_COMPILER_DIR)
+  set(_roctx_dir "${ROCTX_FORTRAN_COMPILER_DIR}")
+  if(NOT EXISTS "${_roctx_incdir}/${_roctx_dir}/roctx.mod"
+     OR NOT EXISTS "${_roctx_libdir}/${_roctx_dir}/libroctx_fortran.a")
+    set(roctx-fortran_FOUND FALSE)
+    string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
+        "ROCTX_FORTRAN_COMPILER_DIR is ${_roctx_dir}, but roctx.mod and "
+        "libroctx_fortran.a are not both installed for it under ${_roctx_incdir} "
+        "and ${_roctx_libdir}. Available: ${_roctx_avail}.")
+    return()
+  endif()
+else()
+  set(_roctx_dir "")
+  if(EXISTS "${_roctx_incdir}/${_roctx_fc}/roctx.mod")
+    set(_roctx_dir "${_roctx_fc}")
+  else()
+    _roctx_dir_matches("${_roctx_built_dir}" "${_roctx_fc}" _roctx_ok)
+    if(_roctx_ok)
+      set(_roctx_dir "${_roctx_built_dir}")
+    endif()
+  endif()
+
+  if(NOT _roctx_dir)
+    set(roctx-fortran_FOUND FALSE)
+    string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_roctx_fc}, but no roctx.mod for it is installed "
+        "under ${_roctx_incdir}. Available: ${_roctx_avail}. "
+        "A Fortran .mod cannot be shared across compilers; rebuild the bindings "
+        "with ${_roctx_fc}, or set ROCTX_FORTRAN_COMPILER_DIR to the directory to use.")
+    return()
+  endif()
 endif()
 
 if(@ROCTX_FORTRAN_NEEDS_C_PACKAGE@)
@@ -85,7 +99,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/roctx-fortran-targets.cmake")
 
-if(NOT _roctx_dir STREQUAL "${ROCTX_FORTRAN_COMPILER_DIR}")
+if(NOT _roctx_dir STREQUAL _roctx_built_dir)
   set_target_properties(roc::roctx_fortran PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${_roctx_incdir}/${_roctx_dir}")
   get_target_property(_roctx_cfgs roc::roctx_fortran IMPORTED_CONFIGURATIONS)

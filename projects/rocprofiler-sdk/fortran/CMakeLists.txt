@@ -18,6 +18,13 @@ if(DEFINED ROCTX_BUILD_FORTRAN_CLIENTS)
     set(BUILD_FORTRAN_CLIENTS ${ROCTX_BUILD_FORTRAN_CLIENTS})
 endif()
 
+set(FORTRAN_ARRAY_INTERFACES
+    "assumed-shape"
+    CACHE STRING
+          "Array-argument overloads to expose: none, assumed-shape, or assumed-rank")
+set_property(CACHE FORTRAN_ARRAY_INTERFACES PROPERTY STRINGS none assumed-shape
+                                                     assumed-rank)
+
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(ROCTX_HAVE_FORTRAN_BINDINGS
         FALSE
@@ -47,28 +54,29 @@ else()
                 list(APPEND _fc_hints "${_cc_dir}")
             endif()
         endforeach()
-        if(ROCM_PATH)
-            list(APPEND _fc_hints "${ROCM_PATH}/lib/llvm/bin" "${ROCM_PATH}/bin")
-        endif()
-        if(_fc_hints)
-            find_program(
-                _amdflang
-                NAMES amdflang
-                HINTS ${_fc_hints}
-                NO_DEFAULT_PATH)
-            if(_amdflang)
-                execute_process(
-                    COMMAND "${_amdflang}" --version
-                    RESULT_VARIABLE _amdflang_rc
-                    OUTPUT_QUIET ERROR_QUIET)
-                if(_amdflang_rc EQUAL 0)
-                    set(CMAKE_Fortran_COMPILER
-                        "${_amdflang}"
-                        CACHE FILEPATH
-                              "Fortran compiler used for the ROCm Fortran bindings" FORCE)
-                endif()
+        foreach(_rocm_root "${ROCM_PATH}" "$ENV{ROCM_PATH}" "/opt/rocm")
+            if(_rocm_root)
+                list(APPEND _fc_hints "${_rocm_root}/lib/llvm/bin" "${_rocm_root}/bin")
+            endif()
+        endforeach()
+        find_program(
+            _amdflang
+            NAMES amdflang
+            HINTS ${_fc_hints}
+            NO_DEFAULT_PATH)
+        if(_amdflang)
+            execute_process(
+                COMMAND "${_amdflang}" --version
+                RESULT_VARIABLE _amdflang_rc
+                OUTPUT_QUIET ERROR_QUIET)
+            if(_amdflang_rc EQUAL 0)
+                set(CMAKE_Fortran_COMPILER
+                    "${_amdflang}"
+                    CACHE FILEPATH "Fortran compiler used for the ROCm Fortran bindings"
+                          FORCE)
             endif()
         endif()
+        unset(_amdflang CACHE)
     endif()
 
     include(CheckLanguage)
