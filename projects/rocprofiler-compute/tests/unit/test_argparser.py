@@ -6,6 +6,7 @@ Unit tests for rocprof-compute general CLI options.
 """
 
 import argparse
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +17,18 @@ from argparser import omniarg_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
+
+# Options whose (Default: ...) describes the default in words
+DESCRIBED_DEFAULTS = {
+    "--output-directory",
+    "--config-dir",
+    "--rocprofiler-sdk-tool-path",
+    "--pc-sampling-interval",
+    "--cols",
+    "--view",
+}
+# "(Default: X)" is the default; "(Default when given without a value: X)" the const
+HELP_DEFAULT_RE = re.compile(r"\(Default( when given without a value)?: ([^)]*)\)")
 
 
 def build_args(argv, experimental=False):
@@ -46,6 +59,13 @@ def write_skills_readme(skills_dir):
     readme = skills_dir / "README.md"
     readme.write_text("skills")
     return readme
+
+
+def all_parsers():
+    """Return the top-level parser and the profile and analyze parsers."""
+    parser = argparse.ArgumentParser()
+    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, True)
+    return [parser, *parser._subparsers._group_actions[0].choices.values()]
 
 
 # =============================================================================
@@ -205,6 +225,36 @@ def test_pc_sampling_analyze_options():
         with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
     mock_error.assert_called_once()
+
+
+# =============================================================================
+# Help notation
+# =============================================================================
+
+
+def test_help_shows_option_metavars(capsys):
+    with pytest.raises(SystemExit):
+        build_args(["analyze", "--help"], experimental=True)
+    out = capsys.readouterr().out
+    assert "-b, --block <ids>..." in out
+    assert "-t, --time-unit <unit>" in out
+    assert "--torch-operator [patterns]..." in out
+    assert "--list-metrics <arch>" in out
+    assert "Values: HBM, L2, vL1D, L0, LDS" in out
+
+
+def test_help_defaults_match_parser_defaults():
+    """Each "(Default: X)" in the help is the option's real default."""
+    for action in (a for parser in all_parsers() for a in parser._actions):
+        name = action.option_strings[-1] if action.option_strings else action.dest
+        if name in DESCRIBED_DEFAULTS:
+            continue
+        help_text = " ".join((action.help or "").split())
+        for match in HELP_DEFAULT_RE.finditer(help_text):
+            value = action.const if match.group(1) else action.default
+            if isinstance(value, list):
+                value = ", ".join(str(item) for item in value)
+            assert match.group(2) == str(value), name
 
 
 # =============================================================================
