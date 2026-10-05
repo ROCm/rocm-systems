@@ -908,14 +908,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Flush F32 subnormals to signed zero without host floating-point arithmetic.
-inline native<float> flush_denorm_f32_simd(native<float> v) {
-  using U = native<uint32_t>;
-  U b = std::bit_cast<U>(v);
-  stdx::where(((b & 0x7F800000u) == 0u) && ((b & 0x007FFFFFu) != 0u), b) = b & 0x80000000u;
-  return std::bit_cast<native<float>>(b);
-}
-
 /// Native-width adapters for the shared integer transcendental mappings.
 inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
   return map_native_convert_scalar<float, float>(
@@ -1388,9 +1380,8 @@ inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) 
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
-// Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
-// whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
-template <class T> native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+// Fallback stubs for non-template gtest callers, whose discarded
+// `if constexpr (has_stdx_simd)` branch is still type-checked.
 inline native<float> trunc_simd(native<float>) { return {}; }
 inline native<float> ceil_simd(native<float>) { return {}; }
 inline native<float> floor_simd(native<float>) { return {}; }

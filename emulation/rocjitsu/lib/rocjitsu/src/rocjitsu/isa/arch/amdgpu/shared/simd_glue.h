@@ -834,9 +834,9 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
   using U = util::native<uint32_t>;
   const uint32_t denorm_mode = force_flush ? 0 : wf.fp_denorm_mode_f32();
   if (!(denorm_mode & 1u)) {
-    a = util::flush_denorm_f32_simd(a);
-    b = util::flush_denorm_f32_simd(b);
-    c = util::flush_denorm_f32_simd(c);
+    a = denormal::flush_value(a);
+    b = denormal::flush_value(b);
+    c = denormal::flush_value(c);
   }
   const bool flush_output = omod || !(denorm_mode & 2u);
   auto exceptional = (std::bit_cast<U>(a) & U(0x7fffffffu)) >= U(0x7f800000u) ||
@@ -851,7 +851,7 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
         result[i] = fp_mode::fma_f32(a[i], b[i], c[i], wf.cu().arch(), wf.ieee_mode(), denorm_mode,
                                      omod != 0);
   // FMA's subnormal intermediate is flushed before OMOD can scale it normal.
-  return flush_output ? util::flush_denorm_f32_simd(result) : result;
+  return flush_output ? denormal::flush_value(result) : result;
 }
 
 /// ADD and MUL share FMA's NaN and pre-packing tininess policy. SUB retains
@@ -867,8 +867,8 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
     using U = util::native<uint32_t>;
     const uint32_t denorm_mode = wf.fp_denorm_mode_f32();
     if (!(denorm_mode & 1u)) {
-      a = util::flush_denorm_f32_simd(a);
-      b = util::flush_denorm_f32_simd(b);
+      a = denormal::flush_value(a);
+      b = denormal::flush_value(b);
     }
     auto result = a - b;
     const auto nan_input = (std::bit_cast<U>(a) & U(0x7fffffffu)) > U(0x7f800000u) ||
@@ -878,7 +878,7 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
         if (nan_input[i])
           result[i] = fp_mode::detail::evaluate_arithmetic<fp_mode::Arithmetic::SUB, float>(
               a[i], b[i], 0.0f);
-    return (denorm_mode & 2u) ? result : util::flush_denorm_f32_simd(result);
+    return (denorm_mode & 2u) ? result : denormal::flush_value(result);
   } else if constexpr (operation == fp_mode::Arithmetic::ADD)
     return fma_f32_simd(a, util::native<float>(1.0f), b, wf, omod);
   else {
@@ -895,8 +895,8 @@ inline util::native<float> fma_dx9_zero_f32_simd(util::native<float> a, util::na
                                                  util::native<float> c, const Wavefront &wf) {
   using U = util::native<uint32_t>;
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-  a = util::flush_denorm_f32_simd(a);
-  b = util::flush_denorm_f32_simd(b);
+  a = denormal::flush_value(a);
+  b = denormal::flush_value(b);
   const auto zero_product = (std::bit_cast<U>(a) & U(0x7fffffffu)) == U(0) ||
                             (std::bit_cast<U>(b) & U(0x7fffffffu)) == U(0);
   // DX9 supplies a positive zero product even when the other operand is
@@ -4242,7 +4242,7 @@ template <typename Inst, typename Op>
     return false;
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
-    return (wf.fp_denorm_mode_f32() & 1u) ? value : util::flush_denorm_f32_simd(value);
+    return (wf.fp_denorm_mode_f32() & 1u) ? value : denormal::flush_value(value);
   };
   auto binary = [&op](util::native<float> first, util::native<float> second) {
     util::native<float> result = op(first, second);
@@ -4255,7 +4255,7 @@ template <typename Inst, typename Op>
   auto flush_output = [&wf, &inst](util::native<float> value) {
     if (inst.inst_.clamp)
       value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
-    return (wf.fp_denorm_mode_f32() & 2u) ? value : util::flush_denorm_f32_simd(value);
+    return (wf.fp_denorm_mode_f32() & 2u) ? value : denormal::flush_value(value);
   };
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -4320,12 +4320,12 @@ template <typename Inst, typename Op>
     return false;
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
-    return (wf.fp_denorm_mode_f32() & 1u) ? value : util::flush_denorm_f32_simd(value);
+    return (wf.fp_denorm_mode_f32() & 1u) ? value : denormal::flush_value(value);
   };
   auto flush_output = [&wf, &inst](util::native<float> value) {
     if (inst.inst_.clamp)
       value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
-    return (wf.fp_denorm_mode_f32() & 2u) ? value : util::flush_denorm_f32_simd(value);
+    return (wf.fp_denorm_mode_f32() & 2u) ? value : denormal::flush_value(value);
   };
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));

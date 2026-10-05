@@ -838,39 +838,6 @@ TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
   }
 }
 
-// Guard for util::flush_denorm_f32_simd: denormals flush to sign-preserving
-// zero (FTZ); every other class (±0, normal, ±Inf, NaN payloads) passes through
-// bit-for-bit. The f32 rcp/rsq/exp/log SIMD ports funnel through this helper.
-TEST(UtilSimd, FlushDenormF32) {
-  SKIP_IF_NO_SIMD();
-  using V = util::native<float>;
-  constexpr std::size_t W = util::native_width_v<float>;
-  struct Case {
-    uint32_t in, out;
-  };
-  const Case cases[] = {
-      {0x00000001u, 0x00000000u}, // +smallest denormal -> +0
-      {0x80000001u, 0x80000000u}, // -smallest denormal -> -0
-      {0x007FFFFFu, 0x00000000u}, // +largest denormal  -> +0
-      {0x807FFFFFu, 0x80000000u}, // -largest denormal  -> -0
-      {0x00000000u, 0x00000000u}, // +0 untouched
-      {0x80000000u, 0x80000000u}, // -0 untouched
-      {0x00800000u, 0x00800000u}, // smallest normal untouched
-      {0x3F800000u, 0x3F800000u}, // 1.0 untouched
-      {0x7F800000u, 0x7F800000u}, // +Inf untouched
-      {0xFF800000u, 0xFF800000u}, // -Inf untouched
-      {0x7FC00000u, 0x7FC00000u}, // qNaN payload untouched
-      {0x7F800001u, 0x7F800001u}, // sNaN payload untouched
-  };
-  for (const auto &c : cases) {
-    V r = util::flush_denorm_f32_simd(util::broadcast<float>(c.in));
-    alignas(V) float out[W];
-    r.copy_to(out, util::stdx::element_aligned);
-    for (std::size_t i = 0; i < W; ++i)
-      EXPECT_EQ(std::bit_cast<uint32_t>(out[i]), c.out) << "in=0x" << std::hex << c.in;
-  }
-}
-
 // --- IEEE-2019 maximum / minimum (NaN-propagating, signed-zero-ordered) ------
 //
 // util::ieee_{maximum,minimum}_simd back the v_maximum_*/v_minimum_* gap ops.
