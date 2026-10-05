@@ -6,16 +6,33 @@ Unit tests for rocprof-compute general CLI options.
 """
 
 import argparse
+import re
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import (
+    CommaListAction,
+    non_negative_int,
+    omniarg_parser,
+)
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
+
+# Options whose (Default: ...) describes the default in words
+DESCRIBED_DEFAULTS = {
+    "--output-directory",
+    "--config-dir",
+    "--rocprofiler-sdk-tool-path",
+    "--pc-sampling-interval",
+    "--cols",
+    "--view",
+}
+# "(Default: X)" is the default; "(Default when given without a value: X)" the const
+HELP_DEFAULT_RE = re.compile(r"\(Default( when given without a value)?: ([^)]*)\)")
 
 
 def build_args(argv, experimental=False):
@@ -46,6 +63,13 @@ def write_skills_readme(skills_dir):
     readme = skills_dir / "README.md"
     readme.write_text("skills")
     return readme
+
+
+def all_parsers():
+    """Return the top-level parser and the profile and analyze parsers."""
+    parser = argparse.ArgumentParser()
+    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, True)
+    return [parser, *parser._subparsers._group_actions[0].choices.values()]
 
 
 # =============================================================================
@@ -205,6 +229,79 @@ def test_pc_sampling_analyze_options():
         with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
     mock_error.assert_called_once()
+
+
+# =============================================================================
+# Help notation
+# =============================================================================
+
+
+def test_help_shows_option_metavars(capsys):
+    with pytest.raises(SystemExit):
+        build_args(["analyze", "--help"], experimental=True)
+    out = capsys.readouterr().out
+    assert "-b, --block <ids>..." in out
+    assert "-t, --time-unit <unit>" in out
+    assert "--torch-operator [patterns]..." in out
+    assert "--list-metrics <arch>" in out
+    assert "Values: ALL, HBM, L2, vL1D, L0, LDS" in out
+
+
+def test_help_defaults_match_parser_defaults():
+    """Each "(Default: X)" in the help is the option's real default."""
+    for action in (a for parser in all_parsers() for a in parser._actions):
+        name = action.option_strings[-1] if action.option_strings else action.dest
+        if name in DESCRIBED_DEFAULTS:
+            continue
+        help_text = " ".join((action.help or "").split())
+        for match in HELP_DEFAULT_RE.finditer(help_text):
+            value = action.const if match.group(1) else action.default
+            if isinstance(value, list):
+                value = ", ".join(str(item) for item in value)
+            assert match.group(2) == str(value), name
+
+
+# =============================================================================
+# Comma separated lists
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "dest", "expected"),
+    [
+        (["-R", "FP16,FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["-R", "FP16", "FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["-R", "FP16", "-R", "FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["--cols", "0,2"], "cols", [0, 2]),
+    ],
+    ids=["comma", "space", "repeated", "item_type"],
+)
+def test_comma_list_forms_are_equivalent(argv, dest, expected):
+    assert getattr(build_args(["analyze"] + argv), dest) == expected
+
+
+@pytest.mark.parametrize(
+    ("options", "value", "error"),
+    [
+        ({"item_choices": ["A", "B"]}, "A,C", "invalid choice: 'C'"),
+        ({"item_type": int}, "1,x", "invalid int value: 'x'"),
+        ({"item_type": non_negative_int}, "1,-2", "must be a non-negative integer"),
+    ],
+    ids=["choice", "value_error", "type_error_message"],
+)
+def test_comma_list_rejects_bad_items(options, value, error, capsys):
+    parser = argparse.ArgumentParser(prog="rocprof-compute")
+    parser.add_argument("--items", action=CommaListAction, **options)
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--items", value])
+    assert exc.value.code == 2
+    assert f"argument --items: {error}" in capsys.readouterr().err
+
+
+def test_comma_list_append_keeps_occurrences():
+    args = build_args(["analyze", "-k", "1,2", "-k", "3", "-d", "4,5"])
+    assert args.gpu_kernel == [[1, 2], [3]]
+    assert args.gpu_dispatch_id == [["4", "5"]]
 
 
 # =============================================================================

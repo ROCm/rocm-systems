@@ -528,7 +528,7 @@ Analyze multiple kernels for comparison:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0,1,2 -b 4
 
 .. _roofline-html-generation:
 
@@ -561,7 +561,7 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- ALL, HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
    * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
@@ -569,7 +569,7 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM,L2 --roofline-data-type FP32,FP16
 
 Interactive Roofline HTML:
 

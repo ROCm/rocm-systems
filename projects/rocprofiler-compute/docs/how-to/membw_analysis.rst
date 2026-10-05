@@ -59,7 +59,7 @@ filter with both block 3 and block 30:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/my_workload/MI350/ -b 3 30
+   $ rocprof-compute analyze -p workloads/my_workload/MI350/ -b 3,30
 
 In this command, ``-b 3`` selects the memory chart and ``-b 30`` selects
 the memory bandwidth analysis panel. When block 30 data was collected

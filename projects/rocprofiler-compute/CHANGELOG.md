@@ -7,13 +7,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Options that take a list now accept values separated by commas, for example `-b 2,5` or `-R FP16,FP32`. Values separated by spaces still work.
+
 ### Changed
+
+* The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
+
+* `-m/--mem-level` now accepts `ALL`, which is also its default.
+
+* `--specs-correction` takes a comma-separated list of `name:value` pairs, like other list options. The quoted form `--specs-correction="num_xcd:4,cu_per_gpu:64"` still works.
+
+* Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the hidden profile option `--target`, which had no effect.
 
 ### Optimized
 

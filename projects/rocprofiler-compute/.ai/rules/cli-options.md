@@ -57,11 +57,18 @@ Every rename also needs these updates:
 
 ## Arguments
 
-A list of values is passed as one comma-separated argument.
+A list of values is passed as one comma-separated argument. Use
+`action=CommaListAction` (with `item_type` / `item_choices` for per-value
+conversion and validation); it also accepts space-separated values.
 
 ```text
 --roofline-data-types FP16,FP32,FP64
 ```
+
+Exceptions, which take space-separated values only:
+
+- `-p/--path`, since paths can contain commas
+- profile `-k/--kernel`, since C++ template kernel names contain commas
 
 ## Help Messages
 
@@ -71,6 +78,9 @@ empty (`metavar=""`).
 - If the value is required, use `metavar="<arg>"`.
 - If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
   The help adds the `[]` automatically.
+
+`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
+`<args>...` and `args` shows as `[args]...`.
 
 For an option that takes an argument, the help message follows these rules:
 
