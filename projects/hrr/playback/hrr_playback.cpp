@@ -622,22 +622,47 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   hrr_dispatch_seq = ev.header().sequence_id;
   auto order = needs_ordering(etype);
 
-  // Spin-wait for our turn in global capture order.
+  // Wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
   // past our slot, we must not spin forever — bail out immediately.
-  // After ~1000 failed yields, sleep for 1 µs to avoid burning a full core
-  // while waiting for a slow ordering predecessor.
+  // The wait is bounded (hrr::wait_for_turn): a gap or duplicate in the
+  // recorded sequence numbers means next_seq never reaches ours, and the
+  // replay must end with a diagnostic instead of hanging.
   {
-    int spin = 0;
-    while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id) {
-      if (ctx.fatal_error.load(std::memory_order_acquire))
+    uint64_t observed = 0;
+    switch (hrr::wait_for_turn(ctx.next_seq, ev.header().sequence_id,
+                               ctx.fatal_error, ctx.max_seq_waits, &observed,
+                               &ctx.turns_in_flight)) {
+      case hrr::TurnResult::Turn:
+        break;
+      case hrr::TurnResult::Fatal:
         return hipErrorUnknown;
-      if (++spin < 1000)
-        std::this_thread::yield();
-      else
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+      case hrr::TurnResult::Stalled: {
+        const uint64_t seq = ev.header().sequence_id;
+        fprintf(stderr,
+                "[HRR] Fatal: malformed event stream: event %zu (%s, thread %llu) has "
+                "sequence number %llu but the replay is at %llu (%s); no event "
+                "supplies the turn after %llu waits (--max-seq-waits)\n",
+                idx, hrr::event_type_name(etype),
+                (unsigned long long)ev.header().thread_id,
+                (unsigned long long)seq, (unsigned long long)observed,
+                observed > seq ? "duplicate or out-of-order sequence number"
+                               : "gap in the sequence numbers",
+                (unsigned long long)ctx.max_seq_waits);
+        ctx.fatal_error.store(true, std::memory_order_release);
+        return hipErrorUnknown;
+      }
     }
   }
+
+  // From here until this function returns the thread is inside its call. The
+  // sequence waits of the other threads do not count while it is (see
+  // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
+  struct InFlight {
+    std::atomic<int>& n;
+    explicit InFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
+    ~InFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
+  } in_flight{ctx.turns_in_flight};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
@@ -1219,6 +1244,14 @@ static void print_usage(const char* argv0) {
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
+    "  --max-seq-waits N     End the replay when an event's sequence number is not\n"
+    "                        reached after N waits with no progress (a gap or\n"
+    "                        duplicate in the recorded sequence). Default 5000000.\n"
+    "  --max-query-attempts N\n"
+    "                        Stop retrying hipEventQuery/hipStreamQuery after N\n"
+    "                        attempts that return hipErrorNotReady. Default 5000000.\n"
+    "  --max-file-bytes N    Refuse a blob or code object larger than N bytes.\n"
+    "                        Default 4294967296 (4 GiB).\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
@@ -1309,6 +1342,19 @@ int main(int argc, char** argv) {
         return 1;
       }
       ctx.sync_watchdog_ms = static_cast<unsigned>(n);
+    }
+    else if ((!strcmp(argv[i], "--max-seq-waits") ||
+              !strcmp(argv[i], "--max-query-attempts") ||
+              !strcmp(argv[i], "--max-file-bytes")) && i + 1 < argc) {
+      const char* flag = argv[i];
+      uint64_t n = 0;
+      if (!hrr::parse_u64(argv[++i], &n)) {
+        fprintf(stderr, "[HRR] %s expects a non-negative integer\n", flag);
+        return 1;
+      }
+      if      (!strcmp(flag, "--max-seq-waits"))      ctx.max_seq_waits      = n;
+      else if (!strcmp(flag, "--max-query-attempts")) ctx.max_query_attempts = n;
+      else                                            hrr::set_max_file_bytes(n);
     }
     else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
     else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
