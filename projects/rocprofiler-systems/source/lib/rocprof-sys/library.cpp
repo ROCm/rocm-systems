@@ -31,9 +31,7 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
-#include "core/output/process_tree.hpp"
-#include "core/output/registry.hpp"
-#include "core/output/summary_writer.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
@@ -1525,11 +1523,11 @@ rocprofsys_finalize_hidden(void)
         output::registry::instance().record_process(output::process_metadata{
             .pid = getpid(), .ppid = getppid(), .command = config::get_exe_name() });
 
-        const auto rows = output::registry::instance().rows();
         const auto tree =
-            output::process_tree{ rows, output::registry::instance().processes() };
+            output::process_tree{ output::registry::instance().rows(),
+                                  output::registry::instance().processes() };
         const auto meta = output::run_metadata::capture(library_load_time);
-        output::write_summary(std::cout, tree, meta, rows);
+        output::write_summary(std::cout, tree, meta);
     }
 
     categories::shutdown();

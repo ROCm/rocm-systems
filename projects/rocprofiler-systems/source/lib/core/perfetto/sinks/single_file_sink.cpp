@@ -5,8 +5,7 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "core/config.hpp"
-#include "core/output/artifact.hpp"
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "logger/debug.hpp"
 
