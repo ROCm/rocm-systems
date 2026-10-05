@@ -99,7 +99,7 @@ TEST(GpuUnit, AmppWritableSlotMaskParsePrefixOnlyIsRejected) {
 
 TEST(GpuUnit, AmppWritableSlotMaskParseTrailingGarbageAfterValidDigitsIsRejected) {
   std::vector<uint32_t> slots;
-  EXPECT_EQ(parse_ampp_writable_slot_mask("0xe00", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(parse_ampp_writable_slot_mask("0xe00g", &slots), RSMI_STATUS_UNEXPECTED_DATA);
 }
 
 TEST(GpuUnit, AmppWritableSlotMaskParseNonHexPrefixCharacterIsRejected) {
