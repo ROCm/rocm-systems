@@ -15,7 +15,9 @@ set(UNIT_TEST_SOURCES
     sqlite_backend_impl_test.cpp
     ph_ctx_test.cpp
     c_api_test.cpp
+    cached_track_reader_test.cpp
     connection_source_test.cpp
+    event_partitions_test.cpp
     track_read_options_test.cpp
     track_window_test.cpp
 )

@@ -18,7 +18,11 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_future.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_c_api.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/cached_track_reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/cached_track_reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/connection_source.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/event_partitions.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/event_partitions.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pooled_connection_source.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pooled_connection_source.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_read_options.cpp
