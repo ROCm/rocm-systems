@@ -4741,7 +4741,7 @@ protected:
     wave->set_exec(1);
     std::array<Wavefront *, 1> waves{wave};
     fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
-    plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+    plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wave);
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_NE(decoder, nullptr);
   }
@@ -5156,8 +5156,7 @@ TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
   ASSERT_EQ(state->exec_mask, 0xFFFF'FFFFu);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   auto &events = plugin_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
@@ -5199,8 +5198,7 @@ TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
                               {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   auto &events = plugin_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
@@ -5383,8 +5381,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
   }
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   ASSERT_NE(plugin_state->race_state, nullptr);
   const auto &events = plugin_state->race_state->getDetector()->events();
@@ -5452,8 +5449,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
     EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *store, *wf);
 
-    auto *plugin_state =
-        static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+    auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
     ASSERT_NE(plugin_state, nullptr);
     ASSERT_NE(plugin_state->race_state, nullptr);
     auto &events = plugin_state->race_state->getDetector()->events();
