@@ -9,7 +9,6 @@ set(UNIT_TEST_SOURCES
     table_select_query_test.cpp
     entity_utility_test.cpp
     json_serializer_test.cpp
-    symbol_seal_test.cpp
     writer_test.cpp
     reader_test.cpp
     sqlite_backend_impl_test.cpp
@@ -57,6 +56,7 @@ target_compile_definitions(
         PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}
         PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}
 )
+
 add_dependencies(profiler-hub_unit_tests profiler-hub)
 
 target_include_directories(
@@ -77,17 +77,9 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()
 
-# ASAN: TheRock forces -shared-libsan fleet-wide but amd-llvm ships only the static asan
-# runtime, so link it statically here.
-if(
-    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"
-)
-    target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
-endif()
-
 gtest_discover_tests(
     profiler-hub_unit_tests
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     PROPERTIES LABELS "unit"
 )

@@ -57,6 +57,7 @@ class AQLProfileDL
 {
     using GetBufferPacketsFn   = decltype(aqlprofile_att_get_buffer_packets);
     using UpdateBufferStatusFn = decltype(aqlprofile_att_update_buffer_status);
+    using GetGPUClockFn        = decltype(aqlprofile_att_get_gpu_clock);
 
 public:
     AQLProfileDL();
@@ -69,6 +70,7 @@ public:
 
     GetBufferPacketsFn*   get_buffer_packets_fn   = nullptr;
     UpdateBufferStatusFn* update_buffer_status_fn = nullptr;
+    GetGPUClockFn*        get_gpu_clock_fn        = nullptr;
     void*                 handle                  = nullptr;
 };
 

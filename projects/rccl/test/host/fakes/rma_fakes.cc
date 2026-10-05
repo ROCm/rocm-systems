@@ -7,6 +7,7 @@
 #include "nccl.h"
 #include "comm.h"        // NCCL_GIN_MAX_CONNECTIONS (via transitive gin headers)
 #include "rma/rma_ce.h"
+#include "rma/rma.h"
 #include "rma/rma_proxy.h"
 
 #include "rocmwrap.h"   // ncclCuStreamBatchMemOp
@@ -25,6 +26,9 @@ ASSERT_HOOK_MATCHES_PROD(g_rmaCePutLaunch,      ncclRmaCePutLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaProxyWaitLaunch,  ncclRmaProxyWaitLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaCeWaitLaunch,     ncclRmaCeWaitLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_cuStreamBatchMemOp,  ncclCuStreamBatchMemOp);
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+ASSERT_HOOK_MATCHES_PROD(g_rmaInitialized,      ncclRmaInitialized);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -70,6 +74,12 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
     g_rmaCeWaitLaunch = DefaultRmaLaunch;
 
+// ncclRmaInitialized (src/rma/rma.cc): false matches a comm whose RMA resources were never set up.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+static bool DefaultRmaInitialized(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_rmaInitialized = DefaultRmaInitialized;
+#endif
+
 // ---------------------------------------------------------------------------
 // Externals the compiled TU links against
 // ---------------------------------------------------------------------------
@@ -102,6 +112,11 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
   return g_rmaCePutLaunch(comm, plan, stream);
 }
 
+// Omitted where the target compiles the real rma.cc as its unit under test and defines this itself.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+bool ncclRmaInitialized(struct ncclComm* comm) { return g_rmaInitialized(comm); }
+#endif
+
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
@@ -126,4 +141,7 @@ void ResetRmaFakes() {
   g_rmaProxyWaitLaunch  = DefaultRmaLaunch;
   g_rmaCeWaitLaunch     = DefaultRmaLaunch;
   g_cuStreamBatchMemOp  = DefaultCuStreamBatchMemOp;
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+  g_rmaInitialized      = DefaultRmaInitialized;
+#endif
 }

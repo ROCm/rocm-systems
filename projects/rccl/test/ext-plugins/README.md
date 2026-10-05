@@ -12,6 +12,8 @@ This directory contains automated tests for RCCL (ROCm Communication Collectives
 
 4. **Mixed Plugin**: Validates that a single shared object can export multiple plugin types. It builds `plugins/mixed/example/librccl-mixed.so` (net + tuner), checks that both plugin symbols are exported, and runs a collective to confirm RCCL loads both the net and tuner plugins from the same object (`ext-mixed`, marker `ext_mixed`).
 
+5. **RMA Plugin**: Validates RMA v15 selection and `optFlags`, example-plugin adoption, and short-name loading (`ext-rma`, marker `ext_rma`).
+
 The tests are written in Python using the pytest framework, making it easy to run, maintain, and extend the test coverage.
 
 ## Directory Structure

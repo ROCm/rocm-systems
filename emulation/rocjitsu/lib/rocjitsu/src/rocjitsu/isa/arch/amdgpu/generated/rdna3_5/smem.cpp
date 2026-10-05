@@ -35,6 +35,7 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -65,6 +66,7 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -95,6 +97,7 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -125,6 +128,7 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -155,6 +159,7 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -184,6 +189,7 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -215,6 +221,7 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -246,6 +253,7 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -277,6 +285,7 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -308,6 +317,7 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -326,6 +336,7 @@ SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SGl1InvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -343,6 +354,7 @@ SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SDcacheInvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -366,6 +378,7 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -389,6 +402,7 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
