@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+use crate as amdsmi;
 use amdsmi::{
     AmdsmiClkInfoT, AmdsmiClkTypeT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiGpuBlockT,
     AmdsmiPowerInfoT, AmdsmiProcessorHandle, AmdsmiStatusT,
