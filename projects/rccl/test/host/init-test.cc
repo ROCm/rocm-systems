@@ -2531,6 +2531,7 @@ struct PeerSpec {
   int mloPart = -1;     // -1 == NCCL_TOPO_UNDEF, i.e. not an MLOPart GPU
   int nvmlDev = -1;     // -1 = its own device; equal values collide for the :1482 check
   int uuidTag = -1;     // -1 = its own UUID; equal values (>=1) make two peers the same GPU
+  int64_t busId = 0;    // equal values are the same PCI function, i.e. the same partition
   int compCap = -1;     // -1 = same as self
   ncclComm* comm = nullptr;  // only read for same-process peers (:1527, :1549)
 };
@@ -2570,6 +2571,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
       info[i].cuMemSupport = s.cuMemSupport;
       info[i].mloPart = s.mloPart;
       info[i].nvmlDev = s.nvmlDev < 0 ? 100 + i : s.nvmlDev;  // self is 0, so -1 never collides
+      info[i].busId = s.busId;  // defaults to 0, which is also what the faked getBusId gives self
       std::memset(&info[i].gpuUuid, 0, sizeof(info[i].gpuUuid));
       reinterpret_cast<unsigned char*>(&info[i].gpuUuid)[0] =
           static_cast<unsigned char>(s.uuidTag < 0 ? i + 1 : s.uuidTag);  // 1-based: never matches self's zeros
@@ -2736,6 +2738,61 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidDifferentHosts_IsAllowe
   // the ncclRemoteError sentinel (proves :1576 was reached) and the exit: call count.
   EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// AICOMRCCL-2749. The CPX shape: one UUID, one bus/device, eight PCI functions. hipDeviceGetUuid
+// returns KFD's per-device unique_id, so every partition of an MI300X OAM reports the same UUID;
+// only the function nibble tells them apart. Measured on dell300x-ccs-aus-k13-09 in CPX: 63
+// partitions, 8 distinct UUIDs (each shared by 8), 63 distinct busIds. Dropping the busId conjunct
+// refuses this communicator, which is the whole bug -- one rank per partition is how CPX is run.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidDifferentPciFunctions_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b001;  // 0000:1b:00.1 and .2: two CPX partitions of the OAM at 0000:1b:00
+  specs[2].busId = 0x1b002;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // ran on to the topo seam
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// The conjunct narrows the guard, it does not disable it: a genuine two-ranks-on-one-partition
+// misconfiguration matches on busId too and is still refused. Without this, the fix would be
+// indistinguishable from the NCCL_MULTI_RANK_GPU_ENABLE=1 workaround it is meant to replace.
+// The sibling test above drives the same guard with a nonzero busId, so neither case is passing
+// only because the harness leaves busId at 0.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidSamePciFunction_StillRefused) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b003;  // both ranks bound to 0000:1b:00.3
+  specs[2].busId = 0x1b003;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclOsCpuCountCalls);  // the one return that skips exit:
+}
+
+// The NVIDIA MLOPart shape is the mirror image and must stay admitted: siblings share a BDF but
+// CUDA gives each partition its own UUID, so the UUID conjunct is what separates them there.
+TEST_F(InitMicrotest, InitTransportsRank_SamePciFunctionDifferentGpuUuids_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].busId = 0x1b000;  // same BDF, and uuidTag -1 leaves each peer its own UUID
+  specs[2].busId = 0x1b000;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Continues) {

@@ -1824,7 +1824,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml |= (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
                                 (comm->peerInfo[i].nvmlDev == comm->peerInfo[j].nvmlDev);
+      // The UUID alone does not identify a partition on AMD. hipDeviceGetUuid returns ROCr's
+      // HSA_AMD_AGENT_INFO_UUID, which is KFD's per-device unique_id, so all 8 CPX partitions of one
+      // MI300X OAM report one UUID. busId separates them: HIP reports the KFD location_id function
+      // (0000:1b:00.0-.7), unique per partition. Two ranks really on one partition still match both
+      // terms and are still refused, which is what NCCL_MULTI_RANK_GPU_ENABLE=1 gives up wholesale.
       if (!ncclParamMultiRankGpuEnable() && (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
+          (comm->peerInfo[i].busId == comm->peerInfo[j].busId) &&
           memcmp(&comm->peerInfo[i].gpuUuid, &comm->peerInfo[j].gpuUuid, sizeof(cudaUUID_t)) == 0) {
         WARN("Multiple Ranks are using the same GPU/Partition. Set NCCL_MULTI_RANK_GPU_ENABLE=1 to enable this "
              "configuration.");
