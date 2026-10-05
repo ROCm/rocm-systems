@@ -913,3 +913,51 @@ threshold table introduced for gfx1250.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
+    * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
+        | Overrides the minimum message size for the CE 2-shot AllReduce path.
+          When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``
+          in the per-arch table. Messages smaller than this minimum skip the
+          2-shot CE path even when it is otherwise eligible.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce minimum size.
+
+    * - | ``RCCL_CE_COLL_MAX_BYTES``
+        | Overrides the CE size cap for all non-AllReduce collectives
+          (AllGather, AlltoAll, ReduceScatter, etc.) on both the registered-window
+          and non-registered (scratch) paths. When ``-1`` (default), the cap is
+          read from ``ceRegMax[func]`` or ``ceNonRegMax[func]`` in the per-arch
+          table. AllReduce uses ``RCCL_CE_AR_2SHOT_MAX_BYTES`` and
+          ``RCCL_CE_AR_REG_MAX_MSG_BYTES`` instead.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the CE size cap for all non-AllReduce
+          collectives, overriding the table.
+
+    * - | ``RCCL_CE_COLL_MIN_BYTES``
+        | Overrides the minimum message size for non-AllReduce CE paths.
+          When ``-1`` (default), the value is resolved from ``ceNonRegMin[func]``
+          in the per-arch table. Messages below this size are not eligible for
+          the non-registered CE path even when CTAPolicy_ZERO is active.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the CE minimum size for non-AllReduce paths.
+
+    * - | ``RCCL_SYM_K_MAX_BYTES``
+        | Overrides the symmetric-kernel upper bound for all collectives.
+          When ``-1`` (default), the bound is resolved from ``symMaxR2[func]``
+          (eager mode) or ``symMaxR2Graph[func]`` (graph-capture mode) in the
+          per-arch table. A table entry of ``kThreshUnlimited`` (``SIZE_MAX``)
+          means no suppression. Setting this variable to ``0`` disables the
+          symmetric kernel for all collectives.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: Disable the symmetric kernel for all collectives.
+        | ``N`` (bytes): Cap the symmetric kernel at ``N`` bytes for all collectives.
+
+    * - | ``RCCL_SYM_K_MIN_BYTES``
+        | Overrides the symmetric-kernel lower bound for all collectives. Below
+          this threshold, DDA is preferred over the symmetric kernel for registered
+          buffers. When ``-1`` (default), the bound is resolved from
+          ``symMinR2[func]`` in the per-arch table. ``0`` in the table means no
+          lower-bound suppression.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: No lower-bound suppression (symk eligible at all sizes).
+        | ``N`` (bytes): Below ``N``, prefer DDA over the symmetric kernel.
+

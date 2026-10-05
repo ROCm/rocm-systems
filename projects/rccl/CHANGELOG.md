@@ -54,8 +54,13 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `RCCL_CE_AR_2SHOT_MAX_BYTES` (default `-1`): overrides the 2-shot AllReduce size cap from the arch table. Set to a positive value to override `ceNonRegMax[AR]`.
+* `RCCL_CE_AR_2SHOT_MIN_BYTES` (default `-1`): overrides the minimum message size for the CE 2-shot AllReduce path. When `-1`, resolved from `ceNonRegMin[AllReduce]` in the per-arch table.
 * `RCCL_CE_AR_REG_MAX_MSG_BYTES` (default `-1`): overrides the registered CE AllReduce size cap from the arch table.
 * `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.
+* `RCCL_CE_COLL_MAX_BYTES` (default `-1`): overrides the CE registered-window and 2-shot size cap for all non-AllReduce collectives (AllGather, AlltoAll, etc.). When `-1`, resolved from `ceRegMax[func]` or `ceNonRegMax[func]` in the per-arch table.
+* `RCCL_CE_COLL_MIN_BYTES` (default `-1`): overrides the minimum message size for CE non-AllReduce paths. When `-1`, resolved from `ceNonRegMin[func]` in the per-arch table.
+* `RCCL_SYM_K_MAX_BYTES` (default `-1`): overrides the symmetric-kernel upper bound for all collectives. When `-1`, resolved from `symMaxR2[func]` (eager) or `symMaxR2Graph[func]` (graph-capture) in the per-arch table. `kThreshUnlimited` (SIZE_MAX) in the table means no suppression.
+* `RCCL_SYM_K_MIN_BYTES` (default `-1`): overrides the symmetric-kernel lower bound for all collectives. When `-1`, resolved from `symMinR2[func]` in the per-arch table. Below this size, DDA is preferred over symk.
 * Per-architecture dispatch table (`rcclArchThresholds`) centralizing algo/proto selection for DDA protocol, CE, and symmetric kernel per collective, replacing scattered hardcoded defaults. Tables are defined for gfx1250, gfx950, and gfx942; the lookup `rcclGetArchThresholds()` maps GCN arch strings to the appropriate entry. The `symMinR2[func]` field sets a per-collective lower bound for registered buffers.
 * `RCCL_IGNORE_ARCH_TABLE` (default `0`): when set to `1`, bypasses the `rcclArchThresholds` dispatch table and falls back to compile-time constants for all DDA, CE, and symmetric-kernel thresholds. Has no effect on gfx942 and gfx950, which always use the arch table.
 * New `rcclAddonAlgos_t` values: `RCCL_CE_SCRATCH` (CE via DDA scratch, distinct from `RCCL_CE_REGISTERED`), `RCCL_A2A_PIVOT`, `RCCL_A2A_GDA`, `RCCL_A2A_GIN_SDMA`, and `RCCL_DIRECT_ALLTOALL`, with corresponding `rcclGetAlgoName()` labels.
