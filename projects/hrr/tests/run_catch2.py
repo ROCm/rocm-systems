@@ -12,6 +12,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Iterable
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +38,31 @@ def test_result(case: ET.Element) -> str:
     if case.find("skipped") is not None:
         return "SKIP"
     return "PASS"
+
+
+def top_level_results(
+    cases: Iterable[ET.Element],
+) -> dict[str, tuple[str, list[tuple[str, ET.Element]]]]:
+    """Fold Catch2's per-SECTION <testcase> entries into their test case.
+
+    Catch2 writes a case as "Name" and each of its sections as "Name/Section",
+    and a failing assertion inside a section appears only on the section's
+    entry. Counting the top-level entries alone would report that case as
+    passed while Catch2 itself exits 42 for it. Returns name -> (result,
+    [(entry name, failure or error element)]), in file order.
+    """
+    results: dict[str, tuple[str, list[tuple[str, ET.Element]]]] = {}
+    for case in cases:
+        entry = case.attrib["name"]
+        name = entry.split("/", 1)[0]
+        result = test_result(case)
+        failures = [(entry, f) for f in case.findall("failure") + case.findall("error")]
+        if name in results:
+            previous, earlier = results[name]
+            result = "FAIL" if "FAIL" in (previous, result) else previous
+            failures = earlier + failures
+        results[name] = (result, failures)
+    return results
 
 
 def main() -> int:
@@ -82,25 +108,21 @@ def main() -> int:
     completed = subprocess.CompletedProcess(command, process.returncode, stdout)
 
     try:
-        cases = [
-            case
-            for case in ET.parse(args.xml).iterfind(".//testcase")
-            if "/" not in case.attrib["name"]
-        ]
+        results = top_level_results(ET.parse(args.xml).iterfind(".//testcase"))
     except (ET.ParseError, OSError, KeyError) as error:
         print(f"Could not read JUnit results: {error}", file=sys.stderr)
         print(completed.stdout, end="")
         return completed.returncode or 1
 
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
-    for case in cases:
-        result = test_result(case)
+    for name, (result, failures) in results.items():
         counts[result] += 1
-        print(f"{result}: {case.attrib['name']}")
-        if result == "FAIL":
-            for failure in case.findall("failure") + case.findall("error"):
-                if failure.text:
-                    print(failure.text.strip())
+        print(f"{result}: {name}")
+        for entry, failure in failures:
+            if entry != name:
+                print(f"in section {entry[len(name) + 1:]!r}:")
+            if failure.text:
+                print(failure.text.strip())
     print(
         f"{counts['PASS']} passed, {counts['FAIL']} failed, "
         f"{counts['SKIP']} skipped"

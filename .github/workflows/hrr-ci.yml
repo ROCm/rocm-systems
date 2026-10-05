@@ -54,6 +54,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Test the JUnit readers
+        shell: bash
+        run: python3 projects/hrr/tests/test_junit_results.py -v
+
       - name: Install ROCm SDK (headers and toolchain only)
         shell: bash
         run: |
@@ -510,6 +514,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
+            projects/hrr/tests/run_catch2.py
             projects/hrr/tests/summarize_junit.py
           sparse-checkout-cone-mode: false
           set-safe-directory: true

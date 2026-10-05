@@ -4,8 +4,8 @@
 """Build a platform/family table from Catch2 JUnit files.
 
 CI names the files unit-<os>.xml and integration-<family>.xml. Catch2 also
-emits one <testcase> per SECTION, so counts here use only top-level cases
-(names without '/'), matching run_catch2.py.
+emits one <testcase> per SECTION, so counts here are of top-level cases, with
+a failing section failing its case, using the same folding as run_catch2.py.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ import argparse
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from run_catch2 import top_level_results
 
 # Display order matches .github/workflows/hrr-ci.yml.
 COLUMNS = (
@@ -33,28 +35,15 @@ COLUMNS = (
 MAX_FAILED_NAMES = 8
 
 
-def case_result(case: ET.Element) -> str:
-    if case.find("failure") is not None or case.find("error") is not None:
-        return "FAIL"
-    if case.find("skipped") is not None:
-        return "SKIP"
-    return "PASS"
-
-
 def summarize_xml(path: Path) -> dict[str, object]:
-    cases = [
-        case
-        for case in ET.parse(path).iterfind(".//testcase")
-        if "/" not in case.attrib.get("name", "/")
-    ]
+    results = top_level_results(ET.parse(path).iterfind(".//testcase"))
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
     failed: list[str] = []
-    for case in cases:
-        result = case_result(case)
+    for name, (result, _) in results.items():
         counts[result] += 1
         if result == "FAIL":
-            failed.append(case.attrib["name"])
-    return {"counts": counts, "failed": failed, "total": len(cases)}
+            failed.append(name)
+    return {"counts": counts, "failed": failed, "total": len(results)}
 
 
 def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
@@ -62,7 +51,7 @@ def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
     # empty file. Report it as unreadable rather than abort the whole table.
     try:
         return summarize_xml(path)
-    except (ET.ParseError, OSError) as error:
+    except (ET.ParseError, OSError, KeyError) as error:
         errors.append(f"{path.name}: {error}")
         return {"error": str(error)}
 
