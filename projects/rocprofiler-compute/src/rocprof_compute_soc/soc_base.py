@@ -796,7 +796,7 @@ class OmniSoC_Base:
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks
-                and "roof" not in self.get_args().filter_blocks
+                and "roofline" not in self.get_args().filter_blocks
             )
         ):
             console_log("roofline", "Skipping roofline")
