@@ -1,28 +1,38 @@
 # Range replay test roadmap
 
 This page plans the correctness and performance tests range replay still needs, one set per
-week from October 2026 through September 2027. Nothing here is implemented yet. Each week's
-tests land as their own pull request, stacked on the previous week's, so every PR stays small
-enough to review in one sitting and can be merged or dropped on its own.
+week from October 2026 through September 2027. Each week's tests land as their own pull
+request, stacked on the previous week's, so every PR stays small enough to review in one
+sitting and can be merged or dropped on its own. The table below lists what has landed.
 
 ## What is covered today
 
 | Layer | Where | What it pins |
 | --- | --- | --- |
-| Unit, no GPU | `range_replay/tests/` (86 tests) | eligibility and decline bookkeeping, the code-object watermark, kernarg layout, pass packets, digests, the public ABI, the single-subscriber claim, CONFIG → PASS → CLOSE ordering, the queue hook's early returns |
+| Unit, no GPU | `range_replay/tests/` (92 tests) | eligibility and decline bookkeeping, the code-object watermark, kernarg layout, pass packets, digests, kernarg block retention, the public ABI, the single-subscriber claim, CONFIG → PASS → CLOSE ordering, the queue hook's early returns |
 | Samples, GPU | `samples/range_replay/` | a replayed range with `divergence_count == 0`, a tool that opts out, a multi-queue decline |
 | Integration, GPU | `tests/range-replay-local-context/` | every per-dispatch service sees the replayed dispatches and honors per-pass toggles |
+| Declines, GPU | `tests/range-replay-declines/` | a device-writing copy between a range's kernels, through `hipMemcpyAsync` (C1) or `hsa_amd_memory_async_batch_copy` (C2), declines with `MEMORY_COPY_IN_RANGE` while nothing traces memory copies; no pass runs and the application's result is intact |
 | Performance, GPU, nightly | `tests/range-replay-perf/` | pass-count scaling, and amortization of the window cost over dispatches |
 
 ## What is missing
 
 Most decline reasons are asserted only as bookkeeping: nothing on hardware drives an application
-into them and checks that the range is declined and the application is unaffected. Three bugs
-fixed in #10864 have no regression test:
+into them and checks that the range is declined and the application is unaffected. Of the three
+bugs fixed in #10864, C1 and C2 now guard the first two:
 
 - device-writing copies went unseen when nothing traced memory copies;
 - `hsa_amd_memory_async_batch_copy` bypassed the decline;
-- a graph launched from another thread during a replay window could corrupt application data.
+- a graph launched from another thread during a replay window could corrupt application data
+  (C8).
+
+A small `hipMemcpyAsync` is not declined at all. HIP performs a copy of up to
+`GPU_FORCE_BLIT_COPY_SIZE` (16 KiB by default) with a copy kernel on the application's own queue,
+so the range records that kernel like any other dispatch. A replayed pass re-runs it, and it reads
+host memory the snapshot does not cover: the application may have changed a pinned source since,
+and HIP reuses the staging buffer it copies a pageable source through. Whether such a range
+should decline, and how the SDK would recognize HIP's copy kernels, is undecided; C28 tests
+whichever is chosen.
 
 The recurring cost range replay imposes on runs that never open a range is not measured either.
 
@@ -56,7 +66,7 @@ will hit first.
 | 2026-12-07 | C11, C24 | correctness | Kernarg staging: 64 dispatches with distinct arguments, arguments near the 4 KiB limit, and kernels with no arguments, all replayed with the right arguments on every pass. Kernels whose hidden arguments matter, one reading `hidden_block_count` and `hidden_dynamic_lds_size` and one built with kernarg preloading on gfx94x (`-mllvm -amdgpu-kernarg-preload-count=16`), replay with the right values on every pass. |
 | 2026-12-14 | P4 | performance | Snapshot and restore time against footprint, 16 MiB to 2 GiB; guards the slope. |
 | 2026-12-21 | C12 | correctness | Open-ended passes: `pass_count_cb` returns 0 and `replay_continue_cb` stops after *k*; exactly *k* passes run. |
-| 2026-12-28 | — | — | Buffer week: fix whatever the earlier weeks turned up. |
+| 2026-12-28 | C28 | correctness | Buffer week: fix whatever the earlier weeks turned up, starting with C28. A `hipMemcpyAsync` of 16 KiB or less between a range's kernels, from pinned and from pageable host memory, then changed on the host before `end`: the range either declines, or every replayed pass sees the bytes the application's own run copied. |
 | 2027-01-04 | C13, C25 | correctness | Several ranges in sequence with different ids, and the context stopped and restarted between them; one CLOSE per range, each with its own status. A kernel that calls `printf` inside a replayed range, built once with HIP's default hostcall `printf` and once with `-mprintf-kind=buffered`: the output appears once per pass in the first build and exactly once in the second, as documented. |
 | 2027-01-11 | P5 | performance | A thousand one-dispatch ranges: the per-range fixed cost, against kernel replay's per-dispatch cost. |
 | 2027-01-18 | C15 | correctness | Range replay and kernel replay configured in one process: neither steals the other's dispatches, and each claims its own service. |
