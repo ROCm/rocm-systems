@@ -1,38 +1,22 @@
 #include "profiler_hub_ctx.hpp"
-#include "common/natural_merge_sort.hpp"
 #include "debug.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler_hub_future.hpp"
 #include "reader_catalog.hpp"
+#include "track_read_options.hpp"
 
 #include <algorithm>
-#include <array>
-#include <atomic>
 #include <cstdlib>
-#include <exception>
 #include <filesystem>
 #include <limits>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
 
 namespace
 {
-
-size_t
-env_size(const char* name, size_t fallback)
-{
-    const char* value = std::getenv(name);
-    if(value == nullptr || value[0] == '\0') return fallback;
-
-    char*      end    = nullptr;
-    const auto parsed = std::strtoull(value, &end, 10);
-    if(end == value || *end != '\0') return fallback;
-    return static_cast<size_t>(parsed);
-}
 
 std::string
 existing_trace_path(std::string_view path)
@@ -43,34 +27,6 @@ existing_trace_path(std::string_view path)
         throw std::runtime_error("trace file does not exist: " + file_path);
     }
     return file_path;
-}
-
-std::uint32_t
-to_list_size(size_t size)
-{
-    if(size > std::numeric_limits<std::uint32_t>::max())
-    {
-        throw std::length_error("result has more elements than the C API can report");
-    }
-    return static_cast<std::uint32_t>(size);
-}
-
-profiler_hub::reader_types::event_filter_t
-make_window_filter(uint64_t start_ts, uint64_t end_ts)
-{
-    using bound_t = profiler_hub::reader_types::timestamp_ns_t;
-
-    constexpr auto max_bound =
-        static_cast<bound_t>(std::numeric_limits<std::int64_t>::max());
-
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = std::min<bound_t>(start_ts, max_bound);
-        filter.time_window.end =
-            (end_ts != 0) ? std::min<bound_t>(end_ts, max_bound) : max_bound;
-    }
-    return filter;
 }
 
 ph_track_category_t
@@ -99,17 +55,22 @@ size_t
 ph_ctx::default_thread_pool_size()
 {
     const auto hw = std::thread::hardware_concurrency();
-    return std::max<size_t>(1, env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2)));
+    return std::max<size_t>(1,
+                            profiler_hub::parse_size(std::getenv("PH_POOL_THREADS"),
+                                                     std::max<size_t>(1, hw / 2)));
 }
 
 size_t
 ph_ctx::default_connection_count()
 {
-    return std::max<size_t>(1, env_size("PH_CONNECTIONS", 8));
+    return std::max<size_t>(1,
+                            profiler_hub::parse_size(std::getenv("PH_CONNECTIONS"), 8));
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ existing_trace_path(trace_path) }
+, m_read_options{ profiler_hub::track_read_options::from_env(
+      [](const char* name) { return std::getenv(name); }) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
@@ -187,296 +148,6 @@ ph_ctx::get_node()
 }
 
 ph_event_list_t
-ph_ctx::core_get_track_events(profiler_hub::common::connection&                   conn,
-                              const profiler_hub::reader_types::track_info_ptr_t& track,
-                              uint64_t start_ts,
-                              uint64_t end_ts)
-{
-    const auto filter = make_window_filter(start_ts, end_ts);
-
-    track_events_result_t result;
-    result.events = conn.reader().get_events_for_track(track, filter);
-    result.c_events.reserve(result.events.size());
-    for(const auto& event : result.events)
-    {
-        result.c_events.push_back(ph_event_t{
-            .start = event.start_timestamp,
-            .end   = event.end_timestamp,
-            .name  = event.display_name.empty() ? "" : event.display_name.data(),
-        });
-    }
-
-    std::scoped_lock lock{ m_track_results_mutex };
-    auto&            stored = m_track_events_results.emplace_back(std::move(result));
-
-    return ph_event_list_t{ .list_size = to_list_size(stored.c_events.size()),
-                            .events    = stored.c_events.data() };
-}
-
-std::vector<ph_event_t>
-ph_ctx::build_thread_track_events(
-    profiler_hub::common::connection&                   conn,
-    const profiler_hub::reader_types::track_info_ptr_t& track,
-    size_t                                              parts)
-{
-    using profiler_hub::reader_types::event_type_t;
-
-    constexpr std::array types{ event_type_t::region,
-                                event_type_t::kernel_dispatch,
-                                event_type_t::memory_allocate,
-                                event_type_t::memory_copy };
-
-    struct work_item
-    {
-        event_type_t            type;
-        size_t                  begin;
-        size_t                  end;
-        std::vector<ph_event_t> out;
-    };
-
-    std::array<std::optional<std::pair<size_t, size_t>>, types.size()> spans{};
-    size_t                                                             total_span = 0;
-    for(size_t i = 0; i < types.size(); ++i)
-    {
-        spans[i] = conn.reader().get_event_id_span(types[i]);
-        if(spans[i].has_value())
-        {
-            total_span += spans[i]->second - spans[i]->first + 1;
-        }
-    }
-
-    std::vector<work_item> items;
-    for(size_t i = 0; i < types.size(); ++i)
-    {
-        if(!spans[i].has_value()) continue;
-        const size_t low   = spans[i]->first;
-        const size_t high  = spans[i]->second + 1;
-        const size_t share = (high - low) * parts;
-        const size_t count = std::max<size_t>(1, (share + total_span / 2) / total_span);
-        const size_t step  = (high - low + count - 1) / count;
-        for(size_t begin = low; begin < high; begin += step)
-        {
-            items.push_back({ types[i], begin, std::min(begin + step, high), {} });
-        }
-    }
-
-    const auto visitor = [](void*                                      context,
-                            profiler_hub::reader_types::timestamp_ns_t start,
-                            profiler_hub::reader_types::timestamp_ns_t end,
-                            std::string_view                           name) {
-        static_cast<std::vector<ph_event_t>*>(context)->push_back(ph_event_t{
-            .start = start, .end = end, .name = name.empty() ? "" : name.data() });
-    };
-
-    std::atomic<size_t> next{ 0 };
-    std::atomic<bool>   failed{ false };
-    std::mutex          error_mutex;
-    std::exception_ptr  first_error;
-    const auto          worker = [&](profiler_hub::common::connection& worker_conn) {
-        try
-        {
-            for(size_t i = next.fetch_add(1); i < items.size() && !failed.load();
-                i        = next.fetch_add(1))
-            {
-                auto& item = items[i];
-                worker_conn.reader().visit_track_events_in_id_range(
-                    track, item.type, item.begin, item.end, visitor, &item.out);
-            }
-        } catch(...)
-        {
-            const std::scoped_lock lock{ error_mutex };
-            if(!first_error) first_error = std::current_exception();
-            failed.store(true);
-        }
-    };
-
-    {
-        std::vector<std::jthread> helpers;
-        const size_t              wanted = std::min(parts, items.size());
-        for(size_t i = 1; i < wanted; ++i)
-        {
-            auto lease = m_connection_pool.try_acquire();
-            if(!lease.has_value()) break;
-            helpers.emplace_back(
-                [&worker, held = std::move(lease)]() mutable { worker(**held); });
-        }
-        worker(conn);
-    }
-
-    if(first_error) std::rethrow_exception(first_error);
-
-    size_t total = 0;
-    for(const auto& item : items)
-    {
-        total += item.out.size();
-    }
-
-    std::vector<ph_event_t> events;
-    events.reserve(total);
-
-    std::vector<size_t> table_ends;
-    for(size_t i = 0; i < items.size(); ++i)
-    {
-        events.insert(events.end(), items[i].out.begin(), items[i].out.end());
-        std::vector<ph_event_t>().swap(items[i].out);
-        if(i + 1 == items.size() || items[i + 1].type != items[i].type)
-        {
-            table_ends.push_back(events.size());
-        }
-    }
-
-    const auto by_start = [](const ph_event_t& lhs, const ph_event_t& rhs) {
-        return lhs.start < rhs.start;
-    };
-
-    size_t table_begin = 0;
-    for(const size_t table_end : table_ends)
-    {
-        profiler_hub::common::natural_merge_sort(
-            events.begin() + static_cast<std::ptrdiff_t>(table_begin),
-            events.begin() + static_cast<std::ptrdiff_t>(table_end),
-            by_start);
-        table_begin = table_end;
-    }
-    for(size_t i = 1; i < table_ends.size(); ++i)
-    {
-        std::inplace_merge(events.begin(),
-                           events.begin() +
-                               static_cast<std::ptrdiff_t>(table_ends[i - 1]),
-                           events.begin() + static_cast<std::ptrdiff_t>(table_ends[i]),
-                           by_start);
-    }
-
-    return events;
-}
-
-std::vector<ph_event_t>
-ph_ctx::build_sorted_track_events(
-    profiler_hub::common::connection&                   conn,
-    const profiler_hub::reader_types::track_info_ptr_t& track)
-{
-    if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
-       track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
-    {
-        return build_thread_track_events(
-            conn, track, std::max<size_t>(1, env_size("PH_READ_PARTS", 8)));
-    }
-
-    const auto events = conn.reader().get_events_for_track(track, {});
-
-    std::vector<ph_event_t> sorted;
-    sorted.reserve(events.size());
-    for(const auto& event : events)
-    {
-        sorted.push_back(ph_event_t{
-            .start = event.start_timestamp,
-            .end   = event.end_timestamp,
-            .name  = event.display_name.empty() ? "" : event.display_name.data(),
-        });
-    }
-
-    profiler_hub::common::natural_merge_sort(
-        sorted.begin(), sorted.end(), [](const ph_event_t& lhs, const ph_event_t& rhs) {
-            return lhs.start < rhs.start;
-        });
-
-    return sorted;
-}
-
-std::vector<ph_sample_t>
-ph_ctx::build_sorted_track_samples(
-    profiler_hub::common::connection&                   conn,
-    const profiler_hub::reader_types::track_info_ptr_t& track)
-{
-    const auto samples = conn.reader().get_counter_events_for_track(track, {});
-
-    std::vector<ph_sample_t> sorted;
-    sorted.reserve(samples.size());
-    for(const auto& sample : samples)
-    {
-        sorted.push_back(
-            ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value });
-    }
-
-    profiler_hub::common::natural_merge_sort(
-        sorted.begin(), sorted.end(), [](const ph_sample_t& lhs, const ph_sample_t& rhs) {
-            return lhs.timestamp < rhs.timestamp;
-        });
-
-    return sorted;
-}
-
-ph_sample_list_t
-ph_ctx::get_cached_track_samples(
-    const profiler_hub::reader_types::track_info_ptr_t& track)
-{
-    track_samples_entry* entry = nullptr;
-    {
-        std::scoped_lock lock{ m_track_cache_mutex };
-        auto&            slot = m_track_samples_cache[static_cast<uint32_t>(track->id)];
-        if(!slot) slot = std::make_unique<track_samples_entry>();
-        entry = slot.get();
-    }
-
-    std::call_once(entry->once, [&] {
-        entry->samples =
-            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-                return build_sorted_track_samples(conn, track);
-            });
-    });
-
-    return ph_sample_list_t{ .list_size = to_list_size(entry->samples.size()),
-                             .samples   = entry->samples.data() };
-}
-
-ph_event_list_t
-ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr_t& track)
-{
-    track_events_entry* entry = nullptr;
-    {
-        std::scoped_lock lock{ m_track_cache_mutex };
-        auto&            slot = m_track_events_cache[static_cast<uint32_t>(track->id)];
-        if(!slot) slot = std::make_unique<track_events_entry>();
-        entry = slot.get();
-    }
-
-    std::call_once(entry->once, [&] {
-        entry->events =
-            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-                return build_sorted_track_events(conn, track);
-            });
-    });
-
-    return ph_event_list_t{ .list_size = to_list_size(entry->events.size()),
-                            .events    = entry->events.data() };
-}
-
-ph_sample_list_t
-ph_ctx::core_get_track_samples(profiler_hub::common::connection&                   conn,
-                               const profiler_hub::reader_types::track_info_ptr_t& track,
-                               uint64_t start_ts,
-                               uint64_t end_ts)
-{
-    const auto filter = make_window_filter(start_ts, end_ts);
-
-    const auto samples = conn.reader().get_counter_events_for_track(track, filter);
-
-    std::vector<ph_sample_t> c_samples;
-    c_samples.reserve(samples.size());
-    for(const auto& sample : samples)
-    {
-        c_samples.push_back(
-            ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value });
-    }
-
-    std::scoped_lock lock{ m_track_results_mutex };
-    auto&            stored = m_track_samples_results.emplace_back(std::move(c_samples));
-
-    return ph_sample_list_t{ .list_size = to_list_size(stored.size()),
-                             .samples   = stored.data() };
-}
-
-ph_event_list_t
 ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
     LOG_DEBUG("[Profiler-Hub] Get track events. Track id {}, time slice [{} - {}]",
@@ -484,20 +155,12 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end() ||
-       track_it->second->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
+    if(track_it == m_track_by_id.end())
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
-    if(start_ts == 0 && end_ts == 0)
-    {
-        return get_cached_track_events(track_it->second);
-    }
-
-    return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_events(conn, track_it->second, start_ts, end_ts);
-    });
+    return m_track_reader.events(track_it->second, start_ts, end_ts);
 }
 
 ph_sample_list_t
@@ -508,20 +171,12 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end() ||
-       track_it->second->category != profiler_hub::reader_types::track_kind_t::pmc_agent)
+    if(track_it == m_track_by_id.end())
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
 
-    if(start_ts == 0 && end_ts == 0)
-    {
-        return get_cached_track_samples(track_it->second);
-    }
-
-    return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_samples(conn, track_it->second, start_ts, end_ts);
-    });
+    return m_track_reader.samples(track_it->second, start_ts, end_ts);
 }
 
 void
