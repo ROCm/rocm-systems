@@ -266,6 +266,7 @@ class RocProfCompute:
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
             prog="rocprof-compute",
+            allow_abbrev=False,
             formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
             usage="rocprof-compute [mode] [options]",
         )

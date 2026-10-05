@@ -17,6 +17,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--specs-correction` takes a comma-separated list of `name:value` pairs, like other list options. The quoted form `--specs-correction="num_xcd:4,cu_per_gpu:64"` still works.
 
+* Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
