@@ -305,7 +305,8 @@ typedef struct amdf_user_queue_status_t {
   /// reserved or when commands are release-published. It is the value sampled
   /// from the mapping's write index and uses that format's index units.
   uint64_t producer_index;
-  /// Greatest index completely consumed by the native queue.
+  /// Greatest index completely consumed by the native queue, expanded into
+  /// the producer frontier's monotonic domain when native counters wrap.
   uint64_t consumed_index;
   /// Sticky terminal failure, or `AMDF_STATUS_OK` while active.
   amdf_status_t terminal_status;

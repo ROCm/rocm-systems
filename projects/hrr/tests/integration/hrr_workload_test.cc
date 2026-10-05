@@ -926,7 +926,7 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // Increment slot: base value, then a read-modify-write increment on top of it.
   // 0x0A0A0A0A + 0xF4E3F0C4 wraps to 0xFEEDFACE.
   constexpr uint32_t kIncBase = 0x0A0A0A0Au;
-  constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
+  [[maybe_unused]] constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
 
   hipStream_t s;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
@@ -935,13 +935,13 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // fully-defined memory.
   uint64_t* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 2 * sizeof(uint64_t)));
-  HRR_HIP_CHECK(hipMemset(d, 0, 2 * sizeof(uint64_t)));
+  HRR_HIP_CHECK(hipMemsetAsync(d, 0, 2 * sizeof(uint64_t), s));
 
   // Separate slot for the flags-bearing write. Allocated 8 bytes wide so a
   // 64-bit-granular implementation of the increment cannot overrun it.
   uint32_t* inc = nullptr;
   HRR_HIP_CHECK(hipMalloc(&inc, sizeof(uint64_t)));
-  HRR_HIP_CHECK(hipMemset(inc, 0, sizeof(uint64_t)));
+  HRR_HIP_CHECK(hipMemsetAsync(inc, 0, sizeof(uint64_t), s));
 
   // 64-bit stream write into slot0.
   HRR_HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
@@ -955,11 +955,18 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // target, so tolerate a rejection: capture only records successful calls, so
   // on a target that rejects it the slot simply keeps kIncBase in both the
   // recorded blob and the replay.
+  //
+  // The flag is an in-tree HIP extension, and this suite is also built against
+  // SDK headers that predate it. Absent at compile time is the same situation
+  // as rejected at run time, so it takes the same path rather than failing the
+  // build.
   HRR_HIP_CHECK(hipStreamWriteValue32(s, inc, kIncBase, 0));
-  hipError_t incErr = hipStreamWriteValue32(s, inc, kIncDelta,
-                                            hipExtStreamWriteValueIncrement);
+  hipError_t incErr = hipErrorNotSupported;
+#ifdef hipExtStreamWriteValueIncrement
+  incErr = hipStreamWriteValue32(s, inc, kIncDelta, hipExtStreamWriteValueIncrement);
   REQUIRE((incErr == hipSuccess || incErr == hipErrorInvalidValue
            || incErr == hipErrorNotSupported));
+#endif
 
   HRR_HIP_CHECK(hipStreamSynchronize(s));
   HRR_HIP_CHECK(hipDeviceSynchronize());

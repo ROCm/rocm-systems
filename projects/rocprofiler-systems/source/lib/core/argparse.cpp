@@ -9,8 +9,8 @@
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
+#include <algorithm>
 #include <cstdint>
-#include <tuple>
 
 #include <timemory/settings/types.hpp>
 
@@ -20,38 +20,10 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 namespace
 {
-auto
-get_clock_id_choices()
-{
-#define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
-    std::make_tuple(utility::string::clock_name(#VAL), VAL, std::string_view{ #VAL })
-
-    auto _choices = strvec_t{};
-    auto _aliases = std::map<std::string, strvec_t>{};
-    for(auto itr : { ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) })
-    {
-        auto _choice = std::to_string(std::get<1>(itr));
-        _choices.emplace_back(_choice);
-        _aliases[_choice] = { std::get<0>(itr), std::string{ std::get<2>(itr) } };
-    }
-
-#undef ROCPROFSYS_CLOCK_IDENTIFIER
-
-    return std::make_pair(_choices, _aliases);
-}
-
 using rocprofsys::common::update_mode;
 
 // NOLINTBEGIN - ignore argument number issue
@@ -70,21 +42,21 @@ update_env(parser_data& data, std::string_view env_var, Tp&& env_val,
 bool
 default_setting_filter(vsetting_t* _v, const parser_data& _data)
 {
-    return (_data.reg.processed_settings.count(_v) == 0 &&
-            _data.reg.processed_environs.count(_v->get_name()) == 0 &&
-            _data.reg.processed_environs.count(_v->get_env_name()) == 0);
+    return (!_data.reg.processed_settings.contains(_v) &&
+            !_data.reg.processed_environs.contains(_v->get_name()) &&
+            !_data.reg.processed_environs.contains(_v->get_env_name()));
 }
 
 bool
 default_environ_filter(std::string_view _v, const parser_data& _data)
 {
-    return (_data.reg.processed_environs.count(_v.data()) == 0);
+    return (!_data.reg.processed_environs.contains(_v.data()));
 }
 
 bool
 default_grouping_filter(std::string_view _v, const parser_data& _data)
 {
-    return (_data.reg.processed_groups.count(_v.data()) == 0);
+    return (!_data.reg.processed_groups.contains(_v.data()));
 }
 
 parser_data&
@@ -101,10 +73,10 @@ init_parser(parser_data& _data)
     _data.env.omni_libpath =
         path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
-    auto _libexecpath = path::realpath(path::get_internal_script_path());
+    auto const _libexecpath = path::realpath(path::get_internal_script_path());
     update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::replace);
 
-    auto _rootpath = path::realpath(path::get_rocprofsys_root());
+    auto const _rootpath = path::realpath(path::get_rocprofsys_root());
     update_env(_data, env_vars::ROOT, _rootpath, update_mode::replace);
 
     return _data;
@@ -120,7 +92,7 @@ add_ld_preload(parser_data& _data)
 parser_data&
 add_ld_library_path(parser_data& _data)
 {
-    auto libdir = path::parent_path(_data.env.dl_libpath);
+    auto const libdir = path::parent_path(_data.env.dl_libpath);
     if(path::is_directory(libdir))
     {
         update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::append);
@@ -131,7 +103,10 @@ add_ld_library_path(parser_data& _data)
 parser_data&
 add_torch_library_path(parser_data& _data)
 {
-    if(_data.out.command.empty()) return _data;
+    if(_data.out.command.empty())
+    {
+        return _data;
+    }
     rocprofsys::common::add_torch_library_path(
         _data.env.current, _data.out.command.front(), _data.env.updated);
     return _data;
@@ -217,11 +192,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .max_count(1)
             .dtype("bool")
             .action([&](parser_t& p) {
-                auto _monochrome     = p.get<bool>("monochrome");
-                _data.out.monochrome = _monochrome;
+                auto const _monochrome = p.get<bool>("monochrome");
+                _data.out.monochrome   = _monochrome;
                 p.set_use_color(!_monochrome);
-                update_env(_data, env_vars::MONOCHROME, (_monochrome) ? "1" : "0");
-                update_env(_data, "MONOCHROME", (_monochrome) ? "1" : "0");
+                update_env(_data, env_vars::MONOCHROME, _monochrome ? "1" : "0");
+                update_env(_data, "MONOCHROME", _monochrome ? "1" : "0");
             });
 
         _data.reg.processed_environs.emplace("monochrome");
@@ -246,7 +221,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("integral")
             .action([&](parser_t& p) {
-                auto _v           = p.get<int>("verbose");
+                auto const _v     = p.get<int>("verbose");
                 _data.out.verbose = _v;
                 update_env(_data, env_vars::VERBOSE, _v);
 
@@ -254,7 +229,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                                                                     "debug", "debug",
                                                                     "trace" };
 
-                auto index =
+                auto const index =
                     std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
                 update_env(_data, env_vars::LOG_LEVEL, log_levels[index]);
             });
@@ -295,7 +270,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v = p.get<strvec_t>("output");
                 update_env(_data, env_vars::OUTPUT_PATH, _v.at(0));
-                if(_v.size() > 1) update_env(_data, env_vars::OUTPUT_PREFIX, _v.at(1));
+                if(_v.size() > 1)
+                {
+                    update_env(_data, env_vars::OUTPUT_PREFIX, _v.at(1));
+                }
             });
 
         _data.reg.processed_environs.emplace("output");
@@ -369,7 +347,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .choices({ "cputime", "realtime" })
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::USE_SAMPLING, true);
-                auto _modes = p.get<strset_t>("sample");
+                auto const _modes = p.get<strset_t>("sample");
                 if(!_modes.empty())
                 {
                     update_env(_data, env_vars::SAMPLING_CPUTIME,
@@ -390,11 +368,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "frequency, memory usage, etc.")
             .max_count(1)
             .action([&](parser_t& p) {
-                auto _h = p.get<bool>("host");
-                auto _d = p.get<bool>("device");
+                auto const _h = p.get<bool>("host");
+                auto const _d = p.get<bool>("device");
                 update_env(_data, env_vars::USE_PROCESS_SAMPLING, _h || _d);
                 update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
-                if(_h) update_env(_data, env_vars::USE_AMD_SMI, _d);
+                if(_h)
+                {
+                    update_env(_data, env_vars::USE_AMD_SMI, _d);
+                }
             });
 
         _data.reg.processed_environs.emplace("host");
@@ -410,11 +391,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 "temperature, memory usage, etc.")
             .max_count(1)
             .action([&](parser_t& p) {
-                auto _h = p.get<bool>("host");
-                auto _d = p.get<bool>("device");
+                auto const _h = p.get<bool>("host");
+                auto const _d = p.get<bool>("device");
                 update_env(_data, env_vars::USE_PROCESS_SAMPLING, _h || _d);
                 update_env(_data, env_vars::USE_AMD_SMI, _d);
-                if(_d) update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
+                if(_d)
+                {
+                    update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
+                }
             });
 
         _data.reg.processed_environs.emplace("device");
@@ -571,22 +555,27 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("[backend...]")
             .choices(_backend_choices)
             .action([&](parser_t& p) {
-                auto _v      = p.get<strset_t>("include");
-                auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, true);
+                auto       _v      = p.get<strset_t>("include");
+                auto const _update = [&](const auto& _opt, bool _cond) {
+                    if(_cond || _v.contains("all"))
+                    {
+                        update_env(_data, _opt, true);
+                    }
                 };
-                _update(env_vars::USE_KOKKOSP, _v.count("kokkosp") > 0);
-                _update(env_vars::USE_MPIP, _v.count("mpip") > 0);
-                _update(env_vars::USE_OMPT, _v.count("ompt") > 0);
-                _update(env_vars::USE_RCCLP, _v.count("rcclp") > 0);
-                _update(env_vars::USE_AMD_SMI, _v.count("amd-smi") > 0);
-                _update(env_vars::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
-                _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
-                _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
+                _update(env_vars::USE_KOKKOSP, _v.contains("kokkosp"));
+                _update(env_vars::USE_MPIP, _v.contains("mpip"));
+                _update(env_vars::USE_OMPT, _v.contains("ompt"));
+                _update(env_vars::USE_RCCLP, _v.contains("rcclp"));
+                _update(env_vars::USE_AMD_SMI, _v.contains("amd-smi"));
+                _update(env_vars::TRACE_THREAD_LOCKS, _v.contains("mutex-locks"));
+                _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.contains("rw-locks"));
+                _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.contains("spin-locks"));
 
-                if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                if(_v.contains("all") || _v.contains("kokkosp"))
+                {
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
                                update_mode::prepend);
+                }
             });
 
         _data.reg.processed_environs.emplace("include");
@@ -600,21 +589,26 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("[backend...]")
             .choices(_backend_choices)
             .action([&](parser_t& p) {
-                auto _v      = p.get<strset_t>("exclude");
-                auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, false);
+                auto       _v      = p.get<strset_t>("exclude");
+                auto const _update = [&](const auto& _opt, bool _cond) {
+                    if(_cond || _v.contains("all"))
+                    {
+                        update_env(_data, _opt, false);
+                    }
                 };
-                _update(env_vars::USE_KOKKOSP, _v.count("kokkosp") > 0);
-                _update(env_vars::USE_MPIP, _v.count("mpip") > 0);
-                _update(env_vars::USE_OMPT, _v.count("ompt") > 0);
-                _update(env_vars::USE_RCCLP, _v.count("rcclp") > 0);
-                _update(env_vars::USE_AMD_SMI, _v.count("amd-smi") > 0);
-                _update(env_vars::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
-                _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
-                _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
+                _update(env_vars::USE_KOKKOSP, _v.contains("kokkosp"));
+                _update(env_vars::USE_MPIP, _v.contains("mpip"));
+                _update(env_vars::USE_OMPT, _v.contains("ompt"));
+                _update(env_vars::USE_RCCLP, _v.contains("rcclp"));
+                _update(env_vars::USE_AMD_SMI, _v.contains("amd-smi"));
+                _update(env_vars::TRACE_THREAD_LOCKS, _v.contains("mutex-locks"));
+                _update(env_vars::TRACE_THREAD_RW_LOCKS, _v.contains("rw-locks"));
+                _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.contains("spin-locks"));
 
-                if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                if(_v.contains("all") || _v.contains("kokkosp"))
+                {
                     remove_env(_data.env.current, "KOKKOS_TOOLS_LIBS", _data.env.initial);
+                }
             });
 
         _data.reg.processed_environs.emplace("exclude");
@@ -774,7 +768,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.reg.environ_filter("trace_clock_id", _data))
     {
-        auto _clock_id_choices = get_clock_id_choices();
         _parser
             .add_argument(
                 { "--trace-clock-id" },
@@ -791,10 +784,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("clock-id")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_PERIOD_CLOCK_ID,
-                           p.get<double>("trace-clock-id"));
+                           p.get<std::string>("trace-clock-id"));
             })
-            .choices(_clock_id_choices.first)
-            .choice_aliases(_clock_id_choices.second);
+            .choices({ "realtime", "cputime" });
 
         _data.reg.processed_environs.emplace("trace_clock_id");
         _data.reg.processed_environs.emplace("trace_period_clock_id");
@@ -851,13 +843,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .required({ "profile|flat-profile" })
             .choices({ "text", "json", "console" })
             .action([&](parser_t& p) {
-                auto _v = p.get<strset_t>("profile-format");
+                auto const _v = p.get<strset_t>("profile-format");
                 update_env(_data, env_vars::PROFILE, true);
                 if(!_v.empty())
                 {
-                    update_env(_data, env_vars::TEXT_OUTPUT, _v.count("text") != 0);
-                    update_env(_data, env_vars::JSON_OUTPUT, _v.count("json") != 0);
-                    update_env(_data, env_vars::COUT_OUTPUT, _v.count("console") != 0);
+                    update_env(_data, env_vars::TEXT_OUTPUT, _v.contains("text"));
+                    update_env(_data, env_vars::JSON_OUTPUT, _v.contains("json"));
+                    update_env(_data, env_vars::COUT_OUTPUT, _v.contains("console"));
                 }
             });
 
@@ -882,7 +874,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _v = p.get<strvec_t>("profile-diff");
                 update_env(_data, env_vars::DIFF_OUTPUT, true);
                 update_env(_data, env_vars::INPUT_PATH, _v.at(0));
-                if(_v.size() > 1) update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
+                if(_v.size() > 1)
+                {
+                    update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
+                }
             });
 
         _data.reg.processed_environs.emplace("profile_diff");
@@ -1145,10 +1140,12 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 {
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
+                    {
                         throw exception<std::runtime_error>(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
+                    }
                     update_env(_data, env_vars::SAMPLING_OVERFLOW_EVENT, _v.front());
                     _v.pop_front();
                 }
@@ -1184,7 +1181,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
-                auto _events =
+                auto const _events =
                     fmt::format("{}", fmt::join(p.get<strvec_t>("cpu-events"), ","));
                 update_env(_data, env_vars::PAPI_EVENTS, _events);
             });
@@ -1202,7 +1199,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
-                auto _events =
+                auto const _events =
                     fmt::format("{}", fmt::join(p.get<strvec_t>("gpu-events"), ","));
                 update_env(_data, env_vars::ROCM_EVENTS, _events);
             });
@@ -1256,38 +1253,57 @@ parser_data&
 add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_data& _data,
                     bool _add_group)
 {
-    if(!_data.reg.grouping_filter(_group_name, _data)) return _data;
+    if(!_data.reg.grouping_filter(_group_name, _data))
+    {
+        return _data;
+    }
 
-    auto _get_name = [](const std::shared_ptr<tim::vsettings>& itr) {
+    auto const _get_name = [](const std::shared_ptr<tim::vsettings>& itr) {
         auto _name = itr->get_name();
         auto _pos  = std::string::npos;
         while((_pos = _name.find('_')) != std::string::npos)
+        {
             _name[_pos] = '-';
+        }
         return _name;
     };
 
-    auto _add_option = [&_parser, &_data](const std::string&                     _name,
-                                          const std::shared_ptr<tim::vsettings>& itr) {
-        if(!_data.reg.setting_filter(itr.get(), _data)) return false;
+    auto const _add_option = [&_parser,
+                              &_data](const std::string&                     _name,
+                                      const std::shared_ptr<tim::vsettings>& itr) {
+        if(!_data.reg.setting_filter(itr.get(), _data))
+        {
+            return false;
+        }
 
         if(_name.empty())
+        {
             throw exception<std::runtime_error>("Error! empty name for " +
                                                 itr->get_name());
+        }
 
         _data.reg.processed_settings.emplace(itr.get());
 
-        auto _opt_name = fmt::format("--{}", _name);
+        auto const _opt_name = fmt::format("--{}", _name);
         itr->set_command_line({ _opt_name });
         auto* _arg = static_cast<parser_t::argument*>(itr->add_argument(_parser));
         if(_arg)
         {
             _arg->action([&_data, itr, _name](parser_t& p) {
                 auto _value = fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
-                if(_value.empty()) _value = p.get<std::string>(_name);
-                if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
+                {
+                    _value = p.get<std::string>(_name);
+                }
+                if(_value.empty())
+                {
+                    _value = fmt::format("{}", p.get<bool>(_name));
+                }
+                if(_value.empty())
+                {
                     throw exception<std::runtime_error>(
                         fmt::format("Error! no value for {}", _name));
+                }
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1296,11 +1312,13 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
             LOG_WARNING("Option {} ({}) is not enabled", _name, itr->get_env_name());
             _parser.add_argument({ _opt_name }, itr->get_description())
                 .action([&](parser_t& p) {
-                    auto _value =
+                    auto const _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
+                    {
                         throw exception<std::runtime_error>(
                             fmt::format("Error! no value for {}", _name));
+                    }
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }
@@ -1308,14 +1326,32 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
     };
 
     auto _settings = std::vector<std::shared_ptr<tim::vsettings>>{};
-    for(auto& itr : *rocprofsys::settings::instance())
+    for(auto const& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
-        if(itr.second->get_categories().count("deprecated") > 0) continue;
-        if(itr.second->get_hidden()) continue;
-        if(!_data.reg.setting_filter(itr.second.get(), _data)) continue;
-        if(!_data.reg.environ_filter(itr.second->get_name(), _data)) continue;
-        if(itr.second->get_categories().count(_group_name) == 0) continue;
+        if(!itr.second->get_categories().contains("rocprofsys"))
+        {
+            continue;
+        }
+        if(itr.second->get_categories().contains("deprecated"))
+        {
+            continue;
+        }
+        if(itr.second->get_hidden())
+        {
+            continue;
+        }
+        if(!_data.reg.setting_filter(itr.second.get(), _data))
+        {
+            continue;
+        }
+        if(!_data.reg.environ_filter(itr.second->get_name(), _data))
+        {
+            continue;
+        }
+        if(!itr.second->get_categories().contains(_group_name))
+        {
+            continue;
+        }
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
@@ -1323,27 +1359,30 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         if(itr.second->get_name() == "papi_events")
         {
             auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
+            _choices.erase(std::ranges::remove_if(
+                               _choices,
                                [](const auto& citr) {
                                    return std::regex_search(
                                               citr,
                                               std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
                                           std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
+                               })
+                               .begin(),
+                           _choices.end());
             _choices.emplace_back(
                 "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
         }
     }
 
-    std::sort(_settings.begin(), _settings.end(), [](const auto& _lhs, const auto& _rhs) {
-        auto _lhs_v = _lhs->get_name();
-        auto _rhs_v = _rhs->get_name();
+    std::ranges::sort(_settings, [](const auto& _lhs, const auto& _rhs) {
+        auto const _lhs_v = _lhs->get_name();
+        auto const _rhs_v = _rhs->get_name();
         if(_lhs_v.length() > 4 && _rhs_v.length() > 4 &&
            _lhs_v.substr(0, 4) == _rhs_v.substr(0, 4))
+        {
             return _lhs_v < _rhs_v;
+        }
         return _lhs_v.length() < _rhs_v.length();
     });
 
@@ -1357,7 +1396,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         _add_option(_get_name(itr), itr);
     }
 
-    if(_add_group) _parser.end_group();
+    if(_add_group)
+    {
+        _parser.end_group();
+    }
 
     return _data;
 }
@@ -1367,13 +1409,28 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 {
     auto _category_count_map = std::unordered_map<std::string, std::uint32_t>{};
     auto _settings           = std::vector<std::shared_ptr<tim::vsettings>>{};
-    for(auto& itr : *rocprofsys::settings::instance())
+    for(auto const& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
-        if(itr.second->get_categories().count("deprecated") > 0) continue;
-        if(itr.second->get_hidden()) continue;
-        if(!_data.reg.setting_filter(itr.second.get(), _data)) continue;
-        if(!_data.reg.environ_filter(itr.second->get_name(), _data)) continue;
+        if(!itr.second->get_categories().contains("rocprofsys"))
+        {
+            continue;
+        }
+        if(itr.second->get_categories().contains("deprecated"))
+        {
+            continue;
+        }
+        if(itr.second->get_hidden())
+        {
+            continue;
+        }
+        if(!_data.reg.setting_filter(itr.second.get(), _data))
+        {
+            continue;
+        }
+        if(!_data.reg.environ_filter(itr.second->get_name(), _data))
+        {
+            continue;
+        }
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
@@ -1381,15 +1438,16 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         if(itr.second->get_name() == "papi_events")
         {
             auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
+            _choices.erase(std::ranges::remove_if(
+                               _choices,
                                [](const auto& citr) {
                                    return std::regex_search(
                                               citr,
                                               std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
                                           std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
+                               })
+                               .begin(),
+                           _choices.end());
             _choices.emplace_back(
                 "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
@@ -1399,22 +1457,29 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         {
             if(std::regex_search(citr, std::regex{ "rocprofsys|timemory|^("
                                                    "native|custom|advanced|analysis)$" }))
+            {
                 continue;
+            }
             _category_count_map[citr] += 1;
         }
     }
 
     auto _category_count_vec = strvec_t{};
     for(const auto& itr : _category_count_map)
+    {
         _category_count_vec.emplace_back(itr.first);
+    }
 
-    std::sort(_category_count_vec.begin(), _category_count_vec.end(),
-              [&_category_count_map](const auto& _lhs, const auto& _rhs) {
-                  auto _lhs_v = _category_count_map.at(_lhs);
-                  auto _rhs_v = _category_count_map.at(_rhs);
-                  if(_lhs_v == _rhs_v) return _lhs < _rhs;
-                  return _lhs_v > _rhs_v;
-              });
+    std::ranges::sort(_category_count_vec,
+                      [&_category_count_map](const auto& _lhs, const auto& _rhs) {
+                          auto const _lhs_v = _category_count_map.at(_lhs);
+                          auto const _rhs_v = _category_count_map.at(_rhs);
+                          if(_lhs_v == _rhs_v)
+                          {
+                              return _lhs < _rhs;
+                          }
+                          return _lhs_v > _rhs_v;
+                      });
 
     auto _groups =
         std::unordered_map<std::string, std::vector<std::shared_ptr<tim::vsettings>>>{};
@@ -1423,24 +1488,31 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         _groups[citr] = {};
         for(const auto& itr : _settings)
         {
-            if(itr->get_categories().count(citr) > 0) _groups[citr].emplace_back(itr);
+            if(itr->get_categories().contains(citr))
+            {
+                _groups[citr].emplace_back(itr);
+            }
         }
-        _settings.erase(std::remove_if(_settings.begin(), _settings.end(),
-                                       [&citr](const auto& itr) {
-                                           return itr->get_categories().count(citr) > 0;
-                                       }),
+        _settings.erase(std::ranges::remove_if(_settings,
+                                               [&citr](const auto& itr) {
+                                                   return itr->get_categories().count(
+                                                              citr) > 0;
+                                               })
+                            .begin(),
                         _settings.end());
     }
 
     for(const auto& citr : _category_count_vec)
     {
-        auto _group = _groups.at(citr);
-        if(_group.empty()) continue;
+        auto const _group = _groups.at(citr);
+        if(_group.empty())
+        {
+            continue;
+        }
 
         add_group_arguments(_parser, citr, _data, true);
     }
 
     return _data;
 }
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

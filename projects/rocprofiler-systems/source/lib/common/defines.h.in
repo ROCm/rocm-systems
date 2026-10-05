@@ -85,7 +85,7 @@
         {                                                                                \
             { "", ROCPROFSYS_LIBRARY_ARCH }, { "compiler", ROCPROFSYS_COMPILER_STRING }, \
             {                                                                            \
-                "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                            \
+                "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING                               \
             }                                                                            \
         }
 #endif
