@@ -16,7 +16,6 @@ GPU_FAMILIES = [
     "gfx120x",
     "gfx1151",
 ]
-TRIGGER_TYPES = ["presubmit", "postsubmit", "nightly"]
 
 
 def warn(message: str) -> None:
