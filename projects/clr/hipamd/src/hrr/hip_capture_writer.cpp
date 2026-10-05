@@ -677,6 +677,16 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
   if (!GetDiskFreeSpaceExA(d.c_str(), &a, &t, &f)) return false;
   *avail = a.QuadPart;
   *total = t.QuadPart;
+  // Files take whole clusters, which can be 64 KiB or more on NTFS and ReFS.
+  // GetDiskFreeSpaceA() reports the cluster size but wants the volume's root.
+  if (block != nullptr) {
+    char full[MAX_PATH], root[MAX_PATH];
+    DWORD sectors = 0, sector_bytes = 0, free_clusters = 0, clusters = 0;
+    const DWORD n = GetFullPathNameA(d.c_str(), MAX_PATH, full, nullptr);
+    if (n > 0 && n < MAX_PATH && GetVolumePathNameA(full, root, MAX_PATH) &&
+        GetDiskFreeSpaceA(root, &sectors, &sector_bytes, &free_clusters, &clusters))
+      bs = static_cast<uint64_t>(sectors) * sector_bytes;
+  }
 #else
   struct statvfs sv{};
   if (::statvfs(dir.c_str(), &sv) != 0) return false;
