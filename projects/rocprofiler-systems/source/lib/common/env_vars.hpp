@@ -114,6 +114,15 @@ inline constexpr const char* AMD_SMI_METRICS      = "ROCPROFSYS_AMD_SMI_METRICS"
 inline constexpr const char* AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 inline constexpr const char* AMD_SMI_DEVICES      = "ROCPROFSYS_AMD_SMI_DEVICES";
 
+// --- Domains: hipFile (AMD Infinity Storage I/O stats) ---
+inline constexpr const char* USE_HIPFILE     = "ROCPROFSYS_USE_HIPFILE";
+inline constexpr const char* HIPFILE_METRICS = "ROCPROFSYS_HIPFILE_METRICS";
+// Registered default for HIPFILE_METRICS.
+inline constexpr const char* HIPFILE_METRICS_DEFAULT =
+    "fastpath, fallback, bandwidth, bytes, errors";
+// The environment variable read by libhipfile itself to enable its stats server.
+inline constexpr const char* HIPFILE_STATS_LEVEL = "HIPFILE_STATS_LEVEL";
+
 // --- Domains: ROCm ---
 inline constexpr const char* ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 inline constexpr const char* ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
@@ -350,7 +359,7 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
+    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
         if(lhs.size() != rhs.size())
         {
             return false;
