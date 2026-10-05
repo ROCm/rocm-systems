@@ -62,9 +62,15 @@ class TestSet(TestCliBase):
                     self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
+            # A readable fan speed does not imply the fan can be controlled.
             fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
             if fan_speed != "N/A":
-                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
+                cmds.append(
+                    (
+                        f"amd-smi reset --fans --gpu {index}",
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                    )
+                )
 
             # set --profile defaults
             if power_profile[index]:
