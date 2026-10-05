@@ -109,12 +109,16 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
 }
 
 // Occupies its stream long enough that anything enqueued behind it cannot
-// complete before work submitted to an independent stream. The accumulator
-// feeds a store so the loop cannot be optimized away, and it is chained so the
-// iterations cannot be reassociated into a closed form.
-__global__ void hrr_repro_spin(uint64_t iters, unsigned* sink) {
+// complete before work submitted to an independent stream. Bounded by the
+// constant-rate wall clock, not by an iteration count: a count lasts as long
+// as the GPU takes to run it. With 200M iterations this case took 2.5 s on
+// gfx1030, 7-11 s on gfx90a, and 700 s or more on some gfx90a CI runs.
+// The accumulator feeds a store so the loop is kept.
+__global__ void hrr_repro_spin(uint64_t ticks, unsigned* sink) {
+  const uint64_t start = static_cast<uint64_t>(wall_clock64());
   unsigned acc = 1;
-  for (uint64_t i = 0; i < iters; ++i) acc = acc * 1664525u + 1013904223u;
+  while (static_cast<uint64_t>(wall_clock64()) - start < ticks)
+    acc = acc * 1664525u + 1013904223u;
   sink[0] = acc;
 }
 
@@ -380,7 +384,13 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
   // not to lengthen the suite noticeably. Correctness does not depend on the
   // exact value: too small only makes the unfixed code flaky again rather than
   // making the fixed code fail.
-  constexpr uint64_t kSpinIters = 200000000ull;
+  constexpr uint64_t kSpinMs = 100;
+  int wallClockKhz = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&wallClockKhz,
+                                  hipDeviceAttributeWallClockRate, 0));
+  // 100 MHz is the wall-clock rate of every supported part.
+  if (wallClockKhz <= 0) wallClockKhz = 100000;
+  const uint64_t spinTicks = static_cast<uint64_t>(wallClockKhz) * kSpinMs;
 
   hipStream_t s;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
@@ -392,7 +402,7 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
 
   // Null stream: a long spin, then the zeroing queued behind it.
   hipLaunchKernelGGL(hrr_repro_spin, dim3(1), dim3(1), 0, nullptr,
-                     kSpinIters, sink);
+                     spinTicks, sink);
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipMemset(d, 0, sizeof(uint64_t)));
 

@@ -353,7 +353,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { family: gfx90a, container: true, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
+          # Every capture or replay process costs about 5.4 s here, against
+          # 0.1 s elsewhere, so the 43-workload T4 sweep alone takes 450 s and
+          # the suite does not fit 1200 s. T4 still runs on every other family.
+          # NullStreamMemsetOrdering has stalled for 700 s or more on these
+          # hosts, so it runs last, in a process of its own with a short limit.
+          - { family: gfx90a, container: true, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}",
+              skip: Unit_HRR_ApiMatrix_T4_Roundtrip, isolate: Unit_HRR_NullStreamMemsetOrdering }
           # gfx94x uses the resolved 1-GPU runner: the 8-GPU gfx942 pool
           # exposes /dev/kfd only to a job with a container spec.
           - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
@@ -479,16 +485,29 @@ jobs:
           # Catch2 and subprocess output, and only emits it when the suite fails.
           # Time out inside the job's 30 minutes, so a hang prints the cases
           # that finished instead of being cancelled with no output.
+          # Separate Catch2 arguments are ANDed, and an empty one selects all.
+          rc=0
           python3 projects/hrr/tests/run_catch2.py \
             --xml integration-${{ matrix.family }}.xml --timeout 1200 \
-            -- ./build/hrr/tests/integration/hrr-integration-tests
+            -- ./build/hrr/tests/integration/hrr-integration-tests \
+            "${SKIP:+~$SKIP}" "${ISOLATE:+~$ISOLATE}" || rc=$?
+          if [ -n "${ISOLATE}" ]; then
+            python3 projects/hrr/tests/run_catch2.py \
+              --xml integration-${{ matrix.family }}-isolated.xml --timeout 180 \
+              -- ./build/hrr/tests/integration/hrr-integration-tests \
+              "${ISOLATE}" || rc=$((rc ? rc : $?))
+          fi
+          exit "${rc}"
+        env:
+          SKIP: ${{ matrix.skip }}
+          ISOLATE: ${{ matrix.isolate }}
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: results-integration-${{ matrix.family }}
-          path: integration-${{ matrix.family }}.xml
+          path: integration-${{ matrix.family }}*.xml
           retention-days: 3
 
   # ---------------------------------------------------------------------------
