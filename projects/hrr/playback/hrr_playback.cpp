@@ -1252,6 +1252,14 @@ static void print_usage(const char* argv0) {
     "                        attempts that return hipErrorNotReady. Default 5000000.\n"
     "  --max-file-bytes N    Refuse a blob or code object larger than N bytes.\n"
     "                        Default 4294967296 (4 GiB).\n"
+    "  --max-threads N       Refuse a --multi-thread replay of an archive recording\n"
+    "                        more than N threads. Default 256.\n"
+    "  --max-events N        Refuse an archive with more than N events. Default 50000000.\n"
+    "  --max-host-bytes N    End the replay when host memory held for the archive\n"
+    "                        (blob caches, pinned buffers, read-backs) would pass N\n"
+    "                        bytes. Default 17179869184 (16 GiB).\n"
+    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit).\n"
+    "                        Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
@@ -1322,6 +1330,8 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  uint64_t max_threads   = hrr::kDefaultMaxThreads;
+  uint64_t max_wall_secs = hrr::kDefaultMaxWallSecs;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1342,6 +1352,21 @@ int main(int argc, char** argv) {
         return 1;
       }
       ctx.sync_watchdog_ms = static_cast<unsigned>(n);
+    }
+    else if ((!strcmp(argv[i], "--max-threads") ||
+              !strcmp(argv[i], "--max-events") ||
+              !strcmp(argv[i], "--max-host-bytes") ||
+              !strcmp(argv[i], "--max-wall-seconds")) && i + 1 < argc) {
+      const char* flag = argv[i];
+      uint64_t n = 0;
+      if (!hrr::parse_u64(argv[++i], &n)) {
+        fprintf(stderr, "[HRR] %s expects a non-negative integer\n", flag);
+        return 1;
+      }
+      if      (!strcmp(flag, "--max-threads"))      max_threads   = n;
+      else if (!strcmp(flag, "--max-events"))       hrr::set_max_events(n);
+      else if (!strcmp(flag, "--max-host-bytes"))   ctx.host_budget.set_cap(n);
+      else                                          max_wall_secs = n;
     }
     else if ((!strcmp(argv[i], "--max-seq-waits") ||
               !strcmp(argv[i], "--max-query-attempts") ||
@@ -1479,6 +1504,29 @@ int main(int argc, char** argv) {
          archive.event_count, archive.kernel_count,
          archive.blob_count, archive.code_object_count);
   printf("[HRR] Threads : %zu captured\n", archive.threads.size());
+
+  // One OS thread is created per recorded thread id in --multi-thread mode.
+  // Refuse before any is created, so the process stays within the cap.
+  if (!single_thread) {
+    std::string why;
+    if (!hrr::check_thread_cap(archive.threads.size(), max_threads, &why)) {
+      fprintf(stderr, "[HRR] Fatal: %s\n", why.c_str());
+      return 1;
+    }
+  }
+
+  // Wall-clock limit for the whole replay. The replay can be blocked inside a
+  // HIP call that no flag interrupts, so the watchdog ends the process.
+  hrr::WallClockWatchdog wall_watchdog(
+      std::chrono::milliseconds(std::min<uint64_t>(max_wall_secs, 31536000ull) * 1000), [max_wall_secs] {
+        fprintf(stderr,
+                "[HRR] Fatal: replay still running after %llu s "
+                "(--max-wall-seconds); ending it\n",
+                (unsigned long long)max_wall_secs);
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(124);
+      });
 
   HIP_CHECK(hipInit(0));
 

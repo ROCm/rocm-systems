@@ -214,6 +214,28 @@ struct PlaybackContext {
     // thread that was supposed to advance next_seq has already aborted.
     std::atomic<bool> fatal_error{false};
 
+    // Host memory held on behalf of the archive, against --max-host-bytes
+    // (hrr_replay_limits.h). A refused charge reports the site on stderr and
+    // returns false; the caller fails the API with hipErrorMemoryAllocation.
+    hrr::ByteBudget host_budget{hrr::kDefaultMaxHostBytes};
+    bool charge_host(uint64_t bytes, const char* what) {
+        if (host_budget.try_charge(bytes)) return true;
+        report_host_refusal(bytes, what);
+        return false;
+    }
+    // Say a charge was refused, and end the replay: the cap is a limit on the
+    // whole run, so --continue-on-error must not turn a refusal into a skipped
+    // event and carry on past it. Takes no charge, so a caller that already
+    // holds a refused ScopedCharge can report it without touching the budget.
+    void report_host_refusal(uint64_t bytes, const char* what) {
+        fprintf(stderr,
+                "[HRR] Fatal: %s needs %llu host bytes; %llu of the %llu-byte host "
+                "memory cap (--max-host-bytes) is already in use\n",
+                what, (unsigned long long)bytes, (unsigned long long)host_budget.used(),
+                (unsigned long long)host_budget.cap());
+        fatal_error.store(true, std::memory_order_release);
+    }
+
     // Bounds on what the archive can make replay wait for (hrr_replay_limits.h).
     // dispatch_event gives up on a sequence number that never becomes current
     // after this many waits with no progress (a gap or duplicate in the
@@ -654,11 +676,24 @@ struct PlaybackContext {
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
+        // A host allocation recorded again under the same address (a second
+        // pass replays the same events) gives the old entry's charge back.
+        auto old = alloc_map.find(rec);
+        if (old != alloc_map.end() &&
+            (old->second.kind == AllocKind::HostMalloc ||
+             old->second.kind == AllocKind::HostRegister))
+            host_budget.release(old->second.size);
         alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
-        alloc_map.erase(rec);
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end()) return;
+        // Host allocations were charged to host_budget before they were made.
+        if (it->second.kind == AllocKind::HostMalloc ||
+            it->second.kind == AllocKind::HostRegister)
+            host_budget.release(it->second.size);
+        alloc_map.erase(it);
     }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {
@@ -680,7 +715,12 @@ struct PlaybackContext {
         if (!rec) return nullptr;
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
-        if (buf.size() < sz) buf.resize(sz);
+        if (buf.size() < sz) {
+            // Charge only the growth; a refusal leaves the buffer as it was.
+            if (!charge_host(sz - buf.size(), "graph host operand buffer"))
+                return nullptr;
+            buf.resize(sz);
+        }
         return buf.data();
     }
 
@@ -743,6 +783,9 @@ struct PlaybackContext {
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
+    // Read `path` into blob_cache_ under `key`, charged to the host budget.
+    const void* cache_file(const std::string& key, const std::string& path,
+                           size_t* sz_out, const char* what) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 

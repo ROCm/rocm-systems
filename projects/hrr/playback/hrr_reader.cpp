@@ -593,6 +593,15 @@ bool load_archive(const std::string& path, Archive& archive) {
     #undef AS
     #undef SIZE_OK
 
+    if (archive.events.size() >= max_events()) {
+      fprintf(stderr,
+              "[HRR] Refusing %s: more than %llu events (--max-events); stopped "
+              "reading after %zu\n",
+              events_path.c_str(), (unsigned long long)max_events(),
+              archive.events.size());
+      fclose(f);
+      return false;
+    }
     archive.events.push_back(std::move(ev));
   }
 
@@ -658,6 +667,10 @@ bool load_archive(const std::string& path, Archive& archive) {
 // ---------------------------------------------------------------------------
 
 static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
+static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};
+
+uint64_t max_events() { return g_max_events.load(std::memory_order_relaxed); }
+void set_max_events(uint64_t events) { g_max_events.store(events, std::memory_order_relaxed); }
 
 uint64_t max_file_bytes() { return g_max_file_bytes.load(std::memory_order_relaxed); }
 void set_max_file_bytes(uint64_t bytes) {
