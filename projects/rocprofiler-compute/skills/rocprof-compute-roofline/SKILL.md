@@ -18,7 +18,7 @@ carries the same numbers in readable form.
 Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b roof -- <application> <args>
+rocprof-compute profile --name <workload_name> -b roofline -- <application> <args>
 ```
 
 Collecting it runs microbenchmarks in addition to profiling the application,
@@ -54,7 +54,7 @@ also runs the roofline benchmarks.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
 - Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+  block 4 (`roofline`) already skips it.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -65,7 +65,7 @@ also runs the roofline benchmarks.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
