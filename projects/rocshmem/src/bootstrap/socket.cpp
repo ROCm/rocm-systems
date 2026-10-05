@@ -633,28 +633,67 @@ void Socket::tryAccept() {
   fd_ = ::accept(acceptFd_, &addr_.sa, &socklen);
   if (fd_ != -1) {
     state_ = SocketStateAccepted;
-  } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-    ERROR("accept failed (fd %d) errno %d\n", acceptFd_, errno);
-  } else {
+  } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EINTR ||
+             errno == ENETDOWN || errno == EPROTO || errno == ENOPROTOOPT || errno == EHOSTDOWN ||
+             errno == ENONET || errno == EHOSTUNREACH || errno == EOPNOTSUPP || errno == ENETUNREACH) {
+    // Per accept(2) these may be already-pending peer/network errors (e.g. a peer
+    // that reset the connection before we accepted it). They are not fatal to the
+    // root: retry accepting. The caller's accept loop bounds this via abortFlag_ /
+    // timeout. Mirrors the transient-error handling in RCCL's ncclOsSocketTryAccept.
     usleep(SLEEP_INT);
     if (++acceptRetries_ % 1000 == 0)
       LOG_TRACE("tryAccept: Call to try accept returned %s, retrying", strerror(errno));
+  } else {
+    ERROR("accept failed (fd %d) errno %d\n", acceptFd_, errno);
   }
+}
+
+// Drop a half-open/spurious peer connection and go back to accepting. Pre-magic
+// failures (peer closed before/mid handshake, wrong magic, abort requested) are
+// not fatal to the root: discarding lets the accept loop reap the fd and keep
+// serving real ranks instead of aborting the whole job.
+void Socket::discardAccept() {
+  if (fd_ >= 0) {
+    ::close(fd_);
+    fd_ = -1;
+  }
+  state_ = SocketStateAccepting;
+}
+
+// Wait for the remaining bytes of the handshake magic once the first chunk has
+// arrived. Returns false (without aborting) if the peer closed mid-magic or an
+// abort was requested, so finalizeAccept can discard the connection. Mirrors the
+// non-fatal pre-magic handling in RCCL's socketFinalizeAccept.
+bool Socket::recvMagic(uint64_t* magic, int* received) {
+  while (*received < (int)sizeof(*magic)) {
+    int closed = 0;
+    socketProgressOpt(ROCSHMEM_SOCKET_RECV, magic, sizeof(*magic), received, 0, &closed);
+    if (closed) return false;
+    if (abortFlag_ && *abortFlag_ != 0) return false;
+  }
+  return true;
 }
 
 void Socket::finalizeAccept() {
   uint64_t magic;
   enum SocketType type;
   int received = 0;
-  socketProgress(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received);
+  int closed = 0;
+  socketProgressOpt(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received, 0, &closed);
+  if (closed) {
+    LOG_TRACE("finalizeAccept: peer closed before magic, discarding connection");
+    discardAccept();
+    return;
+  }
   if (received == 0) return;
-  socketWait(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received);
+  if (!recvMagic(&magic, &received)) {
+    LOG_TRACE("finalizeAccept: peer closed or abort mid-magic, discarding connection");
+    discardAccept();
+    return;
+  }
   if (magic != magic_) {
-    ERROR("finalizeAccept: wrong magic %lx != %lx\n", magic, magic_);
-    ::close(fd_);
-    fd_ = -1;
-    // Ignore spurious connection and accept again
-    state_ = SocketStateAccepting;
+    LOG_WARN("finalizeAccept: wrong magic %lx != %lx, discarding connection", magic, magic_);
+    discardAccept();
     return;
   } else {
     received = 0;
