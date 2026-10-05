@@ -3586,10 +3586,11 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             assert 'vop3_opsel' not in body
             assert 'read_vop3_true16_src' not in body
             assert '>> 16' not in body
-            assert (
-                'static_cast<uint16_t>('
-                'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
-            )
+            # The source half is flushed under MODE before it is widened.
+            flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+            assert flush in body
+            assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+            assert body.index('util::f16_to_f32(') < body.index(flush)
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
             assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
@@ -6421,8 +6422,13 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
     body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'util::f16_to_f32' in body
-    assert 'source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg)' in body
+    # The raw half is flushed, widened, then given ABS/NEG.
+    flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+    assert body.index('source_modifier::apply_to_float(') < body.index(
+        'util::f16_to_f32'
+    )
+    assert body.index('util::f16_to_f32') < body.index(flush)
+    assert '0, inst_.abs, inst_.neg)' in body
     assert 'amdgpu::fp_mode::cvt_f32_f16' in body
     assert 'wf.fp_denorm_mode_f16_f64()' in body
     assert 'wf.ieee_mode()' in body

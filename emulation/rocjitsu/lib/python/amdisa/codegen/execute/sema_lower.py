@@ -552,6 +552,15 @@ def _lower_less_greater_once(node: SemaNode, ctx: LoweringContext) -> str | None
     return f'([&]() {{ auto a = {lhs}; auto b = {rhs}; return (a < b) || (a > b); }}())'
 
 
+def _uses_f16_mode_arithmetic(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether node lowers to fp_mode::arithmetic_f16."""
+    return (
+        ctx.mode_arithmetic
+        and ctx.exec_model == ExecModel.VECTOR
+        and node.ty == SemaType.F16
+    )
+
+
 def _mode_arithmetic(
     node: SemaNode, ctx: LoweringContext, operation: str, operands: list[str]
 ) -> str | None:
@@ -602,6 +611,11 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind in _INFIX_OPS:
         if (expr := _lower_less_greater_once(node, ctx)) is not None:
             return expr
+        if kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL) and (
+            _uses_f16_mode_arithmetic(node, ctx)
+        ):
+            operands = [_flushed_f16_source(child, ctx) for child in node.children[:2]]
+            return _mode_arithmetic(node, ctx, kind.name, operands)
         lhs = _lower_expr(node.children[0], ctx)
         rhs = _lower_expr(node.children[1], ctx)
         if kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL):
@@ -628,13 +642,14 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::pow({lhs}, {rhs})'
 
     if kind == SemaNodeKind.LDEXP:
-        val = _lower_expr(node.children[0], ctx)
         exp = _lower_expr(node.children[1], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
+            val = _flushed_f16_source(node.children[0], ctx)
             return (
                 f'amdgpu::fp_mode::ldexp_f16({val}, {exp}, '
                 'wf.fp_denorm_mode_f16_f64())'
             )
+        val = _lower_expr(node.children[0], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty in (
             SemaType.F32,
             SemaType.F64,
@@ -648,7 +663,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
 
     if kind in _STD_MATH:
         arg = None
-        if kind == SemaNodeKind.FLOOR:
+        # SALU forms keep their existing behavior; they have no hardware captures.
+        if kind == SemaNodeKind.FLOOR and ctx.exec_model == ExecModel.VECTOR:
             arg = _input_flushed_source(node.children[0], ctx)
         if arg is None:
             arg = _lower_expr(node.children[0], ctx)
@@ -657,6 +673,10 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind == SemaNodeKind.FRACT:
         arg = _lower_expr(node.children[0], ctx)
         return f'[&]() {{ auto v = {arg}; return v - std::floor(v); }}()'
+
+    if kind == SemaNodeKind.FMA and _uses_f16_mode_arithmetic(node, ctx):
+        operands = [_flushed_f16_source(child, ctx) for child in node.children[:3]]
+        return _mode_arithmetic(node, ctx, 'FMA', operands)
 
     if kind == SemaNodeKind.FMA:
         a = _lower_expr(node.children[0], ctx)
@@ -1864,6 +1884,27 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
 }
 
 
+# Helpers whose single F16 source the caller flushes before widening.
+_F16_FLUSHED_SOURCE_CALLS = frozenset(
+    {'rcp', 'rsq', 'sqrt', 'sin', 'cos', 'log', 'log2', 'exp', 'exp2'}
+)
+
+
+def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether a call lowers to an F16 helper that expects a flushed source."""
+    callee = node.call_name or ''
+    if len(node.children) != 2:
+        return False
+    # Pseudo-scalar F16 transcendentals are VALU instructions with SGPR operands.
+    if callee.startswith('pseudo_scalar_') and callee.endswith('_f16'):
+        return True
+    if ctx.exec_model != ExecModel.VECTOR:
+        return False
+    if callee == 'cvt_f32_f16_valu':
+        return True
+    return callee in _F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
+
+
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a .call node through inline ops, helper registry, or VOP3 modifiers."""
     callee = node.call_name or ''
@@ -1878,11 +1919,18 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_float_compare(node, ctx)
     if callee.startswith(FLOAT_MINMAX_CALL):
         return _lower_float_minmax(node, ctx)
-    if callee == 'ceil' and len(node.children) == 2:
+    if (
+        callee == 'ceil'
+        and len(node.children) == 2
+        and ctx.exec_model == ExecModel.VECTOR
+    ):
         if (source := _input_flushed_source(node.children[1], ctx)) is not None:
             return f'util::ceil_scalar({source})'
 
-    args = [_lower_expr(c, ctx) for c in node.children[1:]]
+    if _takes_flushed_f16_source(node, ctx):
+        args = [_flushed_f16_source(node.children[1], ctx)]
+    else:
+        args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
     if callee == 'mul_legacy':
         if (arithmetic := _mode_arithmetic(node, ctx, 'MUL_LEGACY', args)) is not None:
@@ -2115,11 +2163,8 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
 
     The register bits are flushed in their own format, before an F16 source is
     widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
-    when ``node`` is not a direct floating register read. SALU forms keep their
-    existing behavior; they have no hardware captures.
+    when ``node`` is not a direct floating register read.
     """
-    if ctx.exec_model != ExecModel.VECTOR:
-        return None
     modifiers = None
     if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
         if len(node.children) < 5:
@@ -2140,11 +2185,15 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
         node = node.children[0]
     if node.kind != SemaNodeKind.INSTOPERAND:
         return None
-    declaration = input_policy.policy_decl(dtype)
-    if declaration not in ctx.body_preamble:
-        ctx.body_preamble.append(declaration)
+    policy = input_policy.policy_expr(dtype)
+    if ctx.exec_model == ExecModel.VECTOR:
+        # Resolve MODE once, before the lane loop.
+        declaration = input_policy.policy_decl(dtype)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
+        policy = input_policy.NAME
     fmt = f'amdgpu::fp_format::{input_policy.FORMATS[dtype]}'
-    bits = f'amdgpu::input_denormal::flush_input<{fmt}>({_lower_expr(node, ctx)}, {input_policy.NAME})'
+    bits = f'amdgpu::input_denormal::flush_input<{fmt}>({_lower_expr(node, ctx)}, {policy})'
     if dtype == 'f16':
         value = f'util::f16_to_f32(static_cast<uint16_t>({bits}))'
     else:
@@ -2156,6 +2205,17 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
             f'{abs_field}, {neg_field})'
         )
     return value
+
+
+def _flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> str:
+    """Return an F16 helper operand, flushed by MODE before it is widened.
+
+    The F16 arithmetic, LDEXP, conversion and transcendental helpers expect
+    their sources already input-flushed; see _input_flushed_source.
+    """
+    if (source := _input_flushed_source(node, ctx)) is None:
+        raise ValueError(f'F16 operand is not a floating register read: {node}')
+    return source
 
 
 def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
