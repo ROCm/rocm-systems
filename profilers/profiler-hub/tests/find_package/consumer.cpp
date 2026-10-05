@@ -17,7 +17,7 @@ main()
     try
     {
         profiler_hub::storage_t storage{ ":memory:", "profiler_hub-find-package-smoke" };
-        const auto              version = storage.get_storage_version();
+        const auto              version = storage.get_schema_version();
         std::cout << "profiler_hub storage opened. schema version: " << version.major
                   << "." << version.minor << "." << version.patch << '\n';
     } catch(const std::exception& e)

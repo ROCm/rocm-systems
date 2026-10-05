@@ -23,7 +23,7 @@ digraph public_api_ownership {
         color="#dce8f5";
         fillcolor="#f0f6ff";
 
-        storage [label="{storage_t|unique_ptr\<impl\>\l|+ get_storage_version()\l}", fillcolor="#c8ddf0"];
+        storage [label="{storage_t|unique_ptr\<impl\>\l|+ get_schema_version()\l}", fillcolor="#c8ddf0"];
         writer [label="{writer_t|unique_ptr\<impl\>\l|+ register_*_info()\l+ insert_*_data()\l+ flush_in_memory_data_to_disk()\l}", fillcolor="#c8ddf0"];
         reader [label="{reader_t|unique_ptr\<impl\>\l|+ get_all_*()\l+ get_events*()\l+ get_*_details()\l}", fillcolor="#c8ddf0"];
     }

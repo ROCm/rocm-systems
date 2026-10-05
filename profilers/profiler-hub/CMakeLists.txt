@@ -69,9 +69,9 @@ include(GNUInstallDirs)
 # Version
 # ------------------------------------------------------------ #
 
-# Version is the single source of truth in `project(profiler-hub VERSION ...)`
-# above. CMake automatically populates profiler-hub_VERSION_{MAJOR,MINOR,PATCH}
-# and profiler-hub_VERSION from it.
+# The VERSION file is the single source of truth for the library version.
+# project() above is populated from that file, and CMake then sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} and profiler-hub_VERSION.
 
 # ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)

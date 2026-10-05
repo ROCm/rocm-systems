@@ -24,6 +24,13 @@ downstream consumer of the library.
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
 
+### Fixed
+
+- `storage_t::get_storage_version()` (installed `include/storage.hpp`) returned the
+  library version (`0.2.0`) instead of the schema version (`3.0.1`). That contradicted
+  `docs/architecture-profiler-hub.md`, which already documents `version_t` as the schema
+  version. The method is renamed to `get_schema_version()`.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

@@ -24,7 +24,7 @@ public:
     storage_t& operator=(const storage_t&) = delete;
     storage_t& operator=(storage_t&&)      = delete;
 
-    [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_schema_version() const;
 
 private:
     friend struct writer_t;

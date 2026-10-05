@@ -19,9 +19,9 @@ storage_t::storage_t(const std::string& database_path, const std::string& uuid)
 storage_t::~storage_t() { m_impl.reset(); }
 
 profiler_hub::version_t
-storage_t::get_storage_version() const
+storage_t::get_schema_version() const
 {
-    return m_impl->get_storage_version();
+    return m_impl->get_schema_version();
 }
 
 }  // namespace profiler_hub

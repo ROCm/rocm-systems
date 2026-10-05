@@ -29,7 +29,7 @@ struct storage_t::impl
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
 
-    [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_schema_version() const;
 
     std::shared_ptr<data_storage::sqlite_backend> create_database(
         const storage_type_t& storage_type);
