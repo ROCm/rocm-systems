@@ -1629,4 +1629,26 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
     CHECK(manifest.find("\"hipUserObjectCreate\"") != std::string::npos);
   }
 }
+
+/**
+ * Unit_HRR_ForkedChildRecordsAfterShutdown
+ * ----------------------------------------
+ *   - A forked child that exits normally without recording leaves no archive,
+ *     even though it records after its capture shutdown, as a fat-binary
+ *     destructor does.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_records_after_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildRecordsAfterShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 1);
+}
 #endif  // !_WIN32

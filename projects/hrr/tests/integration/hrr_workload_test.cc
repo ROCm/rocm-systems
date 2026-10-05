@@ -3864,4 +3864,42 @@ TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
   // Clear if fork() did not wait for the recorder to leave the mutex.
   REQUIRE(g_unreplayable_ran_out.load());
 }
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkedChildRecordsAfterShutdown_Direct
+//
+// A forked child opens its own archive on its first record, so one that has
+// not recorded when its capture shutdown runs has no archive to finalize. Its
+// fat-binary destructors run after that shutdown and still record, through
+// the compiler dispatch table that the shutdown leaves in place. A record
+// then must not open an archive that nothing will finalize. The child here
+// records nothing before it exits normally; after its capture shutdown it
+// pushes and pops a launch configuration, which goes through that same table.
+// Unit_HRR_ForkedChildRecordsAfterShutdown checks that only the parent has an
+// archive.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkedChildRecordsAfterShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = [] {
+      dim3 grid, block;
+      size_t shared = 0;
+      hipStream_t stream = nullptr;
+      (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+      (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
+    };
+    exit(0);
+  }
+  REQUIRE(pid > 0);
+  const int status = hrr_wait_child(pid, 30);
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
 #endif  // !_WIN32

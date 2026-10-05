@@ -885,6 +885,10 @@ void flush(const char* /*output_dir*/) {
 }
 
 void close() {
+  // A forked child that has not recorded yet must not open its archive after
+  // this: nothing would finalize it. Fat-binary destructors still record then.
+  std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
+  g_reopen_after_fork.store(false, std::memory_order_release);
   BufWriteGuard lk;
   if (g_events_fd >= 0) {
     flush_buffer_locked();
