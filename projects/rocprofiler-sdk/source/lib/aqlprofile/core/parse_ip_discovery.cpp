@@ -34,6 +34,7 @@
 #include <cassert>
 
 #include "lib/aqlprofile/core/ip_discovery.h"
+#include "lib/common/environment.hpp"
 
 #define PCI_BUS_NUM(x)  (((x) >> 8) & 0xff)
 #define PCI_SLOT(devfn) (((devfn) >> 3) & 0x1f)
@@ -43,6 +44,8 @@ namespace fs = std::filesystem;
 
 namespace
 {
+constexpr auto ip_discovery_path_env = "AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH";
+
 /**
  * @brief Reads a single integer (decimal or hexadecimal) from a sysfs file.
  *
@@ -219,6 +222,12 @@ get_domain_bdf_str(uint32_t domain, uint32_t bdf)
 
 }  // namespace
 
+bool
+use_custom_ip_discovery_path()
+{
+    return rocprofiler::common::get_env_optional(ip_discovery_path_env).has_value();
+}
+
 /**
  * @brief Parses IP discovery information for a given PCI domain and BDF (Bus:Device.Function).
  *
@@ -234,9 +243,9 @@ get_domain_bdf_str(uint32_t domain, uint32_t bdf)
  *                            or if no IP instances are found.
  *
  * @details
- * - Constructs the sysfs path for the PCI device using the domain and BDF values.
- * - Iterates over the dies in the `/sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die`
- * directory.
+ * - Uses `AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH` as the PCI device directory when it is set.
+ * - Otherwise, constructs the sysfs path for the PCI device using the domain and BDF values.
+ * - Iterates over the dies in the selected directory.
  * - For each die, iterates over the IP directories and calls `parse_ip_instances` to parse
  *   individual IP instance data.
  * - If no IP instances are found, throws an exception.
@@ -245,12 +254,19 @@ discovery_table_t
 parse_ip_discovery(uint32_t domain, uint32_t bdf)
 {
     // /sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die
-    const fs::path die_path =
+    const auto ip_discover_override = rocprofiler::common::get_env_optional(ip_discovery_path_env);
+    if(ip_discover_override && ip_discover_override->empty())
+        throw std::runtime_error(std::string{ip_discovery_path_env} + " is set but empty");
+
+    const auto sysfs_path =
         fs::path("/sys/bus/pci/devices") / get_domain_bdf_str(domain, bdf) / "ip_discovery/die";
+
+    const fs::path die_path =
+        ip_discover_override ? fs::path{*ip_discover_override} / "ip_discovery/die" : sysfs_path;
 
     if(!fs::exists(die_path) || !fs::is_directory(die_path))
     {
-        throw std::runtime_error("sysfs path does not exist or is not a directory: " +
+        throw std::runtime_error("IP discovery path does not exist or is not a directory: " +
                                  die_path.string());
     }
 
