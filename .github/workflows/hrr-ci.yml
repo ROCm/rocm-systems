@@ -20,11 +20,6 @@ on:
       - ".github/workflows/hrr-ci.yml"
       - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
   workflow_dispatch:
-    inputs:
-      capture:
-        description: "Build CLR with HRR capture enabled (false skips every HRR CI job)"
-        type: boolean
-        default: true
 
 concurrency:
   group: hrr-ci-${{ github.event.pull_request.number || github.ref }}
@@ -48,47 +43,31 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Capture gate. HRR capture is compiled into amdhip64 only when
-  # HIP_HRR_CAPTURE_ENABLED is defined (hip_capture.cpp, hip_capture_init); the
-  # tree has no CMake option for it, and this workflow is what defines it for
-  # the CLR build below. When capture is not enabled there is nothing for HRR CI
-  # to test, so every job below is skipped, not failed. A skipped job counts as
-  # passing for branch protection, and "HRR CI Summary" resolves it explicitly.
-  #
-  # Capture is off when the repository variable HRR_CAPTURE_ENABLED is "false"
-  # or "0", when a manual run passes capture=false, or when the capture guard
-  # is no longer in the CLR sources. The jobs are also skipped when a pull
-  # request touches nothing HRR owns (the path filter, done here rather than in
-  # the "on:" block so that HRR CI Summary still reports).
+  # Path gate. The "on:" block cannot filter pull requests by path (see above),
+  # so this job lists the files the pull request changes and sets run=false when
+  # none is an HRR path. Every job below is then skipped, not failed, and
+  # "HRR CI Summary" still reports. Pushes and manual runs always run.
   # ---------------------------------------------------------------------------
   gate:
-    name: "Capture enabled?"
+    name: "HRR paths changed?"
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
     outputs:
-      enabled: ${{ steps.decide.outputs.enabled }}
+      run: ${{ steps.decide.outputs.run }}
     steps:
-      - name: Checkout capture sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: projects/clr/hipamd/src/hrr/hip_capture.cpp
-          sparse-checkout-cone-mode: false
-          set-safe-directory: true
-
       - name: Decide
         id: decide
         env:
-          VAR_ENABLED: ${{ vars.HRR_CAPTURE_ENABLED }}
-          INPUT_ENABLED: ${{ github.event.inputs.capture }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          enabled=true
-          reason="capture is enabled"
+          run=true
+          reason="not a pull request"
           if [ -n "${PR_NUMBER}" ]; then
+            reason="the pull request changes an HRR path"
             # The files API lists at most 3000 files; a PR that large is treated
             # as relevant rather than guessed at.
             gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
@@ -111,26 +90,13 @@ jobs:
           sys.exit(0 if relevant else 1)
           PY
             then
-              enabled=false
+              run=false
               reason="the pull request changes no HRR path"
             fi
           fi
-          case "${VAR_ENABLED,,}" in
-            false|0|off|no) enabled=false; reason="repository variable HRR_CAPTURE_ENABLED=${VAR_ENABLED}" ;;
-          esac
-          case "${INPUT_ENABLED,,}" in
-            false) enabled=false; reason="workflow_dispatch input capture=false" ;;
-          esac
-          # Match the macro name alone, outside comments, so a rewrite such as
-          # "#ifdef HIP_HRR_CAPTURE_ENABLED" still counts as the guard.
-          if ! grep -vE '^[[:space:]]*//' projects/clr/hipamd/src/hrr/hip_capture.cpp \
-              | grep -q 'HIP_HRR_CAPTURE_ENABLED'; then
-            enabled=false
-            reason="hip_capture.cpp no longer mentions HIP_HRR_CAPTURE_ENABLED"
-            echo "::warning::HRR CI skipped: the capture guard HIP_HRR_CAPTURE_ENABLED was not found in hip_capture.cpp. If capture was renamed or made unconditional, update this gate."
-          fi
-          echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
-          echo "HRR CI: run=${enabled} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "HRR CI: run=${run} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # ---------------------------------------------------------------------------
   # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
   # include <hip/hip_runtime.h> for types but issue no HIP calls, so they need
@@ -139,7 +105,7 @@ jobs:
   unit:
     name: "Unit (${{ matrix.os }})"
     needs: [gate]
-    if: ${{ needs.gate.outputs.enabled == 'true' }}
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -251,7 +217,7 @@ jobs:
   ci_config:
     name: "Resolve runners"
     needs: [gate]
-    if: ${{ needs.gate.outputs.enabled == 'true' }}
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
@@ -281,7 +247,7 @@ jobs:
   build:
     name: "Build (multi-arch)"
     needs: [gate]
-    if: ${{ needs.gate.outputs.enabled == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    if: ${{ needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     # The integration binaries embed absolute paths into this workspace, so a
     # containerised GPU job has to recreate it (see "Recreate build path").
     outputs:
@@ -362,6 +328,9 @@ jobs:
       - name: Zero ccache statistics
         run: ccache --zero-stats
 
+      # -DHIP_HRR_CAPTURE_ENABLED is what compiles capture into amdhip64
+      # (hip_capture.cpp); the tree has no CMake option for it. CI always sets
+      # it, so capture is always on in the build under test.
       - name: Build amdhip64 with the HRR capture shims
         run: |
           cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
@@ -452,7 +421,7 @@ jobs:
   integration:
     name: "Integration (${{ matrix.family }})"
     needs: [gate, ci_config, build]
-    if: ${{ needs.gate.outputs.enabled == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    if: ${{ needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     runs-on: ${{ matrix.runner }}
     # The suite runs in about 90 seconds. These are scarce single-GPU machines
     # and the default timeout is six hours, so a workload that deadlocks on one
@@ -643,7 +612,7 @@ jobs:
   report:
     name: "Test results"
     needs: [gate, unit, integration]
-    if: ${{ always() && needs.gate.outputs.enabled == 'true' }}
+    if: ${{ always() && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -690,10 +659,10 @@ jobs:
           deduplicate_classes_by_file_name: true
 
   # ---------------------------------------------------------------------------
-  # Single required-check target. Passes when capture is off (everything above
-  # was skipped) and when every job that ran succeeded; fails on any failure or
-  # cancellation, and on a skip that is not explained by the gate. Fork PRs skip
-  # build and integration on purpose, so those skips are accepted there.
+  # Single required-check target. Passes when the path gate skipped everything
+  # and when every job that ran succeeded; fails on any failure or cancellation,
+  # and on a skip the gate does not explain. Fork PRs skip build and integration
+  # on purpose, so those skips are accepted there.
   # ---------------------------------------------------------------------------
   hrr_ci_summary:
     name: "HRR CI Summary"
@@ -714,10 +683,10 @@ jobs:
           print(json.dumps(result, indent=2))
 
           if result["gate"] != "success":
-              print("::error::capture gate did not complete: " + result["gate"])
+              print("::error::path gate did not complete: " + result["gate"])
               sys.exit(1)
-          if needs["gate"]["outputs"].get("enabled") != "true":
-              print("HRR CI was skipped by the gate (capture off, or no HRR path changed).")
+          if needs["gate"]["outputs"].get("run") != "true":
+              print("HRR CI skipped: the pull request changes no HRR path.")
               sys.exit(0)
 
           fork = os.environ["IS_FORK"] == "true"
