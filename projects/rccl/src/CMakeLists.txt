@@ -1032,6 +1032,10 @@ endif()
 if(ENABLE_ROCSHMEM_GIN)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM_GIN)
 endif()
+# gfx1250 miscompiles the fully unrolled LL128 reduce loop at -O1 (Debug device
+# flags). Release is -O3 and unaffected.
+target_compile_definitions(rccl PRIVATE
+  $<$<CONFIG:Debug>:RCCL_GFX1250_LL128_UNROLL_WORKAROUND>)
 # Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
 # HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
 if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
