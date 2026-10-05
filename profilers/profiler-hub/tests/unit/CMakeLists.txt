@@ -16,6 +16,7 @@ set(UNIT_TEST_SOURCES
     ph_ctx_test.cpp
     c_api_test.cpp
     track_read_options_test.cpp
+    track_window_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
