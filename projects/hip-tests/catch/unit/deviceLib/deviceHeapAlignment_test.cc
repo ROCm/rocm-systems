@@ -5,6 +5,7 @@
  */
 
 #include <array>
+#include <memory>
 #include <hip_test_common.hh>
 
 // This is the OCKL request used to grow the device heap. Calling it directly
@@ -42,13 +43,13 @@ HIP_TEST_CASE(Unit_deviceHeap_HostcallSlabAlignment) {
   CHECK_PCIE_ATOMIC_SUPPORT;
 
   std::array<SlabResult, kRequests> results{};
-  SlabResult* device_results = nullptr;
-  HIP_CHECK(hipMalloc(&device_results, sizeof(results)));
-  requestHeapSlabs<<<1, 1>>>(device_results);
+  SlabResult* raw_results = nullptr;
+  HIP_CHECK(hipMalloc(&raw_results, sizeof(results)));
+  std::unique_ptr<SlabResult, decltype(hipFree)*> device_results{raw_results, hipFree};
+  requestHeapSlabs<<<1, 1>>>(device_results.get());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(results.data(), device_results, sizeof(results), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(device_results));
+  HIP_CHECK(hipMemcpy(results.data(), device_results.get(), sizeof(results), hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < results.size(); ++i) {
     INFO("slab request " << i << ", address " << results[i].address);
