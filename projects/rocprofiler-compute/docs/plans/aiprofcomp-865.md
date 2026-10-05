@@ -58,7 +58,7 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 |------|--------|
 | SPP metrics | Full PMC set in **one** replay + same-pass bind at analyze |
 | SPU parents | Decompose into collectables; recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO` |
-| Escape hatch | `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE=1` restores legacy merged-pass analyze |
+| Escape hatch | `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE=1` / `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` during soak; removed in Phase 2b cleanup PR |
 
 **SPP is collection + post-analysis.** Packing without same-pass bind still yields wrong ratios under PMC duplication; bind without packing still leaves packable metrics multi-bucket. Phase 1 ships both. Phase 2 is only SPU collectables / composites.
 
@@ -158,6 +158,17 @@ Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py -
 
 **Primary code:** `collectable.py`, `weighted_avg.py`, aggregation/expression/evaluation_pipeline composite path; gfx942 SPU YAML conversions.
 
+### 4.3 Phase 2 follow-on — Legacy cleanup (separate PR)
+
+After SPP + SPU collectables land and verification (including blocking-ticket checks) is green, remove migration-only legacy paths in a **separate PR** (do not mix with collectables):
+
+- Profile: drop `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` / `ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0` escape hatches and the old heuristic allocator path once SPP is the sole default.
+- Analyze: drop `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE` and merged-pass analyze fallbacks once same-pass bind is mandatory.
+- Dead priority-coalesce / obsolete grouping helpers that exist only for the pre-SPP layout.
+- Docs/tests that exercise only the legacy escape hatches.
+
+Keep cleanup gated on Phase 1 + Phase 2 (collectables) acceptance so rollback via env vars remains available during soak.
+
 ---
 
 ## 5. Evaluation / Verification Plan
@@ -197,4 +208,4 @@ Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py -
 
 5. **SPU collectables (Phase 2 only)** — gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
 
-**Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2 (SPU collectables / `WEIGHTED_AVG` / `COLLECT_*` only).
+**Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2a (SPU collectables / `WEIGHTED_AVG` / `COLLECT_*`) → Phase 2b (legacy cleanup, separate PR).
