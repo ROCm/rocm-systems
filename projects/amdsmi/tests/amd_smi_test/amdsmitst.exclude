@@ -71,9 +71,7 @@ $BLACKLIST_ALL_ASICS\
 "GpuFunctionalReadWrite.FanReadWrite:"\
 "GpuFunctionalReadWrite.TestOverdriveReadWrite:"\
 "GpuFunctionalReadWrite.TestPowerReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerCapReadWrite:"\
-"GpuFunctionalReadWrite.TestPerfLevelReadWrite:"\
-"GpuFunctionalReadWrite.TestPerfDeterminism"
+"GpuFunctionalReadWrite.TestPowerCapReadWrite"
 
 # SWDEV-391407 and PLAT-156250
 # aqua_vanjaram and later systems show 'ip discovery' in
