@@ -7738,6 +7738,7 @@ protected:
 
   protected:
     bool m_in_cluster;
+    agent_address_t ttmps_addr () const override;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
@@ -8178,6 +8179,15 @@ gfx12_5_architecture_t::cwsr_record_t::group_ids () const
   return wg_in_grid;
 }
 
+agent_address_t
+gfx12_5_architecture_t::cwsr_record_t::ttmps_addr () const
+{
+  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
+  constexpr size_t sgpr_size = sizeof (uint32_t);
+  constexpr size_t ttmp_count = 16;
+  return sgprs_addr () + (sgpr_count () - ttmp_count) * sgpr_size;
+}
+
 std::optional<agent_address_t>
 gfx12_5_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
@@ -8207,23 +8217,6 @@ gfx12_5_architecture_t::cwsr_record_t::register_address (
       break;
     default:
       break;
-    }
-
-  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
-  if (regnum >= amdgpu_regnum_t::first_ttmp
-      && regnum <= amdgpu_regnum_t::last_ttmp)
-    {
-      const size_t ttmp_size = sizeof (uint32_t);
-      const size_t ttmp_count = 16;
-      const size_t ttmps_addr
-        = gfx12_architecture_t::cwsr_record_t::register_address (
-            amdgpu_regnum_t::first_sgpr)
-            .value ()
-          + sgpr_count () * sizeof (uint32_t) - ttmp_size * ttmp_count;
-
-      size_t ttmp_nr
-        = utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp);
-      return ttmps_addr + ttmp_nr * ttmp_size;
     }
 
   return gfx12_architecture_t::cwsr_record_t::register_address (regnum);
