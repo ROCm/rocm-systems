@@ -167,6 +167,14 @@ std::string barrierFenceBackendSkipReason() {
          std::to_string(t) + ")";
 }
 
+// rocSHMEM GDA traps in ncclGinApi_Get, ncclGinApi_FlushAsync and ncclGinApi_Wait.
+std::string getBackendSkipReason() {
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    return "GIN get is not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + ")";
+  return "";
+}
+
 // The GIN-SDMA alltoall exists only on the SDMA backend.
 // BarrierFence uses kBytes=4096 to exercise the SDMA queue; a raised
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD sends the traffic down the IPC fallback instead.
@@ -286,6 +294,11 @@ enum class BarrierFenceOperation : int {
   Put,
   SelfPut,
   Get,
+};
+
+enum class GetCompletion : int {
+  Flush,
+  FlushAsyncWait,
 };
 
 }  // namespace
@@ -488,6 +501,7 @@ class GinMPIDeviceTests : public MPITestBase {
   void runWaitCounterAndSignal(int nContexts);
   void runVASignalPut(int nContexts);
   void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence);
+  void runGetVisibility(GetCompletion completion, int nBlocks, int nChunks, const std::vector<size_t>& chunkSizes);
 };
 
 // Context-aware producer/consumer for Put_BasicAndOffsets: one block per GIN
@@ -1876,6 +1890,220 @@ TEST_F(GinMPIDeviceTests, BarrierFence_AllContextsPut_SingleNode) {
 
 TEST_F(GinMPIDeviceTests, BarrierFence_AllContextsGet_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Get, /*allContexts=*/true, /*defaultFence=*/false);
+}
+
+constexpr unsigned long long kNoGetMismatch = ~0ULL;
+constexpr int kGetVisibilityThreads = 256;
+
+struct GetVisibilityResult {
+  unsigned long long mismatchOffset;
+  unsigned long long mismatchBytes;
+  // Completion calls that did not post the expected count of flush GFDs.
+  unsigned long long badFlushGfdCalls;
+};
+
+// The salt changes on every launch, so a destination that still holds an
+// earlier launch's payload (or the zero fill) mismatches.
+__host__ __device__ inline uint8_t getVisibilityPattern(int srcRank, uint32_t salt, size_t offset) {
+  uint32_t x = static_cast<uint32_t>(offset) * 2654435761u ^ static_cast<uint32_t>(offset >> 32);
+  x ^= static_cast<uint32_t>(srcRank) * 0x9E3779B9u ^ salt * 0x85EBCA6Bu;
+  return static_cast<uint8_t>((x >> 24) ^ x);
+}
+
+// Block b reads slice b of the peer's window in nChunks gets. Each get is
+// completed with flush() or flushAsync()+wait() and then read back in this same
+// kernel, so the completion call is the only thing that can order the landed
+// payload before these loads.
+//
+// Payload checks alone cannot catch a missing get flush, since the race rarely
+// loses. With countFlushGfds (proxy backend, one CTA) the kernel also counts
+// flush GFDs deterministically: the proxy posts them to this rank's own queue
+// and gets go to the peer's queue, so this rank's producer index advances only
+// by flush GFDs.
+__global__ void getVisibilityKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, const uint8_t* dst, size_t chunkBytes, int nChunks, int peer,
+    uint32_t salt, GetCompletion completion, bool countFlushGfds, GetVisibilityResult* result,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclTeam team = ncclTeamWorld(devComm);
+  const size_t sliceBase = (size_t)blockIdx.x * nChunks * chunkBytes;
+
+  uint32_t* flushGfdPi = nullptr;
+  auto ctx = gin._makeCtx();
+  // The host picks the backend from NCCL_GIN_TYPE, which an env plugin can
+  // override, so the handle is only cast once the device agrees it is proxy.
+  // Only thread 0 counts, the other threads keep a null pointer.
+  if (countFlushGfds && threadIdx.x == 0 && ctx.backend == NCCL_NET_DEVICE_GIN_PROXY) {
+    ncclGinProxyGpuCtx_t* proxyCtx = &((ncclGinProxyGpuCtx_t*)ctx.handle)[ctx.contextId];
+    flushGfdPi = &proxyCtx->pis[ctx.rank];
+  }
+  auto checkFlushGfds = [&](uint32_t before, uint32_t expected) {
+    if (flushGfdPi != nullptr && __atomic_load_n(flushGfdPi, __ATOMIC_RELAXED) - before != expected) {
+      atomicAdd(&result->badFlushGfdCalls, 1ULL);
+    }
+  };
+  auto loadFlushGfdPi = [&]() -> uint32_t {
+    return flushGfdPi != nullptr ? __atomic_load_n(flushGfdPi, __ATOMIC_RELAXED) : 0;
+  };
+
+  // With one CTA no get is outstanding, so this skips the get flush. With
+  // several CTAs another may already have bumped the per-context lastIssuedGet.
+  uint32_t before = loadFlushGfdPi();
+  gin.flush(ncclCoopCta());
+  checkFlushGfds(before, 0);
+
+  for (int c = 0; c < nChunks; ++c) {
+    const size_t off = sliceBase + (size_t)c * chunkBytes;
+    before = loadFlushGfdPi();
+    if (threadIdx.x == 0) {
+      gin.get(team, peer, srcWin, /*remoteOffset=*/off, dstWin, /*localOffset=*/off, chunkBytes);
+    }
+    if (completion == GetCompletion::Flush) {
+      gin.flush(ncclCoopCta());
+    } else {
+      ncclGinRequest_t request;
+      gin.flushAsync(team, peer, &request, ncclCoopCta());
+      gin.wait(request, ncclCoopCta());
+    }
+    checkFlushGfds(before, 1);
+    // Walk from the tail of the chunk, the bytes most likely still in flight,
+    // so a visibility gap is read before it has time to close.
+    for (size_t j = threadIdx.x; j < chunkBytes; j += blockDim.x) {
+      const size_t i = chunkBytes - 1 - j;
+      if (dst[off + i] != getVisibilityPattern(peer, salt, off + i)) {
+        atomicCAS(&result->mismatchOffset, kNoGetMismatch, (unsigned long long)(off + i));
+        atomicAdd(&result->mismatchBytes, 1ULL);
+      }
+    }
+  }
+}
+
+// Every rank reads from rank+1, so with 2 ranks both directions run at once.
+void GinMPIDeviceTests::runGetVisibility(GetCompletion completion, int nBlocks, int nChunks,
+                                         const std::vector<size_t>& chunkSizes) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = getBackendSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  const int peer = (rank + 1) % nRanks;
+
+  const size_t maxChunkBytes = *std::max_element(chunkSizes.begin(), chunkSizes.end());
+  const size_t winBytes = (size_t)nBlocks * nChunks * maxChunkBytes;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  GetVisibilityResult* dResult = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, winBytes));
+  auto srcCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, winBytes));
+  auto dstCleanup = makeScopeGuard([&]() {
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dResult, sizeof(GetVisibilityResult)));
+  auto resultCleanup = makeScopeGuard([&]() {
+    if (dResult) (void)hipFree(dResult);
+  });
+
+  ncclWindow_t srcWin = nullptr;
+  ncclWindow_t dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, winBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto srcWinCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, winBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto dstWinCleanup = makeScopeGuard([&]() {
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  // The proxy flush reads back through the signals MR, which is only
+  // registered when at least one signal is requested.
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  // Other CTAs post their own flush GFDs to the same queue, so only a single
+  // CTA can count them.
+  const bool countFlushGfds = requestedGinType() == NCCL_NET_DEVICE_GIN_PROXY && nBlocks == 1;
+
+  constexpr int kLaunchesPerSize = 4;
+  std::vector<uint8_t> hostSrc(winBytes);
+  uint32_t salt = 0;
+  for (size_t chunkBytes : chunkSizes) {
+    const size_t bytes = (size_t)nBlocks * nChunks * chunkBytes;
+    for (int launch = 0; launch < kLaunchesPerSize; ++launch, ++salt) {
+      for (size_t i = 0; i < bytes; ++i) hostSrc[i] = getVisibilityPattern(rank, salt, i);
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), bytes, hipMemcpyHostToDevice));
+      ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, bytes));
+      const GetVisibilityResult resultInit = {kNoGetMismatch, 0, 0};
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dResult, &resultInit, sizeof(resultInit), hipMemcpyHostToDevice));
+
+      // The peer's source must be staged before any rank issues its gets.
+      MPI_Barrier(MPI_COMM_WORLD);
+      getVisibilityKernel<<<nBlocks, kGetVisibilityThreads, 0, stream>>>(
+          srcWin, dstWin, static_cast<const uint8_t*>(dDst), chunkBytes, nChunks, peer, salt, completion,
+          countFlushGfds, dResult, devComm);
+      ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/60));
+
+      GetVisibilityResult result = {};
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&result, dResult, sizeof(result), hipMemcpyDeviceToHost));
+      if (result.mismatchBytes != 0) {
+        uint8_t afterKernel = 0;
+        EXPECT_EQ(hipSuccess, hipMemcpy(&afterKernel, static_cast<uint8_t*>(dDst) + result.mismatchOffset, 1,
+                                        hipMemcpyDeviceToHost));
+        const uint8_t expected = getVisibilityPattern(peer, salt, result.mismatchOffset);
+        ADD_FAILURE() << result.mismatchBytes << " byte(s) not visible after get completion (chunkBytes="
+                      << chunkBytes << ", launch=" << launch << "). Offset " << result.mismatchOffset
+                      << ": expected "
+                      << static_cast<int>(expected) << ", after the kernel it holds "
+                      << static_cast<int>(afterKernel)
+                      << (afterKernel == expected ? " (landed, but was not visible inside the kernel)" : "");
+      }
+      EXPECT_EQ(0ULL, result.badFlushGfdCalls)
+          << result.badFlushGfdCalls << " of " << nChunks + 1
+          << " completion call(s) did not post the expected flush GFD (0 with no get outstanding, 1 after a get;"
+             " chunkBytes="
+          << chunkBytes << ", launch=" << launch << ")";
+      // The peer must not restage its source while this rank's gets are in flight.
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+  }
+}
+
+// 8 B to 4 MiB per get: straddles the Anvil SDMA IPC/SDMA threshold and covers
+// multi-MiB RDMA reads on the proxy backend.
+static const std::vector<size_t> kGetVisibilityChunkSizes = {8, 4 * 1024, 64 * 1024, 1024 * 1024, 4 * 1024 * 1024};
+
+TEST_F(GinMPIDeviceTests, GetFlush_Visibility) {
+  runGetVisibility(GetCompletion::Flush, /*nBlocks=*/1, /*nChunks=*/4, kGetVisibilityChunkSizes);
+}
+
+TEST_F(GinMPIDeviceTests, GetFlushAsyncWait_Visibility) {
+  runGetVisibility(GetCompletion::FlushAsyncWait, /*nBlocks=*/1, /*nChunks=*/4, kGetVisibilityChunkSizes);
+}
+
+// Several CTAs get and flush on the same context at once, so flushes race on
+// the per-peer get-visibility tracking.
+TEST_F(GinMPIDeviceTests, GetFlush_ConcurrentBlocks) {
+  runGetVisibility(GetCompletion::Flush, /*nBlocks=*/8, /*nChunks=*/8, {64 * 1024});
 }
 
 // Collective kernel: every rank runs the same code. The barrier composes
