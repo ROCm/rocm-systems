@@ -5,6 +5,8 @@
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler_hub_future.hpp"
 #include "reader_catalog.hpp"
+#include "track_read_options.hpp"
+#include "track_window.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,18 +23,6 @@
 
 namespace
 {
-
-size_t
-env_size(const char* name, size_t fallback)
-{
-    const char* value = std::getenv(name);
-    if(value == nullptr || value[0] == '\0') return fallback;
-
-    char*      end    = nullptr;
-    const auto parsed = std::strtoull(value, &end, 10);
-    if(end == value || *end != '\0') return fallback;
-    return static_cast<size_t>(parsed);
-}
 
 std::string
 existing_trace_path(std::string_view path)
@@ -53,24 +43,6 @@ to_list_size(size_t size)
         throw std::length_error("result has more elements than the C API can report");
     }
     return static_cast<std::uint32_t>(size);
-}
-
-profiler_hub::reader_types::event_filter_t
-make_window_filter(uint64_t start_ts, uint64_t end_ts)
-{
-    using bound_t = profiler_hub::reader_types::timestamp_ns_t;
-
-    constexpr auto max_bound =
-        static_cast<bound_t>(std::numeric_limits<std::int64_t>::max());
-
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = std::min<bound_t>(start_ts, max_bound);
-        filter.time_window.end =
-            (end_ts != 0) ? std::min<bound_t>(end_ts, max_bound) : max_bound;
-    }
-    return filter;
 }
 
 ph_track_category_t
@@ -99,17 +71,22 @@ size_t
 ph_ctx::default_thread_pool_size()
 {
     const auto hw = std::thread::hardware_concurrency();
-    return std::max<size_t>(1, env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2)));
+    return std::max<size_t>(1,
+                            profiler_hub::parse_size(std::getenv("PH_POOL_THREADS"),
+                                                     std::max<size_t>(1, hw / 2)));
 }
 
 size_t
 ph_ctx::default_connection_count()
 {
-    return std::max<size_t>(1, env_size("PH_CONNECTIONS", 8));
+    return std::max<size_t>(1,
+                            profiler_hub::parse_size(std::getenv("PH_CONNECTIONS"), 8));
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ existing_trace_path(trace_path) }
+, m_read_options{ profiler_hub::track_read_options::from_env(
+      [](const char* name) { return std::getenv(name); }) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
@@ -192,7 +169,7 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                               uint64_t start_ts,
                               uint64_t end_ts)
 {
-    const auto filter = make_window_filter(start_ts, end_ts);
+    const auto filter = profiler_hub::make_window_filter(start_ts, end_ts);
 
     track_events_result_t result;
     result.events = conn.reader().get_events_for_track(track, filter);
@@ -356,10 +333,9 @@ ph_ctx::build_sorted_track_events(
     const profiler_hub::reader_types::track_info_ptr_t& track)
 {
     if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
-       track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
+       track->event_count >= m_read_options.parallel_read_min_events)
     {
-        return build_thread_track_events(
-            conn, track, std::max<size_t>(1, env_size("PH_READ_PARTS", 8)));
+        return build_thread_track_events(conn, track, m_read_options.parallel_read_parts);
     }
 
     const auto events = conn.reader().get_events_for_track(track, {});
@@ -457,7 +433,7 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
                                uint64_t start_ts,
                                uint64_t end_ts)
 {
-    const auto filter = make_window_filter(start_ts, end_ts);
+    const auto filter = profiler_hub::make_window_filter(start_ts, end_ts);
 
     const auto samples = conn.reader().get_counter_events_for_track(track, filter);
 

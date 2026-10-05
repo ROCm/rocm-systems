@@ -4,6 +4,7 @@
 #include "common/thread_pool.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
+#include "track_read_options.hpp"
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -92,8 +93,9 @@ private:
         const profiler_hub::reader_types::track_info_ptr_t& track,
         size_t                                              parts);
 
-    std::string         m_file_path;
-    ph_schema_version_t m_schema_version;
+    std::string                      m_file_path;
+    profiler_hub::track_read_options m_read_options;
+    ph_schema_version_t              m_schema_version;
 
     std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,

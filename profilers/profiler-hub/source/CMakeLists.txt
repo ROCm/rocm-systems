@@ -18,6 +18,9 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_future.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_c_api.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_read_options.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_read_options.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_window.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/natural_merge_sort.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.hpp
