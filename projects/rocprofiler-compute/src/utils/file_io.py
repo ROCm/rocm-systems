@@ -6,7 +6,10 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 import pandas as pd
 import yaml
@@ -347,6 +350,71 @@ def process_pc_sampling_kernel_trace(
     return pd.DataFrame(rows, columns=columns)
 
 
+def _pass_key_from_result_file(result_file: Path) -> str:
+    """Map ``results_pmc_perf_3.csv.gz`` → ``pmc_perf_3``."""
+    name = result_file.name
+    if name.endswith(".gz"):
+        name = name[:-3]
+    if name.endswith(".csv"):
+        name = name[:-4]
+    if name.startswith("results_"):
+        return name[len("results_") :]
+    return name
+
+
+@demarcate
+def load_df_pmc(
+    raw_data_dir: str,
+    verbose: int,
+) -> tuple[pd.DataFrame, "PassLayout"]:
+    """
+    Read all raw pmc counters into one analysis df plus a ``PassLayout``.
+
+    When the same counter appears in multiple passes (SPP duplication), the
+    wide frame keeps a base column (first pass) and per-pass shadow columns.
+    """
+    from utils.metrics.pass_provenance import (
+        PassLayout,
+        build_pass_layout,
+        legacy_pass_merge_enabled,
+        natural_pass_sort_key,
+    )
+
+    result_files = sorted(
+        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}"),
+        key=lambda path: natural_pass_sort_key(_pass_key_from_result_file(path)),
+    )
+    if not result_files:
+        return pd.DataFrame(), PassLayout.empty()
+
+    frames = []
+    for result_file in result_files:
+        frame = _read_counter_results(result_file)
+        frame["Pass_Key"] = _pass_key_from_result_file(result_file)
+        frames.append(frame)
+    long_df = pd.concat(frames, ignore_index=True)
+    layout = build_pass_layout(long_df)
+
+    if legacy_pass_merge_enabled():
+        long_df = long_df.drop(columns=["Pass_Key"])
+        df = utils_analysis.process_rocpd_csv(long_df)
+        layout = PassLayout.empty()
+    else:
+        df = utils_analysis.process_rocpd_csv(long_df, pass_layout=layout)
+
+    utils_analysis.add_unit_counter(df)
+
+    if verbose >= 2:
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+        console_debug(
+            "pass_provenance",
+            f"passes={len(layout.pass_keys)} duplicated={len(layout.duplicated)}",
+        )
+    return df, layout
+
+
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
@@ -358,21 +426,7 @@ def create_df_pmc(
     Counter data is read straight from the rocpd result artifacts. Bad profiling
     output stops the run instead of producing a partial frame.
     """
-    result_files = sorted(
-        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
-    )
-    if not result_files:
-        return pd.DataFrame()
-
-    frames = [_read_counter_results(result_file) for result_file in result_files]
-    df = utils_analysis.process_rocpd_csv(pd.concat(frames, ignore_index=True))
-
-    utils_analysis.add_unit_counter(df)
-
-    if verbose >= 2:
-        frame_info = io.StringIO()
-        df.info(buf=frame_info)
-        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    df, _layout = load_df_pmc(raw_data_dir, verbose)
     return df
 
 
