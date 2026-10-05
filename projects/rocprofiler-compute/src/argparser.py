@@ -5,7 +5,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
@@ -14,20 +14,23 @@ from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 # A --specs-correction pair starts with a spec name and ":"
 SPEC_PAIR_RE = re.compile(r"\s*[A-Za-z_]\w*\s*:")
 
-# Deprecated options by argparse dest: the option and what to use instead
-DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
-    "list_blocks": ("--list-blocks", "--list-metrics"),
-    "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+# Deprecated options and what to do instead. A renamed option keeps its old
+# name as an extra option string until the old name is removed.
+DEPRECATED_OPTIONS: Dict[str, str] = {
+    "--list-blocks": "Use --list-metrics instead.",
+    "--list-available-metrics": "Use --list-metrics instead.",
+    "--retain-rocpd-output": ".db files will be retained automatically.",
 }
 
 
-def warn_deprecated_options(args: argparse.Namespace) -> None:
-    """Warn about each deprecated option the command line uses."""
-    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
-        if getattr(args, dest, None) not in (None, False):
+def warn_deprecated_options(argv: List[str], workload: List[str]) -> None:
+    """Warn about each deprecated option in argv, except in the trailing workload."""
+    for arg in argv[: len(argv) - len(workload)]:
+        option = arg.split("=", 1)[0]
+        if option in DEPRECATED_OPTIONS:
             console_warning(
                 f"{option} is deprecated and will be removed in a future release. "
-                f"Use {replacement} instead."
+                f"{DEPRECATED_OPTIONS[option]}"
             )
 
 
