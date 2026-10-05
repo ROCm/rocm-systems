@@ -11,6 +11,7 @@
 #include "p2p_resiliency_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "multiplane.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -607,6 +608,60 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
   qpAttr.ah_attr.sl = rtrAttr->sl;
   qpAttr.ah_attr.src_path_bits = 0;
   qpAttr.ah_attr.port_num = rtrAttr->localIbPort;
+
+  // Multiplane: program per-plane PUEC routes if configured.
+  // IbCastMultiplaneEnable is set once at init — when false the entire block is skipped
+  // with zero per-QP overhead.  The loopback check (GDR/RMA flush QPs where remote ==
+  // local) is deferred behind the global so non-multiplane paths never pay for the memcmp.
+  if (IbCastMultiplaneEnable &&
+      memcmp(&rtrAttr->remoteGid, &rtrAttr->localGid, sizeof(union ibv_gid)) != 0) {
+    NCCLCHECK(IbCastMultiplaneLoad());
+    union ibv_gid pipGids[MULTIPLANE_MAX_PIPS];
+    int nPips = 0;
+    NCCLCHECK(IbCastMultiplaneGetPipGids(&rtrAttr->remoteGid, pipGids, &nPips));
+    if (nPips > 0) {
+      // Our own PIPs, used as the per-plane source. Leaving the source zero makes
+      // the driver do a source-unconstrained route lookup, which for a peer on this
+      // same host resolves via the kernel local table and yields source ==
+      // destination on both the IP and the MAC, so the frames are undeliverable.
+      union ibv_gid localPipGids[MULTIPLANE_MAX_PIPS];
+      int nLocalPips = 0;
+      NCCLCHECK(IbCastMultiplaneGetPipGids(&rtrAttr->localGid, localPipGids, &nLocalPips));
+      if (nLocalPips == 0) {
+        WARN("Multiplane: local VIP has no PIP mapping — skipping PUEC route programming");
+      } else if (nLocalPips < nPips) {
+        WARN("Multiplane: local VIP maps to %d PIPs but remote maps to %d; programming only %d planes",
+             nLocalPips, nPips, nLocalPips);
+      }
+      // Program only planes where both local and remote PIPs are available.
+      // Never program a route with a zero SGID — it causes source-unconstrained
+      // lookups that break same-host traffic.
+      int nRoutes = std::min(nLocalPips, nPips);
+      // Save the original dgid so we can restore it if route programming fails.
+      union ibv_gid origDgid = qpAttr.ah_attr.grh.dgid;
+      // Replace dgid with loopback (local GID) — NIC firmware handles forwarding
+      if (nRoutes > 0) qpAttr.ah_attr.grh.dgid = rtrAttr->localGid;
+      for (int i = 0; i < nRoutes; i++) {
+        struct ionic_dv_puec_route route = {};
+        route.dgid = pipGids[i];
+        route.sgid = localPipGids[i];
+        route.flow_label = qpAttr.ah_attr.grh.flow_label;
+        route.hop_limit = qpAttr.ah_attr.grh.hop_limit;
+        route.sl = qpAttr.ah_attr.sl;
+        route.traffic_class = qpAttr.ah_attr.grh.traffic_class;
+        route.flags = 0;
+        ncclResult_t puecRet = wrap_ionicdv_qp_set_puec_plane_route(qp->qp, i, &route);
+        if (puecRet != ncclSuccess) {
+          // Restore original dgid so the QP isn't left with a loopback address
+          // and no valid PUEC routes — that would silently loop traffic locally.
+          qpAttr.ah_attr.grh.dgid = origDgid;
+          WARN("Multiplane: PUEC route programming failed for plane %d, restoring non-multiplane path", i);
+          break;
+        }
+      }
+    }
+  }
+
   TRACE(NCCL_NET, "NET/IB: %s: qpn=%u mtu=%d dst=%u ll=%u port=%u sl: %d tc: %d", __func__, qp->qp->qp_num,
         qpAttr.path_mtu, qpAttr.dest_qp_num, rtrAttr->linkLayer, qpAttr.ah_attr.port_num, qpAttr.ah_attr.sl,
         qpAttr.ah_attr.grh.traffic_class);
