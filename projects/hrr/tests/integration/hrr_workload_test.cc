@@ -48,7 +48,9 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -3539,5 +3541,208 @@ TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
   REQUIRE(hung == 0);
   REQUIRE(forked == kHrrForkWhileRecordingForks);
   REQUIRE(failed == 0);
+}
+
+// ---------------------------------------------------------------------------
+// fsync() for this test binary
+//
+// The capture writer calls fsync() at two points the cases below need to stop
+// a thread at: a checkpoint, under the events mutex, and the crash callback's
+// manifest write, while it owns the emergency manifest buffer. CLR resolves
+// fsync() through this executable before libc, so a case that sets
+// g_hrr_fsync_hook can hold the calling thread there. With no hook set this is
+// libc's fsync, and every other case in the binary runs as before.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(int)> g_hrr_fsync_hook{nullptr};
+
+extern "C" int fsync(int fd) {
+  if (auto hook = g_hrr_fsync_hook.load(std::memory_order_acquire)) hook(fd);
+  return static_cast<int>(syscall(SYS_fsync, fd));
+}
+
+// Async-signal-safe, for the hooks: one of them runs in a crash handler.
+static void hrr_sleep_1ms() {
+  struct timespec ts{0, 1000 * 1000};
+  nanosleep(&ts, nullptr);
+}
+
+// Waits up to `seconds` for a forked child, and kills and reaps one still
+// running then. Returns its wait status, or -1 if it hung or was lost.
+static int hrr_wait_child(pid_t pid, int seconds) {
+  int status = 0;
+  pid_t got = 0;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  while ((got = waitpid(pid, &status, WNOHANG)) == 0 &&
+         std::chrono::steady_clock::now() < deadline)
+    hrr_sleep_1ms();
+  if (got == pid) return status;
+  if (got == 0) {
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+  }
+  return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileWriterHoldsLock_Direct
+//
+// Unit_HRR_ForkWhileRecording_Direct without the luck. A second thread records
+// hipGetLastError() in a loop, and the fork is made at the moment another
+// thread could take the events mutex if the writer's own prepare handler let
+// it go before fork(). The handler registered here, before hipSetDevice opens
+// the archive and registers the writer's, runs after the writer's: prepare
+// handlers run in reverse order of registration. It holds the recorder in its
+// next checkpoint fsync(), which the writer calls under the events mutex, and
+// gives up after two seconds. The writer keeps the mutex until fork() returns,
+// so the recorder never gets there and the child, which reopens its archive
+// under the mutex when it records, exits. A child forked with the mutex in the
+// recorder's hands would block on it for ever.
+// Unit_HRR_ForkWhileWriterHoldsLock checks the exit code and both archives.
+// ---------------------------------------------------------------------------
+namespace {
+thread_local bool t_fork_lock_recorder = false;
+std::atomic<int>  g_fork_lock_fsyncs{0};    // checkpoint fsyncs the recorder made
+std::atomic<bool> g_fork_lock_hold{false};  // hold the recorder in its next one
+std::atomic<bool> g_fork_lock_held{false};  // the recorder is held, mutex locked
+bool              g_fork_lock_held_at_fork = false;
+
+void fork_lock_fsync_hook(int) {
+  if (!t_fork_lock_recorder) return;
+  g_fork_lock_fsyncs.fetch_add(1);
+  if (!g_fork_lock_hold.load()) return;
+  g_fork_lock_held = true;
+  // Bounded, in case the parent handler never runs.
+  for (int ms = 0; ms < 10000 && g_fork_lock_hold.load(); ++ms) hrr_sleep_1ms();
+  g_fork_lock_held = false;
+}
+
+void fork_lock_prepare() {
+  g_fork_lock_hold = true;
+  for (int ms = 0; ms < 2000 && !g_fork_lock_held.load(); ++ms) hrr_sleep_1ms();
+  g_fork_lock_held_at_fork = g_fork_lock_held.load();
+}
+
+void fork_lock_parent() { g_fork_lock_hold = false; }
+
+void fork_lock_child() {
+  g_fork_lock_hold = false;
+  g_hrr_fsync_hook = nullptr;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkWhileWriterHoldsLock_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the writer's handlers.
+  REQUIRE(pthread_atfork(fork_lock_prepare, fork_lock_parent, fork_lock_child) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  g_hrr_fsync_hook = fork_lock_fsync_hook;
+
+  // Nothing below may REQUIRE before the join.
+  std::atomic<bool> stop{false};
+  std::thread recorder([&] {
+    t_fork_lock_recorder = true;
+    while (!stop.load(std::memory_order_relaxed)) (void)hipGetLastError();
+  });
+
+  // The recorder reaches a checkpoint every 4096 records. Seeing one proves
+  // fsync() is interposed, without which the case could not fail.
+  for (int ms = 0; ms < 10000 && g_fork_lock_fsyncs.load() == 0; ++ms) hrr_sleep_1ms();
+  const bool interposed = g_fork_lock_fsyncs.load() > 0;
+
+  int status = -1;
+  if (interposed) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      (void)hipGetLastError();
+      _exit(0);
+    }
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+
+  stop = true;
+  recorder.join();
+  g_hrr_fsync_hook = nullptr;
+
+  INFO("checkpoint fsyncs " << g_fork_lock_fsyncs.load() << ", child wait status "
+                            << status);
+  REQUIRE(interposed);
+  // Set if the recorder took the events mutex after the writer's prepare handler.
+  REQUIRE_FALSE(g_fork_lock_held_at_fork);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_CaptureCrashDuringFork_Direct
+//
+// Forks while the crash callback writes the emergency manifest. The main thread
+// raises SIGSEGV, and the fsync hook holds CLR's crash callback in the fsync()
+// of its manifest.json, while the callback owns the emergency manifest buffer.
+// A second thread forks there. The child records a call, which opens its own
+// archive, and raises SIGABRT: CLR installs its handlers with SA_RESETHAND, so
+// SIGSEGV has none left by then. A child that inherited the buffer marked busy
+// by a thread it does not have would skip its own manifest. The parent's
+// callback is released once the child has gone, and the parent dies of its
+// SIGSEGV. Unit_HRR_CaptureCrashDuringFork checks both manifests.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_crash_fork_in_manifest{false};
+std::atomic<bool> g_crash_fork_release{false};
+
+// Whether fd is open on a manifest.json. Async-signal-safe.
+bool hrr_fd_is_manifest(int fd) {
+  char link[32] = "/proc/self/fd/";
+  size_t n = strlen(link);
+  char digits[12];
+  size_t k = 0;
+  do {
+    digits[k++] = static_cast<char>('0' + fd % 10);
+    fd /= 10;
+  } while (fd > 0);
+  while (k > 0) link[n++] = digits[--k];
+  link[n] = '\0';
+  char target[4096];
+  const ssize_t len = readlink(link, target, sizeof(target));
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr ssize_t kSuffixLen = sizeof(kSuffix) - 1;
+  return len >= kSuffixLen && memcmp(target + len - kSuffixLen, kSuffix, kSuffixLen) == 0;
+}
+
+void crash_fork_fsync_hook(int fd) {
+  if (!hrr_fd_is_manifest(fd)) return;
+  g_crash_fork_in_manifest = true;
+  for (int ms = 0; ms < 60000 && !g_crash_fork_release.load(); ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CaptureCrashDuringFork_Direct", "[.][hrr-direct]") {
+  // The crashes are the point; core files are not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  HRR_HIP_CHECK(hipMemset(d, 0, SZ));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  g_hrr_fsync_hook = crash_fork_fsync_hook;
+  std::thread([] {
+    for (int ms = 0; ms < 30000 && !g_crash_fork_in_manifest.load(); ++ms) hrr_sleep_1ms();
+    if (g_crash_fork_in_manifest.load()) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        g_hrr_fsync_hook = nullptr;
+        (void)hipGetLastError();
+        raise(SIGABRT);
+        _exit(1);
+      }
+      if (pid > 0) (void)hrr_wait_child(pid, 30);
+    }
+    g_crash_fork_release = true;
+  }).detach();
+
+  raise(SIGSEGV);
+  FAIL("the process outlived its own SIGSEGV");
 }
 #endif  // !_WIN32

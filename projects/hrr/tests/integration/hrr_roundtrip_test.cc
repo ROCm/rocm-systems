@@ -1540,4 +1540,60 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
   CHECK(hrr_process_archives(cap.path).size() ==
         static_cast<size_t>(kHrrForkWhileRecordingArchives));
 }
+
+/**
+ * Unit_HRR_ForkWhileWriterHoldsLock
+ * ---------------------------------
+ *   - fork() keeps the capture writer's events mutex locked until it returns,
+ *     so no other thread can take it in between and leave the child a mutex
+ *     that only a missing thread could unlock. The workload forks at that
+ *     moment every time, and fails if a child does not exit within its
+ *     deadline.
+ *   - The child, which records once, has its own archive beside the parent's.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_writer_holds_lock"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileWriterHoldsLock_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 2);
+}
+
+/**
+ * Unit_HRR_CaptureCrashDuringFork
+ * -------------------------------
+ *   - A child forked while its parent's crash callback writes the manifest
+ *     writes its own manifest when it crashes in turn: it does not inherit the
+ *     emergency manifest buffer marked busy. Both processes leave a manifest
+ *     marked "complete": false.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_during_fork"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashDuringFork_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 128 + SIGSEGV);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    CHECK(manifest.find("\"complete\": false") != std::string::npos);
+  }
+}
 #endif  // !_WIN32
