@@ -14,7 +14,6 @@ leak:bash
 
 # Suppress leaks from external tools and libraries
 leak:liblzma
-leak:liblsan
 leak:seq
 leak:__GI___strdup
 
