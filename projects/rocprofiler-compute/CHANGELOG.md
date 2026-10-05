@@ -41,6 +41,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
 
+* Removed the hidden profile option `--target`, which had no effect.
+
 ### Optimized
 
 ### Resolved issues
