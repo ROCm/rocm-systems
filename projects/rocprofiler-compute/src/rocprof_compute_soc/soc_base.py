@@ -41,6 +41,7 @@ from utils.utils_common import (
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
+    pmc_slot_cost,
 )
 from vendored import yaml
 
@@ -362,6 +363,14 @@ class OmniSoC_Base:
         policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
+    def parse_counters(self, config_text: str) -> set[str]:
+        """Hardware PMC names in YAML metric config text."""
+        counters, _variables = extract_counters_and_variables(
+            config_text,
+            self._mspec.gpu_series,
+        )
+        return counters
+
     def _metric_aware_coalesce_pass(
         self,
         work_set: set[str],
@@ -543,34 +552,48 @@ class OmniSoC_Base:
         return filter_blocks
 
     def _allocate_perfmon_counter_files(
-        self, counters: set[str]
+        self,
+        counters: set[str],
     ) -> tuple[list[CounterFile], int, int]:
         """Bin-pack counters into perfmon buckets.
 
         Returns (output_files, file_count, accu_file_count).
 
-        Accumulator counters (ending with _ACCUM) get dedicated files first.
-        If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
-        a metric-aware greedy pass runs before the final per-counter first-fit.
+        Named ``*_ACCUM`` counters from rocprofiler-sdk
+        (``accumulate(BASE, HIGH_RES)`` in ``sdk_config.yaml``) cost two block
+        slots alone (BASE + HIGH_RES). If BASE is already in the same bucket,
+        only +1 is charged; adding BASE after its ``*_ACCUM`` charges 0. Legacy
+        ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated accum buckets are not used.
+
+        **Default:** single-pass-packable — every metric whose PMC set fits one
+        ``CounterFile`` gets a full-bucket collection (counters may be duplicated
+        across passes), then ``SLOT_LIMIT`` PMCs are filled into existing buckets.
+
+        **Legacy heuristic** (priority coalesce → first-fit):
+        set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1``.
         """
         output_files: list[CounterFile] = []
+        # Kept for call-site compatibility; dedicated accum files are gone.
         accu_file_count = 0
-        work = sorted(list(counters))
-        for counter in work.copy():
-            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
-                work.remove(counter)
-                output_files.append(CounterFile(counter, self.__perfmon_config))
-                output_files[-1].add(counter)
-                # Paired level-event slot: hardware programs the level counter
-                # alongside its accumulator, so hold one extra slot in the
-                # same block.
-                output_files[-1].reserve(counter, 1)
-                accu_file_count += 1
-
+        work_set = set(counters)
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        work_set = set(work)
+        from rocprof_compute_soc.counter_grouping_single_pass import (
+            try_allocate_single_pass_packable,
+        )
+
+        single_pass = try_allocate_single_pass_packable(
+            self,
+            work_set,
+            self.__perfmon_config,
+            file_count_start=file_count,
+        )
+        if single_pass is not None:
+            output_files, file_count, _stats = single_pass
+            return output_files, file_count, accu_file_count
+
+        # Legacy path: priority coalesce → first-fit.
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(
                 work_set, output_files, file_count
@@ -848,15 +871,20 @@ class LimitedSet:
         self.avail: int = maxsize
         self.elements: list[str] = []
 
-    def add(self, element: str) -> bool:
+    def add(self, element: str, cost: int = 1) -> bool:
         if element in self.elements:
             return True
         # Store all channels for a TCC channel counter in the same file
         if element.split("[")[0] in {elem.split("[")[0] for elem in self.elements}:
             self.elements.append(element)
             return True
-        if self.avail > 0:
-            self.avail -= 1
+        if cost < 0:
+            cost = 0
+        if cost == 0:
+            self.elements.append(element)
+            return True
+        if self.avail >= cost:
+            self.avail -= cost
             self.elements.append(element)
             return True
         return False
@@ -878,7 +906,9 @@ class CounterFile:
         }
 
     def add(self, counter: str) -> bool:
-        return self.blocks[counter_to_block(counter)].add(counter)
+        block = counter_to_block(counter)
+        cost = pmc_slot_cost(counter, present=self.blocks[block].elements)
+        return self.blocks[block].add(counter, cost=cost)
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)
