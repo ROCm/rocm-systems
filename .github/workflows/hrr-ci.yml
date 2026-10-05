@@ -440,6 +440,61 @@ jobs:
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
 
+      # DIAGNOSTIC, not for merge: where do the 5.4 s per GPU process go on
+      # gfx90a? Times one workload plain, under capture and under replay,
+      # and prints the largest gaps in its CLR log.
+      - name: Time one workload process (gfx90a diagnostic)
+        if: matrix.family == 'gfx90a'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          uname -r; nproc; grep -m1 'model name' /proc/cpuinfo || true
+          cat /proc/cmdline || true
+          env | grep -E '^(HSA|ROC|HIP|GPU|AMD|HSAKMT|PROLENSE|LD_PRELOAD)' | sort || true
+          for p in noretry sched_policy cwsr_enable hws_max_conc_proc lockup_timeout mcbp; do
+            echo "amdgpu.$p=$(cat /sys/module/amdgpu/parameters/$p 2>&1)"
+          done
+          ls -l /dev/dri || true
+          timeout 300 python3 - <<'PY'
+          import os, re, subprocess, tempfile, time
+          exe = "./build/hrr/tests/integration/hrr-integration-tests"
+          case = "Unit_HRR_GpuWorkload_Direct"
+          def run(label, cmd, **extra):
+              env = dict(os.environ, **extra)
+              t0 = time.monotonic()
+              p = subprocess.run(cmd, env=env, capture_output=True, text=True)
+              print(f"{time.monotonic() - t0:7.3f} s rc={p.returncode} {label}", flush=True)
+              return p
+          run("python + nothing", ["true"])
+          run("plain 1", [exe, case])
+          run("plain 2", [exe, case])
+          run("plain, HIP_ENABLE_DEFERRED_LOADING=0", [exe, case], HIP_ENABLE_DEFERRED_LOADING="0")
+          run("cpu-only case", [exe, "Unit_HRR_Regions_StreamFraming"])
+          cap = tempfile.mkdtemp()
+          run("capture", [exe, case], HIP_HRR_CAPTURE_OUTPUT=cap)
+          run("playback", ["./build/hrr/playback/hrr-playback", cap])
+          run("playback --info", ["./build/hrr/playback/hrr-playback", cap, "--info"])
+          t0 = time.monotonic()
+          p = run("plain, AMD_LOG_LEVEL=4", [exe, case], AMD_LOG_LEVEL="4")
+          wall = time.monotonic() - t0
+          stamps = []
+          for line in (p.stdout + p.stderr).splitlines():
+              m = re.search(r"\s(\d+) us:", line)
+              if m:
+                  stamps.append((int(m.group(1)), line.strip()[:200]))
+          if stamps:
+              span = (stamps[-1][0] - stamps[0][0]) / 1e6
+              print(f"CLR log: {len(stamps)} lines spanning {span:.3f} s of {wall:.3f} s wall")
+              gaps = sorted(((b[0] - a[0], a[1], b[1]) for a, b in zip(stamps, stamps[1:])), reverse=True)
+              for gap, before, after in gaps[:8]:
+                  print(f"--- gap {gap / 1e6:.3f} s\n  before: {before}\n  after:  {after}")
+              print("first:", stamps[0][1]); print("last: ", stamps[-1][1])
+          else:
+              print("no timestamped CLR log lines; tail of output:")
+              print((p.stdout + p.stderr)[-3000:])
+          PY
+
       # The binaries carry no RUNPATH, so the capture build is selected here.
       - name: Run integration suite
         run: |
