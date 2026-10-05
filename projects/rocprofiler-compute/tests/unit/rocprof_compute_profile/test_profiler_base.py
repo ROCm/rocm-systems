@@ -766,6 +766,15 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
         instance.handle_analyze_args()
 
 
+def test_sanitize_pc_sampling_rejects_set(caplog):
+    """--set would replace the PC sampling block, so the pair is rejected."""
+    args = _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[])
+    args.set_selected = "launch_stats"
+    with pytest.raises(SystemExit):
+        _make_profiler_with_args(args).sanitize()
+    assert "--pc-sampling cannot be used with --set." in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
