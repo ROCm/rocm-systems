@@ -10,84 +10,6 @@ from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
-class ExperimentalAction(argparse.Action):
-    """
-    Custom action that enforces experimental feature gating.
-    - Suppresses help text when experimental mode is disabled
-    - Errors if feature used without --experimental flag
-    - Warns when experimental feature is used
-    - Delegates to inner action for proper value storage
-    """
-
-    def __init__(
-        self,
-        option_strings: list[str],
-        help: str,
-        **kwargs,
-    ) -> None:
-        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
-        self.feature_label = kwargs.pop("feature_label", None)
-
-        # Extract the base_action
-        base_action = kwargs.pop("base_action", None)
-        if base_action is None:
-            raise ValueError(
-                "base_action is required for ExperimentalAction. "
-                "Specify one of: store, store_const, store_true, store_false, "
-                "append, append_const, count, extend"
-            )
-
-        if self.experimental_enabled:
-            leading_whitespace = help[: len(help) - len(help.lstrip())]
-            help_content = help.lstrip()
-            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
-        else:
-            help = argparse.SUPPRESS
-
-        super().__init__(
-            option_strings=option_strings,
-            help=help,
-            **kwargs,
-        )
-
-        # Map of action types to their __call__ methods
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-
-        self._base_action_call = action_map[base_action]
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values,  # noqa ANN001
-        option_string: Optional[str] = None,
-    ) -> None:
-        # Error if experimental feature used without --experimental flag
-        if not self.experimental_enabled:
-            parser.error(
-                f"{self.feature_label} is an experimental feature. "
-                f"Use --experimental to enable it."
-            )
-
-        console_warning(
-            f"{self.feature_label} is experimental and may change in future releases."
-        )
-
-        self._base_action_call(self, parser, namespace, values, option_string)
-
-
 def validate_block(value: str) -> str:
     if METRIC_ID_RE.match(value):
         return value
@@ -1048,3 +970,81 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
         if readme.is_file():
             return f"Agent Skills: see {readme} to install them."
     return None
+
+
+class ExperimentalAction(argparse.Action):
+    """
+    Custom action that enforces experimental feature gating.
+    - Suppresses help text when experimental mode is disabled
+    - Errors if feature used without --experimental flag
+    - Warns when experimental feature is used
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: list[str],
+        help: str,
+        **kwargs,
+    ) -> None:
+        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
+        self.feature_label = kwargs.pop("feature_label", None)
+
+        # Extract the base_action
+        base_action = kwargs.pop("base_action", None)
+        if base_action is None:
+            raise ValueError(
+                "base_action is required for ExperimentalAction. "
+                "Specify one of: store, store_const, store_true, store_false, "
+                "append, append_const, count, extend"
+            )
+
+        if self.experimental_enabled:
+            leading_whitespace = help[: len(help) - len(help.lstrip())]
+            help_content = help.lstrip()
+            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
+        else:
+            help = argparse.SUPPRESS
+
+        super().__init__(
+            option_strings=option_strings,
+            help=help,
+            **kwargs,
+        )
+
+        # Map of action types to their __call__ methods
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+
+        self._base_action_call = action_map[base_action]
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values,  # noqa ANN001
+        option_string: Optional[str] = None,
+    ) -> None:
+        # Error if experimental feature used without --experimental flag
+        if not self.experimental_enabled:
+            parser.error(
+                f"{self.feature_label} is an experimental feature. "
+                f"Use --experimental to enable it."
+            )
+
+        console_warning(
+            f"{self.feature_label} is experimental and may change in future releases."
+        )
+
+        self._base_action_call(self, parser, namespace, values, option_string)
