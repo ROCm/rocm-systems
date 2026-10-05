@@ -2729,7 +2729,7 @@ typedef struct {
  */
 typedef enum {
   AMDSMI_NPM_BALANCING_MODE_INVALID = 0,  //!< Invalid/unavailable (e.g. unreadable sysfs value)
-  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,  //!< Power Balancing (PB), the default mode
+  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,      //!< Power Balancing (PB), the default mode
   AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,  //!< Frequency Balancing (FB)
   AMDSMI_NPM_BALANCING_MODE_MAX = 3  //!< Not a valid mode; bounds the defined enum range
 } amdsmi_npm_balancing_mode_t;
