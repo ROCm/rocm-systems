@@ -9,4 +9,4 @@
 --extra-index-url https://pypi.org/simple
 
 mlir_aie==1.4.2
-llvm-aie
+llvm-aie==22.0.0.2026100501
