@@ -94,21 +94,13 @@ auto s_intercept_installed = std::atomic<bool>{false};  // installed (may not be
 auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 // Forces bypass during 0→1 / 1→0 consumer transitions so doorbells cannot race
-// shadow resync (ROCM-29631).
+// shadow resync while hardware write indices may still advance.
 auto s_consumer_transition_in_progress = std::atomic<bool>{false};
 // Threads that observed should_bypass_inline_intercept()==true and are still
 // inside the next-table write-index / doorbell call. Transition code waits for
-// this to hit zero so a TOCTOU bypass cannot advance HW after shadow resync
-// (ROCM-29631: post-unlock hw_wdid ahead of virtual_wptr → GPU-busy hang).
+// this to hit zero so a TOCTOU bypass cannot leave hw_wdid ahead of
+// virtual_wptr after unlock (seen as GPU-busy hangs with stalled tracers).
 auto s_bypass_inflight = std::atomic<uint32_t>{0};
-
-bool
-queue_interposition_debug_enabled()
-{
-    static const bool enabled =
-        common::get_env("ROCPROFILER_QUEUE_INTERPOSITION_DEBUG", false);
-    return enabled;
-}
 
 struct bypass_inflight_guard
 {
@@ -1678,7 +1670,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         const uint64_t hw_wdid =
             state_ptr->real_wdid ? __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE) : 0;
         ROCP_WARNING << fmt::format(
-            "[ROCM-29631] ring_underflow queue={} ring_used={} ring_size={} hw_rdid={} "
+            "ring_underflow queue={} ring_used={} ring_size={} hw_rdid={} "
             "hw_wdid={} virtual_wptr={} scan_pos={} scan_end={} submit_pos={} consumers={} "
             "transition={}",
             fmt::ptr(state_ptr->hsa_queue),
@@ -1936,7 +1928,7 @@ supports_queue_interposition()
 namespace
 {
 // Serializes the 0→1 / last 1→0 transitions so resync and drains complete before
-// intercept re-engages or bypass returns (ROCM-29631).
+// intercept re-engages or bypass returns under rapid profiler start/stop.
 std::mutex s_consumer_transition_mutex;
 
 void
@@ -1974,43 +1966,6 @@ resync_all_queue_shadow_states()
             resync_queue_shadow_state(entry.second.get());
     });
 }
-
-void
-log_stale_shadow_queues(const char* tag)
-{
-    if(!queue_interposition_debug_enabled()) return;
-
-    get_queue_registry().rlock([&tag](const auto& registry) {
-        for(const auto& entry : registry)
-        {
-            auto* state = entry.second.get();
-            if(!state || !state->real_wdid) continue;
-
-            const uint64_t hw_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_RELAXED);
-            const uint64_t hw_rdid =
-                state->real_rdid ? __atomic_load_n(state->real_rdid, __ATOMIC_RELAXED) : 0;
-            const uint64_t virtual_wptr =
-                state->virtual_wptr.load(std::memory_order_relaxed);
-
-            if(hw_wdid == virtual_wptr && hw_wdid == state->next_submit_pos &&
-               hw_wdid == state->next_scan_pos)
-                continue;
-
-            ROCP_WARNING << fmt::format(
-                "[ROCM-29631] {} stale_shadow queue={} hw_wdid={} hw_rdid={} virtual_wptr={} "
-                "scan_pos={} submit_pos={} consumers={} transition={}",
-                tag,
-                fmt::ptr(state->hsa_queue),
-                hw_wdid,
-                hw_rdid,
-                virtual_wptr,
-                state->next_scan_pos,
-                state->next_submit_pos,
-                s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                s_consumer_transition_in_progress.load(std::memory_order_acquire));
-        }
-    });
-}
 }  // namespace
 
 void
@@ -2021,26 +1976,19 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
     const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
 
     // Resync while the consumer count is still zero (bypass active), then
-    // increment.  Increment-before-resync closes the old bypass window but
+    // increment. Increment-before-resync closes the old bypass window but
     // enables intercept on stale shadow state; resync-then-increment without
-    // a lock recreates the bypass window (ROCM-29631).
+    // a lock recreates the bypass window (ring underflow / stalled waiters).
     if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
     {
         auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
         if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
         {
-            if(queue_interposition_debug_enabled())
-            {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] 0->1 begin ctx={} queues transitioning",
-                    fmt::ptr(ctx));
-                log_stale_shadow_queues("before 0->1 drain");
-            }
-
             // Force bypass across drain + the first two resyncs so intercept
             // doorbells cannot interleave with shadow updates. Unlock before the
             // third resync so any bypass doorbell that slipped between the
-            // pre-unlock resync and unlock is still absorbed (ROCM-29631).
+            // pre-unlock resync and unlock is still absorbed (otherwise hw_wdid
+            // can stay ahead of virtual_wptr and hang the next tracer session).
             s_consumer_transition_in_progress.store(true, std::memory_order_release);
             drain_intercept_work(true);
             resync_all_queue_shadow_states();
@@ -2048,8 +1996,6 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             // Second resync while transition_in_progress still forces bypass.
             wait_for_bypass_quiesce();
             resync_all_queue_shadow_states();
-            if(queue_interposition_debug_enabled())
-                log_stale_shadow_queues("after 0->1 pre-unlock resync");
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
             // Threads that sampled bypass while transition was true may still be
             // inside next-table write-index/doorbell. Wait them out, then absorb.
@@ -2058,16 +2004,6 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             fence_all_queue_gates();
             wait_for_bypass_quiesce();
             resync_all_queue_shadow_states();
-
-            if(queue_interposition_debug_enabled())
-            {
-                log_stale_shadow_queues("after 0->1 post-unlock resync+fence");
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] 0->1 end ctx={} consumers={} bypass_inflight={}",
-                    fmt::ptr(ctx),
-                    s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                    s_bypass_inflight.load(std::memory_order_acquire));
-            }
             return;
         }
     }
@@ -2084,7 +2020,7 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
     {
         // Last consumer: fence doorbell workers, drop the count so new dispatches
         // bypass, then drain the completion monitor so in-flight kernels still
-        // emit records before bypass fully re-engages (ROCM-29631).
+        // emit records before bypass fully re-engages (avoids empty PGLE traces).
         if(cur == 1 && s_intercept_installed.load(std::memory_order_acquire))
         {
             auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
@@ -2092,12 +2028,6 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
             if(cur == 0) return;
             if(cur == 1)
             {
-                if(queue_interposition_debug_enabled())
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[ROCM-29631] 1->0 begin ctx={}", fmt::ptr(ctx));
-                    log_stale_shadow_queues("before 1->0 drain");
-                }
                 s_consumer_transition_in_progress.store(true, std::memory_order_release);
                 drain_intercept_work(false);
                 if(s_active_queue_interposition_consumers.compare_exchange_weak(
@@ -2106,11 +2036,9 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
                     // Drop the transition flag before the unbounded completion-monitor
                     // drain. Consumers is already 0 so new doorbells stay in bypass;
                     // holding transition across the drain previously coincided with
-                    // self-deadlock when Stop raced the record emitter (ROCM-29631).
+                    // self-deadlock when Stop raced the record emitter.
                     s_consumer_transition_in_progress.store(false, std::memory_order_release);
                     interposition_sync();
-                    if(queue_interposition_debug_enabled())
-                        log_stale_shadow_queues("after 1->0 drain");
                     return;
                 }
                 s_consumer_transition_in_progress.store(false, std::memory_order_release);
