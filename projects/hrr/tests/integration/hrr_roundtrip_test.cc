@@ -1602,7 +1602,7 @@ HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_after_capture_shutdown"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkAfterCaptureShutdown_Direct\"", 120);
