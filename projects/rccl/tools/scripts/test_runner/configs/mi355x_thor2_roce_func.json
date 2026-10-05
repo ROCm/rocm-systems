@@ -837,6 +837,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -2184,6 +2189,36 @@
         }
       ]
     },
+    "gin_signal_reset": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_SignalReset",
+          "description": "GIN proxy resetSignal/resetCounter semantics: reset snapshots the signal cell into an offset instead of zeroing it; read, wait, shadow and 32-bit wrap are relative to that offset",
+          "test_filter": "GinMPIDeviceTests.SignalReset_*:GinMPIDeviceTests.CounterReset_*-GinMPIDeviceTests.*_MultiContext"
+        },
+        {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -2928,6 +2963,39 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "gin_device_get_flush": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_GetFlush_Visibility",
+          "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)",
+          "test_filter": "GinMPIDeviceTests.GetFlush_Visibility"
+        },
+        {
+          "name": "GIN_GetFlushAsyncWait_Visibility",
+          "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel",
+          "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility"
+        },
+        {
+          "name": "GIN_GetFlush_ConcurrentBlocks",
+          "description": "8 CTAs get + flush concurrently on one GIN context",
+          "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -3334,6 +3402,12 @@
       "enabled": true
     },
     {
+      "name": "GIN Signal Reset - Proxy",
+      "description": "GIN proxy reset-without-zeroing for signals and counters over IB across two nodes",
+      "config": "gin_signal_reset",
+      "enabled": true
+    },
+    {
       "name": "UBR Tests - Multi Node",
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
@@ -3433,6 +3507,12 @@
       "name": "IR Device Tests",
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Get/Flush Visibility",
+      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility over RoCE across two nodes",
+      "config": "gin_device_get_flush",
       "enabled": true
     }
   ]
