@@ -96,6 +96,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         context.flush_caches();
         if (submission.complete)
           submission.complete(true);
+        // Completion can release an earlier queue in this same service pass.
+        context.wake();
         state.submissions.pop_front();
         queue.command_access.reset();
         if (!state.submissions.empty())
@@ -719,6 +721,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return;
     }
     if (!state.submissions.empty()) {
+      // Yielding the packet budget is runnable work, not an external wait.
+      context.wake();
       context.retry();
     }
   } catch (const std::exception &error) {
