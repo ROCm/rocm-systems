@@ -162,14 +162,27 @@ Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py -
 
 ## 5. Evaluation / Verification Plan
 
-| Layer | Check |
-|-------|--------|
-| Offline packing | `eval_single_pass_packable.py` / inspector: `packable_multi == 0`, pass count, SPU residual fill +0 |
-| SPP analyze (same-pass bind) | Unit tests (`test_pass_provenance`, DB bind tests); health report P0 ratios ≤ 100% where expected |
-| SPU collectables | WA / `COLLECT_RATIO` unit tests; gfx942 `slot_limit_metrics == 0` after Phase 2 |
-| Health report | SPP vs legacy health runners + `generate_metric_health_report.py` on gfx942 (and other arches as needed) |
-| Hardware spot-check | gfx942 CPX/SPX: P0 HBM / WGM / CPC ratios sane (avg/max ≤ 100% where expected) |
-| Regression workload | MI-PATH `ns3d*` (AIPROFCOMP-265 class): SPP (packing + bind) vs legacy packing / legacy pass merge |
-| Multi-arch | Re-baseline gfx908, gfx90a, gfx950, gfx115x, gfx1250 offline after Phase 1 |
+1. **CTest / unit tests** — Existing CTest suite still passes, plus new unit tests for each component:
+   - Phase 1: packing (`test_counter_grouping_single_pass`, buckets, `soc_base` packing path) and same-pass bind (`test_pass_provenance`, DB bind).
+   - Phase 2: collectables / `WEIGHTED_AVG` / `COLLECT_RATIO` (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`).
+
+2. **Manual offline grouping checks** — Inspector + `eval_single_pass_packable.py`:
+   - `packable_multi == 0`, pass count ≈ **14**, SPU residual fill **+0** on gfx942.
+   - After Phase 2: `slot_limit_metrics == 0`.
+
+3. **End-to-end / multi-arch regression (3 workloads)** — Health runners + report for both Phase 1 and Phase 2 stacks (e.g. vcopy, mini-nbody, mega_kernel). Cover gfx908 / gfx90a / gfx942 / gfx950 / gfx115x / gfx1250 as available. **CPX mode only on MI300 (gfx942).**
+
+4. **Blocking-ticket validation** — Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
+
+   | Ticket | Symptom |
+   |--------|---------|
+   | [AIPROFCOMP-265](https://ontrack-internal.amd.com/browse/AIPROFCOMP-265) | Incorrect CPC metrics |
+   | [AIPROFCOMP-90](https://ontrack-internal.amd.com/browse/AIPROFCOMP-90) | L1 bandwidth > 100% |
+   | [AIPROFCOMP-268](https://ontrack-internal.amd.com/browse/AIPROFCOMP-268) | Incorrect cache metrics |
+   | [AIPROFCOMP-267](https://ontrack-internal.amd.com/browse/AIPROFCOMP-267) | Incorrect TA/TD metrics |
+   | [AIPROFCOMP-266](https://ontrack-internal.amd.com/browse/AIPROFCOMP-266) | Incorrect Workgroup Manager utilization |
+   | [ROCM-31864](https://ontrack-internal.amd.com/browse/ROCM-31864) | gfx950 L2-Fabric HBM / remote read traffic incorrect (incl. >100%) |
+
+5. **SPU collectables (Phase 2 only)** — gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
 
 **Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2 (SPU collectables / `WEIGHTED_AVG` / `COLLECT_*` only).
