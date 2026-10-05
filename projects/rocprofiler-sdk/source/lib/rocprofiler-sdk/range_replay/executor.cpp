@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/range_replay/retained_kernarg.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa.h>
@@ -44,6 +45,8 @@
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -87,7 +90,8 @@ tracked_pointers(hsa_agent_t agent)
 }
 
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
-// with each kernel's alignment honored.
+// with each kernel's alignment honored. The block is retained for the agent's next range when this
+// one finishes (see retained_kernarg.hpp).
 class kernarg_staging
 {
 public:
@@ -99,30 +103,51 @@ public:
     kernarg_staging(kernarg_staging&&)                 = delete;
     kernarg_staging& operator=(kernarg_staging&&) = delete;
 
-    // Reserve space for `dispatches` and record each one's offset. Returns false if the kernarg
-    // pool allocation fails.
-    bool reserve(const hsa::Queue& queue, const std::vector<recorded_dispatch_t>& dispatches)
+    // Reserve space for `dispatches` and record each one's offset, reusing the block retained from
+    // an earlier range on this agent when it fits. Returns false if the kernarg pool allocation
+    // fails.
+    bool reserve(const hsa::Queue&                       queue,
+                 rocprofiler_agent_id_t                  agent_id,
+                 const std::vector<recorded_dispatch_t>& dispatches)
     {
         auto placement = plan_kernarg_layout(dispatches);
         m_offsets      = std::move(placement.offsets);
+        m_agent_id     = agent_id;
 
         const auto total = placement.total;
         if(total == 0) return true;
+
+        m_block = take_retained_kernarg_block(agent_id);
+        if(kernarg_block_fits(m_block.capacity, total))
+        {
+            m_reused = true;
+            return true;
+        }
+        free_kernarg_block(m_block);
 
         const auto& ext  = queue.ext_api();
         const auto  pool = queue.get_agent().kernarg_pool();
         if(pool.handle == 0 || ext.hsa_amd_memory_pool_allocate_fn == nullptr) return false;
 
-        if(ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &m_base) != HSA_STATUS_SUCCESS ||
-           m_base == nullptr)
+        void* base = nullptr;
+        if(ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &base) != HSA_STATUS_SUCCESS ||
+           base == nullptr)
             return false;
 
-        m_free_fn  = ext.hsa_amd_memory_pool_free_fn;
+        m_block    = kernarg_block_t{base, total, ext.hsa_amd_memory_pool_free_fn};
         auto agent = queue.get_agent().get_hsa_agent();
         if(ext.hsa_amd_agents_allow_access_fn != nullptr)
-            ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, m_base);
+            ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, base);
 
         return true;
+    }
+
+    size_t capacity() const { return m_block.capacity; }
+
+    std::string_view origin() const
+    {
+        if(m_block.base == nullptr) return "none";
+        return m_reused ? "reused" : "allocated";
     }
 
     // Copy the recorded argument bytes into the block and point each packet at its slot. Done once
@@ -138,23 +163,44 @@ public:
                 continue;
             }
 
-            auto* slot = static_cast<uint8_t*>(m_base) + m_offsets[i];
+            auto* slot = static_cast<uint8_t*>(m_block.base) + m_offsets[i];
             std::memcpy(slot, dispatches[i].kernarg.data(), dispatches[i].kernarg.size());
             packets[i].kernel_dispatch.kernarg_address = slot;
         }
     }
 
+    // Must not run while a pass submitted from this block can still be executing: the next range
+    // on the agent refills it.
     void reset()
     {
-        if(m_base != nullptr && m_free_fn != nullptr) m_free_fn(m_base);
-        m_base = nullptr;
+        if(m_block.base != nullptr)
+            retain_kernarg_block(m_agent_id, std::exchange(m_block, kernarg_block_t{}));
+        m_reused = false;
     }
 
 private:
-    void* m_base                     = nullptr;
-    hsa_status_t (*m_free_fn)(void*) = nullptr;
-    std::vector<size_t> m_offsets    = {};
+    kernarg_block_t        m_block    = {};
+    rocprofiler_agent_id_t m_agent_id = {.handle = 0};
+    bool                   m_reused   = false;
+    std::vector<size_t>    m_offsets  = {};
 };
+
+using phase_clock = std::chrono::steady_clock;
+
+double
+elapsed_ms(phase_clock::duration elapsed)
+{
+    return std::chrono::duration<double, std::milli>{elapsed}.count();
+}
+
+size_t
+snapshot_bytes(const snapshot_t& snapshot)
+{
+    auto total = size_t{0};
+    for(const auto& block : snapshot.blocks)
+        total += block.host_copy.size();
+    return total;
+}
 }  // namespace
 
 kernarg_placement_t
@@ -222,13 +268,20 @@ ensure_entry_snapshot(range_context_t&                      ctx,
     if(ctx.snapshot_taken || !ctx.record.eligible() || ctx.queue == nullptr) return;
     if(!ctx.plan.replay_requested) return;
 
+    const auto entry_start = phase_clock::now();
+
     // Fence against work already in flight so the snapshot sees settled memory: first this queue
     // (a barrier packet through the interceptor's writer, exactly as the kernel-replay window
-    // does), then every other queue on the agent.
-    auto drain_signal = hsa_signal_t{.handle = 0};
-    hsa::Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
-    const auto _destroy_signal = common::scope_destructor{[&]() {
-        if(drain_signal.handle != 0) queue.core_api().hsa_signal_destroy_fn(drain_signal);
+    // does), then every other queue on the agent. The signal comes from the SDK's pool because
+    // creating one costs a KFD event allocation, which a range per iteration would pay every
+    // iteration.
+    auto       drain_signal        = hsa_signal_t{.handle = 0};
+    auto*      pooled_drain_signal = hsa::Queue::create_signal(0, &drain_signal, /*use_pool=*/true);
+    const auto _release_signal     = common::scope_destructor{[&]() {
+        if(pooled_drain_signal != nullptr)
+            hsa::Queue::release_signal(pooled_drain_signal);
+        else if(drain_signal.handle != 0)
+            queue.core_api().hsa_signal_destroy_fn(drain_signal);
     }};
 
     if(writer != nullptr && drain_signal.handle != 0)
@@ -255,9 +308,11 @@ ensure_entry_snapshot(range_context_t&                      ctx,
     }
 
     hsa::replay_drain_agent_or_fatal(ctx.hsa_agent);
+    const auto drained_at = phase_clock::now();
 
-    ctx.snapshot       = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
-    ctx.snapshot_taken = true;
+    ctx.snapshot          = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
+    ctx.snapshot_taken    = true;
+    const auto snapped_at = phase_clock::now();
 
     if(!ctx.snapshot.ok)
     {
@@ -269,6 +324,14 @@ ensure_entry_snapshot(range_context_t&                      ctx,
     }
 
     ctx.snapshot_ptrs = tracked_pointers(ctx.hsa_agent);
+
+    ROCP_INFO << fmt::format("range replay: range {} entry: drain {:.3f} ms, snapshot {:.3f} ms "
+                             "({} bytes in {} regions)",
+                             ctx.record.range_id(),
+                             elapsed_ms(drained_at - entry_start),
+                             elapsed_ms(snapped_at - drained_at),
+                             snapshot_bytes(ctx.snapshot),
+                             ctx.snapshot.blocks.size());
 }
 
 rocprofiler_range_replay_status_t
@@ -285,6 +348,10 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
 
     const auto& queue = *ctx.queue;
 
+    // Wall time of each phase of the window, reported at INFO once the window closes, so the lock
+    // and drain waits, the exit snapshot, the passes and the restores can be told apart.
+    const auto window_start = phase_clock::now();
+
     // Exclude every other replay and every non-replay dispatch on this agent for the whole window.
     const auto replay_guard =
         std::unique_lock<std::shared_mutex>{hsa::agent_replay_mutex(ctx.agent_id)};
@@ -293,6 +360,7 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     // its GPU tail may not be. Drain before touching device memory.
     hsa::replay_drain_or_fatal(queue);
     hsa::replay_drain_agent_or_fatal(ctx.hsa_agent);
+    const auto drained_at = phase_clock::now();
 
     // Every region the entry snapshot covers must still be the same allocation, or restoring it
     // would write into memory the application has since repurposed.
@@ -300,12 +368,15 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         return ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE;
 
     // The state the application must resume with, captured before the first pass overwrites it.
+    const auto snap_start    = phase_clock::now();
     const auto exit_snapshot = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
+    const auto snapped_at    = phase_clock::now();
     if(!exit_snapshot.ok) return ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED;
 
     auto staging = kernarg_staging{};
-    if(!staging.reserve(queue, ctx.record.dispatches()))
+    if(!staging.reserve(queue, ctx.agent_id, ctx.record.dispatches()))
         return ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED;
+    const auto staged_at = phase_clock::now();
 
     auto packets = build_pass_packets(ctx.record.dispatches());
 
@@ -327,6 +398,11 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     const auto agent_id       = ctx.agent_id;
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.dispatch_count());
 
+    auto     passes_time   = phase_clock::duration{};
+    auto     restores_time = phase_clock::duration{};
+    uint64_t passes_run    = 0;
+    uint64_t restores_run  = 0;
+
     // Pass 0 was the application's own execution, so the replayed passes are numbered from 1.
     for(uint64_t pass = 1;; ++pass)
     {
@@ -335,9 +411,13 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         // Rewind to the state the range started from. A failed restore leaves device memory
         // partially written; continuing would submit a pass over corrupted data and hand that
         // corruption back to the application.
+        const auto restore_start = phase_clock::now();
         ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(ctx.snapshot)) << fmt::format(
             "range replay: restore of the range-entry snapshot failed (partial host->device copy); "
             "aborting rather than continuing with corrupted device memory");
+        const auto pass_start = phase_clock::now();
+        restores_time += pass_start - restore_start;
+        ++restores_run;
 
         auto pass_state = pass_context_state_t{};
         execute_pass_phase_enter(ctx.plan,
@@ -358,10 +438,13 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         hsa::replay_drain_or_fatal(queue);
 
         execute_pass_phase_exit(ctx.plan, pass, agent_id, dispatch_count, pass_state);
+        passes_time += phase_clock::now() - pass_start;
+        ++passes_run;
 
         if(!should_continue_replay(ctx.plan, pass, is_final)) break;
     }
 
+    const auto verify_start = phase_clock::now();
     if(divergence_check_enabled())
     {
         const auto post_snapshot = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
@@ -369,12 +452,37 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
             divergence_count = digest::count_divergent(snapshot_digests(exit_snapshot),
                                                        snapshot_digests(post_snapshot));
     }
+    const auto verified_at = phase_clock::now();
 
     // Hand the application back the state its own execution produced, whether or not the replay
     // reproduced it.
     ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(exit_snapshot)) << fmt::format(
         "range replay: restore of the range-exit snapshot failed (partial host->device copy); "
         "aborting rather than returning corrupted device memory to the application");
+    const auto window_end = phase_clock::now();
+
+    ROCP_INFO << fmt::format(
+        "range replay: range {} ({} dispatches) phases: lock+drain {:.3f} ms, exit snapshot {:.3f} "
+        "ms ({} bytes in {} regions), kernarg staging {:.3f} ms ({} bytes, {}), {} passes {:.3f} "
+        "ms, {} restores {:.3f} ms, verify {}, exit restore {:.3f} ms, window {:.3f} ms",
+        ctx.record.range_id(),
+        dispatch_count,
+        elapsed_ms(drained_at - window_start),
+        elapsed_ms(snapped_at - snap_start),
+        snapshot_bytes(exit_snapshot),
+        exit_snapshot.blocks.size(),
+        elapsed_ms(staged_at - snapped_at),
+        staging.capacity(),
+        staging.origin(),
+        passes_run,
+        elapsed_ms(passes_time),
+        restores_run,
+        elapsed_ms(restores_time),
+        divergence_check_enabled()
+            ? fmt::format("{:.3f} ms", elapsed_ms(verified_at - verify_start))
+            : std::string{"off"},
+        elapsed_ms(window_end - verified_at),
+        elapsed_ms(window_end - window_start));
 
     return ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
 }

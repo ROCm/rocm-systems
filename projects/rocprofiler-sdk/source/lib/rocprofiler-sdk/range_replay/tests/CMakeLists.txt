@@ -6,10 +6,10 @@ project(rocprofiler-sdk-range-replay-tests LANGUAGES C CXX)
 
 include(GoogleTest)
 
-# Range eligibility bookkeeping, divergence checking and the queue hook's early-return
-# paths are pure host logic with no GPU or HSA runtime dependency, so these are plain CXX
-# unit tests that run unconditionally.
-foreach(_TEST range-state digest queue-hooks)
+# Range eligibility bookkeeping, divergence checking, the queue hook's early-return paths
+# and the kernarg block retention policy are pure host logic with no GPU or HSA runtime
+# dependency, so these are plain CXX unit tests that run unconditionally.
+foreach(_TEST range-state digest queue-hooks retained-kernarg)
     string(REPLACE "-" "_" _SOURCE_STEM "${_TEST}")
     set(_SOURCE "${_SOURCE_STEM}.cpp")
 

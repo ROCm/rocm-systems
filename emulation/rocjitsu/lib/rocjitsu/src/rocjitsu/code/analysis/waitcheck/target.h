@@ -51,9 +51,13 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 // Reject unsupported architectures before selecting any target policies.
 [[nodiscard]] inline util::FailureOr<WaitcntModel> waitcnt_model(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return WaitcntModel::LegacyNoVscnt;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return WaitcntModel::LegacyVscnt;
@@ -122,9 +126,13 @@ struct LegacyWaitcnt {
 }
 
 [[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5
-             ? decode_gfx11_waitcnt(value)
-             : decode_legacy_waitcnt(value);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return decode_gfx11_waitcnt(value);
+  auto fields = decode_legacy_waitcnt(value);
+  // GFX10 retains the GFX9 positions but widens LGKM to six bits.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
+    fields.lgkmcnt = (value >> 8u) & 0x3fu;
+  return fields;
 }
 
 [[nodiscard]] inline util::FailureOr<std::string>
@@ -256,6 +264,8 @@ struct WaitcheckTarget {
   normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind, WaitcntModel model);
 
   [[nodiscard]] static bool is_xcnt_vmem_kind(WaitEventKind kind);
+
+  [[nodiscard]] static bool is_xcnt_drain(const Instruction &inst);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 

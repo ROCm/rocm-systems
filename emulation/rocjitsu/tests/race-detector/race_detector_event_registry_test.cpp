@@ -27,8 +27,9 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   // already-trimmed id, causing heap corruption and potentially corrupting LDS
   // race bookkeeping.
   int N = EventRegistry::kTrimAttemptInterval;
-  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0),
-                        [](RaceViolation) {});
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
   auto &wave = detector.getWaveRaceState(0);
 
   // Allocate enough wave-local loads to trigger EventRegistry trimming. Each

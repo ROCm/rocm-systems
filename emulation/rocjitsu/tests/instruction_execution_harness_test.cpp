@@ -2533,9 +2533,8 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
       }
 
-      // Pin OMOD finalization independently from CLAMP. Positive and negative
-      // minimum-normal values become subnormals under /2, and both those
-      // flushed results and an input -0 must be canonicalized to +0.
+      // Pin OMOD finalization independently from CLAMP. FP32 underflow caused
+      // by halving a normal result preserves its sign; an input -0 becomes +0.
       wf->set_exec(0x7u);
       constexpr std::array<uint32_t, 3> kF32Inputs{
           std::bit_cast<uint32_t>(std::numeric_limits<float>::min()),
@@ -2553,7 +2552,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       ASSERT_NE(unclamped_f32, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f32.get(), *wf).succeeded());
       for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
-        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), lane == 1 ? 0x80000000u : 0u);
 
       constexpr std::array<uint64_t, 3> kF64Inputs{
           kMinNormalF64,
@@ -2968,6 +2967,72 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_fused_mem");
+  amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_fused_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t a_base = vb + 10;
+  const uint32_t b_base = vb + 20;
+  const uint32_t c_base = vb + 30;
+  const uint32_t d_base = vb + 40;
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(a_base + reg, lane, 0);
+      cu->write_vgpr(b_base + reg, lane, 0);
+      cu->write_vgpr(c_base + reg, lane, 0);
+    }
+
+  const auto a = amdgpu::wmma_input_loc(16, 32, /*row=*/0, /*k=*/0, 16);
+  const auto b = amdgpu::wmma_input_loc(16, 32, /*col=*/0, /*k=*/0, 16);
+  write_packed_half(*cu, a_base + a.vgpr_offset, a.lane, a.sub_element, 0x5F80u); // 2^64
+  write_packed_half(*cu, b_base + b.vgpr_offset, b.lane, b.sub_element, 0x5F80u);
+  const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+  cu->write_vgpr(c_base + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
+
+  ForceScalarGuard force_scalar(/*force_scalar=*/true);
+  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+
+  const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+  const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
+  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32FmaHasStableNanPriority) {
+  auto value = [](uint32_t bits) { return std::bit_cast<float>(bits); };
+  auto result_bits = [&](uint32_t a, uint32_t b, uint32_t c) {
+    return std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(value(a), value(b), value(c)));
+  };
+
+  EXPECT_EQ(result_bits(0x7FC10000u, 0x7FC20000u, 0x7FC30000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x7FC20000u, 0x7FC30000u), 0x7FC20000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x3F800000u, 0x7FC30000u), 0x7FC30000u);
+  EXPECT_EQ(result_bits(0x7F810000u, 0x3F800000u, 0x00000000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0xFFC40000u, 0x00000000u), 0xFFC40000u);
+  EXPECT_EQ(result_bits(0x7F800000u, 0x00000000u, 0x3F800000u), 0xFFC00000u);
+  const float early_a_nan = amdgpu::wmma_bf16f32_fma(value(0x7FC10000u), 1.0f, 0.0f);
+  EXPECT_EQ(
+      std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(1.0f, value(0x7FC20000u), early_a_nan)),
+      0x7FC20000u);
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
@@ -7208,6 +7273,9 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             ASSERT_NE(inst, nullptr);
             cu.execute_and_route(inst.release(), *wf);
             uint32_t expected = c.expected;
+            // LDS selects the incoming NaN when both operands are NaNs.
+            if (form == Form::Ds && c.old_value == (bf16 ? 0x7fc27fc0u : 0x7e027e00u))
+              expected = bf16 ? 0x7fc47fc0u : 0x7e047e00u;
             if (form == Form::Ds &&
                 ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
               expected = c.flushed_value;
@@ -7766,6 +7834,100 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(HwregTest, Gfx1250GetregReadsWgpId) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_shader_engine_location(1, 13, 8);
+
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  // The instruction emitted by tl.extra.hip.smid().
+  constexpr uint16_t kWgpId = encode_hwreg(23, 10, 4);
+  const auto words = encode_sopk(cdna5::kSGetregB32Sopk, 4, kWgpId);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot) {
+    auto *wf = cu->dispatch_wf(0, slot, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 5u);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 5u);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23, 11, 2), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 2u);
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, kWgpId, 0), amdgpu::HwregAccessResult::ReadOnly);
+    // The remaining identity fields still have no modeled backing.
+    for (uint16_t hwreg : {encode_hwreg(23), encode_hwreg(23, 9, 2), encode_hwreg(23, 13, 2),
+                           encode_hwreg(23, 16, 1)}) {
+      value = 0xFFFFFFFFu;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                amdgpu::HwregAccessResult::Unsupported);
+      EXPECT_EQ(value, 0u);
+    }
+  }
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+    cu->wf(slot)->halt();
+}
+
+TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_width_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_width_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kWgpId = encode_hwreg(23, 10, 4);
+  for (uint32_t cu_index : {15u, 31u}) {
+    SCOPED_TRACE(cu_index);
+    cu->set_shader_engine_location(0, cu_index, 16);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 15u);
+  }
+
+  cu->set_shader_engine_location(1, 13);
+  EXPECT_EQ(cu->shader_engine_id(), 1u);
+  EXPECT_EQ(cu->scratch_scoreboard_base(), 13u * cu->scratch_slots_per_cu());
+  EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+
+  for (uint32_t width : {0u, 17u, 32u, std::numeric_limits<uint32_t>::max()}) {
+    SCOPED_TRACE(width);
+    for (uint32_t cu_index : {0u, 16u}) {
+      SCOPED_TRACE(cu_index);
+      cu->set_shader_engine_location(0, cu_index, width);
+      for (uint16_t hwreg : {kWgpId, encode_hwreg(23, 11, 2)}) {
+        SCOPED_TRACE(hwreg);
+        uint32_t value = 0xFFFFFFFFu;
+        EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                  amdgpu::HwregAccessResult::Unsupported);
+        EXPECT_EQ(value, 0u);
+      }
+    }
+  }
+  wf->halt();
 }
 
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {

@@ -80,22 +80,22 @@ TEST(make_agent_uid_test, nic_agent_returns_nic_string)
 
 TEST(make_agent_uid_test, equality_same_agents)
 {
-    auto uid_a = make_agent_uid(make_test_agent(agent_type::gpu, 3));
-    auto uid_b = make_agent_uid(make_test_agent(agent_type::gpu, 3));
+    auto const uid_a = make_agent_uid(make_test_agent(agent_type::gpu, 3));
+    auto const uid_b = make_agent_uid(make_test_agent(agent_type::gpu, 3));
     EXPECT_EQ(uid_a, uid_b);
 }
 
 TEST(make_agent_uid_test, inequality_different_type)
 {
-    auto gpu = make_agent_uid(make_test_agent(agent_type::gpu, 0));
-    auto cpu = make_agent_uid(make_test_agent(agent_type::cpu, 0));
+    auto const gpu = make_agent_uid(make_test_agent(agent_type::gpu, 0));
+    auto const cpu = make_agent_uid(make_test_agent(agent_type::cpu, 0));
     EXPECT_FALSE(gpu == cpu);
 }
 
 TEST(make_agent_uid_test, inequality_different_index)
 {
-    auto idx0 = make_agent_uid(make_test_agent(agent_type::gpu, 0));
-    auto idx1 = make_agent_uid(make_test_agent(agent_type::gpu, 1));
+    auto const idx0 = make_agent_uid(make_test_agent(agent_type::gpu, 0));
+    auto const idx1 = make_agent_uid(make_test_agent(agent_type::gpu, 1));
     EXPECT_FALSE(idx0 == idx1);
 }
 
@@ -389,7 +389,7 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
 {
     register_base_metadata();
 
-    auto register_agent = [&](const agent& agent_obj) {
+    auto const register_agent = [&](const agent& agent_obj) {
         profiler_hub::writer_types::agent_info_t info{};
         info.unique_id    = make_agent_uid(agent_obj);
         info.name         = agent_obj.name;
@@ -406,7 +406,7 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
     register_agent(nic_agent());
 
     flush_and_open_reader();
-    auto agents = m_reader->get_all_agents();
+    auto const agents = m_reader->get_all_agents();
 
     ASSERT_EQ(agents.size(), 3U);
 
@@ -448,7 +448,7 @@ TEST_F(rocpd_write_read_test, kernel_dispatch_values_persisted)
     register_queue_and_stream();
     register_code_object_and_kernel_symbol();
 
-    auto event = make_event(1, 0, 0, "kernel_dispatch");
+    auto const event = make_event(1, 0, 0, "kernel_dispatch");
 
     profiler_hub::writer_types::kernel_dispatch_data_t kd_write{};
     kd_write.event            = event;
@@ -465,13 +465,13 @@ TEST_F(rocpd_write_read_test, kernel_dispatch_values_persisted)
     kd_write.grid_size_z      = 1;
     kd_write.name             = "my_test_kernel";
 
-    auto env = make_trace_env_with_agent_queue_stream(NODE_ID, PID, THREAD_ID,
-                                                      gpu_agent(), QUEUE_ID, STREAM_ID);
+    auto const env = make_trace_env_with_agent_queue_stream(
+        NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
     m_writer->insert_kernel_dispatch_data(kd_write, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -479,7 +479,9 @@ TEST_F(rocpd_write_read_test, kernel_dispatch_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::kernel_dispatch)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_kernel_dispatch_details(tl_event);
         ASSERT_TRUE(detail.has_value()) << "kernel dispatch detail should be readable";
@@ -505,7 +507,7 @@ TEST_F(rocpd_write_read_test, region_with_args_values_persisted)
 {
     register_base_metadata();
 
-    auto event = make_event(1, 0, 0, "HIP_API");
+    auto const event = make_event(1, 0, 0, "HIP_API");
 
     profiler_hub::writer_types::region_data_t region{};
     region.event           = event;
@@ -527,12 +529,12 @@ TEST_F(rocpd_write_read_test, region_with_args_values_persisted)
     arg1.value    = "4096";
     region.args.push_back(arg1);
 
-    auto env = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env = make_trace_env(NODE_ID, PID, THREAD_ID);
     m_writer->insert_region_data(region, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -540,7 +542,9 @@ TEST_F(rocpd_write_read_test, region_with_args_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -586,7 +590,7 @@ TEST_F(rocpd_write_read_test, memory_copy_values_persisted)
 
     register_queue_and_stream();
 
-    auto event = make_event(1, 0, 0, "memory_copy");
+    auto const event = make_event(1, 0, 0, "memory_copy");
 
     profiler_hub::writer_types::memory_copy_data_t mc_write{};
     mc_write.event           = event;
@@ -606,7 +610,7 @@ TEST_F(rocpd_write_read_test, memory_copy_values_persisted)
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -614,7 +618,9 @@ TEST_F(rocpd_write_read_test, memory_copy_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_copy)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_copy_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -645,7 +651,7 @@ TEST_F(rocpd_write_read_test, memory_alloc_values_persisted)
     register_base_metadata();
     register_gpu_agent();
 
-    auto event = make_event(1, 0, 0, "scratch_memory");
+    auto const event = make_event(1, 0, 0, "scratch_memory");
 
     profiler_hub::writer_types::memory_alloc_data_t ma_write{};
     ma_write.event           = event;
@@ -656,12 +662,12 @@ TEST_F(rocpd_write_read_test, memory_alloc_values_persisted)
     ma_write.address         = 0;
     ma_write.size            = 65536;
 
-    auto env = make_trace_env_with_agent(NODE_ID, PID, THREAD_ID, gpu_agent());
+    auto const env = make_trace_env_with_agent(NODE_ID, PID, THREAD_ID, gpu_agent());
     m_writer->insert_memory_alloc_data(ma_write, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -669,7 +675,9 @@ TEST_F(rocpd_write_read_test, memory_alloc_values_persisted)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -752,9 +760,9 @@ TEST_F(rocpd_write_read_test, event_counts_match_inserted_data)
     register_queue_and_stream();
     register_code_object_and_kernel_symbol();
 
-    auto env_full = make_trace_env_with_agent_queue_stream(
+    auto const env_full = make_trace_env_with_agent_queue_stream(
         NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
-    auto env_basic = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env_basic = make_trace_env(NODE_ID, PID, THREAD_ID);
 
     // 2 regions
     for(int idx = 0; idx < 2; ++idx)
@@ -763,7 +771,7 @@ TEST_F(rocpd_write_read_test, event_counts_match_inserted_data)
         region.event           = make_event(idx, 0, 0, "HIP_API");
         region.start_timestamp = 1000 + idx * 100;
         region.end_timestamp   = 1050 + idx * 100;
-        auto region_name       = "region_" + std::to_string(idx);
+        auto const region_name = "region_" + std::to_string(idx);
         region.name            = region_name.c_str();
         m_writer->insert_region_data(region, env_basic);
     }
@@ -791,11 +799,12 @@ TEST_F(rocpd_write_read_test, event_counts_match_inserted_data)
 
     auto counts = m_reader->get_event_counts();
 
-    auto region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
+    auto const region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
     ASSERT_NE(region_it, counts.end());
     EXPECT_EQ(region_it->second, 2U);
 
-    auto kd_it = counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
+    auto const kd_it =
+        counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
     ASSERT_NE(kd_it, counts.end());
     EXPECT_EQ(kd_it->second, 1U);
 }
@@ -850,7 +859,7 @@ TEST_F(rocpd_write_read_test, flush_creates_nonempty_file)
     region.end_timestamp   = 2000;
     region.name            = "flush_test";
 
-    auto env = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env = make_trace_env(NODE_ID, PID, THREAD_ID);
     m_writer->insert_region_data(region, env);
     m_writer->flush_in_memory_data_to_disk();
 
@@ -875,7 +884,7 @@ TEST_F(rocpd_write_read_test, handle_scratch_memory_pathway)
     register_gpu_agent();
     register_queue_and_stream();
 
-    auto ev = make_event(100, 50, 0, "scratch_memory");
+    auto const ev = make_event(100, 50, 0, "scratch_memory");
 
     profiler_hub::writer_types::memory_alloc_data_t ma{};
     ma.event           = ev;
@@ -887,14 +896,14 @@ TEST_F(rocpd_write_read_test, handle_scratch_memory_pathway)
     ma.size            = 131072;
     ma.extdata         = "{\"flags\": 0}";
 
-    auto env = make_trace_env_with_agent_queue_stream(NODE_ID, PID, THREAD_ID,
-                                                      gpu_agent(), QUEUE_ID, STREAM_ID);
+    auto const env = make_trace_env_with_agent_queue_stream(
+        NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
 
     m_writer->insert_memory_alloc_data(ma, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -902,7 +911,9 @@ TEST_F(rocpd_write_read_test, handle_scratch_memory_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -930,7 +941,7 @@ TEST_F(rocpd_write_read_test, handle_memory_allocate_pathway)
     register_gpu_agent();
     register_queue_and_stream();
 
-    auto ev = make_event(200, 100, 0, "memory_allocate");
+    auto const ev = make_event(200, 100, 0, "memory_allocate");
 
     profiler_hub::writer_types::memory_alloc_data_t ma{};
     ma.event           = ev;
@@ -948,7 +959,7 @@ TEST_F(rocpd_write_read_test, handle_memory_allocate_pathway)
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -956,7 +967,9 @@ TEST_F(rocpd_write_read_test, handle_memory_allocate_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_allocate)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_alloc_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1005,7 +1018,7 @@ TEST_F(rocpd_write_read_test, handle_backtrace_region_pathway)
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -1013,7 +1026,9 @@ TEST_F(rocpd_write_read_test, handle_backtrace_region_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1038,7 +1053,7 @@ TEST_F(rocpd_write_read_test, handle_in_time_sample_pathway)
     register_base_metadata();
     register_gpu_agent();
 
-    auto agent_uid = make_agent_uid(gpu_agent());
+    auto const agent_uid = make_agent_uid(gpu_agent());
 
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid{};
     pmc_uid.name     = "my_track";
@@ -1075,7 +1090,7 @@ TEST_F(rocpd_write_read_test, handle_in_time_sample_pathway)
 
     flush_and_open_reader();
 
-    auto pmc_infos = m_reader->get_all_pmc_info();
+    auto const pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_GE(pmc_infos.size(), 1U);
 
     EXPECT_TRUE(std::filesystem::exists(m_db_path));
@@ -1091,7 +1106,7 @@ TEST_F(rocpd_write_read_test, handle_pmc_event_with_sample_pathway)
     register_base_metadata();
     register_gpu_agent();
 
-    auto agent_uid = make_agent_uid(gpu_agent());
+    auto const agent_uid = make_agent_uid(gpu_agent());
 
     profiler_hub::writer_types::pmc_info_t pmc_desc{};
     pmc_desc.unique_id.name     = "SQ_WAVES";
@@ -1149,7 +1164,7 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
 
     auto agent_uid = make_agent_uid(gpu_agent());
 
-    auto register_pmc = [&](const char* name, const char* desc) {
+    auto const register_pmc = [&](const char* name, const char* desc) {
         profiler_hub::writer_types::pmc_info_t pi{};
         pi.unique_id.name     = name;
         pi.unique_id.agent_id = agent_uid;
@@ -1164,15 +1179,15 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
     register_pmc("umc_busy", "UMC activity");
     register_pmc("gpu_temperature", "Hotspot temp");
 
-    auto register_and_insert_pmc = [&](const char* pmc_name, const char* track_name,
-                                       double value, size_t timestamp) {
+    auto const register_and_insert_pmc = [&](const char* pmc_name, const char* track_name,
+                                             double value, size_t timestamp) {
         profiler_hub::writer_types::track_info_t track{};
         track.name       = track_name;
         track.node_id    = NODE_ID;
         track.process_id = PID;
         m_writer->register_track_info(track);
 
-        auto ev = make_event(0, 0, 0, "amd_smi");
+        auto const ev = make_event(0, 0, 0, "amd_smi");
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data{};
         pmc_data.event = ev;
@@ -1196,15 +1211,24 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
 
     flush_and_open_reader();
 
-    auto pmc_infos = m_reader->get_all_pmc_info();
+    auto const pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 3U);
 
     bool found_gfx = false, found_umc = false, found_temp = false;
     for(const auto& pi : pmc_infos)
     {
-        if(pi->symbol == "gfx_busy") found_gfx = true;
-        if(pi->symbol == "umc_busy") found_umc = true;
-        if(pi->symbol == "gpu_temperature") found_temp = true;
+        if(pi->symbol == "gfx_busy")
+        {
+            found_gfx = true;
+        }
+        if(pi->symbol == "umc_busy")
+        {
+            found_umc = true;
+        }
+        if(pi->symbol == "gpu_temperature")
+        {
+            found_temp = true;
+        }
     }
     EXPECT_TRUE(found_gfx) << "gfx_busy PMC info not found";
     EXPECT_TRUE(found_umc) << "umc_busy PMC info not found";
@@ -1229,8 +1253,9 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 
     auto ev = make_event(0, 0, 0, "amd_smi_nic");
 
-    auto register_and_insert_nic_pmc = [&](const char* pmc_name, const char* track_name,
-                                           double value, size_t timestamp) {
+    auto const register_and_insert_nic_pmc = [&](const char* pmc_name,
+                                                 const char* track_name, double value,
+                                                 size_t timestamp) {
         profiler_hub::writer_types::pmc_info_t pi{};
         pi.unique_id.name     = pmc_name;
         pi.unique_id.agent_id = gpu_uid;
@@ -1295,7 +1320,7 @@ TEST_F(rocpd_write_read_test, handle_cpu_pmc_sample_pathway)
 
     auto agent_uid = make_agent_uid(cpu);
 
-    auto register_pmc = [&](const char* name, const char* desc) {
+    auto const register_pmc = [&](const char* name, const char* desc) {
         profiler_hub::writer_types::pmc_info_t pi{};
         pi.unique_id.name     = name;
         pi.unique_id.agent_id = agent_uid;
@@ -1311,8 +1336,8 @@ TEST_F(rocpd_write_read_test, handle_cpu_pmc_sample_pathway)
 
     auto ev = make_event(0, 0, 0, "cpu_freq");
 
-    auto insert_cpu_pmc = [&](const char* pmc_name, const char* track_name, double value,
-                              size_t timestamp) {
+    auto const insert_cpu_pmc = [&](const char* pmc_name, const char* track_name,
+                                    double value, size_t timestamp) {
         profiler_hub::writer_types::track_info_t track{};
         track.name       = track_name;
         track.node_id    = NODE_ID;
@@ -1341,10 +1366,10 @@ TEST_F(rocpd_write_read_test, handle_cpu_pmc_sample_pathway)
 
     flush_and_open_reader();
 
-    auto pmc_infos = m_reader->get_all_pmc_info();
+    auto const pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 2U);
 
-    auto agents = m_reader->get_all_agents();
+    auto const agents = m_reader->get_all_agents();
     ASSERT_GE(agents.size(), 1U);
 
     bool found_cpu_agent = false;
@@ -1371,7 +1396,7 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
     register_base_metadata();
     register_gpu_agent();
 
-    auto agent_uid = make_agent_uid(gpu_agent());
+    auto const agent_uid = make_agent_uid(gpu_agent());
 
     profiler_hub::writer_types::pmc_info_t pmc_desc{};
     pmc_desc.unique_id.name     = "kfd_page_fault";
@@ -1405,7 +1430,7 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
     arg1.value    = "5";
     region.args.push_back(arg1);
 
-    auto env = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env = make_trace_env(NODE_ID, PID, THREAD_ID);
     m_writer->insert_region_data(region, env);
 
     profiler_hub::writer_types::track_info_t track{};
@@ -1432,7 +1457,7 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found_region = false;
@@ -1440,7 +1465,9 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1461,7 +1488,7 @@ TEST_F(rocpd_write_read_test, handle_kfd_sample_pathway)
     }
     EXPECT_TRUE(found_region) << "KFD region event not found in read-back";
 
-    auto pmc_infos = m_reader->get_all_pmc_info();
+    auto const pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_GE(pmc_infos.size(), 1U);
 
     EXPECT_TRUE(std::filesystem::exists(m_db_path));
@@ -1479,13 +1506,13 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
     register_queue_and_stream();
     register_code_object_and_kernel_symbol();
 
-    auto env_full = make_trace_env_with_agent_queue_stream(
+    auto const env_full = make_trace_env_with_agent_queue_stream(
         NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
-    auto env_basic = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env_basic = make_trace_env(NODE_ID, PID, THREAD_ID);
 
     // Region (handle(region_sample) pathway)
     {
-        auto ev = make_event(1, 0, 0, "HIP_API");
+        auto const ev = make_event(1, 0, 0, "HIP_API");
 
         profiler_hub::writer_types::region_data_t region{};
         region.event           = ev;
@@ -1497,7 +1524,7 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
 
     // Kernel dispatch (handle(kernel_dispatch_sample) pathway)
     {
-        auto ev = make_event(2, 1, 0, "kernel_dispatch");
+        auto const ev = make_event(2, 1, 0, "kernel_dispatch");
 
         profiler_hub::writer_types::kernel_dispatch_data_t kd{};
         kd.event            = ev;
@@ -1531,7 +1558,7 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
             m_writer->register_agent_info(info);
         }
 
-        auto ev = make_event(3, 0, 0, "memory_copy");
+        auto const ev = make_event(3, 0, 0, "memory_copy");
 
         profiler_hub::writer_types::memory_copy_data_t mc{};
         mc.event           = ev;
@@ -1550,7 +1577,7 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
 
     // Memory alloc (handle(scratch_memory_sample) pathway)
     {
-        auto ev = make_event(4, 0, 0, "scratch_memory");
+        auto const ev = make_event(4, 0, 0, "scratch_memory");
 
         profiler_hub::writer_types::memory_alloc_data_t ma{};
         ma.event           = ev;
@@ -1561,7 +1588,7 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
         ma.address         = 0;
         ma.size            = 32768;
 
-        auto ma_env = make_trace_env_with_agent_queue_stream(
+        auto const ma_env = make_trace_env_with_agent_queue_stream(
             NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
         m_writer->insert_memory_alloc_data(ma, ma_env);
     }
@@ -1593,19 +1620,21 @@ TEST_F(rocpd_write_read_test, multiple_event_types_in_single_db)
 
     auto counts = m_reader->get_event_counts();
 
-    auto region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
+    auto const region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
     ASSERT_NE(region_it, counts.end());
     EXPECT_EQ(region_it->second, 2U);
 
-    auto kd_it = counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
+    auto const kd_it =
+        counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
     ASSERT_NE(kd_it, counts.end());
     EXPECT_EQ(kd_it->second, 1U);
 
-    auto mc_it = counts.find(profiler_hub::reader_types::event_type_t::memory_copy);
+    auto const mc_it = counts.find(profiler_hub::reader_types::event_type_t::memory_copy);
     ASSERT_NE(mc_it, counts.end());
     EXPECT_EQ(mc_it->second, 1U);
 
-    auto ma_it = counts.find(profiler_hub::reader_types::event_type_t::memory_allocate);
+    auto const ma_it =
+        counts.find(profiler_hub::reader_types::event_type_t::memory_allocate);
     ASSERT_NE(ma_it, counts.end());
     EXPECT_EQ(ma_it->second, 1U);
 
@@ -1631,12 +1660,12 @@ TEST_F(rocpd_write_read_test, handle_region_with_call_stack_pathway)
     region.end_timestamp   = 15500;
     region.name            = "hsa_signal_wait";
 
-    auto env = make_trace_env(NODE_ID, PID, THREAD_ID);
+    auto const env = make_trace_env(NODE_ID, PID, THREAD_ID);
     m_writer->insert_region_data(region, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -1644,7 +1673,9 @@ TEST_F(rocpd_write_read_test, handle_region_with_call_stack_pathway)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::region)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_region_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1670,7 +1701,7 @@ TEST_F(rocpd_write_read_test, handle_kernel_dispatch_full_grid)
     register_queue_and_stream();
     register_code_object_and_kernel_symbol();
 
-    auto ev = make_event(10, 5, 99, "kernel_dispatch");
+    auto const ev = make_event(10, 5, 99, "kernel_dispatch");
 
     profiler_hub::writer_types::kernel_dispatch_data_t kd{};
     kd.event                = ev;
@@ -1689,13 +1720,13 @@ TEST_F(rocpd_write_read_test, handle_kernel_dispatch_full_grid)
     kd.grid_size_z          = 8;
     kd.name                 = "matmul_kernel";
 
-    auto env = make_trace_env_with_agent_queue_stream(NODE_ID, PID, THREAD_ID,
-                                                      gpu_agent(), QUEUE_ID, STREAM_ID);
+    auto const env = make_trace_env_with_agent_queue_stream(
+        NODE_ID, PID, THREAD_ID, gpu_agent(), QUEUE_ID, STREAM_ID);
     m_writer->insert_kernel_dispatch_data(kd, env);
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
+    auto const events = m_reader->get_events();
     ASSERT_GE(events.size(), 1U);
 
     bool found = false;
@@ -1703,7 +1734,9 @@ TEST_F(rocpd_write_read_test, handle_kernel_dispatch_full_grid)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::kernel_dispatch)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_kernel_dispatch_details(tl_event);
         ASSERT_TRUE(detail.has_value());
@@ -1749,7 +1782,7 @@ TEST_F(rocpd_write_read_test, handle_memory_copy_addresses_persisted)
         m_writer->register_agent_info(info);
     }
 
-    auto ev = make_event(1, 0, 0, "memory_copy");
+    auto const ev = make_event(1, 0, 0, "memory_copy");
 
     profiler_hub::writer_types::memory_copy_data_t mc{};
     mc.event           = ev;
@@ -1769,13 +1802,15 @@ TEST_F(rocpd_write_read_test, handle_memory_copy_addresses_persisted)
 
     flush_and_open_reader();
 
-    auto events = m_reader->get_events();
-    bool found  = false;
+    auto const events = m_reader->get_events();
+    bool       found  = false;
     for(const auto& tl_event : events)
     {
         if(tl_event.unique_identifier.type !=
            profiler_hub::reader_types::event_type_t::memory_copy)
+        {
             continue;
+        }
 
         auto detail = m_reader->get_memory_copy_details(tl_event);
         ASSERT_TRUE(detail.has_value());

@@ -84,6 +84,7 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         |     range_state.cpp         eligibility bookkeeping, the recorder, decline channels
         |     replay_callbacks.cpp    CONFIG / PASS / CLOSE delivery, pass-count decisions
         |     executor.cpp            snapshot, kernarg staging, the pass loop, restore
+        |     retained_kernarg.cpp    the kernarg block kept for each agent's next range
         |     digest.cpp              region hashing and divergence counting
         |
         +-- hsa/replay_window.cpp     per-agent lock, drains, ring submit, passthrough gate

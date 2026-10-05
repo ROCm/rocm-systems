@@ -48,7 +48,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace rr = rocprofiler::range_replay;
@@ -84,6 +86,23 @@ make_replayable_context()
     return ctx;
 }
 
+// mem_block_t::host_copy is either a std::vector<char> or a pooled staging buffer that has to be
+// acquired for a size before it is written. Fill whichever the snapshot uses.
+template <typename HostCopy>
+void
+fill_host_copy(HostCopy& host_copy, const std::string& contents)
+{
+    if constexpr(std::is_same_v<HostCopy, std::vector<char>>)
+    {
+        host_copy.assign(contents.begin(), contents.end());
+    }
+    else
+    {
+        ASSERT_TRUE(host_copy.acquire(hsa_agent_t{.handle = 1}, contents.size()));
+        std::memcpy(host_copy.data(), contents.data(), contents.size());
+    }
+}
+
 snapshot_t
 make_snapshot(const std::vector<std::pair<void*, std::string>>& regions)
 {
@@ -92,7 +111,7 @@ make_snapshot(const std::vector<std::pair<void*, std::string>>& regions)
     {
         auto block     = rocprofiler::kernel_replay::memory_snapshot::mem_block_t{};
         block.gpu_addr = addr;
-        block.host_copy.assign(contents.begin(), contents.end());
+        fill_host_copy(block.host_copy, contents);
         snapshot.blocks.emplace_back(std::move(block));
     }
     return snapshot;

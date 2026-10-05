@@ -19,15 +19,21 @@ namespace
 {
 
 using ::testing::_;
+using ::testing::Eq;
 using ::testing::Return;
 using ::testing::StrictMock;
 
 using test_support::externals_with_tracing;
+using test_support::g_buffer_storage_mock;
 using test_support::g_externals_mock;
+using test_support::g_metadata_registry_mock;
 using test_support::g_tracing_backend_mock;
+using test_support::gmock_buffer_storage;
 using test_support::gmock_externals;
+using test_support::gmock_metadata_registry;
 using test_support::gmock_tracing_backend;
 using test_support::mock_sdk_with_tracing;
+using test_support::thread_info_data_t;
 using test_support::tracing_names_t;
 
 // Mirrors the per-domain Category traits (e.g. hip::runtime_api_category,
@@ -54,12 +60,17 @@ protected:
     {
         g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
         g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+        g_metadata_registry_mock =
+            std::make_unique<StrictMock<gmock_metadata_registry>>();
+        g_buffer_storage_mock = std::make_unique<StrictMock<gmock_buffer_storage>>();
     }
 
     void TearDown() override
     {
         g_tracing_backend_mock.reset();
         g_externals_mock.reset();
+        g_metadata_registry_mock.reset();
+        g_buffer_storage_mock.reset();
     }
 };
 
@@ -164,17 +175,19 @@ TEST_F(common_tracing_callbacks_test,
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(k_kind, k_operation, _, _));
-    EXPECT_CALL(*g_externals_mock, metadata_add_string("rocm_hip_api"));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string("rocm_hip_api"));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(k_ppid));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(k_pid));
-    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(k_ppid, k_pid, k_thread_id));
+    EXPECT_CALL(*g_metadata_registry_mock,
+                add_thread_info(
+                    Eq(thread_info_data_t{ k_ppid, k_pid, k_thread_id, 0, 0, "{}" })));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
         .WillOnce(Return(k_parent_stack_id));
-    EXPECT_CALL(*g_externals_mock,
-                region_sample_buffer_storage_store(
-                    k_thread_id, std::string{ "operation" }, k_correlation_id,
-                    k_parent_stack_id, k_begin_timestamp, k_end_timestamp, std::string{},
-                    std::string{ "rocm_hip_api" }));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(k_thread_id, std::string{ "operation" },
+                                    k_correlation_id, k_parent_stack_id,
+                                    k_begin_timestamp, k_end_timestamp, std::string{},
+                                    std::string{ "rocm_hip_api" }));
 
     on_tracing_api_exit<mock_sdk_with_tracing, externals_with_tracing, test_category>(
         record, &user_data, nullptr);
@@ -213,14 +226,14 @@ TEST_F(common_tracing_callbacks_test, exit_serializes_args_populated_via_iterate
             callback(kind, static_cast<std::int32_t>(operation), 1, nullptr, 0, nullptr,
                      nullptr, nullptr, 0, data);
         });
-    EXPECT_CALL(*g_externals_mock, metadata_add_string("rocm_hip_api"));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string("rocm_hip_api"));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(_, _, _));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
-    EXPECT_CALL(*g_externals_mock,
-                region_sample_buffer_storage_store(_, _, _, _, _, _,
-                                                   std::string{ "0;;int;;x;;42;;" }, _));
+    EXPECT_CALL(
+        *g_buffer_storage_mock,
+        store_region_sample(_, _, _, _, _, _, std::string{ "0;;int;;x;;42;;" }, _));
 
     on_tracing_api_exit<mock_sdk_with_tracing, externals_with_tracing, test_category>(
         record, &user_data, nullptr);

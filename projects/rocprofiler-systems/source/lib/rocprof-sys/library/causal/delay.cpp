@@ -53,7 +53,10 @@ compute_sleep_for_overhead()
         const std::int64_t _beg = tracing::now();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
         const std::int64_t _end = tracing::now();
-        if(i < _nwarm) continue;
+        if(i < _nwarm)
+        {
+            continue;
+        }
         auto _diff = (_end - _beg);
         if(_diff < _val)
         {
@@ -92,7 +95,10 @@ delay::setup()
 void
 delay::process()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
     if(causal::experiment::is_active())
     {
@@ -103,7 +109,7 @@ delay::process()
         else if(get_global() > get_local())
         {
             ::rocprofsys::causal::sampling::pause();
-            auto _beg = tracing::now();
+            auto const _beg = tracing::now();
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ get_global() - get_local() });
             get_local() += (tracing::now() - _beg);
@@ -119,9 +125,12 @@ delay::process()
 void
 delay::credit()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
-    auto _diff = get_global() - get_local();
+    auto const _diff = get_global() - get_local();
     if(_diff > 0)
     {
         get_local() += _diff;
@@ -131,9 +140,12 @@ delay::credit()
 void
 delay::preblock()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
-    auto _diff = get_global() - get_local();
+    auto const _diff = get_global() - get_local();
     if(_diff > 0)
     {
         get_local() += _diff;
@@ -143,15 +155,21 @@ delay::preblock()
 void
 delay::postblock(std::int64_t _preblock_global_delay_value)
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
     get_local() += (get_global() - _preblock_global_delay_value);
 }
 
 std::int64_t
 delay::sync()
 {
-    auto _v = get_global().load(std::memory_order_seq_cst);
-    if(get_delay_data()) get_delay_data()->fill(_v);
+    auto const _v = get_global().load(std::memory_order_seq_cst);
+    if(get_delay_data())
+    {
+        get_delay_data()->fill(_v);
+    }
     return _v;
 }
 
@@ -165,7 +183,7 @@ delay::get_global()
 static void
 thr_init()
 {
-    static thread_local auto _thr_init = []() {
+    static thread_local auto const _thr_init = []() {
         using thread_data_t = thread_data<identity<std::int64_t>, delay>;
         thread_data_t::construct(construct_on_thread{ threading::get_id() },
                                  delay::get_global().load());
@@ -178,7 +196,7 @@ bool
 delay::is_local_available()
 {
     thr_init();
-    auto& _data = get_delay_data();
+    auto const& _data = get_delay_data();
     return _data != nullptr;
 }
 
