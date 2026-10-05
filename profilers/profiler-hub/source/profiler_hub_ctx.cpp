@@ -164,7 +164,7 @@ ph_ctx::get_node()
 }
 
 ph_event_list_t
-ph_ctx::core_get_track_events(profiler_hub::common::connection&                   conn,
+ph_ctx::core_get_track_events(profiler_hub::track_row_reader&                     reader,
                               const profiler_hub::reader_types::track_info_ptr_t& track,
                               uint64_t start_ts,
                               uint64_t end_ts)
@@ -172,7 +172,7 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
     const auto filter = profiler_hub::make_window_filter(start_ts, end_ts);
 
     track_events_result_t result;
-    result.events = conn.reader().get_events_for_track(track, filter);
+    result.events = reader.events_for_track(track, filter);
     result.c_events.reserve(result.events.size());
     for(const auto& event : result.events)
     {
@@ -192,7 +192,7 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
 
 std::vector<ph_event_t>
 ph_ctx::build_thread_track_events(
-    profiler_hub::common::connection&                   conn,
+    profiler_hub::track_row_reader&                     reader,
     const profiler_hub::reader_types::track_info_ptr_t& track,
     size_t                                              parts)
 {
@@ -215,7 +215,7 @@ ph_ctx::build_thread_track_events(
     size_t                                                             total_span = 0;
     for(size_t i = 0; i < types.size(); ++i)
     {
-        spans[i] = conn.reader().get_event_id_span(types[i]);
+        spans[i] = reader.event_id_span(types[i]);
         if(spans[i].has_value())
         {
             total_span += spans[i]->second - spans[i]->first + 1;
@@ -249,14 +249,14 @@ ph_ctx::build_thread_track_events(
     std::atomic<bool>   failed{ false };
     std::mutex          error_mutex;
     std::exception_ptr  first_error;
-    const auto          worker = [&](profiler_hub::common::connection& worker_conn) {
+    const auto          worker = [&](profiler_hub::track_row_reader& worker_reader) {
         try
         {
             for(size_t i = next.fetch_add(1); i < items.size() && !failed.load();
                 i        = next.fetch_add(1))
             {
                 auto& item = items[i];
-                worker_conn.reader().visit_track_events_in_id_range(
+                worker_reader.visit_events_in_id_range(
                     track, item.type, item.begin, item.end, visitor, &item.out);
             }
         } catch(...)
@@ -269,8 +269,8 @@ ph_ctx::build_thread_track_events(
 
     const auto helper = [&](const std::stop_token&) {
         if(next.load() >= items.size()) return;
-        auto lease = m_connection_pool.try_acquire();
-        if(lease.has_value()) worker(**lease);
+        const auto helper_reader = m_connection_source.try_acquire();
+        if(helper_reader) worker(*helper_reader);
     };
 
     struct helper_group
@@ -294,7 +294,7 @@ ph_ctx::build_thread_track_events(
         {
             helpers.handles.push_back(m_thread_pool.submit(helper));
         }
-        worker(conn);
+        worker(reader);
     }
 
     if(first_error) std::rethrow_exception(first_error);
@@ -346,16 +346,17 @@ ph_ctx::build_thread_track_events(
 
 std::vector<ph_event_t>
 ph_ctx::build_sorted_track_events(
-    profiler_hub::common::connection&                   conn,
+    profiler_hub::track_row_reader&                     reader,
     const profiler_hub::reader_types::track_info_ptr_t& track)
 {
     if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
        track->event_count >= m_read_options.parallel_read_min_events)
     {
-        return build_thread_track_events(conn, track, m_read_options.parallel_read_parts);
+        return build_thread_track_events(
+            reader, track, m_read_options.parallel_read_parts);
     }
 
-    const auto events = conn.reader().get_events_for_track(track, {});
+    const auto events = reader.events_for_track(track, {});
 
     std::vector<ph_event_t> sorted;
     sorted.reserve(events.size());
@@ -378,10 +379,10 @@ ph_ctx::build_sorted_track_events(
 
 std::vector<ph_sample_t>
 ph_ctx::build_sorted_track_samples(
-    profiler_hub::common::connection&                   conn,
+    profiler_hub::track_row_reader&                     reader,
     const profiler_hub::reader_types::track_info_ptr_t& track)
 {
-    const auto samples = conn.reader().get_counter_events_for_track(track, {});
+    const auto samples = reader.counter_events_for_track(track, {});
 
     std::vector<ph_sample_t> sorted;
     sorted.reserve(samples.size());
@@ -412,9 +413,9 @@ ph_ctx::get_cached_track_samples(
     }
 
     std::call_once(entry->once, [&] {
-        entry->samples =
-            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-                return build_sorted_track_samples(conn, track);
+        entry->samples = profiler_hub::with_reader(
+            m_connection_source, [&](profiler_hub::track_row_reader& reader) {
+                return build_sorted_track_samples(reader, track);
             });
     });
 
@@ -434,9 +435,9 @@ ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr
     }
 
     std::call_once(entry->once, [&] {
-        entry->events =
-            m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-                return build_sorted_track_events(conn, track);
+        entry->events = profiler_hub::with_reader(
+            m_connection_source, [&](profiler_hub::track_row_reader& reader) {
+                return build_sorted_track_events(reader, track);
             });
     });
 
@@ -445,14 +446,14 @@ ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr
 }
 
 ph_sample_list_t
-ph_ctx::core_get_track_samples(profiler_hub::common::connection&                   conn,
+ph_ctx::core_get_track_samples(profiler_hub::track_row_reader&                     reader,
                                const profiler_hub::reader_types::track_info_ptr_t& track,
                                uint64_t start_ts,
                                uint64_t end_ts)
 {
     const auto filter = profiler_hub::make_window_filter(start_ts, end_ts);
 
-    const auto samples = conn.reader().get_counter_events_for_track(track, filter);
+    const auto samples = reader.counter_events_for_track(track, filter);
 
     std::vector<ph_sample_t> c_samples;
     c_samples.reserve(samples.size());
@@ -488,9 +489,10 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
         return get_cached_track_events(track_it->second);
     }
 
-    return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_events(conn, track_it->second, start_ts, end_ts);
-    });
+    return profiler_hub::with_reader(
+        m_connection_source, [&](profiler_hub::track_row_reader& reader) {
+            return core_get_track_events(reader, track_it->second, start_ts, end_ts);
+        });
 }
 
 ph_sample_list_t
@@ -512,9 +514,10 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
         return get_cached_track_samples(track_it->second);
     }
 
-    return m_connection_pool.run_sync([&](profiler_hub::common::connection& conn) {
-        return core_get_track_samples(conn, track_it->second, start_ts, end_ts);
-    });
+    return profiler_hub::with_reader(
+        m_connection_source, [&](profiler_hub::track_row_reader& reader) {
+            return core_get_track_samples(reader, track_it->second, start_ts, end_ts);
+        });
 }
 
 void

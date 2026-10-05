@@ -2,6 +2,7 @@
 
 #include "common/connection_pool.hpp"
 #include "common/thread_pool.hpp"
+#include "pooled_connection_source.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
 #include "track_read_options.hpp"
@@ -61,12 +62,12 @@ private:
     void initialize_node_processes();
 
     ph_event_list_t core_get_track_events(
-        profiler_hub::common::connection&                   conn,
+        profiler_hub::track_row_reader&                     reader,
         const profiler_hub::reader_types::track_info_ptr_t& track,
         uint64_t                                            start_ts,
         uint64_t                                            end_ts);
     ph_sample_list_t core_get_track_samples(
-        profiler_hub::common::connection&                   conn,
+        profiler_hub::track_row_reader&                     reader,
         const profiler_hub::reader_types::track_info_ptr_t& track,
         uint64_t                                            start_ts,
         uint64_t                                            end_ts);
@@ -78,18 +79,18 @@ private:
         const profiler_hub::reader_types::track_info_ptr_t& track);
 
     std::vector<ph_sample_t> build_sorted_track_samples(
-        profiler_hub::common::connection&                   conn,
+        profiler_hub::track_row_reader&                     reader,
         const profiler_hub::reader_types::track_info_ptr_t& track);
 
     ph_event_list_t get_cached_track_events(
         const profiler_hub::reader_types::track_info_ptr_t& track);
 
     std::vector<ph_event_t> build_sorted_track_events(
-        profiler_hub::common::connection&                   conn,
+        profiler_hub::track_row_reader&                     reader,
         const profiler_hub::reader_types::track_info_ptr_t& track);
 
     std::vector<ph_event_t> build_thread_track_events(
-        profiler_hub::common::connection&                   conn,
+        profiler_hub::track_row_reader&                     reader,
         const profiler_hub::reader_types::track_info_ptr_t& track,
         size_t                                              parts);
 
@@ -101,6 +102,7 @@ private:
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,
                                                              default_connection_count(),
                                                              m_catalog };
+    profiler_hub::pooled_connection_source m_connection_source{ m_connection_pool };
 
     profiler_hub::reader_types::track_info_list_t m_tracks;
     std::vector<ph_track_t>                       m_c_tracks;
