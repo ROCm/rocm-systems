@@ -109,11 +109,6 @@ private:
     [[nodiscard]] reader_types::event_data_ptr_t build_event_data(
         const data_storage::schema_v3::event_id_result& event_meta);
 
-    // Converts raw SQL results to timeline_event_t, resolving FKs
-    [[nodiscard]] reader_types::timeline_event_list_t build_timeline_events(
-        const std::vector<data_storage::schema_v3::timeline_event_result>& results,
-        reader_types::event_type_t                                         type);
-
     // Applies limit/offset to merged event list
     void apply_pagination(reader_types::timeline_event_list_t& events,
                           const reader_types::pagination_t&    pagination);

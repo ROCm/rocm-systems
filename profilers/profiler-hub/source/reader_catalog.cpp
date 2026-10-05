@@ -182,6 +182,34 @@ reader_catalog_t::build_agents(data_storage::schema_v3::read_statements& stmts)
 }
 
 void
+reader_catalog_t::link_owner(reader_types::track_info_t& track,
+                             size_t                      nid,
+                             std::optional<size_t>       pid,
+                             std::optional<size_t>       tid) const
+{
+    if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
+    {
+        track.node_info = node_it->second;
+    }
+    if(pid.has_value())
+    {
+        if(const auto process_it = process_utility.find(pid.value());
+           process_it != process_utility.end())
+        {
+            track.process_info = process_it->second;
+        }
+    }
+    if(tid.has_value())
+    {
+        if(const auto thread_it = thread_utility.find(tid.value());
+           thread_it != thread_utility.end())
+        {
+            track.thread_info = thread_it->second;
+        }
+    }
+}
+
+void
 reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
 {
     // No rocpd_track dependency: "thread" and "pmc_agent" tracks are derived
@@ -213,21 +241,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
             track_info_ptr->end_ts   = stats.max_end;
         }
 
-        if(const auto node_it = node_utility.find(topo.nid);
-           node_it != node_utility.end())
-        {
-            track_info_ptr->node_info = node_it->second;
-        }
-        if(const auto process_it = process_utility.find(topo.pid);
-           process_it != process_utility.end())
-        {
-            track_info_ptr->process_info = process_it->second;
-        }
-        if(const auto thread_it = thread_utility.find(topo.tid);
-           thread_it != thread_utility.end())
-        {
-            track_info_ptr->thread_info = thread_it->second;
-        }
+        link_owner(*track_info_ptr, topo.nid, topo.pid, topo.tid);
 
         tracks.push_back(track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, no_db_id);
@@ -257,21 +271,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
             track_info_ptr->end_ts   = stats.max_end;
         }
 
-        if(const auto node_it = node_utility.find(stats.nid);
-           node_it != node_utility.end())
-        {
-            track_info_ptr->node_info = node_it->second;
-        }
-        if(const auto process_it = process_utility.find(stats.pid);
-           process_it != process_utility.end())
-        {
-            track_info_ptr->process_info = process_it->second;
-        }
-        if(const auto thread_it = thread_utility.find(stats.tid);
-           thread_it != thread_utility.end())
-        {
-            track_info_ptr->thread_info = thread_it->second;
-        }
+        link_owner(*track_info_ptr, stats.nid, stats.pid, stats.tid);
 
         tracks.push_back(track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, sample_track_id);
@@ -305,15 +305,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
                                                                   row.max_value.value() };
         }
 
-        if(const auto node_it = node_utility.find(row.nid); node_it != node_utility.end())
-        {
-            track_ptr->node_info = node_it->second;
-        }
-        if(const auto process_it = process_utility.find(row.pid);
-           process_it != process_utility.end())
-        {
-            track_ptr->process_info = process_it->second;
-        }
+        link_owner(*track_ptr, row.nid, row.pid);
 
         tracks.push_back(track_ptr);
     }
@@ -343,10 +335,7 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         track_ptr->start_ts    = start_ts;
         track_ptr->end_ts      = end_ts;
 
-        if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
-        {
-            track_ptr->node_info = node_it->second;
-        }
+        link_owner(*track_ptr, nid);
 
         tracks.push_back(track_ptr);
     };
@@ -369,59 +358,38 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         track_ptr->start_ts    = start_ts;
         track_ptr->end_ts      = end_ts;
 
-        if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
-        {
-            track_ptr->node_info = node_it->second;
-        }
-        if(const auto process_it = process_utility.find(pid);
-           process_it != process_utility.end())
-        {
-            track_ptr->process_info = process_it->second;
-        }
+        link_owner(*track_ptr, nid, pid);
 
         tracks.push_back(track_ptr);
     };
 
     const auto& category_statements = stmts.track_category_statements();
 
-    for(const auto& row : category_statements.kernel_dispatch_agent_queue().to_vector())
-    {
-        add_agent_queue_track(
-            reader_types::track_kind_t::kernel_dispatch_agent_queue,
-            fmt::format("Kernel Dispatch [{}] Queue {}", row.agent_id, row.queue_id),
-            row.nid,
-            row.agent_id,
-            row.queue_id,
-            row.count,
-            row.min_start.value_or(0),
-            row.max_end.value_or(0));
-    }
+    auto add_agent_queue_tracks =
+        [&](reader_types::track_kind_t kind, std::string_view label, const auto& rows) {
+            for(const auto& row : rows)
+            {
+                add_agent_queue_track(
+                    kind,
+                    fmt::format("{} [{}] Queue {}", label, row.agent_id, row.queue_id),
+                    row.nid,
+                    row.agent_id,
+                    row.queue_id,
+                    row.count,
+                    row.min_start.value_or(0),
+                    row.max_end.value_or(0));
+            }
+        };
 
-    for(const auto& row : category_statements.memory_allocate_agent_queue().to_vector())
-    {
-        add_agent_queue_track(
-            reader_types::track_kind_t::memory_allocate_agent_queue,
-            fmt::format("Memory Allocate [{}] Queue {}", row.agent_id, row.queue_id),
-            row.nid,
-            row.agent_id,
-            row.queue_id,
-            row.count,
-            row.min_start.value_or(0),
-            row.max_end.value_or(0));
-    }
-
-    for(const auto& row : category_statements.memory_copy_agent_queue().to_vector())
-    {
-        add_agent_queue_track(
-            reader_types::track_kind_t::memory_copy_agent_queue,
-            fmt::format("Memory Copy [{}] Queue {}", row.agent_id, row.queue_id),
-            row.nid,
-            row.agent_id,
-            row.queue_id,
-            row.count,
-            row.min_start.value_or(0),
-            row.max_end.value_or(0));
-    }
+    add_agent_queue_tracks(reader_types::track_kind_t::kernel_dispatch_agent_queue,
+                           "Kernel Dispatch",
+                           category_statements.kernel_dispatch_agent_queue().to_vector());
+    add_agent_queue_tracks(reader_types::track_kind_t::memory_allocate_agent_queue,
+                           "Memory Allocate",
+                           category_statements.memory_allocate_agent_queue().to_vector());
+    add_agent_queue_tracks(reader_types::track_kind_t::memory_copy_agent_queue,
+                           "Memory Copy",
+                           category_statements.memory_copy_agent_queue().to_vector());
 
     std::map<std::tuple<size_t, size_t, size_t>, track_range_stats_t> stream_stats;
     auto accumulate_stream = [&](const auto& rows) {
