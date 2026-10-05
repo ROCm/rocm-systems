@@ -264,7 +264,11 @@ jobs:
           # required not to introduce. The C++ half (CLR/amdhip64, the bulk of
           # the wall clock) is cached; extend to HIP only after a run proves
           # the arch-embedding check still passes on a fully cached build.
+          # Cross-check only: put the capture build first in the test binaries'
+          # RUNPATH, so a set-group-ID copy, which ignores LD_LIBRARY_PATH, still
+          # loads it on the bare runners.
           cmake -S projects/hrr -B build/hrr -GNinja -Wno-dev \
+            -DCMAKE_BUILD_RPATH="${GITHUB_WORKSPACE}/build/clr/hipamd/lib" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
