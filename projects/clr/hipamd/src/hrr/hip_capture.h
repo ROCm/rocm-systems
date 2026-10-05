@@ -35,7 +35,8 @@ struct HipDispatchTable;
 // Public API — called from hip_context.cpp and hip_capture.cpp
 // ---------------------------------------------------------------------------
 
-// Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and non-empty)
+// Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
+// and the process not started in secure-execution mode)
 bool hip_capture_enabled();
 
 // Return the output directory from the env var
