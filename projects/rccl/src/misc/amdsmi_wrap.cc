@@ -878,7 +878,7 @@ bool amdSmiDiagLoadCalled = false;
 ncclResult_t amdSmiDiagLoadResult = ncclSystemError;
 } // namespace
 
-// A missing symbol or a failed query makes the value unavailable; it is not an error of the job.
+// A missing symbol (logged once at load) or a failed query makes the value unavailable; it is not an error of the job.
 #define AMDSMIDIAG(fn, ...) \
   do { \
     if (amdSmiDiag.fn == nullptr) return ncclSystemError; \
@@ -913,7 +913,10 @@ static ncclResult_t amd_smi_diagLoadImpl() {
     {(void**)&amdSmiDiag.getGpuTotalEccCount, "amdsmi_get_gpu_total_ecc_count"},
     {(void**)&amdSmiDiag.getGpuXgmiLinkStatus, "amdsmi_get_gpu_xgmi_link_status"},
   };
-  for (Symbol sym : symbols) *sym.ppfn = dlsym(libhandle, sym.name);
+  for (Symbol sym : symbols) {
+    *sym.ppfn = dlsym(libhandle, sym.name);
+    if (*sym.ppfn == nullptr) INFO(NCCL_RAS, "RAS diagnostics: %s not found in %s", sym.name, RCCL_AMDSMI_LIBNAME);
+  }
 
   // The RCCL_USE_AMD_SMI_LIB path may have initialized the library already; amdsmi_init is not called twice.
   if (!amdSmiLibInitialized) AMDSMIDIAG(init, AMDSMI_INIT_AMD_GPUS);
