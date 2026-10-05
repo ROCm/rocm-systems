@@ -55,6 +55,7 @@
 #include <cstdint>
 #include <set>
 #include <sstream>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 
@@ -935,6 +936,31 @@ TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
 {
     EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(2, 0),
               static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
+// Exercised on hosts without /dev/kfd (e.g. WSL2/DXG): the KFD-only device lock and
+// PTL controls must degrade to "unsupported" so PMC collection continues without them.
+TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
+{
+    if(agent::kfd_device_available()) GTEST_SKIP() << "/dev/kfd is available";
+
+    rocprofiler_agent_t agent{};
+    agent.gpu_id = 1;
+
+    ::testing::internal::CaptureStdout();
+
+    EXPECT_FALSE(counters::counter_collection_has_device_lock());
+    EXPECT_FALSE(counters::ptl_control_supported());
+    EXPECT_EQ(counters::counter_collection_device_lock(&agent, true),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_device_unlock(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_ptl_disable(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_ptl_enable(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+
+    EXPECT_EQ(::testing::internal::GetCapturedStdout(), std::string{});
 }
 
 TEST_F(device_counting_service_test, sync_grbm_verify)

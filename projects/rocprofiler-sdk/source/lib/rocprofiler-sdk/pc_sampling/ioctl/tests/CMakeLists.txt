@@ -2,7 +2,8 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_LIB_PC_SAMPLING_IOCTL_TEST_SOURCES pc_sampling_versioning.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_IOCTL_TEST_SOURCES pc_sampling_versioning.cpp
+                                                   kfd_unavailable.cpp)
 
 add_executable(pcs-ioctl-test)
 

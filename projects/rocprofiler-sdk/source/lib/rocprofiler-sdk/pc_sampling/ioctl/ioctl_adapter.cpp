@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -222,6 +223,10 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioct
 rocprofiler_status_t
 is_pc_sampling_supported()
 {
+    // PC sampling is only implemented on top of the KFD ioctl interface, so it is
+    // unavailable on platforms without /dev/kfd (e.g. WSL2/DXG).
+    if(get_kfd_fd() < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+
     // Verify KFD 1.16 version
     rocprofiler_ioctl_version_info_t ioctl_version = {.major_version = 0, .minor_version = 0};
     auto                             status        = get_ioctl_version(ioctl_version);
@@ -462,7 +467,8 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    static auto _v = kfd_open();
+    // Skip the open (and its CI-fatal warning) when the KFD device node is absent
+    static auto _v = ::rocprofiler::agent::kfd_device_available() ? kfd_open() : -1;
     return _v;
 }
 
