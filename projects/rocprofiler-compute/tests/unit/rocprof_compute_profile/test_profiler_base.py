@@ -591,7 +591,6 @@ def _make_rpc_args(
         membw_analysis=membw_analysis,
         experimental=experimental,
         set_selected=None,
-        roof_only=False,
         bench_only=False,
         no_roof=False,
         name="unit-test",

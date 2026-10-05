@@ -16,6 +16,19 @@ PANEL_SHORTCUTS = {
     "roofline": "4",
 }
 
+# Profile options that choose what to collect. Options in the same group can be
+# combined; options from different groups cannot.
+PROFILE_SELECTION_GROUPS = (
+    ("--block", "--speed-of-light", "--memory-chart", "--roofline"),
+    ("--set",),
+    ("--roofline-bench-only",),
+)
+
+PROFILE_SELECTION_CONFLICT = (
+    "--set and --roofline-bench-only cannot be used with each other or with block "
+    "selection (--block, --speed-of-light, --memory-chart, --roofline)."
+)
+
 ROOFLINE_MEM_LEVELS = ["ALL", "HBM", "L2", "vL1D", "L0", "LDS"]
 ROOFLINE_DATA_TYPES = [
     "FP4",
@@ -216,6 +229,7 @@ def omniarg_parser(
 Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_sol --speed-of-light -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roofline -- ./vcopy -n 1048576 -b 256
@@ -399,9 +413,20 @@ Examples:
             "(e.g. 12,13,14).\n"
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-blocks <arch> to see\n"
-            "all valid block ids and aliases.\n"
-            "Cannot be used with --set, --roofline or --roofline-bench-only."
+            "all valid block ids and aliases.\n" + _cannot_be_used_with("--block")
         ),
+    )
+    _add_panel_shortcut(
+        profile_group,
+        "speed_of_light",
+        "Profile the Speed of Light block.",
+        help_suffix="\n" + _cannot_be_used_with("--speed-of-light"),
+    )
+    _add_panel_shortcut(
+        profile_group,
+        "memory_chart",
+        "Profile the Memory Chart block.",
+        help_suffix="\n" + _cannot_be_used_with("--memory-chart"),
     )
     profile_group.add_argument(
         "--list-sets",
@@ -416,8 +441,7 @@ Examples:
         help=(
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
-            "For available sets, see --list-sets.\n"
-            "Cannot be used with --block, --roofline or --roofline-bench-only."
+            "For available sets, see --list-sets.\n" + _cannot_be_used_with("--set")
         ),
     )
     profile_group.add_argument(
@@ -476,17 +500,15 @@ Examples:
     )
 
     ## Roofline Command Line Options
-    roofline_group.add_argument(
-        "--roofline",
+    _add_panel_shortcut(
+        roofline_group,
+        "roofline",
+        "Profile the roofline block.",
         "--roof-only",
-        dest="roof_only",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "Profile roofline data only.\n"
-            "Cannot be used with --block, --set or --roofline-bench-only.\n"
-            "Deprecated alias: --roof-only."
+        help_suffix=(
+            "\nUsed alone, only roofline data is profiled.\n"
+            + _cannot_be_used_with("--roofline")
+            + "\nDeprecated alias: --roof-only."
         ),
     )
     roofline_group.add_argument(
@@ -500,8 +522,8 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with --block, --set, --roofline or --no-roof.\n"
-            "Deprecated alias: --bench-only."
+            + _cannot_be_used_with("--roofline-bench-only", "--no-roof")
+            + "\nDeprecated alias: --bench-only."
         ),
     )
     roofline_group.add_argument(
@@ -1018,8 +1040,24 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
     return None
 
 
+def _cannot_be_used_with(option: str, *extra_options: str) -> str:
+    """Help line listing the options from other profile selection groups."""
+    others = [
+        other
+        for group in PROFILE_SELECTION_GROUPS
+        if option not in group
+        for other in group
+    ]
+    others.extend(extra_options)
+    return f"Cannot be used with {', '.join(others[:-1])} or {others[-1]}."
+
+
 def _add_panel_shortcut(
-    group: argparse._ArgumentGroup, dest: str, description: str
+    group: argparse._ArgumentGroup,
+    dest: str,
+    description: str,
+    *old_names: str,
+    help_suffix: str = "",
 ) -> None:
     """Add the --speed-of-light, --memory-chart or --roofline option for dest."""
     others = ["-b"] + [
@@ -1027,12 +1065,14 @@ def _add_panel_shortcut(
     ]
     group.add_argument(
         "--" + dest.replace("_", "-"),
+        *old_names,
         dest=dest,
         default=False,
         action="store_true",
         help=(
             f"{description} Same as -b {PANEL_SHORTCUTS[dest]}.\n"
             f"Can be combined with {', '.join(others[:-1])}, and {others[-1]}."
+            + help_suffix
         ),
     )
 

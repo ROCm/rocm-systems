@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import config
 from argparser import (
+    PROFILE_SELECTION_CONFLICT,
     CliHelpFormatter,
     apply_panel_shortcuts,
     omniarg_parser,
@@ -294,11 +295,9 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
-        # Handle list operations first - these are independent and exit immediately
-        if getattr(self.__args, "list_sets", False):
-            return
-        if getattr(self.__args, "list_available_metrics", False):
-            return
+        apply_panel_shortcuts(self.__args, "filter_blocks")
+        # True when only block 4 is selected, by --roofline or -b 4
+        self.__args.roof_only = self.__args.filter_blocks == ["4"]
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -548,25 +547,19 @@ class RocProfCompute:
     def _validate_profile_mode_arguments(self) -> None:
         """Validate that the profile-mode invocation is internally consistent.
 
-        Covers the mutual exclusion among action-selection flags
-        (--block, --set, --roofline, --roofline-bench-only) and the
-        --roofline-bench-only / --no-roof conflict.
+        Block selection, --set and --roofline-bench-only exclude each other, and
+        --roofline-bench-only cannot be combined with --no-roof.
         """
         args = self.__args
         if (
             sum((
                 bool(getattr(args, "filter_blocks", None)),
                 bool(getattr(args, "set_selected", None)),
-                bool(getattr(args, "roof_only", False)),
                 bool(getattr(args, "bench_only", False)),
             ))
             > 1
         ):
-            console_error(
-                "--block, --set, --roofline, and --roofline-bench-only"
-                " are mutually exclusive options."
-                " Please use only one of them."
-            )
+            console_error(PROFILE_SELECTION_CONFLICT)
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--roofline-bench-only cannot be used with --no-roof.")
