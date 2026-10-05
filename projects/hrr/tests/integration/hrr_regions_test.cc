@@ -43,7 +43,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <regex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -599,13 +598,7 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
       // support, or every reservation failed. If blocks were relocated and the
       // overrun still did not fault, the guard is not doing its job.
       INFO("Guard reported a clean run; it must not have relocated anything");
-      // The summary names the guard modes before the count
-      // ("Guard          : blocks 0 block relocation(s), ..."), so read the
-      // number itself rather than match the text around it.
-      std::smatch relocated;
-      REQUIRE(std::regex_search(
-          out, relocated, std::regex(R"((\d+) block relocation\(s\))")));
-      CHECK(relocated[1].str() == "0");
+      CHECK(out.find(": 0 block relocation(s)") != std::string::npos);
     }
   }
 }
