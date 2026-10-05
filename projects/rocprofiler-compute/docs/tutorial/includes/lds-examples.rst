@@ -19,7 +19,7 @@ Finally, we generate our ``rocprof-compute profile`` as:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n lds --no-roof -- ./lds
+   $ rocprof-compute profile -n lds -- ./lds
 
 .. _lds-bandwidth:
 

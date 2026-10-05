@@ -198,8 +198,7 @@ def eval_metric(
     debug: bool,
 ) -> None:
     """Execute the expr string for each metric in the df."""
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
+    # confirm no illogical counter values
     gui_active_counter = next(
         (
             counter
@@ -208,11 +207,7 @@ def eval_metric(
         ),
         None,
     )
-    if (
-        (not roof_only_run)
-        and gui_active_counter is not None
-        and (raw_pmc_df[gui_active_counter] == 0).any()
-    ):
+    if gui_active_counter is not None and (raw_pmc_df[gui_active_counter] == 0).any():
         console_warning(f"Detected {gui_active_counter} == 0")
         console_error("Halting execution for warning above.")
 

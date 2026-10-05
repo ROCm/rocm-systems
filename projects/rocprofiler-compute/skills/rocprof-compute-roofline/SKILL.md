@@ -22,13 +22,13 @@ rocprof-compute profile --name <workload_name> -- <application> <args>
 ```
 
 Collecting it runs microbenchmarks in addition to profiling the application,
-which takes extra time. `--no-roof` skips them when the user only wants
-counters.
+which takes extra time. They are skipped when `-b` or `--set` selects blocks
+that leave out roofline (block 4), or with the deprecated `--no-roof`.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
 supported architecture does. On MI100 the benchmark is skipped and the profile
 still succeeds, so a missing roofline there is not a mistake in how the profile
-was run. Never tell an MI100 user to re-profile without `--no-roof`; use
+was run. Never tell an MI100 user to re-profile to get roofline; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
@@ -45,7 +45,7 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more optio
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
@@ -85,11 +85,11 @@ the hierarchy.
 
 ```bash
 # Ceilings for the precision the kernel actually uses
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline \
     -R FP16,BF16
 
 # Ceilings for a specific level
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline \
     -m HBM,L2
 ```
 
@@ -107,7 +107,7 @@ L2 and vL1D show whether caches are absorbing the traffic.
 
 | Cause | What to do |
 |---|---|
-| Profiled with `--no-roof` | re-profile without it |
+| Profiled with `--no-roof`, or `-b`/`--set` without block 4 | re-profile without `--no-roof`, adding `--roofline` to the selection |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 

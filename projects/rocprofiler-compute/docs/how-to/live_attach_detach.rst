@@ -8,7 +8,7 @@ Dynamic process attachment in ROCm Compute Profiler
 
 Dynamic process attachment is a new feature of ROCm Compute Profiler that allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
 
-A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1,4.1.1,5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
+A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1,5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
 Detachment can be achieved in two ways:
 
@@ -26,13 +26,13 @@ For using live attach and detach the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1,4.1.1,5.1.1 --no-roof -VVV --attach-pid <process id of workload>
+   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1,5.1.1 -VVV --attach-pid <process id of workload>
 
-   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload>
+   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats -VVV --attach-pid <process id of workload>
 
-   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1,4.1.1,5.1.1 --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
+   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1,5.1.1 -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
-   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
+   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
 Analysis options
 ================

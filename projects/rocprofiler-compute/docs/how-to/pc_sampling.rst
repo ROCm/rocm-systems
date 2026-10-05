@@ -34,7 +34,7 @@ For using profiling options for PC sampling the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
+   $ rocprof-compute profile -n pc_test --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
 
 Profile multi-process workloads
 -------------------------------

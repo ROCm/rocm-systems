@@ -36,7 +36,7 @@ How it works
 
 ROCm Compute Profiler is a Python-based tool that profiles an application in up to two
 stages: it first replays the application as many times as needed to collect the requested
-hardware counters per kernel dispatch, then, unless disabled with ``--no-roof``, runs a set
+hardware counters per kernel dispatch, then, unless the selected blocks leave out roofline, runs a set
 of accelerator-specific micro-benchmarks to establish the empirical roofline. The roofline
 model is not available on accelerators pre-MI200. See :ref:`profiling-routine` for the exact
 stage breakdown.
