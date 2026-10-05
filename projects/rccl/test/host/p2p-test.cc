@@ -3642,6 +3642,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessPeer_SelectsDirectAndFillsConnect
     EXPECT_EQ(info->rank, myInfo_.rank);
     EXPECT_EQ(info->read, 0);
     EXPECT_TRUE(recv.conn.flags & NCCL_P2P_WRITE);
+    EXPECT_TRUE(recv.conn.flags & NCCL_GPU_PRODUCER);
 
     p2pTransport.recv.free(&comm_, &recv);
 }
@@ -3792,6 +3793,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_IntermediateHop_SelectsIntermediateAndRoutes
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_INTERMEDIATE);
     EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 1);
+    EXPECT_TRUE(recv.conn.flags & NCCL_GPU_PRODUCER);
 
     p2pTransport.recv.free(&comm_, &recv);
 }
@@ -3811,8 +3813,51 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCuMemPeer_SelectsCumem)
     auto* res = static_cast<p2pResources*>(recv.transportResources);
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_CUMEM);
+    EXPECT_TRUE(recv.conn.flags & NCCL_GPU_PRODUCER);
 
     p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_LeavesTailOnSysAcquire)
+{
+    useMemcpy = 1;
+    std::unique_ptr<int, void (*)(int*)> restoreMemcpy(&useMemcpy, [](int* v) { *v = 0; });
+    ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    EXPECT_EQ(static_cast<p2pResources*>(recv.transportResources)->type, P2P_IPC);
+    EXPECT_TRUE(recv.conn.flags & NCCL_P2P_WRITE);
+    EXPECT_FALSE(recv.conn.flags & NCCL_GPU_PRODUCER);
+    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(recv.conn.flags));
+
+    restoreMemcpy.reset();  // setup never opened the CE shm segment, so free must take the non-CE arm
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST(RecvTailAcquireMicrotest, ProxyOrCopyEnginePublishedPayload_NeedsSysAcquire)
+{
+    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(0));  // NET/CollNet no-GDR, SHM
+    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(NCCL_P2P_WRITE));  // P2P CE
+    EXPECT_TRUE(ncclRecvTailNeedsSysAcquire(NCCL_P2P_READ | NCCL_NVLS_MIN_POLL));
+}
+
+TEST(RecvTailAcquireMicrotest, GpuOrGdrNicProducedPayload_StaysRelaxed)
+{
+    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_WRITE));
+    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER | NCCL_P2P_READ));
+    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_GPU_PRODUCER));
+    EXPECT_FALSE(ncclRecvTailNeedsSysAcquire(NCCL_DIRECT_NIC));
+}
+
+TEST(RecvTailAcquireMicrotest, GpuProducerBitIsDistinctFromOtherConnFlags)
+{
+    EXPECT_EQ(NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL), 0);
 }
 
 TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)

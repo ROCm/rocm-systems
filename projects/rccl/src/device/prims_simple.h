@@ -28,7 +28,7 @@ class Primitives<T, RedOp, Fan, Direct,
                        RolePostSend = 0x10, RolePostRecv = 0x20, Aborted = 0x40, NetRegMode = 0x80,
                        ConnFifoEnabled = 0x100, DirectWrite = 0x200, DirectRead = 0x400, PatMode = 0x800,
                        NvlsMinPolling = 0x1000, NetDeviceUnpack = 0x2000, AnyNetDeviceUnpack = 0x4000,
-                       RoleWaitPatNvls = 0x8000, RolePostPatNvls = 0x10000;
+                       RoleWaitPatNvls = 0x8000, RolePostPatNvls = 0x10000, SysAcquireTail = 0x20000;
   const int tid, tidInBlock;
   const int nthreads;
   int nworkers;
@@ -92,7 +92,7 @@ class Primitives<T, RedOp, Fan, Direct,
     barrier();
   }
 
-  inline __device__ uint64_t loadStepValue(uint64_t* ptr) {
+  inline __device__ uint64_t loadStepValue(uint64_t* ptr, bool sysAcquire = true) {
 #if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
     if (flags & NvlsMinPolling) {
       uint64_t ans;
@@ -108,9 +108,11 @@ class Primitives<T, RedOp, Fan, Direct,
     //
     // To be revisited for correctness on gfx1250
 #if defined(__gfx950__)
-    // NET no-GDR can publish host-staged payloads from the CPU proxy.
-    // Acquire the tail before GPU workers consume the payload.
-    return ld_acquire_sys_global(ptr);
+    // Proxy or copy-engine published payloads (NET no-GDR, SHM, P2P CE) need a sys-scope tail acquire (#6497).
+    if (sysAcquire) {
+      return ld_acquire_sys_global(ptr);
+    }
+    return __atomic_load_n(ptr, __ATOMIC_RELAXED);
 #elif defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
@@ -129,7 +131,7 @@ class Primitives<T, RedOp, Fan, Direct,
       repeat = 50;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         __builtin_amdgcn_s_sleep(1);
-        connStepCache = loadStepValue(connStepPtr);
+        connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireTail) != 0);
         if (checkAbort(flags, Aborted, spins)) break;
         // if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         if (spins == 0 && repeat > 0) {
@@ -382,7 +384,7 @@ public:
           const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
           int spins = 0;
           while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
-            connStepCache = loadStepValue(connStepPtr);
+            connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireTail) != 0);
             if (checkAbort(flags, Aborted, spins)) break;
           }
           void** ptrs = isSendNotRecv ? ncclShmem.groups[group].dsts : ncclShmem.groups[group].srcs;
@@ -541,8 +543,11 @@ private:
         ncclShmem.groups[group].recvConns[index] =
           conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
+      if (ncclRecvTailNeedsSysAcquire(conn->flags)) {
+        flags |= SysAcquireTail;
+      }
       connStepPtr = conn->tail;
-      connStepCache = loadStepValue(connStepPtr);
+      connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireTail) != 0);
       connStepSize = conn->stepSize / sizeof(T);
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
       if (conn->connFifo != nullptr) {
@@ -595,7 +600,7 @@ private:
           conn; // WaitSend role saves since that's who needs it in setDataPtrs()
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
       connStepPtr = conn->head;
-      connStepCache = loadStepValue(connStepPtr);
+      connStepCache = loadStepValue(connStepPtr, false);
       connStepSize = conn->stepSize / sizeof(T);
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
       if (Direct) {

@@ -600,6 +600,9 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
     resources->type = P2P_INTERMEDIATE;
     info->rank = intermediateRank;
   }
+  if (!useMemcpy) {
+    recv->conn.flags |= NCCL_GPU_PRODUCER;
+  }
 
   memset(&req, '\0', sizeof(req));
   req.size = recvSize;
