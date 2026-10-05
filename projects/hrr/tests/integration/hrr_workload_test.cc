@@ -3549,8 +3549,11 @@ TEST_CASE("Unit_HRR_FailedShimCalls_Direct", "[.][hrr-direct]") {
   props.location.id = 0;
   hipMemPool_t pool = nullptr;
   HRR_HIP_CHECK(hipMemPoolCreate(&pool, &props));
-  int32_t opportunistic = 1;
-  HRR_HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &opportunistic));
+  // The reuse policy is a 4-byte int. The word after it is a sentinel that an
+  // 8-byte copy in capture would record as the value's high half.
+  int32_t opportunistic[2] = {1, 0x5a5a5a5a};
+  HRR_HIP_CHECK(
+      hipMemPoolSetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &opportunistic[0]));
   hipStream_t stream = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&stream));
 

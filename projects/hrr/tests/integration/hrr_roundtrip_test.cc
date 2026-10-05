@@ -1595,6 +1595,8 @@ HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
  *     rejected hipMemPoolSetAttribute.
  *   - The archive holds only the accepted calls and replays cleanly. Replay
  *     issues every recorded call again, so a recorded rejected call stops it.
+ *   - The accepted 4-byte reuse policy is recorded as exactly 1: an 8-byte copy
+ *     would also take the sentinel word the workload put after it.
  */
 HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};
@@ -1618,6 +1620,22 @@ HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
         "hipStreamSetAttribute", "hipMemGetAllocationGranularity"}) {
     INFO("API: " << api);
     CHECK(counts.count(api) == 0);
+  }
+
+  // The accepted reuse policy is an int32_t, so capture copies 4 bytes and the
+  // sentinel the workload put after it stays out of the recorded value.
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    const auto ev = std::find_if(arc.events.begin(), arc.events.end(), [](const hrr::Event& e) {
+      return e.header().event_type == static_cast<uint16_t>(HRR_API_HIPMEMPOOLSETATTRIBUTE);
+    });
+    REQUIRE(ev != arc.events.end());
+    hrr_args_hipMemPoolSetAttribute a{};
+    REQUIRE(ev->raw_payload.size() >= sizeof(a));
+    std::memcpy(&a, ev->raw_payload.data(), sizeof(a));
+    CHECK(a.attr == static_cast<int32_t>(hipMemPoolReuseAllowOpportunistic));
+    CHECK(a.value_u64 == 1);
   }
 
   auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path));
