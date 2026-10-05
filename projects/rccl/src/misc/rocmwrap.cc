@@ -151,7 +151,7 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
     bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.2.0 (or ROCm 7.0.2.x backport)");
+      WARN("cuMem support requires ROCm >= 7.12 or the 7.0.2.x backport (found %d)", cudaDriverVersion);
       supported = 0;
     }
   }
