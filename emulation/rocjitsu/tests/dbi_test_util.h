@@ -377,14 +377,15 @@ inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uin
 // Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
 // kernarg segment pointer. The entry prologue rejects a kernel without one, so this
 // is the only builder here that reaches prologue placement rather than a rejection
-// path.
-inline std::vector<uint8_t> make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words,
-                                                    uint32_t private_bytes, uint32_t e_flags,
-                                                    uint32_t kernarg_size, bool wave32 = false,
-                                                    uint32_t granulated_sgpr_count = 3,
-                                                    uint64_t entry_text_offset = 0) {
+// path. The VGPR defaults leave v0..v3 ordinary on CDNA, as make_amdgpu_kernel_elf's
+// do; a probe taking more argument dwords needs a wider window.
+inline std::vector<uint8_t>
+make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
+                        uint32_t e_flags, uint32_t kernarg_size, bool wave32 = false,
+                        uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0,
+                        uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count, e_flags,
-                                /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+                                granulated_vgpr_count, accum_offset,
                                 /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
                                 /*kd_crosses_section=*/false, wave32,
