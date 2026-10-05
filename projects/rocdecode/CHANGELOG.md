@@ -17,6 +17,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
+* Fixed HEVC decode failure when a CRA picture starts the coded video sequence on a decoder reused with a new parser. Short-term "follow" reference set entries that name a picture absent from the DPB are now marked invalid instead of being emitted as real surface indices.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
