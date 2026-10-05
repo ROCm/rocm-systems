@@ -357,6 +357,14 @@ ncclResult_t IbCastRmaIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t
   return IbCastGinIbInitType(ctx, commId, logFunction, ncclParamCastGinType());
 }
 
+// NCCL 2.32 RMA v16 query. Do not claim that a signal flushes all earlier puts on IB-CAST, so
+// GIN barriers keep issuing explicit flushes (pre-2.32 behaviour).
+ncclResult_t IbCastRmaIbProxyGetRmaProperties(void* collComm, ncclRmaProperties_t* rmaProps) {
+  (void)collComm;
+  rmaProps->flushesAllPutsOnAnySignal = false;
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastRmaIbProxyGetProperties(int dev, ncclNetProperties_t* props) {
   NCCLCHECK(netIbCast.getProperties(dev, props));
   props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
@@ -811,6 +819,7 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 ncclRma_t IbCastRmaIbProxy = {"RMA_IB_PROXY",
                               IbCastRmaIbProxyInit,
                               IbCastDevices,
+                              IbCastRmaIbProxyGetRmaProperties,
                               IbCastRmaIbProxyGetProperties,
                               IbCastListen,
                               IbCastRmaIbProxyConnect,

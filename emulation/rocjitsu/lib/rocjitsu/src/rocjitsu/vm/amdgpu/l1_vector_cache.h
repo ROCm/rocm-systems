@@ -64,12 +64,14 @@ public:
   /// @param element_lane_masks Empty when every element uses @p lane_mask;
   /// otherwise contains exactly @p num_elems masks. In the latter form,
   /// @p lane_mask is the union of lanes valid for at least one element.
+  /// Private batching is opt-in for unobserved functional requests whose source
+  /// data remain in instruction-owned storage until the operation completes.
   VmAccessOutcome store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                         uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
                         uint32_t wf_size, uint32_t vmid = 0, uint32_t addr_stride = 0,
                         uint32_t addr_base_offset = 0,
                         std::span<const uint64_t> element_lane_masks = {},
-                        uint32_t swizzle_unit = 4);
+                        uint32_t swizzle_unit = 4, bool allow_private_batch = false);
 
   void invalidate(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all();
@@ -86,6 +88,13 @@ private:
                              bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
   VmAccessOutcome write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
                               uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome store_swizzled(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                                 uint32_t num_elems, const uint8_t *src, Mtype mtype,
+                                 bool non_temporal, uint32_t vmid, uint32_t addr_stride,
+                                 uint32_t addr_base_offset,
+                                 std::span<const uint64_t> element_lane_masks,
+                                 uint32_t swizzle_unit, bool allow_private_batch,
+                                 RequestMtypeResolver &mtypes);
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true);

@@ -18,6 +18,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/init.cc
     src/transport/net_ib_cast/p2p.cc
     src/transport/net_ib_cast/net_ib_ops_fault.cc
+    src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc
     src/transport/net_ib_cast/p2p_resiliency.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc
@@ -25,6 +26,8 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/scheduler.cc
     src/transport/net_ib_cast/gin.cc
     src/transport/net_ib_cast/qp_sharing.cc
+    src/transport/net_ib_cast/multiplane.h
+    src/transport/net_ib_cast/multiplane.cc
 )
 
 # The cast headers (common_cast.h, p2p_cast.h, etc.) live in this directory.
