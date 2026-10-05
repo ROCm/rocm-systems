@@ -20,6 +20,7 @@
 /// AMD ISA specification.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "util/amdgpu_exp.h"
 #include "util/amdgpu_log.h"
 #include "util/amdgpu_rcp.h"
@@ -196,15 +197,11 @@ inline uint32_t execute_pseudo_f16(pseudo_scalar::Operation operation, float sou
     value = map_f16<HalfOperation::SQRT>(source, denorm_mode, fp16_ovfl, true);
     break;
   }
-  value = fp_mode::apply_omod_f16(value, omod, fp16_ovfl);
-  if (clamp) {
-    const uint32_t bits = std::bit_cast<uint32_t>(value);
-    if ((bits & 0x80000000u) || (bits & 0x7fffffffu) > 0x7f800000u)
-      value = 0.0f;
-    else if (bits > 0x3f800000u)
-      value = 1.0f;
-  }
-  return fp_mode::finalize_omod_f16(util::f32_to_f16(value), omod);
+  // The mapped value is already a half. TRANS OMOD overflow rounds to nearest,
+  // and CLAMP turns a NaN into +0 on every target with these instructions.
+  const output_modifier::Policy policy{
+      .omod = omod, .clamp = clamp, .clamp_nan_to_zero = true, .fp16_ovfl = fp16_ovfl};
+  return output_modifier::apply<fp_format::F16>(uint32_t{util::f32_to_f16(value)}, policy);
 }
 
 /// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).

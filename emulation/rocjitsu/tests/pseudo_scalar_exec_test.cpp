@@ -1015,6 +1015,11 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
                                                        false, 0, 0, 0, false, false),
             0x00008000u);
+  // gfx1201 V_S_RCP_F16 div:2: halving a result in the lowest normal binade
+  // keeps its sign, as for the vector forms.
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, util::f16_to_f32(0xF037u),
+                                                       false, false, 0, 3, 3, false, false),
+            0x00008000u);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllProfilesAndInstructions, PseudoScalarExecTest,
