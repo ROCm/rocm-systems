@@ -414,7 +414,13 @@ Filtering options
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
    Give all values after one ``-b``, for example ``-b 2 5``. A repeated ``-b``
    keeps only its own values.
-   Note that this option cannot be used with ``--roofline`` or ``--set``.
+   Note that this option cannot be used with ``--set`` or ``--roofline-bench-only``.
+
+``--speed-of-light``, ``--memory-chart``, ``--roofline``
+   Short forms of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
+   Speed-of-Light, Memory Chart, and Roofline blocks.
+   They can be combined with each other and with ``-b``.
+   For example, ``--speed-of-light --roofline`` is the same as ``-b 2 4``.
 
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
@@ -424,7 +430,7 @@ Filtering options
 
 ``--set <metric-set>``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
-   Cannot be used with ``--roofline`` or ``--block``.
+   Cannot be used with ``--block``, ``--speed-of-light``, ``--memory-chart``, or ``--roofline``.
    See :ref:`profiling-metric-sets`.
 
 .. tip::
@@ -650,7 +656,7 @@ Metric sets filtering
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
-This option cannot be used with ``--roofline`` and ``--block``.
+This option cannot be used with ``--block``, ``--speed-of-light``, ``--memory-chart``, or ``--roofline``.
 
 .. code-block:: shell-session
 
@@ -732,7 +738,9 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  ``--roofline`` cannot be used with ``--block``, ``--set``, or ``--roofline-bench-only``.
+  * ``--roofline`` is the same as ``-b 4``.
+  * It can be combined with ``-b``, ``--speed-of-light``, and ``--memory-chart``.
+  * It cannot be used with ``--set`` or ``--roofline-bench-only``.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
@@ -836,8 +844,8 @@ This is useful for:
 
 .. note::
 
-  ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--roofline``,
-  or ``--no-roof``.
+  ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--speed-of-light``,
+  ``--memory-chart``, ``--roofline``, or ``--no-roof``.
 
 .. code-block:: shell-session
 
