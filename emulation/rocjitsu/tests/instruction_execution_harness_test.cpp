@@ -7836,6 +7836,100 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
     wf->halt();
 }
 
+TEST(HwregTest, Gfx1250GetregReadsWgpId) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_shader_engine_location(1, 13, 8);
+
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  // The instruction emitted by tl.extra.hip.smid().
+  constexpr uint16_t kWgpId = encode_hwreg(23, 10, 4);
+  const auto words = encode_sopk(cdna5::kSGetregB32Sopk, 4, kWgpId);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot) {
+    auto *wf = cu->dispatch_wf(0, slot, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 5u);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 5u);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23, 11, 2), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 2u);
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, kWgpId, 0), amdgpu::HwregAccessResult::ReadOnly);
+    // The remaining identity fields still have no modeled backing.
+    for (uint16_t hwreg : {encode_hwreg(23), encode_hwreg(23, 9, 2), encode_hwreg(23, 13, 2),
+                           encode_hwreg(23, 16, 1)}) {
+      value = 0xFFFFFFFFu;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                amdgpu::HwregAccessResult::Unsupported);
+      EXPECT_EQ(value, 0u);
+    }
+  }
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+    cu->wf(slot)->halt();
+}
+
+TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_width_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_width_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kWgpId = encode_hwreg(23, 10, 4);
+  for (uint32_t cu_index : {15u, 31u}) {
+    SCOPED_TRACE(cu_index);
+    cu->set_shader_engine_location(0, cu_index, 16);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 15u);
+  }
+
+  cu->set_shader_engine_location(1, 13);
+  EXPECT_EQ(cu->shader_engine_id(), 1u);
+  EXPECT_EQ(cu->scratch_scoreboard_base(), 13u * cu->scratch_slots_per_cu());
+  EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+
+  for (uint32_t width : {0u, 17u, 32u, std::numeric_limits<uint32_t>::max()}) {
+    SCOPED_TRACE(width);
+    for (uint32_t cu_index : {0u, 16u}) {
+      SCOPED_TRACE(cu_index);
+      cu->set_shader_engine_location(0, cu_index, width);
+      for (uint16_t hwreg : {kWgpId, encode_hwreg(23, 11, 2)}) {
+        SCOPED_TRACE(hwreg);
+        uint32_t value = 0xFFFFFFFFu;
+        EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                  amdgpu::HwregAccessResult::Unsupported);
+        EXPECT_EQ(value, 0u);
+      }
+    }
+  }
+  wf->halt();
+}
+
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
   amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_ib_sts_mem");
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts_l2");

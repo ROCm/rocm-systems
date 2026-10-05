@@ -734,6 +734,25 @@
       ]
     },
 
+    "resiliency_gid_change": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
+        }
+      ]
+    },
+
     "net_ib_stress": {
       "extends": "net_ib_base",
       "timeout": 600,
@@ -1433,6 +1452,12 @@
       "name": "NET IB - Fault Injection (CAST path)",
       "description": "Per-QP fault injection: error detection, WRR rebalancing under artificial delay, data integrity on CAST multi-QP path",
       "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Resiliency GID Change Refresh",
+      "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+      "config": "resiliency_gid_change",
       "enabled": true
     },
     {
