@@ -59,17 +59,17 @@ struct MockedSHMEMGotcha
 {
     static bool is_permitted(const std::string& func_name)
     {
-        auto& reject_fn = get_reject_list();
-        if(reject_fn && reject_fn().count(func_name) > 0)
+        auto const& reject_fn = get_reject_list();
+        if(reject_fn && reject_fn().contains(func_name))
         {
             return false;
         }
 
-        auto& permit_fn = get_permit_list();
+        auto const& permit_fn = get_permit_list();
         if(permit_fn)
         {
             const auto& permit = permit_fn();
-            if(!permit.empty() && permit.count(func_name) == 0)
+            if(!permit.empty() && !permit.contains(func_name))
             {
                 return false;
             }
@@ -388,20 +388,20 @@ TEST_F(shmem_gotcha_test, test_get_category_map)
 TEST_F(shmem_gotcha_test, test_get_default_permit)
 {
     using namespace rocprofsys::component::shmem_categories;
-    auto permit = get_default_permit();
+    auto const permit = get_default_permit();
 
     EXPECT_NE(permit.count("shmem_init"), 0u);
     EXPECT_NE(permit.count("shmem_barrier_all"), 0u);
     EXPECT_NE(permit.count("shmem_put32"), 0u);
 
-    auto atomics = get_category_map().at("atomics");
+    auto const atomics = get_category_map().at("atomics");
     for(const auto& api : atomics)
     {
         EXPECT_EQ(permit.count(api), 0u)
             << "atomics should be excluded from default permit: " << api;
     }
 
-    auto memory = get_category_map().at("memory");
+    auto const memory = get_category_map().at("memory");
     for(const auto& api : memory)
     {
         EXPECT_EQ(permit.count(api), 0u)
@@ -415,14 +415,14 @@ TEST_F(shmem_gotcha_test, test_expand_tokens_to_apis)
     const auto& m = get_category_map();
 
     const std::set<std::string> init_only = { "init" };
-    auto                        expanded  = expand_tokens_to_apis(init_only);
+    auto const                  expanded  = expand_tokens_to_apis(init_only);
     EXPECT_EQ(expanded, m.at("init"));
 
     const std::set<std::string> raw_api = { "shmem_init" };
     EXPECT_EQ(expand_tokens_to_apis(raw_api), std::set<std::string>{ "shmem_init" });
 
     const std::set<std::string> mixed          = { "init", "shmem_malloc" };
-    auto                        mixed_expanded = expand_tokens_to_apis(mixed);
+    auto const                  mixed_expanded = expand_tokens_to_apis(mixed);
     EXPECT_EQ(mixed_expanded.count("shmem_init"), 1u);
     EXPECT_EQ(mixed_expanded.count("shmem_malloc"), 1u);
 }
@@ -475,7 +475,7 @@ TEST_F(shmem_gotcha_test, test_configure_function_names)
 
 TEST_F(shmem_gotcha_test, test_get_reject_list_assignable_and_invokable)
 {
-    auto reject = std::set<std::string>{ "shmem_init", "shmem_finalize" };
+    auto const reject = std::set<std::string>{ "shmem_init", "shmem_finalize" };
     MockedSHMEMGotcha::get_reject_list() = [reject]() { return reject; };
     EXPECT_EQ(MockedSHMEMGotcha::get_reject_list()(), reject);
 }
@@ -507,11 +507,9 @@ TEST_F(shmem_gotcha_test, test_reject_list_excludes_from_configure)
     ASSERT_TRUE(initializer);
     initializer();
 
+    EXPECT_EQ(configured_names.end(), std::ranges::find(configured_names, "shmem_init"));
     EXPECT_EQ(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_init"));
-    EXPECT_EQ(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "shmem_finalize"));
+              std::ranges::find(configured_names, "shmem_finalize"));
     EXPECT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS - 2));
 
     unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
@@ -546,10 +544,8 @@ TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
     initializer();
 
     EXPECT_EQ(configured_names.size(), 2u);
-    EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_put32"));
-    EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "shmem_get32"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "shmem_put32"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "shmem_get32"));
 
     unsetenv(rocprofsys::env_vars::SHMEM_REJECT_LIST);
     unsetenv(rocprofsys::env_vars::SHMEM_PERMIT_LIST);
@@ -557,14 +553,14 @@ TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
 
 TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
 {
-    auto permit = std::set<std::string>{ "shmem_put32", "shmem_get32" };
+    auto const permit = std::set<std::string>{ "shmem_put32", "shmem_get32" };
     MockedSHMEMGotcha::get_permit_list() = [permit]() { return permit; };
     EXPECT_EQ(MockedSHMEMGotcha::get_permit_list()(), permit);
 }
 
 TEST_F(shmem_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [](const std::string& tool_id) {
+    auto const test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)

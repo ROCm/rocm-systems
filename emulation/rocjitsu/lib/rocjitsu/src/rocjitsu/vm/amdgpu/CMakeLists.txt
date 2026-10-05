@@ -3,7 +3,7 @@
 
 rj_add_object_library(rocjitsu_vm_amdgpu
     aql/aql_packet_processor.cpp
-    aql/aql_queue_binding_factory.cpp
+    compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
     buffer_format.cpp
     cluster_lds_multicast.cpp
@@ -27,7 +27,6 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     memory_wait_scoreboard.cpp
     pm4/pm4_packet_processor.cpp
     pm4/pm4_queue_binding_factory.cpp
-    pm4/pm4_queue_controller.cpp
     pm4/pm4_ring_consumer.cpp
     sdma_packet_processor.cpp
     sdma_queue_binding_factory.cpp
