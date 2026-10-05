@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import config
 from argparser import (
+    apply_panel_shortcuts,
     build_parser,
     warn_deprecated_options,
 )
@@ -288,6 +289,7 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        apply_panel_shortcuts(args, "filter_metrics")
         if args.list_stats and args.output_format in ("csv", "db"):
             console_error(
                 "--list-stats cannot be used with --output-format "
