@@ -313,6 +313,31 @@ class TestDeriveScalarBinop:
         assert 'wf.write_scc((s0 > s1))' in cpp
         assert 'wf.write_scc((s0 >= s1))' not in cpp
 
+    @pytest.mark.parametrize(
+        ('op', 'dtype', 'selection', 'mode'),
+        [
+            ('min_num', 'f32', 'MinNum', 'fp_denorm_mode_f32'),
+            ('maximum', 'f32', 'Maximum', 'fp_denorm_mode_f32'),
+            ('max_num', 'f16', 'MaxNum', 'fp_denorm_mode_f16_f64'),
+            ('minimum', 'f16', 'Minimum', 'fp_denorm_mode_f16_f64'),
+        ],
+    )
+    def test_float_minmax_uses_shared_selection(self, op, dtype, selection, mode):
+        sem = _FakeSem(
+            f'S_{op.upper()}_{dtype.upper()}', 'scalar_binop', op, dtype, 'none'
+        )
+        cpp = lower_sema_block(derive_sema_block(sem))
+
+        assert f'amdgpu::input_denormal::Policy::make(wf.{mode}())' in cpp
+        fmt = dtype.upper()
+        assert (
+            f'amdgpu::minmax::evaluate<amdgpu::fp_format::{fmt}, '
+            f'amdgpu::minmax::{selection}>(' in cpp
+        )
+        # The selected encoding is written as is, without a float round trip.
+        assert 'std::fmin' not in cpp and 'std::fmax' not in cpp
+        assert 'f32_to_f16' not in cpp and 'bit_cast<float>' not in cpp
+
     def test_signed_mul_uses_unsigned_result_slot(self):
         sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
         block = derive_sema_block(sem)
@@ -412,14 +437,14 @@ class TestDeriveScalarBinop:
         'name,operation,dtype,expected_cpp',
         [
             ('S_PACK_HL_B32_B16', 'pack_hl', 'b32', '0xFFFFu) << 16'),
-            ('S_MIN_NUM_F32', 'min_num', 'f32', 'std::fmin'),
-            ('S_MAX_NUM_F32', 'max_num', 'f32', 'std::fmax'),
-            ('S_MIN_NUM_F16', 'min_num', 'f16', 'std::fmin'),
-            ('S_MAX_NUM_F16', 'max_num', 'f16', 'std::fmax'),
-            ('S_MINIMUM_F32', 'minimum', 'f32', 'quiet_NaN'),
-            ('S_MAXIMUM_F32', 'maximum', 'f32', 'quiet_NaN'),
-            ('S_MINIMUM_F16', 'minimum', 'f16', 'quiet_NaN'),
-            ('S_MAXIMUM_F16', 'maximum', 'f16', 'quiet_NaN'),
+            ('S_MIN_NUM_F32', 'min_num', 'f32', 'amdgpu::minmax::MinNum>'),
+            ('S_MAX_NUM_F32', 'max_num', 'f32', 'amdgpu::minmax::MaxNum>'),
+            ('S_MIN_NUM_F16', 'min_num', 'f16', 'amdgpu::minmax::MinNum>'),
+            ('S_MAX_NUM_F16', 'max_num', 'f16', 'amdgpu::minmax::MaxNum>'),
+            ('S_MINIMUM_F32', 'minimum', 'f32', 'amdgpu::minmax::Minimum>'),
+            ('S_MAXIMUM_F32', 'maximum', 'f32', 'amdgpu::minmax::Maximum>'),
+            ('S_MINIMUM_F16', 'minimum', 'f16', 'amdgpu::minmax::Minimum>'),
+            ('S_MAXIMUM_F16', 'maximum', 'f16', 'amdgpu::minmax::Maximum>'),
         ],
     )
     def test_gfx1250_scalar_float_and_pack_ops_derive(

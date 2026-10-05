@@ -17,7 +17,9 @@
 /// gfx1201 results and the ISA pseudocode are marked "ISA discrepancy" below.
 /// The RDNA4 and CDNA5 callers use these rules. Hardware measurements cover
 /// gfx1201 only; applying its ISA discrepancies to CDNA5 remains an assumption
-/// requiring hardware verification.
+/// requiring hardware verification. SALU S_MIN_NUM, S_MAX_NUM, S_MINIMUM and
+/// S_MAXIMUM share them: the ISA defines them to match their VALU counterparts,
+/// and gfx1201 captures agree.
 ///
 /// Scalar and SIMD callers use the same implementation on raw encodings in
 /// unsigned lanes, so selection preserves signs and NaN payloads.
