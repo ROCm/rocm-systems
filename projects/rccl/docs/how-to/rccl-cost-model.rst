@@ -139,10 +139,10 @@ partitioned into three contiguous families, defined in ``src/include/tuning.h``:
 A caller restricts the model to a subset of these families with a 64-bit candidate mask. Four
 mask constants name the useful subsets:
 
-*  ``NCCL_TUNING_MASK_GENERAL_KERNELS`` -- bits ``[0, 21)``
-*  ``NCCL_TUNING_MASK_SYM_KERNELS`` -- bits ``[21, 39)``
-*  ``NCCL_TUNING_MASK_CE`` -- bits ``[39, 41)``
-*  ``NCCL_TUNING_MASK_ALL`` -- all of the above
+*  ``NCCL_TUNING_MASK_GENERAL_KERNELS``: bits ``[0, 21)``
+*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, 39)``
+*  ``NCCL_TUNING_MASK_CE``: bits ``[39, 41)``
+*  ``NCCL_TUNING_MASK_ALL``: all of the above
 
 The mask is the single most useful thing to read out of the logs, because it tells you which
 family the model was even allowed to choose from on a given call.
@@ -311,8 +311,9 @@ The names come from an algorithm registry that covers both the general rows (``T
    general row the selection does not name is marked ``NCCL_ALGO_PROTO_IGNORE`` before the argmin
    runs. A selection that names no general row at all, such as ``SYMK_LL``, leaves the general
    table untouched, so the symmetric scheduler can still decline and fall back to it. The
-   process-wide ``NCCL_ALGO`` and ``NCCL_PROTO`` still win over ``algSelection`` for any
-   collective they force. ``RCCL_OVERRIDE_ALGO`` and ``RCCL_OVERRIDE_PROTO`` do not: they are
+   process-wide ``NCCL_ALGO``, ``NCCL_PROTO``, and ``NCCL_SYM_KERNEL`` still win over
+   ``algSelection`` for any collective they force, because all three mark that collective in
+   ``tuningContext.forced``. ``RCCL_OVERRIDE_ALGO`` and ``RCCL_OVERRIDE_PROTO`` do not: they are
    applied after the narrowing, so a selection that excludes the overridden row drops the
    override, with a ``WARN``.
 
