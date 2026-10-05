@@ -165,10 +165,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   inst_cache_.set_l2(l2_);
 
-  // Enable pool allocation for the hot decode-execute path.
-  // Instructions decoded during step() are always deleted before the CU
-  // (and its decoder) are destroyed, so pool allocation is safe here.
-  decoder_->enable_pool();
+  // Decoded instructions use heap storage: cache entries and asynchronous
+  // work can outlive an issue quantum and move between execution workers.
+  // Do not install this decoder's pool on the constructing thread.
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
@@ -1510,7 +1509,9 @@ template <bool EnableAsync>
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
-  DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
+  const bool reuse_decoded = !debug_active();
+  DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
+                                                    decode_error.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
@@ -1526,6 +1527,8 @@ template <bool EnableAsync>
     return;
   }
   Instruction *inst = decoded.value().get();
+  DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
+                                                       active->pc, vmid, words, reuse_decoded);
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
@@ -1726,6 +1729,7 @@ template <bool EnableAsync>
   }();
 
   if (execution_result.failed()) [[unlikely]] {
+    return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
@@ -1748,7 +1752,7 @@ template <bool EnableAsync>
   // pc, and allocations are now zeroed, so the after-execute hook, result logging,
   // and pc-advance below must not run on the dead slot. The dedicated
   // onAmdgpuWavefrontHalted hook already fired (with live state) from halt().
-  // s_endpgm is never a memory op, so just reclaim the decoded instruction.
+  // The completed s_endpgm can return to the decoded cache on scope exit.
   //
   // Note the intentional asymmetry: an s_endpgm that defers to ENDING (pending
   // memory waits) is NOT halted here, so it DOES fire onAmdgpuAfterExecuteInstruction
@@ -1930,8 +1934,6 @@ template <bool EnableAsync>
         return;
       }
     }
-  } else {
-    decoded.value().reset();
   }
 
   active->pc += inst_size;

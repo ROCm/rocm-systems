@@ -1924,6 +1924,12 @@ class CodeGenerator:
             f'    &execute_with_backend<{class_name}>,\n'
             for class_name in self._split_execution_classes
         )
+        # Generated executors follow Instruction's decoded-reuse contract:
+        # non-memory instructions without DynamicInstState can execute again
+        # on another wave. Read values and EXEC from the current context,
+        # restore temporary operand delegates, and assign per-execution flags
+        # on every call. Persistent per-issue state belongs in DynamicInstState,
+        # not decoded encoding or operand members.
         source = textwrap.dedent(f'''\
             {CppFile._prologue_comment()}
             #include "{generated_arch}/execution_backend.h"

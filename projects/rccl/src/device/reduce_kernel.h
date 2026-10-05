@@ -679,12 +679,14 @@ struct FuncPreMulSum<rccl_float8> {
   using EltType = rccl_float8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg holds float bits, not fp8 bits: see hostToDevRedOp, ncclRedOpCreatePreMulSum
+    // and RedOpArg<FuncPreMulSum<rccl_float8>> below.
     union {
       uint64_t u64;
-      rccl_float8 val;
+      float val;
     };
     u64 = opArg;
-    scalar = (float)(val);
+    scalar = val;
   }
 };
 
@@ -697,12 +699,44 @@ struct FuncPreMulSum<rccl_bfloat8> {
   using EltType = rccl_bfloat8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg holds float bits, as for FuncPreMulSum<rccl_float8>.
     union {
       uint64_t u64;
-      rccl_bfloat8 val;
+      float val;
     };
     u64 = opArg;
-    scalar = (float)(val);
+    scalar = val;
+  }
+};
+
+// A device-resident scalar is an fp8 value in user memory, decoded here with the device's
+// own typedef and widened to the float bits the constructors above expect. No test reaches
+// these yet: the harness cannot build such a scalar for an FNUZ device (AICOMRCCL-2322).
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_float8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = float(*(rccl_float8*)ptr);
+    return u64;
+  }
+};
+
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_bfloat8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = float(*(rccl_bfloat8*)ptr);
+    return u64;
   }
 };
 #endif
