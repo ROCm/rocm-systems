@@ -36,10 +36,21 @@ import unittest
 # degrade gracefully rather than erroring at import; without the harness there is
 # no resolver, and the suite skips with the reason below.
 try:
-    from common.common import cli_search_order, find_cli_dir
+    from common.common import (
+        cli_search_order,
+        fake_module,
+        find_cli_dir,
+        load_cli_module,
+        stub_modules,
+        stub_modules_at_import,
+    )
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     cli_search_order = None
+    fake_module = None
     find_cli_dir = None
+    load_cli_module = None
+    stub_modules = None
+    stub_modules_at_import = None
 
 _CLI_DIR = (
     find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
@@ -84,41 +95,52 @@ def _import_real_amdsmi_helpers():
     otherwise this file's copy could silently drift from the shipped
     validators. Uses a throwaway module name so it never collides with the
     per-test fake ``amdsmi_helpers`` module installed by
-    ``_install_fake_modules()``.
+    ``_build_fake_modules()``.
     """
     if not HELPERS_PATH:
         # Neither CLI layout was found; the test classes below will skip via
         # their own setUpClass checks, so avoid crashing at import time here.
         return None
-    saved = {
-        name: sys.modules.pop(name, None)
-        for name in ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception", "amdsmi_init")
-    }
+
+    # amdsmi_helpers.AMDSMIHelpers's CPER_DECODE_MESSAGES class body reads
+    # these off amdsmi_wrapper at import time, so loading the real module
+    # under this stub needs them present or it dies with an AttributeError
+    # before any test runs.
+    wrapper = fake_module(
+        "amdsmi.amdsmi_wrapper",
+        AMDSMI_STATUS_INVAL=_STATUS_INVAL,
+        AMDSMI_STATUS_UNEXPECTED_SIZE=_STATUS_INVAL + 1,
+        AMDSMI_STATUS_UNEXPECTED_DATA=_STATUS_INVAL + 2,
+        AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_INVAL + 3,
+    )
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        amdsmi_wrapper=wrapper,
+        AmdSmiInitFlags=_FakeInitFlagsForHelpersImport,
+        AmdSmiClkType=_FakeClkTypeForHelpersImport,
+        AmdSmiLibraryException=_FakeLibraryException,
+        AmdSmiParameterException=_FakeLibraryException,
+        AMDSMI_MAX_STRING_LENGTH=256,
+        amdsmi_init=lambda _flag: None,
+        amdsmi_shut_down=lambda: None,
+        amdsmi_get_processor_handles=lambda: [],
+    )
+    exception = fake_module(
+        "amdsmi.amdsmi_exception",
+        AmdSmiLibraryException=_FakeLibraryException,
+        AmdSmiParameterException=_FakeLibraryException,
+    )
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
+
+    restore = stub_modules_at_import(
+        {
+            "amdsmi": amdsmi_pkg,
+            "amdsmi.amdsmi_interface": interface,
+            "amdsmi.amdsmi_exception": exception,
+            "amdsmi_init": None,
+        }
+    )
     try:
-        amdsmi_pkg = types.ModuleType("amdsmi")
-        interface = types.ModuleType("amdsmi.amdsmi_interface")
-        exception = types.ModuleType("amdsmi.amdsmi_exception")
-
-        interface.amdsmi_wrapper = types.ModuleType("amdsmi.amdsmi_wrapper")
-        interface.AmdSmiInitFlags = _FakeInitFlagsForHelpersImport
-        interface.AmdSmiClkType = _FakeClkTypeForHelpersImport
-        interface.AmdSmiLibraryException = _FakeLibraryException
-        interface.AmdSmiParameterException = _FakeLibraryException
-        interface.AMDSMI_MAX_STRING_LENGTH = 256
-        interface.amdsmi_init = lambda _flag: None
-        interface.amdsmi_shut_down = lambda: None
-        interface.amdsmi_get_processor_handles = lambda: []
-
-        exception.AmdSmiLibraryException = _FakeLibraryException
-        exception.AmdSmiParameterException = _FakeLibraryException
-
-        amdsmi_pkg.amdsmi_interface = interface
-        amdsmi_pkg.amdsmi_exception = exception
-
-        sys.modules["amdsmi"] = amdsmi_pkg
-        sys.modules["amdsmi.amdsmi_interface"] = interface
-        sys.modules["amdsmi.amdsmi_exception"] = exception
-
         spec = importlib.util.spec_from_file_location("_real_amdsmi_helpers", HELPERS_PATH)
         module = importlib.util.module_from_spec(spec)
         if _CLI_DIR not in sys.path:
@@ -126,11 +148,7 @@ def _import_real_amdsmi_helpers():
         spec.loader.exec_module(module)
         return module.AMDSMIHelpers
     finally:
-        for name, mod in saved.items():
-            if mod is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = mod
+        restore()
 
 
 class _FakeLibraryException(Exception):
@@ -151,39 +169,30 @@ class _FakeLibraryException(Exception):
 _RealAMDSMIHelpers = _import_real_amdsmi_helpers()
 
 
-def _install_fake_modules():
-    """Register a stub ``amdsmi`` package plus the sibling CLI modules that
+def _build_fake_modules():
+    """Build a stub ``amdsmi`` package plus the sibling CLI modules that
     ``amdsmi_parser.py`` and ``set_value.py`` import at module scope.
 
-    Returns the fake ``amdsmi_interface`` module so individual tests can swap
-    in per-case ``amdsmi_configure_ampp_profile``/``amdsmi_get_ampp_profiles``
-    behavior.
+    Returns the name -> module mapping for ``common.stub_modules``; the
+    ``"amdsmi.amdsmi_interface"`` entry is what individual tests mutate to
+    swap in per-case ``amdsmi_configure_ampp_profile``/
+    ``amdsmi_get_ampp_profiles`` behavior.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
-    wrapper = types.ModuleType("amdsmi.amdsmi_wrapper")
-
-    wrapper.AMDSMI_STATUS_NO_PERM = _STATUS_NO_PERM
-    interface.amdsmi_wrapper = wrapper
-    # Constants set_value.py binds at import time; the values are irrelevant
-    # to the ampp-configure paths exercised here.
-    interface.AMDSMI_MAX_PPT_LIMIT = 0
-    interface.AMDSMI_MAX_UTIL = 100
-    interface.AMDSMI_MAX_STRING_LENGTH = 256
-    # Overwritten per-test; the default keeps the CONFIGURE path a no-op.
-    interface.amdsmi_configure_ampp_profile = lambda *a, **k: None
-    interface.amdsmi_get_ampp_profiles = lambda _h: ("1.0", [])
-
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
+    wrapper = fake_module("amdsmi.amdsmi_wrapper", AMDSMI_STATUS_NO_PERM=_STATUS_NO_PERM)
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        amdsmi_wrapper=wrapper,
+        # Constants set_value.py binds at import time; the values are
+        # irrelevant to the ampp-configure paths exercised here.
+        AMDSMI_MAX_PPT_LIMIT=0,
+        AMDSMI_MAX_UTIL=100,
+        AMDSMI_MAX_STRING_LENGTH=256,
+        # Overwritten per-test; the default keeps the CONFIGURE path a no-op.
+        amdsmi_configure_ampp_profile=lambda *a, **k: None,
+        amdsmi_get_ampp_profiles=lambda _h: ("1.0", []),
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     # amdsmi_parser.py and set_value.py additionally import this sibling
     # module by bare name at module scope; the tests here never construct a
@@ -197,34 +206,21 @@ def _install_fake_modules():
         is_valid_ampp_field_name = staticmethod(_RealAMDSMIHelpers.is_valid_ampp_field_name)
         parse_ampp_field_value = staticmethod(_RealAMDSMIHelpers.parse_ampp_field_value)
 
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = _FakeAMDSMIHelpers
-    sys.modules["amdsmi_helpers"] = helpers_mod
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=_FakeAMDSMIHelpers)
+    version_mod = fake_module("_version", __version__="0.0.0-test")
 
-    version_mod = types.ModuleType("_version")
-    version_mod.__version__ = "0.0.0-test"
-    sys.modules["_version"] = version_mod
-
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
+        "amdsmi_helpers": helpers_mod,
+        "_version": version_mod,
+    }
 
 
 def _load_module(name, path):
-    if _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_SAVED_MODULE_NAMES = (
-    "amdsmi",
-    "amdsmi.amdsmi_interface",
-    "amdsmi.amdsmi_exception",
-    "amdsmi.amdsmi_wrapper",
-    "amdsmi_helpers",
-    "_version",
-)
+    return load_cli_module(name, path, sys_path_dir=_CLI_DIR)
 
 
 class _StubHelpersForParser:
@@ -252,8 +248,8 @@ class TestAmppConfigureParserAction(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(PARSER_PATH):
             raise unittest.SkipTest(f"amd-smi CLI amdsmi_parser.py not found at {PARSER_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in _SAVED_MODULE_NAMES}
-        _install_fake_modules()
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
         cls.parser_module = _load_module("amdsmi_parser_under_test", PARSER_PATH)
         # amdsmi_parser.py resolves this via a plain ``import
         # amdsmi_cli_exceptions`` (not spec_from_file_location), so the
@@ -261,14 +257,6 @@ class TestAmppConfigureParserAction(unittest.TestCase):
         # *this* sys.modules entry -- reuse it rather than loading a second,
         # class-identity-incompatible copy.
         cls.exceptions_module = sys.modules["amdsmi_cli_exceptions"]
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _make_action(self):
         # ``_ampp_configure_options`` is an ordinary (unbound) method on
@@ -407,8 +395,22 @@ class _RecordingLogger:
         return None
 
 
+class _StubErrorCollector:
+    def __init__(self):
+        self.recorded_errors = []
+
+    def record_library_error(self, error_code):
+        self.recorded_errors.append(error_code)
+
+    def record(self, code):
+        self.recorded_errors.append(code)
+
+
 class _StubHelpersForSetGpu:
     """Minimal ``self.helpers`` stub for the GPU ``set`` path."""
+
+    def __init__(self):
+        self.error_collector = _StubErrorCollector()
 
     def check_required_groups(self):
         pass
@@ -422,6 +424,15 @@ class _StubHelpersForSetGpu:
 
     def get_gpu_id_from_device_handle(self, handle):
         return 0
+
+    def store_device_error(self, logger, device, key, message, exception=None, code=None):
+        # Mirrors AMDSMIHelpers.store_device_error: show the error and note it so
+        # the run resolves to a non-zero exit code.
+        if exception is not None:
+            self.error_collector.record_library_error(exception.get_error_code())
+        else:
+            self.error_collector.record(code)
+        logger.store_output(device, key, message)
 
 
 _AmppConfigureArgs = collections.namedtuple(
@@ -444,18 +455,11 @@ class TestSetGpuAmppConfigureCallSite(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
             raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in _SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_modules()
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.module = _load_module("set_value_under_test_ampp", SET_VALUE_PATH)
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_set_gpu(self, ampp_configure):
         logger = _RecordingLogger()
@@ -557,18 +561,11 @@ class TestSetGpuAmppActivateCallSite(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
             raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in _SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_modules()
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.module = _load_module("set_value_under_test_ampp_activate", SET_VALUE_PATH)
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_set_gpu(self, ampp_activate):
         logger = _RecordingLogger()
@@ -655,19 +652,12 @@ class TestSetGpuAmppConfigureFromFile(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
             raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in _SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_modules()
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.module = _load_module("set_value_under_test_ampp_file", SET_VALUE_PATH)
         cls.exceptions_module = sys.modules["amdsmi_cli_exceptions"]
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def setUp(self):
         self._tmp = tempfile.NamedTemporaryFile(
@@ -1019,7 +1009,3 @@ class TestSetGpuAmppConfigureFromFile(unittest.TestCase):
         )
         results = logger.last_output("ampp_configure")
         self.assertIn("profile_5: Successfully configured (PPT0_Limit=550)", results[0])
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -947,6 +947,7 @@ class SetValueCommands:
                 results.append(
                     f"{profile_name}: [{e.get_error_info(detailed=False)}] Unable to configure"
                 )
+                self.helpers.error_collector.record_library_error(e.get_error_code())
 
         self.logger.store_output(args.gpu, "ampp_configure", results)
         self.logger.print_output()
@@ -2144,7 +2145,9 @@ class SetValueCommands:
                     f"[{e.get_error_info(detailed=False)}] Unable to activate AMPP profile "
                     f"{args.ampp_activate}"
                 )
-                self.logger.store_output(args.gpu, "ampp_activate", error_msg)
+                self.helpers.store_device_error(
+                    self.logger, args.gpu, "ampp_activate", error_msg, exception=e
+                )
                 print(f"\nValid AMPP Profiles: [{available_str}]\n")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -2187,7 +2190,9 @@ class SetValueCommands:
                     f"[{e.get_error_info(detailed=False)}] Unable to configure AMPP profile "
                     f"{profile_name}"
                 )
-                self.logger.store_output(args.gpu, "ampp_configure", error_msg)
+                self.helpers.store_device_error(
+                    self.logger, args.gpu, "ampp_configure", error_msg, exception=e
+                )
                 print(f"\nWritable AMPP Profiles: [{available_str}]\n")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()

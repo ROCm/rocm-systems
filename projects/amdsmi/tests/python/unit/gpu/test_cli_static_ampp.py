@@ -10,16 +10,15 @@ the NOT_SUPPORTED fallback. Follows the same load-from-source-tree / stub the
 """
 
 import copy
-import importlib.util
 import os
-import sys
-import types
 import unittest
 from argparse import Namespace
 
+from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else ""
 
 _STATUS_NOT_SUPPORTED = 2
 _STATUS_NO_DATA = 40
@@ -78,16 +77,13 @@ class _FakeLibraryException(Exception):
         return self._message
 
 
-def _install_fake_modules(holder):
-    """Register a stub ``amdsmi`` package plus the sibling CLI modules.
+def _build_fake_modules(holder):
+    """Build a stub ``amdsmi`` package plus the sibling CLI modules.
 
     ``holder`` supplies the per-test behavior for
     ``amdsmi_get_ampp_profiles``/``amdsmi_get_ampp_fields`` so each test can
     swap it without reloading ``static.py``.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
 
     def _get_ampp_profiles(_handle):
         return holder["get_profiles"]()
@@ -95,40 +91,39 @@ def _install_fake_modules(holder):
     def _get_ampp_fields(_handle, profile_name):
         return holder["get_fields"](profile_name)
 
-    interface.amdsmi_get_ampp_profiles = _get_ampp_profiles
-    interface.amdsmi_get_ampp_fields = _get_ampp_fields
-
-    wrapper = types.ModuleType("amdsmi.amdsmi_interface.amdsmi_wrapper")
-    wrapper.AMDSMI_STATUS_NOT_SUPPORTED = _STATUS_NOT_SUPPORTED
-    wrapper.AMDSMI_STATUS_NO_DATA = _STATUS_NO_DATA
-    interface.amdsmi_wrapper = wrapper
-
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
+    wrapper = fake_module(
+        "amdsmi.amdsmi_interface.amdsmi_wrapper",
+        AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_DATA=_STATUS_NO_DATA,
+    )
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        amdsmi_wrapper=wrapper,
+        amdsmi_get_ampp_profiles=_get_ampp_profiles,
+        amdsmi_get_ampp_fields=_get_ampp_fields,
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     # ``static.py`` imports these sibling names at load time; the ampp path
     # never instantiates them (the test injects a fake helpers object).
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = object
-    sys.modules["amdsmi_helpers"] = helpers_mod
-
-    exceptions_mod = types.ModuleType("amdsmi_cli_exceptions")
-    exceptions_mod.AmdSmiInvalidParameterException = type(
-        "AmdSmiInvalidParameterException", (Exception,), {}
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=object)
+    exceptions_mod = fake_module(
+        "amdsmi_cli_exceptions",
+        AmdSmiInvalidParameterException=type("AmdSmiInvalidParameterException", (Exception,), {}),
     )
-    sys.modules["amdsmi_cli_exceptions"] = exceptions_mod
+
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi_helpers": helpers_mod,
+        "amdsmi_cli_exceptions": exceptions_mod,
+    }
 
 
 def _load_static_module():
-    spec = importlib.util.spec_from_file_location("static_ampp_under_test", STATIC_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("static_ampp_under_test", STATIC_PATH)
 
 
 class _FakeLogger:
@@ -208,33 +203,16 @@ def _build_args():
 
 
 class TestCliStaticAmpp(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi_helpers",
-        "amdsmi_cli_exceptions",
-    )
-
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
         cls.holder = {
             "get_profiles": lambda: ("1.0", copy.deepcopy(_PROFILES)),
             "get_fields": lambda name: copy.deepcopy(_FIELDS_BY_PROFILE[name]),
         }
-        _install_fake_modules(cls.holder)
+        stub_modules(cls, _build_fake_modules(cls.holder))
         cls.static_module = _load_static_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def setUp(self):
         # Tests mutate the shared class-level holder; reset it so one test's
@@ -376,7 +354,3 @@ class TestCliStaticAmpp(unittest.TestCase):
         ]
         static_dict = self._run_ampp("human")
         self.assertIn("SomeCount: 5 ", static_dict["ampp"])
-
-
-if __name__ == "__main__":
-    unittest.main()

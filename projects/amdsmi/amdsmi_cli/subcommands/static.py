@@ -1026,20 +1026,11 @@ class StaticCommands:
 
                 # Get vram type string
                 vram_type_enum = vram_info["vram_type"]
-                # The generated map keeps the sentinel name for aliased values;
-                # prefer the corresponding real enum name when available.
+                # AMDSMI_VRAM_TYPE__MAX aliases the highest real type (LPDDR5);
+                # the auto-generated enum-value map resolves this shared value
+                # to the "__MAX" label, so translate it to the real type here.
                 if vram_type_enum == amdsmi_interface.amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX:
-                    enum_name = next(
-                        (
-                            name
-                            for name, value in vars(amdsmi_interface.amdsmi_wrapper).items()
-                            if name.startswith("AMDSMI_VRAM_TYPE_")
-                            and name != "AMDSMI_VRAM_TYPE__MAX"
-                            and value == vram_type_enum
-                        ),
-                        "AMDSMI_VRAM_TYPE__MAX",
-                    )
-                    vram_type = enum_name.replace("AMDSMI_VRAM_TYPE_", "").replace("_", "")
+                    vram_type = "LPDDR5"
                 else:
                     vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
                         vram_type_enum

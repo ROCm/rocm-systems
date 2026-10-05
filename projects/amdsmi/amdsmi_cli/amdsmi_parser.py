@@ -365,12 +365,8 @@ class AMDSMIParser(argparse.ArgumentParser):
             f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes.",
         )
 
-    def _is_command_supported(self, user_input, acceptable_values, command_name):
-        if acceptable_values == "N/A":
-            outputformat = self.helpers.get_output_format()
-            raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
-        elif str(user_input).upper() not in acceptable_values:
-            print(f"Valid inputs are {acceptable_values}")
+    def _is_command_supported(self, user_input, acceptable_values, hint=None):
+        if str(user_input).upper() not in acceptable_values:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 sys.argv[1], str(user_input).upper(), self.helpers.get_output_format(), hint=hint
             )
