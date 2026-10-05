@@ -1448,6 +1448,7 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  d->set_block_dword_mask(wf.m0());
   set_data(std::move(d));
 }
 
@@ -1460,13 +1461,22 @@ void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
-  uint64_t exec = wf.exec();
+  d->set_block_dword_mask(wf.m0());
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 32, exec);
   d->store_data.resize(wf.wf_size() * 128);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  for (uint32_t i = 0; i < 32; ++i) {
+    if (!(d->block_dword_mask & (uint32_t{1} << i)))
+      continue;
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base + i, 1, d->lane_mask);
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(d->lane_mask & (uint64_t{1} << lane)))
+        continue;
+      const uint32_t value = data.lane(0, lane);
+      std::memcpy(&d->store_data[lane * 128 + i * 4], &value, 4);
+    }
+  }
   set_data(std::move(d));
 }
 
