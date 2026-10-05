@@ -301,6 +301,93 @@ TEST(AnvilOamMapEngine, ZeroEnginesDoesNotFold) {
   EXPECT_FALSE(sdma_anvil::oamMapEngineNeedsFold(0, 0, 0));
 }
 
+// pciFunctionBus decides getOamId's fallback: physBusId differing from busId is what gives it a
+// second candidate to read, so a tail it refuses to parse means the physical-BDF read never runs.
+// getBusId lowercases an "00000000:00:00.0" buffer, so the function digit is the last character.
+TEST(AnvilPciFunctionBus, PartitionTailYieldsFunctionAndPhysicalBdf) {
+  const auto loc = sdma_anvil::pciFunctionBus("00000000:1b:00.1");
+  EXPECT_EQ(loc.function, 1);
+  EXPECT_EQ(loc.busId, "00000000:1b:00.1");
+  EXPECT_EQ(loc.physBusId, "00000000:1b:00.0");  // the second candidate getOamId reads
+}
+
+// PCI function numbers are three bits, so '0'-'7' is the whole range and both ends must parse.
+TEST(AnvilPciFunctionBus, WholeDigitRangeParses) {
+  for (int fn = 0; fn <= 7; ++fn) {
+    const std::string bdf = "00000000:1b:00." + std::to_string(fn);
+    const auto loc = sdma_anvil::pciFunctionBus(bdf);
+    EXPECT_EQ(loc.function, fn) << bdf;
+    EXPECT_EQ(loc.physBusId, "00000000:1b:00.0") << bdf;
+  }
+}
+
+// Function 0 parses but rewrites to itself, so physBusId == busId collapses getOamId's candidate
+// list to one entry -- the same shape as an unparsable tail, reached for a different reason.
+TEST(AnvilPciFunctionBus, FunctionZeroLeavesOneCandidate) {
+  const auto loc = sdma_anvil::pciFunctionBus("00000000:1b:00.0");
+  EXPECT_EQ(loc.function, 0);
+  EXPECT_EQ(loc.physBusId, loc.busId);
+}
+
+// A tail outside the range is not function 0: it stays -1 so foldOamMapEngine's unreadable-function
+// path is what runs, and busId is left untouched rather than rewritten to something that does not
+// exist. '8' and '9' are the ones that matter -- they are digits, so a std::isdigit test here would
+// accept them and invent a function PCI cannot express.
+TEST(AnvilPciFunctionBus, TailOutsideRangeIsNotFunctionZero) {
+  for (const char* bdf : {"00000000:1b:00.8", "00000000:1b:00.9", "00000000:1b:00.f",
+                          "00000000:1b:00.", "00000000:1b:00.a"}) {
+    const auto loc = sdma_anvil::pciFunctionBus(bdf);
+    EXPECT_EQ(loc.function, -1) << bdf;
+    EXPECT_EQ(loc.physBusId, loc.busId) << bdf;
+    EXPECT_EQ(loc.busId, bdf) << bdf;
+  }
+}
+
+// The parse is the last character and nothing else, so a BDF with no function field at all is read
+// as function 0 whenever it happens to end in a function digit. getBusId always writes a
+// "00000000:00:00.0" buffer so this does not arise today, and pinning it says which invariant
+// getOamId leans on: if that format ever loses its ".N" suffix, this returns a function and a
+// physBusId equal to busId rather than refusing, and the fallback read silently stops happening.
+TEST(AnvilPciFunctionBus, ParsesTheLastCharacterOnlyNotTheBdfShape) {
+  const auto noFn = sdma_anvil::pciFunctionBus("0000:1b:00");
+  EXPECT_EQ(noFn.function, 0);
+  EXPECT_EQ(noFn.physBusId, noFn.busId);
+  // A bare digit is accepted for the same reason: nothing checks the shape.
+  EXPECT_EQ(sdma_anvil::pciFunctionBus("3").function, 3);
+}
+
+// back() on an empty string is undefined, so the empty guard is load-bearing rather than defensive.
+TEST(AnvilPciFunctionBus, EmptyInputIsRefusedWithoutReadingTheTail) {
+  const auto loc = sdma_anvil::pciFunctionBus("");
+  EXPECT_EQ(loc.function, -1);
+  EXPECT_TRUE(loc.busId.empty());
+  EXPECT_TRUE(loc.physBusId.empty());
+}
+
+// The budget observable. Without it the refusal in connect() and the per-destination teardown in
+// disconnectDevice() are only visible in a log line, so neither the up-front refusal nor the
+// rollback that follows a part-way failure has anything a case can assert.
+//
+// Both of connect()'s failure exits have to land on the same count: the budget compare returns
+// before touching sdma_channels_, and a create that fails after some channels succeeded runs
+// rollback(), which gives back only the valid queues it charged. The request below is far past any
+// partition's budget, so the first exit is the expected one and the second is the fallback when a
+// node does not report a budget at all.
+//
+// disconnectDevice() is deliberately not called on the success branch: the channel map is
+// process-global, so dropping device 0 would destroy queues the fixture cases still hold.
+TEST(AnvilQueueBudget, FailedConnectDoesNotChargeTheBudget) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  auto& anvil = sdma_anvil::anvil;
+  const uint32_t before = anvil.queuesUsed();
+  if (anvil.connect(/*srcDeviceId=*/0, /*dstDeviceId=*/0, /*numChannels=*/1 << 20)) {
+    GTEST_SKIP() << "node satisfied an over-subscribed connect; neither failure exit was reached";
+  }
+  EXPECT_EQ(anvil.queuesUsed(), before);
+}
+
 // F11: spread env atoi paths (non-zero/non-one numeric and invalid string).
 TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_EnvAtoi) {
   if (gin_anvil_sdma_probe() <= 0) {
