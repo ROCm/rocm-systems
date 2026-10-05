@@ -33,6 +33,7 @@
 #include <functional>
 #include <iostream>
 #include <numeric>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -418,6 +419,36 @@ static void expectCompleteReport(const RasReport& report, int nRanks, const std:
     EXPECT_TRUE(report.failures().empty()) << "failure lines:\n" << report.dump();
 }
 
+// The communicator a check line names ("0x..." after "in comm "); empty if it names none.
+static std::string commIdOf(const std::string& line)
+{
+    static const std::string key = "in comm ";
+    const size_t pos = line.find(key);
+    if(pos == std::string::npos)
+        return {};
+    const size_t begin = pos + key.size();
+    const size_t end   = line.find_first_not_of("0123456789abcdefx", begin);
+    return line.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+}
+
+// Each check has one line for each of nComms distinct communicators, so a report repeated for one communicator
+// cannot stand in for the report of another. Use together with expectCompleteReport(..., nComms).
+static void expectOneReportPerComm(const RasReport& report, int nComms)
+{
+    std::set<std::string> comms;
+    for(const char* label : {kGpuInventory, kDriver, kEcc, kEnv})
+    {
+        std::set<std::string> ids;
+        for(const std::string& line : report.checkLines(label))
+            ids.insert(commIdOf(line));
+        EXPECT_EQ(ids.count(""), 0u) << label << "\n" << report.dump();
+        EXPECT_EQ(ids.size(), static_cast<size_t>(nComms)) << label << "\n" << report.dump();
+        if(comms.empty())
+            comms = ids;
+        EXPECT_EQ(ids, comms) << label << "\n" << report.dump();
+    }
+}
+
 struct RasCase
 {
     const char* name;
@@ -654,6 +685,7 @@ TEST_F(RasDiagnostics, RunsAtEveryCommInit)
         const RasReport report = capture.waitForReports(2);
         capture.restore();
         expectCompleteReport(report, half, std::to_string(half) + " ranks", 2);
+        expectOneReportPerComm(report, 2);
     };
 
     runRasCases({{"ReinitSameProcess", 2, reinit}, {"CommSplit", 4, split}});
@@ -782,8 +814,8 @@ TEST(RasDiagnosticsWorker, Run)
     EXPECT_EQ(value, 3.0f);
 }
 
-// The init-time report needs the RAS subsystem: with NCCL_RAS_ENABLE=0 no check runs and no completion line is
-// printed, and communicator creation still succeeds.
+// The init-time report needs the RAS subsystem: with NCCL_RAS_ENABLE=0 rank 0 still prints the header, but no check
+// runs and no completion line is printed, and communicator creation still succeeds.
 TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
 {
     runRasCases({{"RasDisabledRunsNoChecks", 2, []() {
@@ -799,6 +831,8 @@ TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
         }
         capture.restore();
         const RasReport report = parseRasReport(capture.read());
+        EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
+        EXPECT_EQ(report.lines.size(), 1u) << report.dump();
         EXPECT_EQ(report.count(kRasDone), 0) << report.dump();
         for(const char* label : {kGpuInventory, kDriver, kEcc, kEnv})
             EXPECT_TRUE(report.checkLines(label).empty()) << label << "\n" << report.dump();
