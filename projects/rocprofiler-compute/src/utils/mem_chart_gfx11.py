@@ -325,21 +325,19 @@ def _build_cu_and_l0(
     tcp_gl1_content = stack_metrics(
         "\n".join([
             colored("Read BW", color_read),
-            colored(format_value(metrics["tcp_gl1_read_bw"], "Bytes/s", 1), color_read),
+            colored(format_value(metrics["tcp_gl1_read_bw"], "Bytes/s"), color_read),
             colored(std_arrows["left"], color_read),
         ]),
         "\n".join([
             colored("Write BW", color_write),
-            colored(
-                format_value(metrics["tcp_gl1_write_bw"], "Bytes/s", 1), color_write
-            ),
+            colored(format_value(metrics["tcp_gl1_write_bw"], "Bytes/s"), color_write),
             colored(std_arrows["right"], color_write),
         ]),
     )
     tcp_gl1_zone = tcp_gl1_content.split("\n")
     sqc_gl1_zone = [
         colored("Read BW", color_read),
-        colored(format_value(metrics["sqc_gl1_read_bw"], "Bytes/s", 1), color_read),
+        colored(format_value(metrics["sqc_gl1_read_bw"], "Bytes/s"), color_read),
         colored(std_arrows["left"], color_read),
     ]
     gl1_edges_lines = (
@@ -414,7 +412,7 @@ def _build_memory_columns(
         std_arrows,
     )
 
-    total = format_value(metrics["total_bw"], "Bytes/s", 1)
+    total = format_value(metrics["total_bw"], "Bytes/s")
     dram_content = stack_metrics(
         "[dim]DDR5/LPDDR5[/dim]",
         f"Total: [bold bright_green]{total}[/bold bright_green]",

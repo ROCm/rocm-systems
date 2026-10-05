@@ -56,7 +56,8 @@ def format_value(
     """Format a metric value with unit. Returns 'N/A' for None/NaN/invalid.
 
     Bandwidth units (Bytes/s, GB/s) are always rendered as fixed GB/s
-    with 3 decimal places for easy comparison across cache levels.
+    with 3 decimal places for easy comparison across cache levels, so
+    *precision* applies only to other units.
     """
     if value is None:
         return "N/A"
@@ -67,11 +68,9 @@ def format_value(
     if math.isnan(numeric):
         return "N/A"
     if unit == "GB/s":
-        gbps = numeric
-        return f"{gbps:.3f} GB/s"
+        return f"{numeric:.3f} GB/s"
     if unit == "Bytes/s":
-        gbps = numeric / 1e9
-        return f"{gbps:.3f} GB/s"
+        return f"{numeric / 1e9:.3f} GB/s"
     if unit == "%":
         return f"{numeric:.{precision}f}%"
     return f"{numeric:.{precision}f}{unit}"

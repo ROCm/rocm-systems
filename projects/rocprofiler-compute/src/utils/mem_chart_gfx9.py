@@ -159,14 +159,14 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["l2_fabric_wr_at_bw"] = metric_dict.get("L2-Fabric Write and Atomic BW")
 
     # Fabric→MALL→HBM BW (gfx940-942 use "Estimated …"; gfx950 uses exact)
-    _exact_rd = metric_dict.get("HBM Read BW")
+    exact_rd = metric_dict.get("HBM Read BW")
     metrics["hbm_read_bw"] = (
-        _exact_rd if _exact_rd is not None else metric_dict.get("Estimated HBM Read BW")
+        exact_rd if exact_rd is not None else metric_dict.get("Estimated HBM Read BW")
     )
-    _exact_wr = metric_dict.get("HBM Write and Atomic BW")
+    exact_wr = metric_dict.get("HBM Write and Atomic BW")
     metrics["hbm_wr_at_bw"] = (
-        _exact_wr
-        if _exact_wr is not None
+        exact_wr
+        if exact_wr is not None
         else metric_dict.get("Estimated HBM Write and Atomic BW")
     )
     metrics["hbm_write_bw"] = metric_dict.get("HBM Write BW")
@@ -402,7 +402,7 @@ def _read_bw_edge(
     color: str,
 ) -> list[str]:
     """Three markup lines: Read BW label, formatted value, left arrow."""
-    formatted = format_value(bw_value, "Bytes/s", 1)
+    formatted = format_value(bw_value, "Bytes/s")
     return [
         colored("Read BW", color),
         colored(formatted, color),
@@ -418,7 +418,7 @@ def _bw_label_value(
     """Label and formatted BW value — joined by newline."""
     return "\n".join([
         colored(label, color),
-        colored(format_value(value, "Bytes/s", 1), color),
+        colored(format_value(value, "Bytes/s"), color),
     ])
 
 
@@ -471,6 +471,31 @@ def _build_hbm_content(
     )
 
 
+def _build_io_panel_grid(fabric_col: int, panel_label: str, panel_width: int) -> Table:
+    """IO block panel (xGMI or PCIe), centred on the Fabric column."""
+    panel = Panel(
+        f"[dim]{panel_label}[/dim]",
+        border_style=COLORS["block"],
+        width=panel_width,
+        height=3,
+    )
+    panel_grid = Table.grid(padding=0)
+    col_offset = (panel_width - _XGMI_PANEL_W) // 2
+    panel_grid.add_column(width=fabric_col - col_offset)
+    panel_grid.add_column()
+    panel_grid.add_row("", panel)
+    return panel_grid
+
+
+def _build_io_connector(fabric_col: int, markup: str) -> Table:
+    """Connector between an IO block and the Fabric column."""
+    connector = Table.grid(padding=0)
+    connector.add_column(width=fabric_col + _IO_PAD_OFFSET)
+    connector.add_column()
+    connector.add_row("", Text.from_markup(markup))
+    return connector
+
+
 def _build_io_row(
     metrics: dict[str, Any],
     fabric_col: int,
@@ -484,35 +509,19 @@ def _build_io_row(
     color_read = COLORS["read"]
     color_write = COLORS["write"]
     color_atomic = COLORS["atomic"]
-    read_bw = format_value(metrics.get(bw_keys[0]), "Bytes/s", 1)
-    write_bw = format_value(metrics.get(bw_keys[1]), "Bytes/s", 1)
-    atomic_bw = format_value(metrics.get(bw_keys[2]), "Bytes/s", 1)
+    read_bw = format_value(metrics.get(bw_keys[0]), "Bytes/s")
+    write_bw = format_value(metrics.get(bw_keys[1]), "Bytes/s")
+    atomic_bw = format_value(metrics.get(bw_keys[2]), "Bytes/s")
 
-    panel = Panel(
-        f"[dim]{panel_label}[/dim]",
-        border_style=COLORS["block"],
-        width=panel_width,
-        height=3,
-    )
-    panel_grid = Table.grid(padding=0)
-    col_offset = (panel_width - _XGMI_PANEL_W) // 2
-    panel_grid.add_column(width=fabric_col - col_offset)
-    panel_grid.add_column()
-    panel_grid.add_row("", panel)
-
-    arrow_grid = Table.grid(padding=0)
-    arrow_grid.add_column(width=fabric_col + _IO_PAD_OFFSET)
-    arrow_grid.add_column()
-    arrow_grid.add_row(
-        "",
-        Text.from_markup(
-            f"[{color_read}]||  Read BW"
-            f"    {read_bw}[/{color_read}]\n"
-            f"[{color_write}]||  Write BW"
-            f"   {write_bw}[/{color_write}]\n"
-            f"[{color_atomic}]||  Atomic BW"
-            f"  {atomic_bw}[/{color_atomic}]"
-        ),
+    panel_grid = _build_io_panel_grid(fabric_col, panel_label, panel_width)
+    arrow_grid = _build_io_connector(
+        fabric_col,
+        f"[{color_read}]||  Read BW"
+        f"    {read_bw}[/{color_read}]\n"
+        f"[{color_write}]||  Write BW"
+        f"   {write_bw}[/{color_write}]\n"
+        f"[{color_atomic}]||  Atomic BW"
+        f"  {atomic_bw}[/{color_atomic}]",
     )
 
     if panel_above:
@@ -520,29 +529,12 @@ def _build_io_row(
     return Group(arrow_grid, panel_grid)
 
 
-def _build_io_panel_only(
-    fabric_col: int,
-    *,
-    panel_label: str,
-    panel_width: int,
-) -> Group:
-    """Build an IO block (xGMI or PCIe) without BW arrows."""
-    panel = Panel(
-        f"[dim]{panel_label}[/dim]",
-        border_style=COLORS["block"],
-        width=panel_width,
-        height=3,
+def _build_xgmi_panel_only(fabric_col: int) -> Group:
+    """Build the xGMI block without BW arrows, for gfx9 parts without xGMI counters."""
+    return Group(
+        _build_io_panel_grid(fabric_col, "xGMI (to Peer GPU)", _XGMI_PANEL_W),
+        _build_io_connector(fabric_col, "[dim]||[/dim]"),
     )
-    panel_grid = Table.grid(padding=0)
-    col_offset = (panel_width - _XGMI_PANEL_W) // 2
-    panel_grid.add_column(width=fabric_col - col_offset)
-    panel_grid.add_column()
-    panel_grid.add_row("", panel)
-    connector = Table.grid(padding=0)
-    connector.add_column(width=fabric_col + _IO_PAD_OFFSET)
-    connector.add_column()
-    connector.add_row("", Text.from_markup("[dim]||[/dim]"))
-    return Group(panel_grid, connector)
 
 
 def _build_scope_bar(total_width: int, fabric_col: int) -> str:
@@ -692,13 +684,7 @@ def create_mem_chart_diagram(
             )
         )
     else:
-        sections.append(
-            _build_io_panel_only(
-                fabric_col,
-                panel_label="xGMI (to Peer GPU)",
-                panel_width=_XGMI_PANEL_W,
-            )
-        )
+        sections.append(_build_xgmi_panel_only(fabric_col))
 
     sections.append(_build_scope_bar(chart_width, fabric_col))
     sections.append("")
