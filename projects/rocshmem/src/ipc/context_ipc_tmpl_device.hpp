@@ -86,6 +86,15 @@ __device__ void IPCContext::amo_set(void *dest, T value, int pe) {
 }
 
 template <typename T>
+__device__ void IPCContext::amo_set_relaxed(void *dest, T value, int pe) {
+  // System-scope, relaxed-order store: peer-visible without a seq_cst
+  // barrier. Safe under targeted ordering because the preceding relaxed
+  // fence (wait_on_vmem) has already drained the payload stores.
+  atomic::store<atomic::memory_scope::system, atomic::memory_order::relaxed>(
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, pe)), value);
+}
+
+template <typename T>
 __device__ T IPCContext::amo_swap(void *dest, T value, int pe) {
   return ipcImpl_.ipcAMOSwap(
       reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, pe)), value);

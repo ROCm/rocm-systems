@@ -47,6 +47,7 @@
 #include "signal_wait_until_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
+#include "producer_consumer_tester.hpp"
 #include "primitive_tester.hpp"
 #include "random_access_tester.hpp"
 #include "shmem_ptr_tester.hpp"
@@ -683,6 +684,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                      : "PingPong";
       testers.push_back(new PingPongTester(args));
       break;
+    case ProducerConsumerTestType:
+      test_name = "Producer-Consumer (put+fence+atomic_set+wait_until+load)";
+      testers.push_back(new ProducerConsumerTester(args));
+      break;
     case PingAllTestType:
       test_name = "PingAll";
       testers.push_back(new PingAllTester(args));
@@ -1269,6 +1274,7 @@ bool Tester::peLaunchesKernel() {
     case TileReduceWGTestType:
     case QpPingPongTestType:
     case SdmaPingPongTestType:
+    case ProducerConsumerTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

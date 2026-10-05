@@ -40,19 +40,32 @@ class GDAContext : public Context {
 
   __device__ GDAContext(Backend *b, unsigned int ctx_id); //TODO is this used?
 
-  __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
+  template <typename... Options>
+  __device__ void putmem(void *dest, const void *source, size_t nelems, int pe,
+                       CommOpt<Options...> opts = {});
 
-  __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);
+  template <typename... Options>
+  __device__ void getmem(void *dest, const void *source, size_t nelems, int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
-                             int pe);
+                             int pe, CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
-                             int pe);
+                             int pe,
+                       CommOpt<Options...> opts = {});
 
   __device__ void fence();
 
   __device__ void fence(int pe);
+
+  template <typename... Options>
+  __device__ void fence(CommOpt<Options...> opts);
+
+  template <typename... Options>
+  __device__ void fence(int pe, CommOpt<Options...> opts);
 
   __device__ void quiet();
 
@@ -84,23 +97,27 @@ class GDAContext : public Context {
 
   __device__ void sync_wg(rocshmem_team_t team);
 
-  template <typename T>
-  __device__ void p(T *dest, T value, int pe);
+  template <typename T, typename... Options>
+  __device__ void p(T *dest, T value, int pe, CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put_nbi(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put_nbi(T *dest, const T *source, size_t nelems, int pe,
+                          CommOpt<Options...> opts = {});
 
   template <typename T>
   __device__ T g(const T *source, int pe);
 
-  template <typename T>
-  __device__ void get(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void get_nbi(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get_nbi(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
   // Atomic operations
   template <typename T>
@@ -138,6 +155,32 @@ class GDAContext : public Context {
 
   template <typename T>
   __device__ T amo_fetch_cas(void *dst, T value, T cond, int pe);
+
+  // CommOpt-accepting amo overloads (accepted for API uniformity, ignored).
+  template <typename T, typename... Options>
+  __device__ void amo_add(void *dst, T value, int pe, CommOpt<Options...>) { amo_add(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_and(void *dst, T value, int pe, CommOpt<Options...>) { amo_and(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_or(void *dst, T value, int pe, CommOpt<Options...>) { amo_or(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_set(void *dst, T value, int pe, CommOpt<Options...>) { amo_set(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_xor(void *dst, T value, int pe, CommOpt<Options...>) { amo_xor(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_swap(void *dst, T value, int pe, CommOpt<Options...>) { return amo_swap(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_add(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_add(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_and(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_and(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_or(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_or(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_xor(void *dst, T value, int pe, CommOpt<Options...>) { return amo_fetch_xor(dst, value, pe); }
+  template <typename T, typename... Options>
+  __device__ void amo_cas(void *dst, T value, T cond, int pe, CommOpt<Options...>) { amo_cas(dst, value, cond, pe); }
+  template <typename T, typename... Options>
+  __device__ T amo_fetch_cas(void *dst, T value, T cond, int pe, CommOpt<Options...>) { return amo_fetch_cas(dst, value, cond, pe); }
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
@@ -218,54 +261,77 @@ class GDAContext : public Context {
                            int nelems);
 
   // Block/wave functions
+  template <typename... Options>
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
-                            int pe);
+                            int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void getmem_wg(void *dest, const void *source, size_t nelems,
-                            int pe);
+                            int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
-                                int pe);
+                                int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
-                                int pe);
+                                int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
-                              int pe);
+                              int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void getmem_wave(void *dest, const void *source, size_t nelems,
-                              int pe);
+                              int pe,
+                       CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
-                                  int pe);
+                                  int pe, CommOpt<Options...> opts = {});
 
+  template <typename... Options>
   __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
-                                  int pe);
+                                  int pe,
+                       CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put_wg(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put_wg(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put_nbi_wg(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put_wave(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put_wave(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void put_nbi_wave(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void put_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                               CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void get_wg(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get_wg(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void get_nbi_wg(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get_nbi_wg(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
 
-  template <typename T>
-  __device__ void get_wave(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get_wave(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
-  template <typename T>
-  __device__ void get_nbi_wave(T *dest, const T *source, size_t nelems, int pe);
+  template <typename T, typename... Options>
+  __device__ void get_nbi_wave(T *dest, const T *source, size_t nelems, int pe,
+                         CommOpt<Options...> opts = {});
 
 #define GDA_CONTEXT_PUT_SIGNAL_DEC(SUFFIX)                                               \
   template <typename T>                                                                  \
@@ -275,7 +341,20 @@ class GDAContext : public Context {
                                                                                          \
   __device__ void putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
                                         uint64_t *sig_addr, uint64_t signal, int sig_op, \
-                                        int pe);
+                                        int pe);  \
+  \
+  template <typename T, typename... Options>  \
+  __device__ void put_signal##SUFFIX(T *dest, const T *source, size_t nelems,  \
+                                     uint64_t *sig_addr, uint64_t signal, int sig_op,  \
+                                     int pe, CommOpt<Options...>) {  \
+    put_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);  \
+  }  \
+  template <typename... Options>  \
+  __device__ void putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,  \
+                                        uint64_t *sig_addr, uint64_t signal, int sig_op,  \
+                                        int pe, CommOpt<Options...>) {  \
+    putmem_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);  \
+  }
 
   GDA_CONTEXT_PUT_SIGNAL_DEC()
   GDA_CONTEXT_PUT_SIGNAL_DEC(_wg)
