@@ -8,6 +8,7 @@ import pytest
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
+    pmc_slot_cost,
 )
 
 # =============================================================================
@@ -119,3 +120,46 @@ class TestExtractCountersAndVariables:
         assert formula_only == {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
         assert "SQ_WAVES" in with_denom
         assert "SQ_WAVES" not in formula_only
+
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.pmc_slot_cost
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("counter", "present", "cost"),
+    [
+        ("SQ_WAVES", None, 1),
+        ("SQ_INST_LEVEL_SMEM_ACCUM", None, 2),
+        ("SQ_INST_LEVEL_SMEM_ACCUM", {"SQ_INST_LEVEL_SMEM"}, 1),
+        ("SQ_INST_LEVEL_SMEM", {"SQ_INST_LEVEL_SMEM_ACCUM"}, 0),
+        ("SQC_DCACHE_INFLIGHT_LEVEL_ACCUM", None, 2),
+        ("SQ_INST_LEVEL_VMEM_ACCUM[0]", None, 2),
+        ("SQ_ACCUM_PREV_HIRES", None, 1),
+    ],
+)
+def test_pmc_slot_cost(counter, present, cost):
+    assert pmc_slot_cost(counter, present=present) == cost
+
+
+@pytest.mark.parametrize(
+    ("counters", "cost"),
+    [
+        ({"SQ_INST_LEVEL_SMEM_ACCUM"}, 2),
+        ({"SQ_INST_LEVEL_SMEM", "SQ_INST_LEVEL_SMEM_ACCUM"}, 2),
+        ({"SQ_INST_LEVEL_SMEM"}, 1),
+        (
+            {
+                "SQ_INST_LEVEL_SMEM",
+                "SQ_INST_LEVEL_SMEM_ACCUM",
+                "SQ_INST_LEVEL_VMEM_ACCUM",
+            },
+            4,
+        ),
+    ],
+)
+def test_pmc_bucket_slot_cost(counters, cost):
+    from utils.utils_counter_defs import pmc_bucket_slot_cost
+
+    assert pmc_bucket_slot_cost(counters) == cost
