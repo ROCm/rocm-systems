@@ -7,13 +7,7 @@ set(output_sources
     ${CMAKE_CURRENT_LIST_DIR}/summary_writer.cpp
 )
 
-set(output_headers
-    ${CMAKE_CURRENT_LIST_DIR}/artifact.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/process_metadata.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/registry.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/process_tree.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/summary_writer.hpp
-)
+set(output_headers ${CMAKE_CURRENT_LIST_DIR}/output_summary.hpp)
 
 target_sources(
     rocprofiler-systems-core-library

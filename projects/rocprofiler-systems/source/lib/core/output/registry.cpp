@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 
 #include "logger/debug.hpp"
 
@@ -49,39 +49,26 @@ registry::register_file(std::string path, output_format format, std::optional<pi
     entry.format     = format;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_files.push_back({ m_session_id, std::move(entry) });
+    m_files.push_back(std::move(entry));
 }
 
 void
 registry::record_process(process_metadata meta)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto                        it = m_processes.find(meta.pid);
-    if(it == m_processes.end() || it->second.session_id != m_session_id)
+    auto [it, inserted] = m_processes.try_emplace(meta.pid, meta);
+    if(!inserted)
     {
-        // Capture the key before moving from meta: relying on the RHS of
-        // `operator[]=` being sequenced before the LHS (so meta.pid would
-        // still read correctly after the move) is a fragile guarantee that
-        // only holds because pid_t is trivially copyable.
-        const pid_t pid = meta.pid;
-        m_processes[pid] =
-            session_entry<process_metadata>{ m_session_id, std::move(meta) };
-        return;
+        if(meta.ppid != NO_PID) it->second.ppid = meta.ppid;
+        if(!meta.command.empty()) it->second.command = std::move(meta.command);
     }
-
-    if(meta.ppid != NO_PID) it->second.value.ppid = meta.ppid;
-    if(!meta.command.empty()) it->second.value.command = std::move(meta.command);
 }
 
 std::vector<artifact>
 registry::rows() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::vector<artifact>       result;
-    result.reserve(m_files.size());
-    for(const auto& entry : m_files)
-        if(entry.session_id == m_session_id) result.push_back(entry.value);
-    return result;
+    return m_files;
 }
 
 std::vector<process_metadata>
@@ -90,26 +77,17 @@ registry::processes() const
     std::lock_guard<std::mutex>   lock(m_mutex);
     std::vector<process_metadata> result;
     result.reserve(m_processes.size());
-    for(const auto& [pid, entry] : m_processes)
-        if(entry.session_id == m_session_id) result.push_back(entry.value);
+    for(const auto& [pid, meta] : m_processes)
+        result.push_back(meta);
     return result;
 }
 
-std::uint64_t
+void
 registry::start_new_session()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    const auto                  ended_session = m_session_id;
-    ++m_session_id;
-
-    std::erase_if(m_files, [ended_session](const auto& entry) {
-        return entry.session_id < ended_session;
-    });
-    std::erase_if(m_processes, [ended_session](const auto& kv) {
-        return kv.second.session_id < ended_session;
-    });
-
-    return m_session_id;
+    m_files.clear();
+    m_processes.clear();
 }
 
 }  // namespace rocprofsys::output

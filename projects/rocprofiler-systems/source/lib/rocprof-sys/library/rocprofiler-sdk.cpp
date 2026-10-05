@@ -20,9 +20,8 @@
 #include "core/control/triggers/roctx.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto.hpp"
-#include "core/perfetto/log_filter.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/sdk/tracing-config-deps.hpp"
 #include "core/sdk/tracing-config.hpp"
@@ -1708,8 +1707,6 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
         reset_sdk_session_guards();
 
         output::registry::instance().start_new_session();
-
-        core::log_filter::register_with_perfetto_logger();
 
         // Restart Perfetto for a new tracing session
         if(get_use_perfetto())

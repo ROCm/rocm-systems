@@ -4,7 +4,7 @@
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
 

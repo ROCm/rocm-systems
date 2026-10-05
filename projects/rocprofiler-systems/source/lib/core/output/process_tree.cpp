@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/output/process_tree.hpp"
+#include "core/output/output_summary.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -30,71 +30,21 @@ make_node(const process_metadata& meta, std::vector<artifact> rows)
     node.meta = meta;
     node.rows = std::move(rows);
     sort_rows_desc_by_size(node);
-    node.own_size_bytes        = sum_sizes(node.rows);
-    node.cumulative_size_bytes = node.own_size_bytes;
     return node;
 }
 
-struct subtree_walk
-{
-    std::vector<pid_t>               order;
-    std::unordered_map<pid_t, pid_t> parent_of;
-};
-
-// Stack-based pre-order enumeration. Iterative so deep parent chains
-// (MPI fork generations) do not blow the call stack.
-[[nodiscard]] subtree_walk
-collect_subtree_order(
-    pid_t root_pid, const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
-{
-    subtree_walk       walk{};
-    std::vector<pid_t> stack{ root_pid };
-    while(!stack.empty())
-    {
-        const pid_t pid = stack.back();
-        stack.pop_back();
-        walk.order.push_back(pid);
-        auto it = children_by_ppid.find(pid);
-        if(it == children_by_ppid.end()) continue;
-        for(pid_t cp : it->second)
-        {
-            walk.parent_of[cp] = pid;
-            stack.push_back(cp);
-        }
-    }
-    return walk;
-}
-
-void
-attach_children_bottom_up(const subtree_walk&                      walk,
-                          std::unordered_map<pid_t, process_node>& built, pid_t root_pid)
-{
-    for(auto rit = walk.order.rbegin(); rit != walk.order.rend(); ++rit)
-    {
-        const pid_t pid = *rit;
-        if(pid == root_pid) continue;
-        const pid_t ppid = walk.parent_of.at(pid);
-        auto&       dst  = built.at(ppid);
-        auto&       src  = built.at(pid);
-        dst.cumulative_size_bytes += src.cumulative_size_bytes;
-        dst.children.push_back(std::move(src));
-    }
-}
-
 process_node
-extract_subtree(std::unordered_map<pid_t, process_node>&             nodes,
-                const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid,
-                pid_t                                                root_pid)
+build_subtree(pid_t pid, std::unordered_map<pid_t, process_node>& nodes,
+              const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
 {
-    const auto walk = collect_subtree_order(root_pid, children_by_ppid);
-
-    std::unordered_map<pid_t, process_node> built;
-    built.reserve(walk.order.size());
-    for(pid_t pid : walk.order)
-        built.insert(nodes.extract(pid));
-
-    attach_children_bottom_up(walk, built, root_pid);
-    return std::move(built.at(root_pid));
+    process_node node = std::move(nodes.extract(pid).mapped());
+    auto         it   = children_by_ppid.find(pid);
+    if(it != children_by_ppid.end())
+    {
+        for(pid_t child_pid : it->second)
+            node.children.push_back(build_subtree(child_pid, nodes, children_by_ppid));
+    }
+    return node;
 }
 
 [[nodiscard]] std::unordered_map<pid_t, process_metadata>
@@ -215,7 +165,7 @@ process_tree::process_tree(std::span<const artifact>         rows,
 
     m_roots.reserve(root_pids.size());
     for(pid_t pid : root_pids)
-        m_roots.push_back(extract_subtree(nodes, children_by_ppid, pid));
+        m_roots.push_back(build_subtree(pid, nodes, children_by_ppid));
 
     m_diagnostics.cyclic_ppid_pids = collect_unreachable_pids(nodes);
 

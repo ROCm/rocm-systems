@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/output/summary_writer.hpp"
+#include "core/output/output_summary.hpp"
 
 #include "logger/debug.hpp"
 
@@ -11,14 +11,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
-#include <iterator>
-#include <numeric>
 #include <ostream>
 #include <set>
 #include <system_error>
@@ -30,9 +27,6 @@ namespace
 {
 inline constexpr std::size_t ISO_8601_BUFFER_BYTES = 32;
 
-inline constexpr unsigned char UTF8_CONTINUATION_MASK = 0xC0;
-inline constexpr unsigned char UTF8_CONTINUATION_BITS = 0x80;
-
 inline constexpr std::string_view UNKNOWN_VALUE_PLACEHOLDER = "?";
 
 inline constexpr double BYTES_PER_KILOBYTE = 1000.0;
@@ -41,7 +35,6 @@ inline constexpr double BYTES_PER_GIGABYTE = 1000.0 * BYTES_PER_MEGABYTE;
 
 inline constexpr std::size_t FORMAT_NAME_WIDTH = 9;
 inline constexpr std::size_t FILE_SIZE_WIDTH   = 10;
-inline constexpr std::size_t MIN_BOX_WIDTH     = 40;
 
 inline constexpr std::string_view GLYPH_NODE_MARKER       = "● ";
 inline constexpr std::string_view GLYPH_SEPARATOR         = "│";
@@ -52,10 +45,6 @@ inline constexpr std::string_view GLYPH_CHILD_CONN_MID    = "├─";
 inline constexpr std::string_view GLYPH_CHILD_INDENT_LAST = "    ";
 inline constexpr std::string_view GLYPH_CHILD_INDENT_MID  = "│   ";
 inline constexpr std::string_view GLYPH_ROOT_INDENT       = "  ";
-inline constexpr std::string_view GLYPH_BOX_TOP_LEFT      = "╭─ ";
-inline constexpr std::string_view GLYPH_BOX_BOTTOM_LEFT   = "╰";
-inline constexpr std::string_view GLYPH_BOX_LINE          = "─";
-inline constexpr std::string_view GLYPH_BOX_LEFT_RAIL     = "│ ";
 }  // namespace
 
 run_metadata
@@ -79,62 +68,16 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
     return meta;
 }
 
-std::size_t
-display_width(std::string_view text)
-{
-    return static_cast<std::size_t>(std::ranges::count_if(text, [](char byte) {
-        return (static_cast<unsigned char>(byte) & UTF8_CONTINUATION_MASK) !=
-               UTF8_CONTINUATION_BITS;
-    }));
-}
-
 namespace
 {
 std::string
-repeat_glyph(std::string_view glyph, std::size_t count)
-{
-    std::string out;
-    out.reserve(glyph.size() * count);
-    for(std::size_t index = 0; index < count; ++index)
-        out.append(glyph);
-    return out;
-}
-
-std::string
 strip_terminal_control_chars(std::string_view s)
 {
-    std::string out;
-    out.reserve(s.size());
-    for(std::size_t i = 0; i < s.size();)
-    {
-        const auto byte = static_cast<unsigned char>(s[i]);
-        // CSI sequence: ESC [ ... <final byte in 0x40..0x7E>
-        if(byte == 0x1B && i + 1 < s.size() && s[i + 1] == '[')
-        {
-            std::size_t j = i + 2;
-            while(j < s.size())
-            {
-                const auto fb = static_cast<unsigned char>(s[j]);
-                if(fb >= 0x40 && fb <= 0x7E)
-                {
-                    ++j;
-                    break;
-                }
-                ++j;
-            }
-            i = j;
-            continue;
-        }
-        // Drop other C0 controls + DEL; keep tab (0x09) and newline (0x0A)
-        // so downstream layout still sees structure.
-        if((byte < 0x20 && byte != 0x09 && byte != 0x0A) || byte == 0x7F)
-        {
-            ++i;
-            continue;
-        }
-        out.push_back(static_cast<char>(byte));
-        ++i;
-    }
+    std::string out{ s };
+    std::erase_if(out, [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        return (byte < 0x20 && byte != 0x09 && byte != 0x0A) || byte == 0x7F;
+    });
     return out;
 }
 }  // namespace
@@ -381,44 +324,23 @@ render_tree(const process_tree& tree, pid_t main_pid)
 
     return lines;
 }
-}  // namespace
 
-std::size_t
-box_width(std::span<const std::string> header_lines,
-          std::span<const std::string> tree_lines)
+[[nodiscard]] std::vector<artifact>
+collect_rows(const process_tree& tree)
 {
-    std::size_t width = MIN_BOX_WIDTH;
-    for(const auto& line : header_lines)
-        width = std::max(width, display_width(line) + 2);  // + 2 for the "│ " rail
-    for(const auto& line : tree_lines)
-        width = std::max(width, display_width(line) + 2);
-    return width;
-}
-
-namespace
-{
-void
-append_box(std::string& out, std::string_view title, std::span<const std::string> lines,
-           std::size_t width)
-{
-    const std::string head      = fmt::format("{}{} ", GLYPH_BOX_TOP_LEFT, title);
-    const std::size_t head_cols = display_width(head);
-
-    const std::size_t reserve_hint =
-        std::accumulate(lines.begin(), lines.end(), out.size() + head_cols + width + 4,
-                        [](std::size_t acc, const std::string& line) {
-                            return acc + line.size() + GLYPH_BOX_LEFT_RAIL.size() + 1;
-                        });
-    out.reserve(reserve_hint);
-
-    out += head;
-    if(width > head_cols) out += repeat_glyph(GLYPH_BOX_LINE, width - head_cols);
-    out += "\n";
-    for(const auto& line : lines)
-        fmt::format_to(std::back_inserter(out), "{}{}\n", GLYPH_BOX_LEFT_RAIL, line);
-    out += GLYPH_BOX_BOTTOM_LEFT;
-    out += repeat_glyph(GLYPH_BOX_LINE, width - 1);
-    out += "\n";
+    std::vector<artifact>            rows;
+    std::vector<const process_node*> stack;
+    for(const auto& root : tree.roots())
+        stack.push_back(&root);
+    while(!stack.empty())
+    {
+        const process_node* node = stack.back();
+        stack.pop_back();
+        rows.insert(rows.end(), node->rows.begin(), node->rows.end());
+        for(const auto& child : node->children)
+            stack.push_back(&child);
+    }
+    return rows;
 }
 
 [[nodiscard]] std::string
@@ -441,9 +363,9 @@ build_legend(std::span<const artifact> rows)
 }  // namespace
 
 void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
-              std::span<const artifact> rows)
+write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta)
 {
+    const auto rows = collect_rows(tree);
     if(rows.empty()) return;
 
     report_diagnostics(tree.diagnostics());
@@ -451,12 +373,13 @@ write_summary(std::ostream& os, const process_tree& tree, const run_metadata& me
     const auto header_lines = render_header(meta, tree, rows);
     const auto tree_lines   = render_tree(tree, getpid());
     const auto legend       = build_legend(rows);
-    const auto width        = box_width(header_lines, tree_lines);
 
-    std::string out = "\n";
-    append_box(out, "Output Summary", header_lines, width);
-    out += "\n";
-    append_box(out, "Process tree", tree_lines, width);
+    std::string out = "\nOutput Summary\n";
+    for(const auto& line : header_lines)
+        out += "  " + line + "\n";
+    out += "\nProcess tree\n";
+    for(const auto& line : tree_lines)
+        out += "  " + line + "\n";
     if(!legend.empty()) out += fmt::format("\n  {}\n", legend);
 
     os << out;

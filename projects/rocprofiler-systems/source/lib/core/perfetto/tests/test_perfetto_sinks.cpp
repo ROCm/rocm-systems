@@ -3,7 +3,7 @@
 
 #include "gtest/gtest.h"
 
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks/file_output.hpp"
 #include "core/perfetto/sinks/per_pid_file_sink.hpp"

@@ -4,8 +4,7 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "common/path.hpp"
-#include "core/output/artifact.hpp"
-#include "core/output/registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "logger/debug.hpp"
 
 #include <cerrno>
