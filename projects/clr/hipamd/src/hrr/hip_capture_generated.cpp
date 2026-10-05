@@ -7793,7 +7793,7 @@ static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t li
   hipError_t r = g_real_table.hipLibraryGetModule_fn(pMod, library);
   if (r == hipSuccess) {
     hrr_args_hipLibraryGetModule a{};
-    a.ret     = static_cast<int32_t>(r);
+    a.ret         = static_cast<int32_t>(r);
     a.library = reinterpret_cast<uint64_t>(library);
     if (pMod) a.pMod = reinterpret_cast<uint64_t>(*pMod);
     hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMODULE, &a.hdr, sizeof(a));
