@@ -1035,6 +1035,32 @@
         {"name": "HostApi_GraphCaptureReplayPutWait_Proxy", "description": "Host API: two-node proxy graph capture and repeated replay", "test_filter": "HostApiTest.GraphCaptureReplayPutWait"}
       ]
     },
+    "host_api_rma_disable": {
+      "extends": "host_api_tests_symmem",
+      "description": "NCCL_RMA_DISABLE=1 on a single node: every peer is in the LSA team, so the whole Host API suite must still pass over the copy engine. NCCL_PARAM is cached per process, so the flag has to come from the environment.",
+      "env_variables": {
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {"name": "HostApi_RmaDisableIntraNodePutUsesCe", "description": "Host API: NCCL_RMA_DISABLE=1 leaves intra-node put/wait working", "test_filter": "HostApiTest.RmaDisableIntraNodePutUsesCe"}
+      ]
+    },
+    "host_api_rma_disable_proxy": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {"name": "HostApi_RmaDisableCrossNodePutFails_Sym", "description": "Host API: NCCL_RMA_DISABLE=1, symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of hanging", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"},
+        {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
+      ]
+    },
 
     "rma_external_plugin_put_signal": {
       "extends": "default",
@@ -2089,6 +2115,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -2984,6 +3015,51 @@
           "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
           "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
           "timeout": 300
+        }
+      ]
+    },
+
+    "mpi_8rank_single_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "DDA_ForeignCurrentDevice_8Ranks",
+          "description": "AllReduce issued with another device current runs on the communicator's device and leaves the caller's current device unchanged",
+          "test_filter": "DdaMPI_AllReduce.ForeignCurrentDeviceUngrouped"
+        },
+        {
+          "name": "DDA_StreamAlternation_8Ranks",
+          "description": "Consecutive AllReduces alternating between two streams on one communicator stay ordered; a missing done-event edge lets them overlap and corrupt the result",
+          "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
+        },
+        {
+          "name": "DDA_CapturedForkJoin_8Ranks",
+          "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
+          "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
+        },
+        {
+          "name": "DDA_CapturedReplayOrdered_8Ranks",
+          "description": "A collective issued after a graph replay stays ordered behind it through an event the application records outside the capture",
+          "test_filter": "DdaMPI_AllReduce.CapturedReplayOrderedByAppEvent"
+        },
+        {
+          "name": "DDA_CapturedForkedStreamsSerialized_8Ranks",
+          "description": "Two AllReduces captured on pre-forked streams of one graph are serialized through deviceStream: every pair of their work nodes is ordered",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnForkedStreamsSerializedInGraph"
+        },
+        {
+          "name": "DDA_CapturedJoinsSerialEvent_8Ranks",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0: a captured AllReduce waits on deviceStream.serialEvent and records it into the graph exactly once",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
         }
       ]
     },
@@ -4102,7 +4178,8 @@
           "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
           "env_variables": {
             "NCCL_IB_SL": "",
-            "NCCL_IB_TC": ""
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": ""
           }
         }
       ]
@@ -4764,6 +4841,12 @@
       "enabled": true
     },
     {
+      "name": "MPI Tests (8-rank, single-node)",
+      "description": "MPI unit tests that need eight ranks on one node, one rank per process",
+      "config": "mpi_8rank_single_node",
+      "enabled": true
+    },
+    {
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
@@ -5098,6 +5181,22 @@
       "name": "Host API Graph Capture - Proxy",
       "description": "Two-node proxy graph capture and repeated replay for PutSignal/WaitSignal",
       "config": "host_api_graph_proxy",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - RMA Disabled",
+      "description": "Host API suite on a single node with NCCL_RMA_DISABLE=1 (copy engine only)",
+      "config": "host_api_rma_disable",
+      "enabled": true
+    },
+    {
+      "name": "Host API RMA Disabled - Proxy",
+      "description": "Two-node NCCL_RMA_DISABLE=1: cross-node put/wait must fail cleanly on symmetric and non-symmetric windows",
+      "config": "host_api_rma_disable_proxy",
       "num_ranks": 2,
       "num_nodes": 2,
       "num_gpus": 1,

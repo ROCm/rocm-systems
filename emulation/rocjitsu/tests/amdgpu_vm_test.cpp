@@ -3765,7 +3765,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -3869,7 +3869,7 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
     // metadata untouched, then suspend and destroy the queue below.
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -4019,7 +4019,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
     fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
   });
 
-  amdgpu::AqlQueueConfig queue{};
+  amdgpu::ComputeQueueConfig queue{};
   queue.interrupt_sink = subscription.sink();
   queue.process_id = kProcessId;
   queue.queue_id = kQueueId;
@@ -5275,6 +5275,17 @@ constexpr uint32_t sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
 }
 constexpr uint32_t s_cmp_eq_i32(uint32_t s0, uint32_t s1) { return sopc(0, s0, s1); }
 constexpr uint32_t s_cmp_gt_i32(uint32_t s0, uint32_t s1) { return sopc(2, s0, s1); }
+// SOPK: encoding[31:28]=0xB, op[27:23], sdst[22:16], simm16[15:0]
+constexpr uint32_t sopk(uint32_t op, uint32_t sdst, uint16_t simm16) {
+  return (0xBu << 28) | (op << 23) | (sdst << 16) | simm16;
+}
+// hwreg(id, offset, size) operand of S_GETREG/S_SETREG: id[5:0], offset[10:6], size-1[15:11]
+constexpr uint32_t HW_REG_MODE = 1;
+constexpr uint16_t hwreg(uint32_t id, uint32_t offset, uint32_t size) {
+  return static_cast<uint16_t>(id | (offset << 6) | ((size - 1) << 11));
+}
+// The value to write follows as a 32-bit literal dword.
+constexpr uint32_t s_setreg_imm32_b32(uint16_t hwreg) { return sopk(20, 0, hwreg); }
 // VOP1: encoding[31:25]=0x3F, vdst[24:17], op[16:9], src0[8:0]
 constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
@@ -5987,7 +5998,10 @@ TEST_P(IsaTest, VCmpEqF32_SetsVCC) {
   // Compare v0 (lane index as float-bits) with inline 0 (integer 0).
   // Lane 0: v0=0, compared with 0 -> equal -> VCC[0]=1.
   // Lane 1: v0=1, compared with 0 -> not equal -> VCC[1]=0.
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
+  // Bit pattern 1 is an F32 subnormal. Compares flush it to zero unless MODE
+  // preserves F32 input denormals, so enable them first.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
   uint64_t vcc = fx.vcc();
   EXPECT_TRUE(vcc & (1ULL << 0));  // lane 0: 0.0 == 0.0
   EXPECT_FALSE(vcc & (1ULL << 1)); // lane 1: int 1 as float != 0.0
@@ -6001,7 +6015,9 @@ TEST_P(IsaTest, VCndmaskB32) {
   // v_cmp_eq_f32 v0, 0 -> VCC[0]=1 (lane 0 = 0 == 0), VCC[1]=0 (1 != 0)
   // v_mov_b32 v1, inline 99
   // v_cndmask_b32 v2, v0, v1 -> lane 0: VCC=1 -> v1=99; lane 1: VCC=0 -> v0=1
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
+  // Lane 1's bit pattern is an F32 subnormal; preserve F32 input denormals.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
                    enc::v_mov_b32(1, enc::INLINE_CONST(42)),   // v1 = 42 (all lanes)
                    enc::v_cndmask_b32(2, enc::VGPR_SRC(0), 1), // v2 = VCC ? v1 : v0
                    SOPP_S_ENDPGM});
@@ -7134,6 +7150,30 @@ public:
   bool requires_serial_hot_hooks() const override { return false; }
 };
 
+class LiveHotHookSubscriptionPlugin final : public ExecutionPlugin {
+public:
+  explicit LiveHotHookSubscriptionPlugin(bool observes)
+      : ExecutionPlugin(observes ? "live_subscribed_hot_hook" : "live_unsubscribed_hot_hook"),
+        observes_(observes) {}
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
+    return observes_;
+  }
+  bool observes_before_execute_instruction() const override { return false; }
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_async_instruction_issued() const override { return false; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++sgpr_reads; }
+
+  uint32_t sgpr_reads = 0;
+
+private:
+  bool observes_ = false;
+};
+
 TEST(AqlDispatchTest, DebugPausedPoolWaveDoesNotKeepSchedulingContinuations) {
   VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
   f.cp()->set_dispatch_threads(2);
@@ -7225,6 +7265,48 @@ TEST(AqlDispatchTest, LivePluginReplacementPreservesPoolDuringActiveDispatch) {
 
   f.engine->run();
   EXPECT_TRUE(f.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, LivePluginReplacementRefreshesResidentWaveHotHookSubscriptions) {
+  const auto run_case = [](bool initial_observes, bool replacement_observes) {
+    SCOPED_TRACE(std::format("{} -> {}", initial_observes, replacement_observes));
+    VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+    f.soc_ptr->set_dispatch_threads(2);
+
+    auto initial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto initial = std::make_unique<LiveHotHookSubscriptionPlugin>(initial_observes);
+    auto *initial_ptr = initial.get();
+    ASSERT_TRUE(initial_group->add(std::move(initial)));
+    f.soc_ptr->set_plugin_group(initial_group);
+
+    auto code = make_multi_quantum_nop_kernel();
+    const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+    step_until_first_quantum(f, f.cu());
+
+    auto *wave = f.cu()->wf(0);
+    ASSERT_NE(wave, nullptr);
+    const uint32_t physical_sgpr = wave->sgpr_alloc().base;
+    EXPECT_EQ(f.cu()->read_sgpr(physical_sgpr), 0u);
+    EXPECT_EQ(initial_ptr->sgpr_reads, initial_observes ? 1u : 0u);
+
+    auto replacement_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto replacement = std::make_unique<LiveHotHookSubscriptionPlugin>(replacement_observes);
+    auto *replacement_ptr = replacement.get();
+    ASSERT_TRUE(replacement_group->add(std::move(replacement)));
+    f.soc_ptr->set_plugin_group(replacement_group);
+
+    EXPECT_EQ(f.cu()->read_sgpr(physical_sgpr), 0u);
+    EXPECT_EQ(replacement_ptr->sgpr_reads, replacement_observes ? 1u : 0u);
+    EXPECT_EQ(initial_ptr->sgpr_reads, initial_observes ? 1u : 0u);
+
+    f.engine->run();
+    EXPECT_TRUE(f.cu()->is_idle());
+  };
+
+  run_case(/*initial_observes=*/false, /*replacement_observes=*/true);
+  run_case(/*initial_observes=*/true, /*replacement_observes=*/false);
 }
 
 uint64_t instructions_visible_at_tick_ten(uint32_t dispatch_threads) {
@@ -7359,9 +7441,9 @@ private:
   bool released_ = false;
 };
 
-amdgpu::AqlQueueConfig make_inert_aql_queue(uint32_t queue_id, uint64_t ring_base,
-                                            bool host_accessible = false) {
-  amdgpu::AqlQueueConfig queue{};
+amdgpu::ComputeQueueConfig make_inert_aql_queue(uint32_t queue_id, uint64_t ring_base,
+                                                bool host_accessible = false) {
+  amdgpu::ComputeQueueConfig queue{};
   queue.queue_id = queue_id;
   queue.ring_base_va = ring_base;
   queue.ring_size = amdgpu::kAqlPacketBytes;
@@ -7509,7 +7591,7 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   test::AqlQueue dispatch_queue(f.mem(), f.cp());
-  amdgpu::AqlQueueConfig removable_queue = make_inert_aql_queue(42, 0xF1000000);
+  amdgpu::ComputeQueueConfig removable_queue = make_inert_aql_queue(42, 0xF1000000);
   const uint64_t removable_registration = f.cp()->register_queue(removable_queue);
   ASSERT_NE(removable_registration, 0u);
   dispatch_queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
@@ -7523,7 +7605,7 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
     return;
   }
 
-  amdgpu::AqlQueueConfig added_queue = make_inert_aql_queue(43, 0xF2000000);
+  amdgpu::ComputeQueueConfig added_queue = make_inert_aql_queue(43, 0xF2000000);
   std::promise<void> registration_started_promise;
   auto registration_started = registration_started_promise.get_future();
   auto registration =
@@ -7576,7 +7658,7 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
   EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
       << "no monitor should run before any host-accessible queue is registered";
 
-  amdgpu::AqlQueueConfig queue = make_inert_aql_queue(7, 0xF1000000, true);
+  amdgpu::ComputeQueueConfig queue = make_inert_aql_queue(7, 0xF1000000, true);
   const uint64_t registration = cp->register_queue(queue);
   ASSERT_NE(registration, 0u);
   EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
@@ -7588,7 +7670,7 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
       << "the stopped monitor must be joined before queue teardown returns";
 
   // A new queue landing on a CP whose monitor retired must get polling back.
-  amdgpu::AqlQueueConfig queue2 = make_inert_aql_queue(8, 0xF2000000, true);
+  amdgpu::ComputeQueueConfig queue2 = make_inert_aql_queue(8, 0xF2000000, true);
   const uint64_t registration2 = cp->register_queue(queue2);
   ASSERT_NE(registration2, 0u);
   EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
@@ -7605,11 +7687,13 @@ TEST(DoorbellMonitorLifecycle, ConcurrentLastQueueRemovalAndRegistrationKeepsMon
   amdgpu::CommandProcessor *cp = f.cp();
 
   for (uint32_t iteration = 0; iteration < 50; ++iteration) {
-    amdgpu::AqlQueueConfig old_queue = make_inert_aql_queue(iteration * 2 + 1, 0xF1000000, true);
+    amdgpu::ComputeQueueConfig old_queue =
+        make_inert_aql_queue(iteration * 2 + 1, 0xF1000000, true);
     const uint64_t old_registration = cp->register_queue(old_queue);
     ASSERT_NE(old_registration, 0u);
 
-    amdgpu::AqlQueueConfig new_queue = make_inert_aql_queue(iteration * 2 + 2, 0xF2000000, true);
+    amdgpu::ComputeQueueConfig new_queue =
+        make_inert_aql_queue(iteration * 2 + 2, 0xF2000000, true);
 
     std::barrier start(3);
     std::thread remove_last([&] {
@@ -7642,9 +7726,8 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
       for (bool graphics_engine : {false, true}) {
         VmFixture f(arch, 1, 8, 64, 106, 256, /*num_shader_engines=*/1, /*max_ticks=*/0);
         auto *snapshots = f.capture_halts();
-        amdgpu::Pm4SubmitQueue queue;
+        amdgpu::ComputeQueueConfig queue;
         queue.queue_id = 71;
-        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
         ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
         constexpr uint64_t code = 0x8000, ib = 0x4000, indirect = 0x6010;
         const bool unpacked_ids =
@@ -7751,9 +7834,8 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
        {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna1", "cdna2", "cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch, 1, 8, 64, 106, 256, 1, 0);
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.queue_id = 71;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     constexpr uint64_t ib = 0x4000, predicate = 0x6000, output = 0x7000;
     std::vector<uint32_t> words;
@@ -7822,11 +7904,10 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
                                          .request_mutex = process.page_table_request_mutex(),
                                          .mutation_epoch = process.page_table_mutation_epoch()});
   ASSERT_TRUE(address_space);
-  amdgpu::Pm4SubmitQueue queue;
+  amdgpu::ComputeQueueConfig queue;
   queue.address_space = address_space;
   queue.queue_id = 71;
   queue.process_id = 7;
-  queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
   ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
   EXPECT_FALSE(adapter.unregister_address_space(address_space));
   amdgpu::Pm4Submission submission;
@@ -7856,11 +7937,10 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
   ASSERT_TRUE(address_space);
   std::array<uint32_t, 2> callbacks{};
   for (uint32_t i = 0; i < 2; ++i) {
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.address_space = address_space;
     queue.queue_id = 71 + i;
     queue.process_id = 7;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     amdgpu::Pm4Submission submission;
     submission.ready = [] { return false; };
@@ -7938,11 +8018,10 @@ TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
     std::memcpy(code_backing.data(), &end_program, sizeof(end_program));
     uint32_t completed = 0;
     for (uint32_t index = 0; index < 2; ++index) {
-      amdgpu::Pm4SubmitQueue queue;
+      amdgpu::ComputeQueueConfig queue;
       queue.address_space = address_space;
       queue.queue_id = 71 + index;
       queue.process_id = pid;
-      queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
       ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
       std::vector<uint32_t> words;
       auto packet = [&](amdgpu::Pm4Opcode op, std::initializer_list<uint32_t> payload) {
@@ -8006,11 +8085,10 @@ TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
                   .mutation_epoch = process.page_table_mutation_epoch()});
         ASSERT_TRUE(address_space);
         auto *snapshots = f.capture_halts();
-        amdgpu::Pm4SubmitQueue queue;
+        amdgpu::ComputeQueueConfig queue;
         queue.address_space = address_space;
         queue.queue_id = 71;
         queue.process_id = pid;
-        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
         ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
         const uint32_t end_program = legacy ? 0xbf810000 : 0xbfb00000;
         std::memcpy(code_backing.data(), &end_program, sizeof(end_program));

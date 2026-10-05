@@ -210,13 +210,20 @@ class Kernel {
     size_t wavesPerSimdHint_;       //!< waves per simd hit
     size_t constMemSize_;           //!< size of user-allocated constant memory
     size_t maxDynamicSharedSizeBytes_;
+    int runtimeClusterSize_[3];              //!< runtime-required cluster dimensions
+    int kernelMaxDynamicSharedSizeBytes_;    //!< device-wide kernel attribute value
+    int kernelPreferredShmemCarveout_;       //!< device-wide kernel carveout attribute
+    int nonPortableClusterSizeAllowed_;      //!< raw kernel attribute value; nonzero permits it
+    int clusterSchedulingPolicyPreference_;  //!< preferred cluster scheduling policy
     std::string compileVecTypeHint_;  //!< kernel compiled vector type hint
 
     int maxOccupancyPerCu_;           //!< Max occupancy per compute unit in threads
     bool isWGPMode_;                  //!< kernel compiled in WGP/cumode
     bool uniformWorkGroupSize_;       //!< uniform work group size option
     bool hasClusterAttr_;             //!< cluster metadata present in code object
-    uint8_t groupMemCarveout_;        //!< LDS carveout
+    bool hasFuncMaxDynamicSharedSize_;    //!< context/function-level override was set
+    bool hasFuncPreferredShmemCarveout_;  //!< context/function-level override was set
+    int groupMemCarveout_;                //!< effective LDS carveout; -1 selects device default
   };
 
   //! Default constructor
