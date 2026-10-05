@@ -33,6 +33,15 @@ find_package(hip CONFIG REQUIRED)
 
 add_subdirectory(unit)
 
+# Generator rules: regenerate the playback handlers and fail if
+# one still casts an archive field to a pointer or an opaque handle.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME hrr-generator-rules
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
 if(HRR_BUILD_INTEGRATION_TESTS)
   if(NOT HRR_BUILD_PLAYBACK)
     message(FATAL_ERROR "HRR_BUILD_INTEGRATION_TESTS requires HRR_BUILD_PLAYBACK because integration tests spawn hrr-playback")

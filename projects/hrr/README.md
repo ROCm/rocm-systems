@@ -129,6 +129,24 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
 | `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
 
+### Archive integers reach HIP only through translation
+
+An archive is untrusted input, so replay never hands the runtime a recorded
+integer as a pointer or an opaque handle unless it was translated through the
+replay's own maps. The playback generator enforces this: an API with a pointer
+or handle argument that has no translation is refused as unreplayable, by name,
+with `hipErrorNotSupported`. That covers texture references, external memory and
+semaphores, execution contexts, graphics resources and `hipLibraryGetGlobal`/
+`hipLibraryGetManaged`. `hipLinkAddFile` is refused because the path would be one
+the archive chose, `hipLinkCreate` is refused when a JIT option carries a
+pointer (a log buffer or a symbol table), and `hipStreamSetAttribute` and
+`hipGraphKernelNodeSetAttribute` are refused for the access policy window, whose
+base pointer has no translation. A 2D copy whose source or destination is in no
+replay map is refused instead of run against the recorded address. A fixed-size string in a record is
+copied into a bounded, NUL-terminated buffer before it is used.
+`tools/tests/test_gen_raw_slots.py` regenerates the handlers and fails if a raw
+cast of a recorded pointer or handle remains.
+
 ### External region annotations
 
 HRR interposes the HIP dispatch table, so it records the memory that crosses a
