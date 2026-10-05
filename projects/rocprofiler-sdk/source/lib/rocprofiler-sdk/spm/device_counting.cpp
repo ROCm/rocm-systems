@@ -124,7 +124,7 @@ init_callback_data(rocprofiler::SPM::spm_agent_callback_data& callback_data,
     // we have already setup this ctx
     if(callback_data.packet) return;
 
-    callback_data.packet = std::move(construct_aql_pkt(callback_data.profile));
+    callback_data.packet = construct_aql_pkt(callback_data.profile);
 
     callback_data.queue             = agent.profile_queue();
     callback_data.packet->cb.buffer = callback_data.buffer;
