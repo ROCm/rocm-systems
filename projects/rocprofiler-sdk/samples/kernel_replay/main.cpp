@@ -67,6 +67,7 @@ main()
     int opted_h    = 0;
     HIP_CHECK(hipMemcpy(&replayed_h, replayed, sizeof(int), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(&opted_h, opted, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipFree(replayed));
     HIP_CHECK(hipFree(opted));
 
