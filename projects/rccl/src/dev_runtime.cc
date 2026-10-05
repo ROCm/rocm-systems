@@ -772,6 +772,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
     NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
                                   mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
+                                  mem->ginSegmentInfos[segment].ginWinGenerations,
                                   mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
                   ret, fail);
     numSegmentsRegistered++;
@@ -788,7 +789,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   return ret;
 fail:
   for (int i = 0; mem->ginSegmentInfos != nullptr && i <= numSegmentsRegistered && i < mem->numGinSegments; i++) {
-    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins,
+                            mem->ginSegmentInfos[i].ginWinGenerations);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
@@ -815,7 +817,8 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   struct ncclDevrState* devr = &comm->devrState;
   if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
     for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins,
+                              mem->ginSegmentInfos[segment].ginWinGenerations);
     }
   }
   // rmaHostWins[0] is a reliable witness that register completed (same pattern

@@ -320,8 +320,10 @@ std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_C
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
                              void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
-                             int memType) {
+                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                             bool multiSegment, int memType) {
+  (void)ginWinGenerations;
   return g_devrGinRegister(comm, addr, size, hostWins, devWins, winFlags, multiSegment, memType);
 }
 
@@ -329,7 +331,9 @@ static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CO
 std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister =
     DefaultGinDeregister;
 
-ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
+ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  (void)ginWinGenerations;
   return g_devrGinDeregister(comm, hostWins);
 }
 
