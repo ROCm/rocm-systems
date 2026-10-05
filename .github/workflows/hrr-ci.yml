@@ -444,6 +444,15 @@ jobs:
           # Keep the runner's existing path: setup-python puts libpython there,
           # and replacing it makes python3 fail to start on some GPU machines.
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          # Cross-check only: a set-group-ID copy runs in secure-execution mode and
+          # ignores LD_LIBRARY_PATH, so register the capture build with the loader
+          # cache, ahead of the SDK's plain build. Containers only: the bare
+          # runners are shared machines and their /etc stays untouched.
+          if [ "${{ matrix.container && '1' || '' }}" = 1 ] && [ "$(id -u)" = 0 ]; then
+            printf '%s\n' "${PWD}/build/clr/hipamd/lib" "${ROCM_SDK}/lib" > /etc/ld.so.conf.d/00-hrr-ci.conf
+            ldconfig
+            ldconfig -p | grep -E 'libamdhip64|libhsa-runtime64' || true
+          fi
           # A GPU-labelled runner with no visible device is infrastructure
           # failure, not 67 unsupported capabilities. Still run the four
           # CPU-only integration checks and publish their JUnit, then fail the
