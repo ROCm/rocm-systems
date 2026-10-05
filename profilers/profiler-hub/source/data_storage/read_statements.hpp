@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include "queries/select/table_select_query.hpp"
 
@@ -187,6 +188,17 @@ struct timeline_event_result
     std::optional<size_t> tid;
     std::optional<size_t> track_id;
 };
+
+inline constexpr auto timeline_event_columns =
+    std::make_tuple(&timeline_event_result::id,
+                    &timeline_event_result::start_timestamp,
+                    &timeline_event_result::end_timestamp,
+                    &timeline_event_result::display_name_id,
+                    &timeline_event_result::category_id,
+                    &timeline_event_result::nid,
+                    &timeline_event_result::pid,
+                    &timeline_event_result::tid,
+                    &timeline_event_result::track_id);
 
 // ----- Event detail result structs -----
 
@@ -423,94 +435,79 @@ struct read_statements
         }
     }
 
-    using string_statement_func_t =
-        std::function<sqlite_backend::result_set<string_result>()>;
+    template <typename Row, typename... Args>
+    using statement_func_t = std::function<sqlite_backend::result_set<Row>(Args...)>;
 
-    using node_info_statement_func_t =
-        std::function<sqlite_backend::result_set<node_info_result>()>;
+    using string_statement_func_t = statement_func_t<string_result>;
 
-    using process_info_statement_func_t =
-        std::function<sqlite_backend::result_set<process_info_result>()>;
+    using node_info_statement_func_t = statement_func_t<node_info_result>;
 
-    using stream_info_statement_func_t =
-        std::function<sqlite_backend::result_set<stream_info_result>()>;
+    using process_info_statement_func_t = statement_func_t<process_info_result>;
 
-    using queue_info_statement_func_t =
-        std::function<sqlite_backend::result_set<queue_info_result>()>;
+    using stream_info_statement_func_t = statement_func_t<stream_info_result>;
 
-    using thread_info_statement_func_t =
-        std::function<sqlite_backend::result_set<thread_info_result>()>;
+    using queue_info_statement_func_t = statement_func_t<queue_info_result>;
 
-    using agent_info_statement_func_t =
-        std::function<sqlite_backend::result_set<agent_info_result>()>;
+    using thread_info_statement_func_t = statement_func_t<thread_info_result>;
 
-    using pmc_track_statement_func_t =
-        std::function<sqlite_backend::result_set<pmc_track_result>()>;
+    using agent_info_statement_func_t = statement_func_t<agent_info_result>;
+
+    using pmc_track_statement_func_t = statement_func_t<pmc_track_result>;
 
     using kernel_symbol_info_statement_func_t =
-        std::function<sqlite_backend::result_set<kernel_symbol_info_result>()>;
+        statement_func_t<kernel_symbol_info_result>;
 
-    using code_object_info_statement_func_t =
-        std::function<sqlite_backend::result_set<code_object_info_result>()>;
+    using code_object_info_statement_func_t = statement_func_t<code_object_info_result>;
 
-    using pmc_info_statement_func_t =
-        std::function<sqlite_backend::result_set<pmc_info_result>()>;
+    using pmc_info_statement_func_t = statement_func_t<pmc_info_result>;
 
-    using timeline_event_statement_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>()>;
+    using timeline_event_statement_func_t = statement_func_t<timeline_event_result>;
 
     using timeline_event_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
+        statement_func_t<timeline_event_result, size_t, size_t>;
 
-    using timeline_event_track_filtered_func_t = std::function<sqlite_backend::result_set<
-        timeline_event_result>(size_t, size_t, size_t, size_t)>;
+    using timeline_event_track_filtered_func_t =
+        statement_func_t<timeline_event_result, size_t, size_t, size_t, size_t>;
 
     using timeline_event_track_range_filtered_func_t =
-        std::function<sqlite_backend::result_set<
-            event_range_result>(size_t, size_t, size_t, size_t, size_t)>;
+        statement_func_t<event_range_result, size_t, size_t, size_t, size_t, size_t>;
 
-    using id_span_func_t = std::function<sqlite_backend::result_set<id_span_result>()>;
+    using id_span_func_t = statement_func_t<id_span_result>;
 
     using timeline_event_track_and_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>(size_t,
-                                                                        size_t,
-                                                                        size_t,
-                                                                        size_t,
-                                                                        size_t,
-                                                                        size_t,
-                                                                        size_t,
-                                                                        size_t)>;
+        statement_func_t<timeline_event_result,
+                         size_t,
+                         size_t,
+                         size_t,
+                         size_t,
+                         size_t,
+                         size_t,
+                         size_t,
+                         size_t>;
 
-    using timeline_event_agent_queue_filtered_func_t = std::function<
-        sqlite_backend::result_set<timeline_event_result>(size_t, size_t, size_t)>;
+    using timeline_event_agent_queue_filtered_func_t =
+        statement_func_t<timeline_event_result, size_t, size_t, size_t>;
 
-    using timeline_event_stream_filtered_func_t = std::function<
-        sqlite_backend::result_set<timeline_event_result>(size_t, size_t, size_t)>;
+    using timeline_event_stream_filtered_func_t =
+        statement_func_t<timeline_event_result, size_t, size_t, size_t>;
 
     using timeline_event_agent_queue_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<
-            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+        statement_func_t<timeline_event_result, size_t, size_t, size_t, size_t, size_t>;
 
     using timeline_event_stream_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<
-            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+        statement_func_t<timeline_event_result, size_t, size_t, size_t, size_t, size_t>;
 
-    using region_detail_func_t =
-        std::function<sqlite_backend::result_set<region_detail_result>(size_t)>;
+    using region_detail_func_t = statement_func_t<region_detail_result, size_t>;
     using kernel_dispatch_detail_func_t =
-        std::function<sqlite_backend::result_set<kernel_dispatch_detail_result>(size_t)>;
-    using memory_copy_detail_func_t =
-        std::function<sqlite_backend::result_set<memory_copy_detail_result>(size_t)>;
+        statement_func_t<kernel_dispatch_detail_result, size_t>;
+    using memory_copy_detail_func_t = statement_func_t<memory_copy_detail_result, size_t>;
     using memory_alloc_detail_func_t =
-        std::function<sqlite_backend::result_set<memory_alloc_detail_result>(size_t)>;
-    using arg_detail_func_t =
-        std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
-    using event_id_func_t =
-        std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
-    using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
+        statement_func_t<memory_alloc_detail_result, size_t>;
+    using arg_detail_func_t = statement_func_t<arg_detail_result, size_t>;
+    using event_id_func_t   = statement_func_t<event_id_result, size_t>;
+    using count_func_t      = statement_func_t<count_result>;
 
-    using track_key_count_statement_func_t =
-        std::function<sqlite_backend::result_set<track_key_count_result>()>;
+    using track_key_count_statement_func_t = statement_func_t<track_key_count_result>;
 
     struct track_event_count_statement_set
     {
@@ -521,7 +518,7 @@ struct read_statements
     };
 
     using track_thread_sample_statement_func_t =
-        std::function<sqlite_backend::result_set<track_thread_sample_result>()>;
+        statement_func_t<track_thread_sample_result>;
 
     struct track_thread_sample_statement_set
     {
@@ -532,9 +529,9 @@ struct read_statements
     };
 
     using track_agent_queue_count_statement_func_t =
-        std::function<sqlite_backend::result_set<track_agent_queue_count_result>()>;
+        statement_func_t<track_agent_queue_count_result>;
     using track_stream_count_statement_func_t =
-        std::function<sqlite_backend::result_set<track_stream_count_result>()>;
+        statement_func_t<track_stream_count_result>;
 
     struct track_category_statement_set
     {
@@ -547,20 +544,17 @@ struct read_statements
     };
 
     // Bind (nid, agent_id, pmc_id).
-    using pmc_sample_statement_func_t = std::function<
-        sqlite_backend::result_set<pmc_sample_result>(size_t, size_t, size_t)>;
+    using pmc_sample_statement_func_t =
+        statement_func_t<pmc_sample_result, size_t, size_t, size_t>;
     // Bind (nid, agent_id, pmc_id, window_start, window_end).
     using pmc_sample_time_filtered_statement_func_t =
-        std::function<sqlite_backend::result_set<
-            pmc_sample_result>(size_t, size_t, size_t, size_t, size_t)>;
-    using count_time_filtered_func_t =
-        std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
-    using time_range_func_t =
-        std::function<sqlite_backend::result_set<time_range_result>()>;
+        statement_func_t<pmc_sample_result, size_t, size_t, size_t, size_t, size_t>;
+    using count_time_filtered_func_t = statement_func_t<count_result, size_t, size_t>;
+    using time_range_func_t          = statement_func_t<time_range_result>;
 
     // Correlated events: bind (stack_id, excluded_event_id)
     using correlated_event_func_t =
-        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
+        statement_func_t<timeline_event_result, size_t, size_t>;
 
     [[nodiscard]] string_statement_func_t string_statement() const
     {
@@ -1322,6 +1316,18 @@ private:
             &event_range_result::display_name_id);
     }
 
+    template <typename BindTypes>
+    [[nodiscard]] auto make_timeline_statement(const std::string& sql)
+    {
+        return std::apply(
+            [&](auto... column) {
+                return m_backend
+                    ->create_read_statement_executor<timeline_event_result, BindTypes>(
+                        sql, column...);
+            },
+            timeline_event_columns);
+    }
+
     template <typename JoinBuilder>
     void initialize_timeline_event_variants(
         JoinBuilder&                  base,
@@ -1333,137 +1339,53 @@ private:
 
         const auto unfiltered_sql = base.get_query_string();
 
-        out.base = m_backend->create_read_statement_executor<timeline_event_result>(
-            unfiltered_sql,
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
+        out.base = make_timeline_statement<bind_types<>>(unfiltered_sql);
 
-        out.time_filtered =
-            m_backend->create_read_statement_executor<timeline_event_result,
-                                                      bind_types<size_t, size_t>>(
-                base.where(a + ".start <= ?")
-                    .and_where(a + ".end >= ?")
-                    .get_query_string(),
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id,
-                &timeline_event_result::nid,
-                &timeline_event_result::pid,
-                &timeline_event_result::tid,
-                &timeline_event_result::track_id);
+        out.time_filtered = make_timeline_statement<bind_types<size_t, size_t>>(
+            base.where(a + ".start <= ?").and_where(a + ".end >= ?").get_query_string());
 
         const auto own_track_where = a + ".nid = ? AND " + a + ".pid = ? AND " + a +
                                      ".tid = ? AND S.track_id IS NULL";
 
-        out.track_filtered = m_backend->create_read_statement_executor<
-            timeline_event_result,
-            bind_types<size_t, size_t, size_t, size_t>>(
-            unfiltered_sql + " WHERE " + own_track_where + " UNION ALL " +
+        out.track_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t>>(
+                unfiltered_sql + " WHERE " + own_track_where + " UNION ALL " +
                 unfiltered_sql +
                 " WHERE S.track_id = ?4 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
-                "track_id = ?4)",
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
+                "track_id = ?4)");
 
         const auto time_where = " AND " + a + ".start <= ? AND " + a + ".end >= ?";
 
-        out.track_and_time_filtered = m_backend->create_read_statement_executor<
-            timeline_event_result,
+        out.track_and_time_filtered = make_timeline_statement<
             bind_types<size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + own_track_where + time_where + " UNION ALL " +
-                unfiltered_sql +
-                " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
-                "track_id = ?6)" +
-                time_where,
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
+            unfiltered_sql +
+            " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
+            "track_id = ?6)" +
+            time_where);
 
         if(!agent_id_column.has_value()) return;
 
         const auto agent_col = a + "." + agent_id_column.value();
 
         out.agent_queue_filtered =
-            m_backend->create_read_statement_executor<timeline_event_result,
-                                                      bind_types<size_t, size_t, size_t>>(
+            make_timeline_statement<bind_types<size_t, size_t, size_t>>(
                 unfiltered_sql + " WHERE " + a + ".nid = ? AND " + agent_col +
-                    " = ? AND " + a + ".queue_id = ?",
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id,
-                &timeline_event_result::nid,
-                &timeline_event_result::pid,
-                &timeline_event_result::tid,
-                &timeline_event_result::track_id);
+                " = ? AND " + a + ".queue_id = ?");
 
-        out.stream_filtered =
-            m_backend->create_read_statement_executor<timeline_event_result,
-                                                      bind_types<size_t, size_t, size_t>>(
-                unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " +
-                    a + ".stream_id = ?",
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id,
-                &timeline_event_result::nid,
-                &timeline_event_result::pid,
-                &timeline_event_result::tid,
-                &timeline_event_result::track_id);
-
-        out.agent_queue_time_filtered = m_backend->create_read_statement_executor<
-            timeline_event_result,
-            bind_types<size_t, size_t, size_t, size_t, size_t>>(
-            unfiltered_sql + " WHERE " + a + ".nid = ? AND " + agent_col + " = ? AND " +
-                a + ".queue_id = ?" + time_where,
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
-
-        out.stream_time_filtered = m_backend->create_read_statement_executor<
-            timeline_event_result,
-            bind_types<size_t, size_t, size_t, size_t, size_t>>(
+        out.stream_filtered = make_timeline_statement<bind_types<size_t, size_t, size_t>>(
             unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " + a +
-                ".stream_id = ?" + time_where,
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
+            ".stream_id = ?");
+
+        out.agent_queue_time_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND " + agent_col +
+                " = ? AND " + a + ".queue_id = ?" + time_where);
+
+        out.stream_time_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND +" + a + ".pid = ? AND " +
+                a + ".stream_id = ?" + time_where);
     }
 
     void initialize_id_span_statements()
