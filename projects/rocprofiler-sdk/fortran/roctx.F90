@@ -154,8 +154,8 @@ module roctx
     function roctxGetThreadId(tid) &
        result(GetThreadId) &
        bind(C, name="roctxGetThreadId")
-       import :: c_ptr, c_int
-       type(c_ptr), value :: tid
+       import :: c_int64_t, c_int
+       integer(c_int64_t) :: tid
        integer(c_int) :: GetThreadId
     end function roctxGetThreadId
 

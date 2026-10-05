@@ -18,6 +18,4 @@ endif()
 set_source_files_properties(roctx.f03 PROPERTIES LANGUAGE Fortran)
 add_executable(roctx_fortran_test_roctx roctx.f03)
 target_link_libraries(roctx_fortran_test_roctx PRIVATE roctx_fortran)
-target_compile_options(roctx_fortran_test_roctx
-                       PRIVATE $<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-std=gnu>)
 add_test(NAME roctx_fortran_roctx COMMAND roctx_fortran_test_roctx)
