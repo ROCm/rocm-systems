@@ -62,6 +62,7 @@
 
 #include <dlfcn.h>
 #include <algorithm>
+#include <functional>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -261,7 +262,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 5};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1705,6 +1706,118 @@ write_rocpd(
 
         auto spm_name_id = string_entries.at("SPM");
 
+        // One rocpd_info_pmc row per counter location. Ids sit above the KFD
+        // pmc id range (0x7000000000000000) so they do not collide with
+        // counter ids or KFD rows.
+        struct spm_location_key
+        {
+            uint64_t counter_id    = 0;
+            int64_t  xcc           = 0;
+            int64_t  shader_engine = 0;
+            int64_t  shader_array  = 0;
+            int64_t  wgp           = 0;
+            int64_t  instance      = 0;
+
+            bool operator==(const spm_location_key& rhs) const
+            {
+                return counter_id == rhs.counter_id && xcc == rhs.xcc &&
+                       shader_engine == rhs.shader_engine && shader_array == rhs.shader_array &&
+                       wgp == rhs.wgp && instance == rhs.instance;
+            }
+        };
+        struct spm_location_key_hash
+        {
+            size_t operator()(const spm_location_key& key) const
+            {
+                auto mix = [](size_t seed, uint64_t value) {
+                    return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+                                   (seed << 6) + (seed >> 2));
+                };
+                size_t seed = 0;
+                seed        = mix(seed, key.counter_id);
+                seed        = mix(seed, static_cast<uint64_t>(key.xcc));
+                seed        = mix(seed, static_cast<uint64_t>(key.shader_engine));
+                seed        = mix(seed, static_cast<uint64_t>(key.shader_array));
+                seed        = mix(seed, static_cast<uint64_t>(key.wgp));
+                seed        = mix(seed, static_cast<uint64_t>(key.instance));
+                return seed;
+            }
+        };
+        auto location_ids = std::unordered_map<spm_location_key, uint64_t, spm_location_key_hash>{};
+        auto next_location_pmc_id = uint64_t{0x7100000000000000ULL};
+
+        auto spm_location_pmc_id = [&](const auto& count) -> uint64_t {
+            auto key = spm_location_key{
+                count.id.handle,
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_XCC)),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_SHADER_ARRAY)),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_WGP)),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_INSTANCE)),
+            };
+            if(auto found = location_ids.find(key); found != location_ids.end())
+                return found->second;
+
+            const tool_counter_info* base_info  = nullptr;
+            rocprofiler_agent_id_t         base_agent = {};
+            for(const auto& [agent_key, counters] : tool_metadata.agent_counter_info)
+            {
+                for(const auto& info : counters)
+                {
+                    if(info.id.handle != count.id.handle) continue;
+                    base_info  = &info;
+                    base_agent = agent_key;
+                    break;
+                }
+                if(base_info) break;
+            }
+
+            auto pmc_id = next_location_pmc_id++;
+            location_ids.emplace(key, pmc_id);
+
+            const auto* agent = base_info ? tool_metadata.get_agent(base_agent) : nullptr;
+            auto        json_data = get_json_string([agent](auto& ar) {
+                if(agent) cereal::save(ar, *agent);
+            });
+            const auto* name        = base_info ? base_info->name : "";
+            const auto* description = base_info ? base_info->description : "";
+            const auto* block       = base_info ? base_info->block : "";
+            const auto* expression  = base_info ? base_info->expression : "";
+
+            get_insert_statement(
+                db,
+                "rocpd_info_pmc{{uuid}}",
+                {
+                    insert_value("id", pmc_id),
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("target_arch", std::string_view{"GPU"}),
+                    insert_value("agent_id", agent ? agent->node_id : 0),
+                    insert_value("name", name, allow_empty_string{}),
+                    insert_value("symbol", name, allow_empty_string{}),
+                    insert_value("description", description, allow_empty_string{}),
+                    insert_value("component", std::string_view{"rocm"}),
+                    insert_value("value_type", std::string_view{"ABS"}),
+                    insert_value("block", block, allow_empty_string{}),
+                    insert_value("expression", expression, allow_empty_string{}),
+                    insert_value("is_constant", base_info ? base_info->is_constant : 0),
+                    insert_value("is_derived", base_info ? base_info->is_derived : 0),
+                    insert_value("spm_support", base_info ? base_info->spm_support : 1),
+                    insert_value("xcc", key.xcc),
+                    insert_value("shader_engine", key.shader_engine),
+                    insert_value("shader_array", key.shader_array),
+                    insert_value("wgp", key.wgp),
+                    insert_value("instance", key.instance),
+                    insert_value("extdata", json_data),
+                });
+            return pmc_id;
+        };
+
         for(auto ditr : spm_collection_gen)
         {
             for(const auto& record : spm_collection_gen.get(ditr))
@@ -1744,28 +1857,8 @@ write_rocpd(
                                 insert_value("id", idx++),
                                 insert_value("event_id", evt_id),
                                 insert_value("sample_id", sample_id),
-                                insert_value("pmc_id", count.id.handle),
+                                insert_value("pmc_id", spm_location_pmc_id(count)),
                                 insert_value("value", count.value),
-                                insert_value(
-                                    "xcc",
-                                    counters::rec_to_dim_pos(count.instance_id,
-                                                             counters::ROCPROFILER_DIMENSION_XCC)),
-                                insert_value("shader_engine",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
-                                insert_value("shader_array",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_SHADER_ARRAY)),
-                                insert_value(
-                                    "wgp",
-                                    counters::rec_to_dim_pos(count.instance_id,
-                                                             counters::ROCPROFILER_DIMENSION_WGP)),
-                                insert_value("instance",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_INSTANCE)),
                             });
                     }
                 }
