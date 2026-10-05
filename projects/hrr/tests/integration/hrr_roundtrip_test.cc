@@ -1194,6 +1194,54 @@ HRR_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ModuleAPI_Direct", cap.path);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ModuleLoadBundle_Direct, which loads one HIPRTC ELF with
+ *     hipModuleLoadData and, wrapped in an offload bundle file, with
+ *     hipModuleLoad, then launches rtc_fill from the bundle's module.
+ *   - REQUIRE that the hipModuleLoad event records the device ELF the runtime
+ *     loaded, not the bundle file: its code object is an ELF and has the same
+ *     hash as the hipModuleLoadData event of the bare ELF.
+ *   - REQUIRE that the launch from that module records the same code object as
+ *     its load event, then replay and validate the D2H.
+ */
+HRR_TEST_CASE(Unit_HRR_ModuleLoadBundleRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleloadbundle"};
+  hrr_run_roundtrip("Unit_HRR_ModuleLoadBundle_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const hrr::Event* load_data = nullptr;
+  const hrr::Event* load_file = nullptr;
+  const hrr::Event* launch    = nullptr;
+  for (const auto& ev : arc.events) {
+    const uint16_t type = ev.header().event_type;
+    if (type == HRR_API_HIPMODULELOADDATA) load_data = &ev;
+    if (type == HRR_API_HIPMODULELOAD) load_file = &ev;
+    if (ev.kernel_launch &&
+        ev.kernel_launch->kernel_name.find("rtc_fill") != std::string::npos)
+      launch = &ev;
+  }
+  REQUIRE(load_data);
+  REQUIRE(load_file);
+  REQUIRE(launch);
+
+  const auto& file_ev = load_file->module_load_ev;
+  INFO("hipModuleLoad code object: " << hrr::hash_hex(file_ev.hash_lo, file_ev.hash_hi));
+  std::vector<uint8_t> file_co;
+  REQUIRE(hrr::read_code_object(arc, file_ev.hash_lo, file_ev.hash_hi, file_co));
+  INFO("hipModuleLoad code object size: " << file_co.size());
+  REQUIRE(file_co.size() >= 4);
+  REQUIRE(std::memcmp(file_co.data(), "\x7f" "ELF", 4) == 0);
+
+  const auto& data_ev = load_data->module_load_ev;
+  CHECK(file_ev.hash_lo == data_ev.hash_lo);
+  CHECK(file_ev.hash_hi == data_ev.hash_hi);
+  CHECK(launch->kernel_launch->co_hash_lo == file_ev.hash_lo);
+  CHECK(launch->kernel_launch->co_hash_hi == file_ev.hash_hi);
+}
+
 HRR_TEST_CASE(Unit_HRR_VMMRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_vmm"};
   hrr_run_roundtrip("Unit_HRR_VMM_Direct", cap.path);
