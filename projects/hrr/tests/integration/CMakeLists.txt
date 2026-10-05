@@ -102,6 +102,11 @@ target_link_libraries(hrr-integration-tests PRIVATE
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+  # hsa-runtime64 is REQUIRED and linked just above, so the cases that call HSA
+  # directly can compile here. Define the macro they are guarded by next to the
+  # dependency so the two cannot drift apart; without it those cases vanish from
+  # the binary with no signal. tests/expected_cases_integration.txt is the backstop.
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
