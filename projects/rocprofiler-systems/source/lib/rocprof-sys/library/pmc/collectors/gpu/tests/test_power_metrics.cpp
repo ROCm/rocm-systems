@@ -5,9 +5,9 @@
 // Unit tests for the shared socket-power selection / labeling helpers declared in
 // library/pmc/collectors/gpu/types.hpp.
 //
-// These helpers are the single source of truth used by the live Perfetto path
-// (perfetto_policy.hpp) and the replay paths (perfetto_processor.cpp /
-// rocpd_processor.cpp), so exercising them here covers all output formats.
+// These helpers are the single source of truth used by the replay paths
+// (perfetto_processor.cpp / rocpd_processor.cpp), so exercising them here covers all
+// output formats.
 //
 
 #include "library/pmc/collectors/gpu/types.hpp"

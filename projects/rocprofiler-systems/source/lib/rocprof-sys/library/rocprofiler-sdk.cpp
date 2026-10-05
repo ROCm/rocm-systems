@@ -20,8 +20,6 @@
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto.hpp"
-#include "core/perfetto_fwd.hpp"
 #include "core/sdk/tracing-config-deps.hpp"
 #include "core/sdk/tracing-config.hpp"
 #include "core/state.hpp"
@@ -139,19 +137,6 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 
 // NOLINTBEGIN(readability-function-size)
 // Implementation of rocprofiler_callback_tracing_operation_args_cb_t
-int
-save_args(rocprofiler_callback_tracing_kind_t /*kind*/, std::int32_t /*operation*/,
-          std::uint32_t /*arg_number*/, const void* const /*arg_value_addr*/,
-          std::int32_t /*arg_indirection_count*/, const char* /*arg_type*/,
-          const char* arg_name, const char*             arg_value_str,
-          std::int32_t /*arg_dereference_count*/, void* data)
-{
-    auto* argvec = static_cast<callback_arg_array_t*>(data);
-    argvec->emplace_back(arg_name, arg_value_str);
-    return 0;
-}
-
-// Additional implementation of rocprofiler_callback_tracing_operation_args_cb_t
 // for iterating through arguments in a callback for rocpd_arg table in database
 int
 iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
@@ -182,7 +167,6 @@ using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
-using production_stream_stack_service = stream_stack_service<production_backend>;
 
 struct external_dependencies
 {
@@ -316,12 +300,9 @@ struct external_dependencies
         constexpr size_t k_backtrace_stack_depth       = 16;
         constexpr size_t k_backtrace_ignore_depth      = 3;
         constexpr bool   k_backtrace_with_signal_frame = true;
-        auto const       use_perfetto =
-            (config::get_use_perfetto() && config::get_perfetto_annotations());
-        auto const use_rocpd = config::get_use_rocpd();
+        auto const       use_rocpd                     = config::get_use_rocpd();
 
-        const auto should_we_generate_backtrace =
-            (use_perfetto || use_rocpd) && are_operations_available;
+        const auto should_we_generate_backtrace = use_rocpd && are_operations_available;
 
         auto result = std::optional<std::vector<tim::unwind::processed_entry>>{};
 
@@ -499,7 +480,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     state::thread::pop();
 }
 
-#if(ROCPROFILER_VERSION < 700)
+#if (ROCPROFILER_VERSION < 700)
 /**
  * @brief Stream ID.
  */
@@ -649,7 +630,7 @@ template <typename CorrelationIdType>
 std::uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -1092,7 +1073,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
@@ -1102,7 +1083,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         domain_selection selection;
@@ -1118,7 +1099,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 10202)
+#if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -1308,7 +1289,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_OMPT))
     {
         _data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
@@ -1322,7 +1303,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1338,7 +1319,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
     {
         _data->backtrace_operations.emplace(
@@ -1354,7 +1335,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10304)
+#if (ROCPROFILER_VERSION >= 10304)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
     {
         _data->backtrace_operations.emplace(
@@ -1370,7 +1351,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10305)
+#if (ROCPROFILER_VERSION >= 10305)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1587,9 +1568,7 @@ create_roctx_client()
 
     const auto roctx_config = roctx_client_config{
         .pause_resume_enabled   = has_marker_domain,
-        .use_perfetto           = config::get_use_perfetto(),
         .use_timemory           = config::get_use_timemory(),
-        .perfetto_annotations   = config::get_perfetto_annotations(),
         .selected_trace_regions = roctx_traced_regions,
     };
     g_roctx_client = std::make_shared<roctx_client<>>(g_session, roctx_config);
@@ -1709,26 +1688,13 @@ void
 tool_attach_fini(void* /* tool_data */)
 {
     // Stop and flush SDK contexts/buffers so that buffer callbacks
-    // write their Perfetto events before Perfetto post-processing.
+    // write their events to the trace cache before it is shut down.
     ::rocprofsys::rocprofiler_sdk::stop();
     ::rocprofsys::rocprofiler_sdk::flush();
     finalize_sdk_common();
 
     // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
-
-    // Write Perfetto trace output
-    if(get_use_perfetto())
-    {
-        bool                             _perfetto_output_error = false;
-        rocprofsys::output_file_registry _output_registry{};
-        ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
-                                             _output_registry);
-        if(_perfetto_output_error)
-        {
-            LOG_ERROR("Perfetto output error occurred during attach finalization");
-        }
-    }
 
     rocprofsys_finalize_hidden();
 }
@@ -1748,12 +1714,6 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
         LOG_INFO("Re-attaching to process {} (session {})", getpid(), current_count);
         rocprofsys_reset_for_reattach_hidden();
         reset_sdk_session_guards();
-
-        // Restart Perfetto for a new tracing session
-        if(get_use_perfetto())
-        {
-            ::rocprofsys::perfetto::start();
-        }
 
         trace_cache::get_buffer_storage().start(getpid());
 

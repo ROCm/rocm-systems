@@ -185,10 +185,6 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& tracing = config["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
-        if(tracing.contains("legacy"))
-        {
-            resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
-        }
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
@@ -868,7 +864,6 @@ export_tracing_section(nlohmann::json&                           config,
                        const std::map<std::string, std::string>& env_map)
 {
     export_section_enabled(config, env_map, env_vars::TRACE, "tracing");
-    export_enabled(config, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
     export_int_value(config, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
                      "buffer_size_kb");
     export_string_value(config, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",

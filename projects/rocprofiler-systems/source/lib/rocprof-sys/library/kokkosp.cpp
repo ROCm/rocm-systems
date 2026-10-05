@@ -15,7 +15,6 @@
 #include "core/config.hpp"
 #include "core/control/clocks/timeline.hpp"
 #include "core/node_info.hpp"
-#include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
@@ -767,14 +766,7 @@ extern "C"
 
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
-        if(rocprofsys::config::get_use_perfetto())
-        {
-            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
-                fmt::format("{} {} [dual_view_sync]", _kp_prefix, label)));
-            TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
-                                "target", (is_device) ? "device" : "host");
-        }
-        else if(rocprofsys::config::get_use_causal())
+        if(rocprofsys::config::get_use_causal())
         {
             auto const _name = tim::get_hash_identifier_fast(
                 tim::add_hash_id(fmt::format("{} {} [dual_view_sync][{}]", _kp_prefix,
@@ -800,14 +792,7 @@ extern "C"
         auto const timestamp = rocprofsys::control::clocks::timeline_ns();
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
-        if(rocprofsys::config::get_use_perfetto())
-        {
-            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
-                fmt::format("{} {} [dual_view_modify]", _kp_prefix, label)));
-            TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
-                                "target", (is_device) ? "device" : "host");
-        }
-        else if(rocprofsys::config::get_use_causal())
+        if(rocprofsys::config::get_use_causal())
         {
             auto const _name = tim::get_hash_identifier_fast(
                 tim::add_hash_id(fmt::format("{} {} [dual_view_modify][{}]", _kp_prefix,

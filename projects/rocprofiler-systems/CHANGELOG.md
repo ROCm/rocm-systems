@@ -21,6 +21,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   constants at debug optimization levels; DynInst was treating these block-form
   attributes as errors and dereferencing a null pointer in `parseSubrange()`.
   Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+### Removed
+
+- Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
+  trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
+  now an unknown-argument error); the `tracing.legacy` key was removed from JSON
+  configuration export.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 

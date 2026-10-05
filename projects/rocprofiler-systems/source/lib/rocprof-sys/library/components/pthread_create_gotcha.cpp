@@ -60,7 +60,7 @@ template <typename... Args>
 inline void
 start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto())
+    if(!get_use_timemory())
     {
         return;
     }
@@ -70,7 +70,7 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         const char* _name = nullptr;
         if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+            category_region_t{}.audit(quirk::config<quirk::no_timemory>{},
                                       std::string_view{ _name }, _args...);
         }
     }
@@ -85,7 +85,7 @@ template <typename... Args>
 inline void
 stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto())
+    if(!get_use_timemory())
     {
         return;
     }
@@ -115,7 +115,7 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         const char* _name = nullptr;
         if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+            category_region_t{}.audit(quirk::config<quirk::no_timemory>{},
                                       std::string_view{ _name }, _args...);
         }
     }

@@ -210,9 +210,6 @@ int
 get_verbose() ROCPROFSYS_HOT;
 
 bool&
-get_use_perfetto() ROCPROFSYS_HOT;
-
-bool&
 get_use_timemory() ROCPROFSYS_HOT;
 
 bool&
@@ -434,7 +431,7 @@ bool&
 get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
 bool&
-get_caching_perfetto() ROCPROFSYS_HOT;
+get_use_perfetto() ROCPROFSYS_HOT;
 
 bool
 get_merge_perfetto_files();

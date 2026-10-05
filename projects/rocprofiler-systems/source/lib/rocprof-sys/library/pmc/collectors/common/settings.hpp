@@ -221,8 +221,6 @@ struct settings_policy
         return _enabled_metrics;
     }
 
-    static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
-
     /**
      * @brief Get NIC device filter based on ROCPROFSYS_SAMPLING_AINICS setting.
      *

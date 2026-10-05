@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "library/components/category_region.hpp"
 #include "library/tracing.hpp"
+#include "library/tracing/annotation.hpp"
 #include "rocprofiler-systems/categories.h"
 
 #include <cstdint>
@@ -144,21 +145,10 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
             return;
         }
 
-        component::category_region<category_type>::start(
-            name, [&](::perfetto::EventContext ctx) {
-                if(_annotations && config::get_perfetto_annotations())
-                {
-                    for(size_t i = 0; i < _annotation_count; ++i)
-                    {
-                        tracing::add_perfetto_annotation(ctx, _annotations[i]);
-                    }
-                }
-            });
+        component::category_region<category_type>::start(name);
 
         // Cache the annotations into the trace-cache args wire format so
-        // cache-replay handlers (perfetto + rocpd) re-emit them. The lambda
-        // above only reaches the live-instrumentation output, which the final
-        // trace does not use when cache replay is active.
+        // cache-replay handlers (perfetto + rocpd) re-emit them.
         if(_annotations != nullptr && _annotation_count > 0)
         {
             component::category_region<category_type>::append_cache_args(
@@ -180,8 +170,7 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
 template <size_t Idx, size_t... Tail>
 void
 invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
-                            rocprofsys_annotation_t* _annotations,
-                            size_t _annotation_count, std::index_sequence<Idx, Tail...>)
+                            std::index_sequence<Idx, Tail...>)
 {
     static_assert(Idx > ROCPROFSYS_CATEGORY_NONE && Idx < ROCPROFSYS_CATEGORY_LAST,
                   "Error! index sequence should only contain values which are greater "
@@ -197,24 +186,14 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
             return;
         }
 
-        component::category_region<category_type>::stop(
-            name, [&](::perfetto::EventContext ctx) {
-                if(_annotations && config::get_perfetto_annotations())
-                {
-                    for(size_t i = 0; i < _annotation_count; ++i)
-                    {
-                        tracing::add_perfetto_annotation(ctx, _annotations[i]);
-                    }
-                }
-            });
+        component::category_region<category_type>::stop(name);
     }
     else
     {
         constexpr size_t remaining = sizeof...(Tail);
         if constexpr(remaining > 0)
         {
-            invoke_category_region_stop(_category, name, _annotations, _annotation_count,
-                                        std::index_sequence<Tail...>{});
+            invoke_category_region_stop(_category, name, std::index_sequence<Tail...>{});
         }
     }
 }
@@ -284,11 +263,11 @@ rocprofsys_push_trace_with_args_hidden(const char* name, const char* serialized_
 
 extern "C" void
 rocprofsys_pop_category_region_hidden(rocprofsys_category_t _category, const char* name,
-                                      rocprofsys_annotation_t* _annotations,
-                                      size_t                   _annotation_count)
+                                      rocprofsys_annotation_t* /*_annotations*/,
+                                      size_t /*_annotation_count*/)
 {
     rocprofsys::impl::invoke_category_region_stop(
-        _category, name, _annotations, _annotation_count,
+        _category, name,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
 
@@ -303,12 +282,12 @@ rocprofsys_push_category_region_python_hidden(const char*              name,
 }
 
 extern "C" void
-rocprofsys_pop_category_region_python_hidden(const char*              name,
-                                             rocprofsys_annotation_t* _annotations,
-                                             size_t                   _annotation_count)
+rocprofsys_pop_category_region_python_hidden(const char* name,
+                                             rocprofsys_annotation_t* /*_annotations*/,
+                                             size_t /*_annotation_count*/)
 {
     rocprofsys::impl::invoke_category_region_stop(
-        ROCPROFSYS_CATEGORY_PYTHON, name, _annotations, _annotation_count,
+        ROCPROFSYS_CATEGORY_PYTHON, name,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
 

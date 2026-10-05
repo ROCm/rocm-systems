@@ -6,7 +6,6 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
-#include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
@@ -18,44 +17,6 @@ using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys::component
 {
-namespace
-{
-template <typename Tp, typename... Args>
-void
-write_perfetto_counter_track(std::uint64_t _val)
-{
-    using counter_track = rocprofsys::perfetto_counter_track<Tp>;
-
-    if(rocprofsys::get_use_perfetto() &&
-       rocprofsys::state::process::get() == rocprofsys::state::process::Active)
-    {
-        auto _emplace = [](const size_t _idx) {
-            if(!counter_track::exists(_idx))
-            {
-                const std::string _label =
-                    (_idx > 0) ? fmt::format(" {} [{}]", Tp::label, _idx) : Tp::label;
-                counter_track::emplace(_idx, _label, "bytes");
-            }
-        };
-
-        const size_t          _idx = 0;
-        static std::once_flag _once{};
-        std::call_once(_once, _emplace, _idx);
-
-        static std::mutex    _mutex{};
-        static std::uint64_t value = 0;
-        std::uint64_t        _now  = 0;
-        {
-            const std::unique_lock<std::mutex> _lk{ _mutex };
-            _now = rocprofsys::tracing::now<std::uint64_t>();
-            _val = (value += _val);
-        }
-
-        TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _now, _val);
-    }
-}
-}  // namespace
-
 namespace
 {
 void
@@ -269,8 +230,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(count * _size);
-
     {
         cache_comm_data_events<mpi_send>(0, count * _size);
     }
@@ -293,8 +252,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
 {
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
-
-    if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
     {
         cache_comm_data_events<mpi_recv>(0, count * _size);
@@ -319,8 +276,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
-
     {
         cache_comm_data_events<mpi_send>(0, count * _size);
     }
@@ -343,8 +298,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
 {
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
-
-    if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
     {
         cache_comm_data_events<mpi_recv>(0, count * _size);
@@ -369,8 +322,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
-
     {
         cache_comm_data_events<mpi_send>(0, count * _size);
     }
@@ -392,12 +343,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, void*, 
     int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<mpi_recv>(count * _size);
-        write_perfetto_counter_track<mpi_send>(count * _size);
-    }
-
     {
         cache_comm_data_events<mpi_recv>(0, count * _size);
         cache_comm_data_events<mpi_send>(0, count * _size);
@@ -415,12 +360,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int const _send_size = mpi_type_size(sendtype);
     int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
-    }
 
     {
         cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
@@ -464,12 +403,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
-    }
-
     {
         cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
         cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
@@ -496,12 +429,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int const _send_size = mpi_type_size(sendtype);
     int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
-    }
 
     {
         cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
@@ -532,11 +459,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         return;
     }
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(count);
-    }
-
     {
         cache_comm_data_events<ucx_send>(0, count);
     }
@@ -559,11 +481,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     if(count == 0)
     {
         return;
-    }
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_recv>(count);
     }
 
     {
@@ -591,11 +508,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         return;
     }
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(count);
-    }
-
     {
         cache_comm_data_events<ucx_send>(0, count);
     }
@@ -618,11 +530,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     if(count == 0)
     {
         return;
-    }
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_recv>(count);
     }
 
     {
@@ -651,11 +558,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
     }
 
     const size_t total_size = header_length + count;
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(total_size);
-    }
-
     {
         cache_comm_data_events<ucx_send>(0, total_size);
     }
@@ -677,11 +579,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     if(count == 0)
     {
         return;
-    }
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(count);
     }
 
     {
@@ -707,11 +604,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         return;
     }
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_recv>(count);
-    }
-
     {
         cache_comm_data_events<ucx_recv>(0, count);
     }
@@ -734,11 +626,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
         return;
     }
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(count);
-    }
-
     {
         cache_comm_data_events<ucx_send>(0, count);
     }
@@ -759,11 +646,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
     if(count == 0)
     {
         return;
-    }
-
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_recv>(count);
     }
 
     {
@@ -789,18 +671,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
     }
 
     const bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
-
-    if(get_use_perfetto())
-    {
-        if(is_put)
-        {
-            write_perfetto_counter_track<ucx_send>(length);
-        }
-        else
-        {
-            write_perfetto_counter_track<ucx_recv>(length);
-        }
-    }
 
     {
         if(is_put)
@@ -832,11 +702,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, voi
         return;
     }
 
-    if(get_use_perfetto())
-    {
-        write_perfetto_counter_track<ucx_send>(total_length);
-    }
-
     {
         cache_comm_data_events<ucx_send>(0, total_length);
     }
@@ -860,18 +725,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     }
 
     const bool is_send = _data.tool_id.find("send") != std::string::npos;
-
-    if(get_use_perfetto())
-    {
-        if(is_send)
-        {
-            write_perfetto_counter_track<ucx_send>(count);
-        }
-        else
-        {
-            write_perfetto_counter_track<ucx_recv>(count);
-        }
-    }
 
     {
         if(is_send)
@@ -904,8 +757,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
-
     if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
 
     if(rocprofsys::get_use_timemory())
@@ -933,12 +784,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
 
     if(_send_types.count(_data.tool_id) > 0)
     {
-        if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
         if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
     }
     else if(_recv_types.count(_data.tool_id) > 0)
     {
-        if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
         if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
     }
     else
@@ -966,7 +815,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
     if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
 
     if(rocprofsys::get_use_timemory())
@@ -993,12 +841,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 
     if(_send_types.count(_data.tool_id) > 0)
     {
-        if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
         if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
     }
     else if(_recv_types.count(_data.tool_id) > 0)
     {
-        if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
         if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
     }
     else
@@ -1018,7 +864,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
     if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
     if(rocprofsys::get_use_timemory()) add(_data, count * _size);
 }

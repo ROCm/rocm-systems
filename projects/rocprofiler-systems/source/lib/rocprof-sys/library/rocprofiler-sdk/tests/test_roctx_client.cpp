@@ -28,7 +28,6 @@
 namespace
 {
 
-using rocprofsys::rocprofiler_sdk::annotation_entry;
 using rocprofsys::trace_cache::region_sample;
 
 using ::testing::NiceMock;
@@ -38,12 +37,6 @@ class mock_api
 public:
     MOCK_METHOD(void, push_timemory, (std::string_view name));
     MOCK_METHOD(void, pop_timemory, (std::string_view name));
-    MOCK_METHOD(void, push_perfetto_ts,
-                (const char* name, std::uint64_t ts, std::uint64_t flow_id,
-                 const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, pop_perfetto_ts,
-                (const char* name, std::uint64_t ts,
-                 const std::vector<annotation_entry>& annotations));
     MOCK_METHOD(void, add_string, (std::string_view string_value));
     MOCK_METHOD(void, store_region, (const region_sample& sample));
     MOCK_METHOD(void, add_thread_info,
@@ -58,19 +51,6 @@ struct mock_marker_policy
 
     static void push_timemory(std::string_view name) { api->push_timemory(name); }
     static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
-
-    static void push_perfetto_ts(const char* name, std::uint64_t ts,
-                                 std::uint64_t                        flow_id,
-                                 const std::vector<annotation_entry>& annotations)
-    {
-        api->push_perfetto_ts(name, ts, flow_id, annotations);
-    }
-
-    static void pop_perfetto_ts(const char* name, std::uint64_t ts,
-                                const std::vector<annotation_entry>& annotations)
-    {
-        api->pop_perfetto_ts(name, ts, annotations);
-    }
 
     static void add_string(std::string_view string_value)
     {
@@ -104,9 +84,7 @@ TEST_F(roctx_client_test, constructor_registers_trigger_on_supplied_session)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ .pause_resume_enabled   = true,
-                                      .use_perfetto           = true,
                                       .use_timemory           = true,
-                                      .perfetto_annotations   = false,
                                       .selected_trace_regions = "TestRegion" };
     const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
@@ -124,9 +102,7 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ .pause_resume_enabled   = true,
-                                      .use_perfetto           = true,
                                       .use_timemory           = true,
-                                      .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
     const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
@@ -138,9 +114,7 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ .pause_resume_enabled   = true,
-                                      .use_perfetto           = true,
                                       .use_timemory           = true,
-                                      .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
     const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
@@ -152,9 +126,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ .pause_resume_enabled   = true,
-                                      .use_perfetto           = true,
                                       .use_timemory           = true,
-                                      .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
     const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
@@ -166,9 +138,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ .pause_resume_enabled   = true,
-                                      .use_perfetto           = true,
                                       .use_timemory           = true,
-                                      .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
     const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
@@ -198,14 +168,12 @@ protected:
         std::make_shared<rocprofsys::control::session>();
 
     /// Create a client and subscribe callback counters on its session.
-    /// Uses pause_resume_enabled=true with no backends (perfetto/timemory off)
+    /// Uses pause_resume_enabled=true with no backends (timemory off)
     /// so trigger.should_write_markers() purely reflects the trigger state.
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
         const roctx_config_t config{ .pause_resume_enabled   = true,
-                                     .use_perfetto           = false,
                                      .use_timemory           = false,
-                                     .perfetto_annotations   = false,
                                      .selected_trace_regions = regions };
 
         auto client = std::make_unique<roctx_client_t>(m_session, config);
@@ -232,9 +200,7 @@ protected:
                                .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
-                                     .use_perfetto           = false,
                                      .use_timemory           = false,
-                                     .perfetto_annotations   = false,
                                      .selected_trace_regions = regions };
 
         return std::make_unique<roctx_client_t>(m_session, config);
@@ -690,18 +656,8 @@ namespace
 
 using ::testing::_;
 using ::testing::AllOf;
-using ::testing::ElementsAre;
 using ::testing::Field;
-using ::testing::IsEmpty;
 using ::testing::SizeIs;
-using ::testing::StrEq;
-
-MATCHER_P2(IsAnnotation, key, value, "")
-{
-    return std::string(arg.key) == key &&
-           std::holds_alternative<std::uint64_t>(arg.value) &&
-           std::get<std::uint64_t>(arg.value) == static_cast<std::uint64_t>(value);
-}
 
 using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
 
@@ -721,7 +677,7 @@ make_record(std::uint64_t thread_id, std::uint64_t corr_internal,
 class marker_write_test : public mock_cleanup_base
 {};
 
-TEST_F(marker_write_test, all_backends_with_annotations)
+TEST_F(marker_write_test, all_backends)
 {
     auto&      mock   = *mock_marker_policy::api;
     auto const record = make_record(42, 100, 200);
@@ -730,11 +686,6 @@ TEST_F(marker_write_test, all_backends_with_annotations)
     EXPECT_CALL(mock, add_string(std::string_view(str)));
     EXPECT_CALL(mock, push_timemory(std::string_view("my_region")));
     EXPECT_CALL(mock, pop_timemory(std::string_view("my_region")));
-    EXPECT_CALL(mock, push_perfetto_ts(StrEq("my_region"), 1000, 100,
-                                       ElementsAre(IsAnnotation("begin_ns", 1000u),
-                                                   IsAnnotation("stack_id", 100u))));
-    EXPECT_CALL(mock, pop_perfetto_ts(StrEq("my_region"), 2000,
-                                      ElementsAre(IsAnnotation("end_ns", 2000u))));
     const auto thread_info =
         rocprofsys::trace_cache::info::thread{ .parent_process_id = getppid(),
                                                .process_id        = getpid(),
@@ -754,39 +705,21 @@ TEST_F(marker_write_test, all_backends_with_annotations)
                                    Field(&region_sample::call_stack, "{}"),
                                    Field(&region_sample::category, "rocm_marker_api"))));
 
-    const mock_marker_writer writer(true, true, true);
+    const mock_marker_writer writer(true);
     writer.write_begin("my_region");
     writer.write_end("my_region", 1000, 2000, "arg1=val1", record);
 }
 
-TEST_F(marker_write_test, perfetto_disabled)
-{
-    auto&      mock   = *mock_marker_policy::api;
-    auto const record = make_record(1, 10, 20);
-
-    EXPECT_CALL(mock, push_timemory(_));
-    EXPECT_CALL(mock, pop_timemory(_));
-    EXPECT_CALL(mock, push_perfetto_ts(_, _, _, _)).Times(0);
-    EXPECT_CALL(mock, pop_perfetto_ts(_, _, _)).Times(0);
-    EXPECT_CALL(mock, store_region(_));
-
-    const mock_marker_writer writer(false, true, false);
-    writer.write_begin("r");
-    writer.write_end("r", 100, 200, "{}", record);
-}
-
-TEST_F(marker_write_test, timemory_disabled_no_annotations)
+TEST_F(marker_write_test, timemory_disabled)
 {
     auto&      mock   = *mock_marker_policy::api;
     auto const record = make_record(1, 10, 20);
 
     EXPECT_CALL(mock, push_timemory(_)).Times(0);
     EXPECT_CALL(mock, pop_timemory(_)).Times(0);
-    EXPECT_CALL(mock, push_perfetto_ts(_, 100, _, IsEmpty()));
-    EXPECT_CALL(mock, pop_perfetto_ts(_, 200, IsEmpty()));
     EXPECT_CALL(mock, store_region(_));
 
-    const mock_marker_writer writer(true, false, false);
+    const mock_marker_writer writer(false);
     writer.write_begin("r");
     writer.write_end("r", 100, 200, "{}", record);
 }
@@ -803,7 +736,7 @@ TEST_F(marker_write_test, sequential_writes_propagate_independent_data)
     auto const record1 = make_record(1, 100, 200);
     auto const record2 = make_record(2, 300, 400);
 
-    const mock_marker_writer writer(false, false, false);
+    const mock_marker_writer writer(false);
     writer.write_end("First", 1000, 2000, "a=1", record1);
     writer.write_end("Second", 3000, 4000, "b=2", record2);
 
@@ -833,7 +766,7 @@ TEST_F(marker_write_test, write_end_with_empty_args)
 
     EXPECT_CALL(mock, store_region(Field(&region_sample::args_str, "")));
 
-    const mock_marker_writer writer(false, false, false);
+    const mock_marker_writer writer(false);
     writer.write_end("R", 100, 200, "", record);
 }
 
@@ -865,9 +798,7 @@ protected:
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
         const roctx_config_t config{ .pause_resume_enabled   = true,
-                                     .use_perfetto           = false,
                                      .use_timemory           = false,
-                                     .perfetto_annotations   = false,
                                      .selected_trace_regions = regions };
 
         auto client = std::make_unique<roctx_client_t>(m_session, config);
@@ -892,9 +823,7 @@ protected:
                                .scopes    = { rocprofsys::control::scope::global } });
 
         const roctx_config_t config{ .pause_resume_enabled   = true,
-                                     .use_perfetto           = false,
                                      .use_timemory           = false,
-                                     .perfetto_annotations   = false,
                                      .selected_trace_regions = regions };
 
         return std::make_unique<roctx_client_t>(m_session, config);
@@ -1059,9 +988,7 @@ protected:
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions = "")
     {
         const roctx_config_t config{ .pause_resume_enabled   = false,
-                                     .use_perfetto           = false,
                                      .use_timemory           = false,
-                                     .perfetto_annotations   = false,
                                      .selected_trace_regions = regions };
         return std::make_unique<roctx_client_t>(m_session, config);
     }
