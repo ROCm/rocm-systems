@@ -6374,13 +6374,17 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                # Integer sources take no ABS/NEG, but the float result takes
+                # CLAMP and OMOD like any other VOP3 float result.
+                is_integer_to_float = cls == 'vector_unary' and dtype in (
                     'f32_i32',
                     'f32_u32',
                     'f32_ubyte0',
                     'f32_ubyte1',
                     'f32_ubyte2',
                     'f32_ubyte3',
+                    'f64_i32',
+                    'f64_u32',
                 )
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
@@ -6392,7 +6396,7 @@ class CodeGenerator:
                     is_vop3
                     and (
                         is_float_op
-                        or is_integer_to_f32
+                        or is_integer_to_float
                         or is_f32_to_integer
                         or is_f16_input_conversion
                     )
@@ -6401,8 +6405,8 @@ class CodeGenerator:
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = set() if is_integer_to_f32 else {'neg'}
-                    if has_abs and not is_integer_to_f32:
+                    ef = set() if is_integer_to_float else {'neg'}
+                    if has_abs and not is_integer_to_float:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     if 'clamp' in inst_fields and not is_f32_to_integer:

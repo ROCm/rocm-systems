@@ -76,21 +76,35 @@ OUTPUT_POLICY = 'output_policy'
 OUTPUT_MODIFIERS = ('inst_.omod', 'inst_.clamp')
 
 
-def output_policy_expr(dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS) -> str:
+def output_policy_expr(
+    dtype: str,
+    fields: tuple[str, str] = OUTPUT_MODIFIERS,
+    transcendental: bool = False,
+) -> str:
     """Emit the effective OMOD/CLAMP policy using dtype's MODE fields.
 
     ``fields`` holds the (OMOD, CLAMP) expressions from the instruction.
+    TRANS-unit results round OMOD overflow to nearest in every MODE.
     """
     omod, clamp = fields
     fmt = f'amdgpu::fp_format::{dtype.upper()}'
-    return f'amdgpu::output_modifier_policy<{fmt}>(wf, {omod}, {clamp})'
+    helper = (
+        'transcendental_output_modifier_policy'
+        if transcendental
+        else 'output_modifier_policy'
+    )
+    return f'amdgpu::{helper}<{fmt}>(wf, {omod}, {clamp})'
 
 
 def output_policy_decl(
-    dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS, indent: str = '  '
+    dtype: str,
+    fields: tuple[str, str] = OUTPUT_MODIFIERS,
+    indent: str = '  ',
+    transcendental: bool = False,
 ) -> str:
     """Declare the scalar output policy once, before the lane loop."""
-    return f'{indent}const auto {OUTPUT_POLICY} = {output_policy_expr(dtype, fields)};'
+    policy = output_policy_expr(dtype, fields, transcendental)
+    return f'{indent}const auto {OUTPUT_POLICY} = {policy};'
 
 
 def apply_output(dtype: str, bits: str) -> str:
