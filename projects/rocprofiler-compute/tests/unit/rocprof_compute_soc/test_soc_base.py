@@ -843,7 +843,7 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
     [
         pytest.param([], True, id="no_filter_runs_benchmark"),
         pytest.param(["4"], True, id="block_4_runs_benchmark"),
-        pytest.param(["roof"], True, id="roof_alias_runs_benchmark"),
+        pytest.param(["roofline"], True, id="roofline_alias_runs_benchmark"),
         pytest.param(["11.2.3", "11.2.4"], False, id="set_metrics_skip_benchmark"),
         pytest.param(["2"], False, id="unrelated_block_skips_benchmark"),
     ],
