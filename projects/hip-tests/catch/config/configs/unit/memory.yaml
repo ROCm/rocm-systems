@@ -1393,9 +1393,12 @@ memory:
     tags: [query, managed_memory]
   Unit_hipPointerSetAttribute_Positive_SyncMemops:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "unit/memory/CMakeLists.txt adds hipPointerSetAttribute.cc only if(UNIX) (Windows build error: undefined symbol hipPointerSetAttribute); never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Below test is disabled due to defect EXSWHTEC-347 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "Below test is disabled due to defect EXSWHTEC-347 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P1]
   Unit_hipPointerSetAttribute_Negative_Parameters:
     <<: *level_2

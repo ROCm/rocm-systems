@@ -83,7 +83,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) Disabling below tests temporarily due to change in API behavior; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities:
     <<: *level_2
@@ -206,7 +206,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) mlsejenkins_Window_Failures_on_gfx1201; (amd_wsl) Note: TDR (pass) Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: TDR (pass) Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
@@ -257,7 +257,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-400049 tdr intermittently; (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_2

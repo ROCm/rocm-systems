@@ -208,7 +208,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) Rock_Window_Failures_on_gfx1151 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [function]
   Unit_hipModuleGetFunctionCount_NegativeTsts:
     <<: *level_2
@@ -301,7 +301,7 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows, amd_wsl]
-      reason: "(amd_windows) Below tests are failing PSDB; (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged on nvidia_windows, amd_wsl AIRUNTIME-2744"
+      reason: "(nvidia_windows) Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged on nvidia_windows, amd_wsl AIRUNTIME-2744"
     tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Parameters:
     <<: *level_2

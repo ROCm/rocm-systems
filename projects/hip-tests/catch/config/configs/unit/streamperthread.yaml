@@ -31,7 +31,7 @@ streamperthread:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "(amd_linux) === Test does not reflect a valid use case - SWDEV-569454; (amd_windows) === Test does not reflect a valid use case - SWDEV-569454; (amd_wsl) Disabling test tracked SWDEV-395683; (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454 Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "(amd_linux) === Test does not reflect a valid use case - SWDEV-569454; (amd_wsl) Disabling test tracked SWDEV-395683; (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454 Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_2

@@ -40,7 +40,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithFlags:
     <<: *level_2
@@ -49,7 +49,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled:
     <<: *level_2
@@ -885,7 +885,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [capture]
   Unit_hipStreamBeginCapture_captureEmptyStreams:
     <<: *level_2
@@ -985,9 +985,12 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_ComplexGraph:
     <<: *level_2
@@ -1027,9 +1030,12 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads:
     <<: *level_2
+    unsupported:
+      targets: [amd_windows]
+      reason: "Linux-only (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows. AIRUNTIME-2744"
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24 Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_wsl]
+      reason: "SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24 Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [capture]
   Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
     <<: *level_2
@@ -1346,7 +1352,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [exec]
   Unit_hipStreamGetCaptureInfo_v2_Positive_Functional:
     <<: *level_2
@@ -1566,7 +1572,7 @@ graph:
     tags: [exec]
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipGraphUpload_Functional_With_Priority_Stream:
     <<: *level_2
     tags: [exec]
@@ -1593,7 +1599,7 @@ graph:
     tags: [exec]
     disabled:
       targets: [asan]
-      reason: "(amd_windows) PAL backend does not charge device memory for eager internal; stream allocation at instantiate, so the footprint is unmeasurable there.; asan quarantines freed gpu allocations, so hipMemGetInfo does not; immediately report memory released by hipGraphExecDestroy. Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "stream allocation at instantiate, so the footprint is unmeasurable there.; asan quarantines freed gpu allocations, so hipMemGetInfo does not; immediately report memory released by hipGraphExecDestroy. Needs to be re-triaged on asan AIRUNTIME-2744"
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]

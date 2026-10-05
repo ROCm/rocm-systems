@@ -85,7 +85,7 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_NegTst:
     <<: *level_2
@@ -175,7 +175,7 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipGetSetDeviceFlags_InvalidFlag:
     <<: *level_2
@@ -199,7 +199,7 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) Note: UUID returned empty on some windows nodes; (amd_wsl) Note: UUID returned empty on some windows nodes Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: UUID returned empty on some windows nodes Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Negative:
     <<: *level_2
@@ -328,13 +328,13 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Linux disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Negative_Parameters:
     <<: *level_2
@@ -376,7 +376,7 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs; (amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Windows disabled Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [init, P0]
   Unit_hipInitDevice_Positive_Basic:
     <<: *level_2
