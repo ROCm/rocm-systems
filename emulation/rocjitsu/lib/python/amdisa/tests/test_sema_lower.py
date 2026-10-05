@@ -792,6 +792,38 @@ class TestLowerVectorAdd:
         if result_type == SemaType.F16:
             assert result.index('util::f16_to_f32(') < result.index(flush)
 
+    @pytest.mark.parametrize('operation', ['add', 'rcp', 'ldexp'])
+    def test_f16_helpers_receive_flushed_sources(self, operation: str):
+        source = _cast(_src(0), SemaType.F16)
+        if operation == 'add':
+            value = SemaNode(
+                SemaNodeKind.ADD,
+                ty=SemaType.F16,
+                children=(source, _cast(_src(1), SemaType.F16)),
+            )
+        elif operation == 'ldexp':
+            value = SemaNode(
+                SemaNodeKind.LDEXP,
+                ty=SemaType.F16,
+                children=(source, _cast(_src(1), SemaType.I32)),
+            )
+        else:
+            value = SemaNode(
+                SemaNodeKind.CALL,
+                call_name='rcp',
+                ty=SemaType.F16,
+                children=(SemaNode(SemaNodeKind.ID, id_name='rcp'), source),
+            )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        result = lower_sema_block(SemaBlock('V_F16', ExecModel.VECTOR, body))
+
+        # The helpers no longer flush; each F16 source is flushed before widening.
+        flushes = result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(')
+        assert flushes == (2 if operation == 'add' else 1)
+        assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
+
     def test_scalar_alu_rounding_keeps_unflushed_source(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,

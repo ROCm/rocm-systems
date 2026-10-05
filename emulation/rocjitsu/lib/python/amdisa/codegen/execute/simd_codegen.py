@@ -368,6 +368,7 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 
 
 # Integral rounding operations whose source honors MODE input flushing.
+# F16 transcendental functors also receive a flushed source.
 _INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})
 
 
@@ -727,43 +728,58 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_rcp_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[&wf](auto a) { return util::f32_to_f16_simd('
-        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RCP>('
-        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        _flush_input_then(
+            'F16',
+            '[&wf](auto a) { return util::f32_to_f16_simd('
+            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RCP>('
+            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        ),
     ),
     'v_rsq_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[&wf](auto a) { return util::f32_to_f16_simd('
-        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RSQ>('
-        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        _flush_input_then(
+            'F16',
+            '[&wf](auto a) { return util::f32_to_f16_simd('
+            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RSQ>('
+            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        ),
     ),
     'v_sqrt_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[&wf](auto a) { return util::f32_to_f16_simd('
-        'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::SQRT>('
-        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        _flush_input_then(
+            'F16',
+            '[&wf](auto a) { return util::f32_to_f16_simd('
+            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::SQRT>('
+            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        ),
     ),
     # Half LOG/EXP rounds once before applying output modifiers.
     'v_exp_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[&wf](auto a) { return util::f32_to_f16_simd('
-        'amdgpu::transcendental::log_exp_f16_simd<false>(util::f16_to_f32_simd(a), '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        _flush_input_then(
+            'F16',
+            '[&wf](auto a) { return util::f32_to_f16_simd('
+            'amdgpu::transcendental::log_exp_f16_simd<false>(util::f16_to_f32_simd(a), '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        ),
     ),
     'v_log_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[&wf](auto a) { return util::f32_to_f16_simd('
-        'amdgpu::transcendental::log_exp_f16_simd<true>(util::f16_to_f32_simd(a), '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        _flush_input_then(
+            'F16',
+            '[&wf](auto a) { return util::f32_to_f16_simd('
+            'amdgpu::transcendental::log_exp_f16_simd<true>(util::f16_to_f32_simd(a), '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
+        ),
     ),
     # --- f16 <-> f32 / int16 conversions ---
     'v_cvt_f32_f16_vop1': (
@@ -3029,15 +3045,12 @@ def _simd_probe_line(
             if true16_vop3
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
-        rounded = (
-            ', true'
-            if template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
-            else ''
-        )
-        if template_name.split('_')[1] in _INPUT_FLUSHED_ROUNDING:
+        transcendental = template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
+        rounded = ', true' if transcendental else ''
+        if transcendental or template_name.split('_')[1] in _INPUT_FLUSHED_ROUNDING:
             # The glue flushes the raw half before widening it for the functor.
             policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
-            rounded = f', false, {policy}'
+            rounded = f', {"true" if transcendental else "false"}, {policy}'
         return f'  {macro}({spec3unaf16}{rounded});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
