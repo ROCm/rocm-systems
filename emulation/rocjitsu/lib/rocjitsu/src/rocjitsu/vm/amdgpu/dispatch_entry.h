@@ -16,8 +16,8 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 

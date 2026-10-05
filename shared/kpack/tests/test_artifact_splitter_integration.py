@@ -27,7 +27,7 @@ from rocm_kpack.coff.surgery import CoffSurgery
 from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler, RocBLASHandler
 from rocm_kpack.elf.kpack_transform import HIPF_MAGIC as ELF_HIPF_MAGIC
 from rocm_kpack.elf.surgery import ElfSurgery
-from rocm_kpack.kpack_transform import kpack_offload_binary
+from rocm_kpack.kpack_transform import kpack_offload_binary, read_kpack_ref_marker
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
@@ -323,6 +323,54 @@ class TestArtifactSplitterIntegration:
         verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
         all_checks_passed = verifier.run_all_checks()
         assert all_checks_passed, "Artifact verification should pass all checks"
+
+    def test_split_binary_finds_kpack_beside_relocated_binary(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """A binary split under lib/ and bundled into an application directory
+        with .kpack/ beside it must find that archive, although the original
+        prefix-relative location is absent."""
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+        prefix = "test/lib/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib"
+        lib_dir.mkdir(parents=True)
+        shutil.copy2(
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so",
+            lib_dir / "libtest.so",
+        )
+
+        output_dir = tmp_path / "output"
+        splitter = ArtifactSplitter(
+            artifact_prefix="test_lib", toolchain=toolchain, database_handlers=[]
+        )
+        splitter.split(input_dir, output_dir)
+
+        split_binary = output_dir / "test_lib_generic" / prefix / "lib" / "libtest.so"
+        marker = read_kpack_ref_marker(split_binary)
+        assert marker is not None
+
+        # An application bundles the binary and its archives together.
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        bundled_binary = app_dir / "libtest.so"
+        shutil.copy2(split_binary, bundled_binary)
+        archive = app_dir / ".kpack" / "test_lib_gfx1100.kpack"
+        archive.parent.mkdir()
+        archive.touch()
+
+        # Expand the embedded patterns relative to the relocated binary.
+        candidates = [
+            bundled_binary.parent / pattern.replace("@GFXARCH@", "gfx1100")
+            for pattern in marker["kpack_search_paths"]
+        ]
+
+        # The original prefix-relative location cannot satisfy this layout.
+        assert not candidates[0].exists()
+        assert archive in candidates
+        assert next(path for path in candidates if path.is_file()) == archive
 
     def test_artifact_with_database_files(
         self, create_test_artifact, toolchain, tmp_path
