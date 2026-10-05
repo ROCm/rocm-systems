@@ -99,11 +99,13 @@ def test_live_attach_detach_pc_sampling(
         }
 
         # Profiling step (may fail)
-        binary_handler_profile_rocprof_compute(
+        code, stdout, stderr = binary_handler_profile_rocprof_compute(
             config,
             workload_dir,
             options,
-            check_success=True,
+            check_success=False,
+            capture_output=True,
+            stream=True,
             roof=False,
             app_name="app_hip_dynamic_shared",
             attach_detach_para=attach_detach,
@@ -121,4 +123,7 @@ def test_live_attach_detach_pc_sampling(
             capture_output=True,
         )
 
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
     common.clean_output_dir(config["cleanup"], workload_dir)
