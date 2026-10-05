@@ -19,6 +19,7 @@ from utils.mem_chart_common import (
     build_bw_edges,
     build_cache_panel,
     build_cu_panel,
+    build_cu_stats,
     build_ip_block,
     build_legend,
     colored,
@@ -30,7 +31,6 @@ from utils.mem_chart_common import (
     pad_to,
     progress_bar,
     render_chart_to_string,
-    safe_float,
     stack_metrics,
 )
 
@@ -40,12 +40,12 @@ from utils.mem_chart_common import (
 
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     # Compute Units panel
-    ("Wavefront Occupancy", 8),
+    ("Wavefront Occupancy", 50.0),
     ("VGPR", 64),
     ("SGPR", 32),
     ("LDS Allocation", 32768),
     ("Scratch Allocation", 0),
-    ("Workgroups", 256),
+    ("Workgroups", 2.0),
     # Compute Units→L1 request edges
     ("Flat Read", 80),
     ("Flat Write", 20),
@@ -121,12 +121,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
 
     # Compute Unit stats
-    metrics["wave_occ"] = metric_dict.get("Wavefront Occupancy")
-    metrics["vgpr"] = metric_dict.get("VGPR")
-    metrics["sgpr"] = metric_dict.get("SGPR")
-    metrics["scratch_alloc"] = metric_dict.get("Scratch Allocation")
-    metrics["lds_alloc"] = metric_dict.get("LDS Allocation")
-    metrics["workgroups"] = metric_dict.get("Workgroups")
+    metrics["cu_stats"] = build_cu_stats(metric_dict, "CU")
 
     # Compute Units→L1 request edges
     metrics["flat_read"] = metric_dict.get("Flat Read")
@@ -591,19 +586,7 @@ def create_mem_chart_diagram(
     has_mall = gpu_arch in _MALL_ARCHS
 
     # Build main diagram grid first (needed to measure width for scope bar)
-    scratch_bytes = safe_float(metrics["scratch_alloc"])
-    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
-    lds_bytes = safe_float(metrics["lds_alloc"])
-    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
-    cu_stats = [
-        ("Wave Occ", metrics["wave_occ"], " waves/CU"),
-        ("vGPRs", metrics["vgpr"], ""),
-        ("sGPRs", metrics["sgpr"], ""),
-        ("Scratch", scratch_kb, " KB", 3),
-        ("LDS Alloc", lds_alloc_kb, " KB"),
-        ("Workgroups", metrics["workgroups"], ""),
-    ]
-    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
+    cu_panel = build_cu_panel(_TOTAL_H, stats=metrics["cu_stats"])
     req_edges = _build_request_edges(metrics, cu_arrows)
     l1_stack = _build_l1_stack(metrics, membw=membw)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)

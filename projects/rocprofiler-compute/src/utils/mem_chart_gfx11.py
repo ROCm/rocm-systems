@@ -23,6 +23,7 @@ from utils.mem_chart_common import (
     build_arch_notes,
     build_bw_edges,
     build_cu_panel,
+    build_cu_stats,
     build_ip_block,
     build_legend,
     colored,
@@ -34,7 +35,6 @@ from utils.mem_chart_common import (
     pad_to,
     progress_bar,
     render_chart_to_string,
-    safe_float,
     safe_float_sum,
     stack_metrics,
 )
@@ -86,12 +86,12 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
     # Table 310: Workgroup Processors (WGPs)
-    ("Wavefront Occupancy", 8),
+    ("Wavefront Occupancy", 50.0),
     ("VGPR", 64),
     ("SGPR", 32),
     ("LDS Allocation", 32768),
     ("Scratch Allocation", 0),
-    ("Workgroups", 256),
+    ("Workgroups", 2.0),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -161,12 +161,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
 
     # WGPs
-    metrics["wave_occ"] = metric_dict.get("Wavefront Occupancy")
-    metrics["vgpr"] = metric_dict.get("VGPR")
-    metrics["sgpr"] = metric_dict.get("SGPR")
-    metrics["scratch_alloc"] = metric_dict.get("Scratch Allocation")
-    metrics["lds_alloc"] = metric_dict.get("LDS Allocation")
-    metrics["workgroups"] = metric_dict.get("Workgroups")
+    metrics["cu_stats"] = build_cu_stats(metric_dict, "WGP")
 
     metrics["icache_req"] = metric_dict.get("ICache Requests")
     metrics["icache_hit"] = metric_dict.get("ICache Hit Rate")
@@ -227,19 +222,7 @@ def _build_cu_and_l0(
     color_read = COLORS["read"]
     color_write = COLORS["write"]
 
-    scratch_bytes = safe_float(metrics["scratch_alloc"])
-    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
-    lds_bytes = safe_float(metrics["lds_alloc"])
-    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
-    cu_stats = [
-        ("Wave Occ", metrics["wave_occ"], " waves/WGP"),
-        ("vGPRs", metrics["vgpr"], ""),
-        ("sGPRs", metrics["sgpr"], ""),
-        ("Scratch", scratch_kb, " KB", 3),
-        ("LDS Alloc", lds_alloc_kb, " KB"),
-        ("Workgroups", metrics["workgroups"], ""),
-    ]
-    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats, title="WGPs")
+    cu_panel = build_cu_panel(_TOTAL_H, stats=metrics["cu_stats"], title="WGPs")
 
     cu_arrow_left = cu_arrows["left"]
     cu_arrow_right = cu_arrows["right"]

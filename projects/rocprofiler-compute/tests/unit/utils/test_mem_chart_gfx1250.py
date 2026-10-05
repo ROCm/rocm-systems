@@ -203,7 +203,7 @@ class TestIntegrationGfx1250:
         assert isinstance(chart, str)
         assert len(chart) > 100
         assert "WGPs" in chart
-        assert "waves/WGP" in chart
+        assert "Workgroups/WGP" in chart
         assert "Compute Units" not in chart
         assert "Legend" in chart
 

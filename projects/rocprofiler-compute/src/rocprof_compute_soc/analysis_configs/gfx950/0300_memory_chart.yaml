@@ -11,19 +11,23 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
-            0)
+          value: ROUND(100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu), 1)
+          unit: Percent
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Registers
         SGPR:
           value: ROUND(AVG(SGPR), 0)
+          unit: Registers
         LDS Allocation:
           value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Bytes per Workgroup
         Scratch Allocation:
-          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          unit: KB per Wave
         Workgroups:
-          value: ROUND(AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS
-            + SPI_CS3_NUM_THREADGROUPS), 0)
+          value: ROUND(AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS) / $numActiveCUs, 1)
+          unit: Workgroups per CU
         Flat Read:
           value: ROUND(SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom), 0)
         Flat Write:
@@ -114,7 +118,9 @@ Panel Config:
       comparable: false
       cli_style: mem_chart
   metrics_description:
-    Wavefront Occupancy: Wavefronts per active CU.
+    Wavefront Occupancy: >-
+      Resident wavefronts per active CU, averaged over GPU-active cycles, as a percent of
+      the maximum wavefronts per CU.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
@@ -124,13 +130,15 @@ Panel Config:
       see SALU. Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
     LDS Allocation: >-
-      The number of bytes of LDS memory (or, shared memory) allocated for
-      this kernel. Note: This may also be larger than what was requested at compile
-      time due to both allocation granularity and dynamic per-dispatch LDS allocations.
-    Scratch Allocation: The number of bytes of scratch memory requested per work-item
-      for this kernel. Scratch memory is used for stack memory on the accelerator,
-      as well as for register spills and restores.
-    Workgroups: The total number of workgroups forming this kernel launch.
+      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+      This may also be larger than what was requested at compile time due to both allocation
+      granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: >-
+      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+      requested per work-item multiplied by the wavefront size. Scratch memory is used for
+      stack memory on the accelerator, as well as for register spills and restores.
+    Workgroups: >-
+      The number of workgroups in the launch divided by the number of active CUs.
     Flat Read: The total number of flat read wavefronts per normalization unit.
     Flat Write: The total number of flat write wavefronts per normalization unit.
     Flat Atomic: The total number of flat atomic wavefronts per normalization unit.

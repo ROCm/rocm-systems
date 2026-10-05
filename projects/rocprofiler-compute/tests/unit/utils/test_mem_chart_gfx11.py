@@ -171,5 +171,5 @@ def test_left_panel_uses_wgp_terminology():
         )
     )
     assert "WGPs" in output
-    assert "waves/WGP" in output
+    assert "Workgroups/WGP" in output
     assert "Compute Units" not in output

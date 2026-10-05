@@ -27,6 +27,7 @@ from utils.mem_chart_common import (
     build_bw_edges,
     build_cache_panel,
     build_cu_panel,
+    build_cu_stats,
     build_legend,
     colored,
     format_edge,
@@ -116,12 +117,12 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GMI Write Bandwidth", 192e9),
     ("EA Stall Rate", 15.2),
     # Table 309: Workgroup Processors (WGPs)
-    ("Wavefront Occupancy", 8),
+    ("Wavefront Occupancy", 50.0),
     ("VGPR", 64),
     ("SGPR", 32),
     ("LDS Allocation", 32768),
     ("Scratch Allocation", 0),
-    ("Workgroups", 256),
+    ("Workgroups", 2.0),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -472,19 +473,7 @@ def create_mem_chart_diagram(
     std_arrows = make_arrows(_ARROW_LEN)
 
     # --- WGPs panel ---
-    scratch_bytes = safe_float(m.get("Scratch Allocation"))
-    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
-    lds_bytes = safe_float(m.get("LDS Allocation"))
-    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
-    cu_stats = [
-        ("Wave Occ", m.get("Wavefront Occupancy"), " waves/WGP"),
-        ("vGPRs", m.get("VGPR"), ""),
-        ("sGPRs", m.get("SGPR"), ""),
-        ("Scratch", scratch_kb, " KB", 3),
-        ("LDS Alloc", lds_alloc_kb, " KB"),
-        ("Workgroups", m.get("Workgroups"), ""),
-    ]
-    cu_panel = build_cu_panel(_CU_PANEL_H, stats=cu_stats, title="WGPs")
+    cu_panel = build_cu_panel(_CU_PANEL_H, stats=build_cu_stats(m, "WGP"), title="WGPs")
 
     # --- WGPs -> TCP/SQC edges ---
     color_read = COLORS["read"]

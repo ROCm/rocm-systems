@@ -148,6 +148,31 @@ class TestBuildCuPanel:
         assert "0.031 KB" in panel.renderable
 
 
+class TestBuildCuStats:
+    def test_rows_and_units(self):
+        stats = mem_chart_common.build_cu_stats(
+            {
+                "Wavefront Occupancy": 45.5,
+                "VGPR": 64,
+                "SGPR": 32,
+                "Scratch Allocation": 0.125,
+                "LDS Allocation": 2048,
+                "Workgroups": 2.5,
+            },
+            "WGP",
+        )
+        rows = {row[0]: row for row in stats}
+        assert rows["Wave Occ"][1:] == (45.5, "%")
+        assert rows["Scratch/Wave"][1:] == (0.125, " KB", 3)
+        assert rows["LDS Alloc"][1:] == (2.0, " KB")
+        assert rows["Workgroups/WGP"][1:] == (2.5, "")
+
+    def test_missing_metrics_render_as_none(self):
+        stats = mem_chart_common.build_cu_stats({})
+        assert [row[1] for row in stats] == [None] * 6
+        assert stats[-1][0] == "Workgroups/CU"
+
+
 class TestFormatMemChartHeading:
     @pytest.mark.parametrize(
         "unit, panel_id, expected",

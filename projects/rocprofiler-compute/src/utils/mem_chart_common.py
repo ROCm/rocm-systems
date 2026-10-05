@@ -241,6 +241,23 @@ def build_arch_notes(
 # ---------------------------------------------------------------------------
 
 
+def build_cu_stats(metric_dict: dict[str, Any], scope: str = "CU") -> list[tuple]:
+    """Compute Units / WGPs panel stats from the memory chart YAML metrics.
+
+    *scope*: "CU" on gfx9, "WGP" on gfx115x and gfx1250.
+    """
+    lds_bytes = safe_float(metric_dict.get("LDS Allocation"))
+    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
+    return [
+        ("Wave Occ", metric_dict.get("Wavefront Occupancy"), "%"),
+        ("vGPRs", metric_dict.get("VGPR"), ""),
+        ("sGPRs", metric_dict.get("SGPR"), ""),
+        ("Scratch/Wave", metric_dict.get("Scratch Allocation"), " KB", 3),
+        ("LDS Alloc", lds_alloc_kb, " KB"),
+        (f"Workgroups/{scope}", metric_dict.get("Workgroups"), ""),
+    ]
+
+
 def build_cu_panel(
     height: int,
     padding_lines: int = 13,
