@@ -34,6 +34,10 @@ struct Pm4ExecutionContext {
   /// @details Set queue.command_retry_pending and arrange a later CP scheduling
   /// turn. CP clears the flag before resuming processing.
   std::function<void()> retry;
+  /// @brief Wake CP promptly after stream completion or yielding runnable work.
+  /// @details Reset retry backoff and arrange a scheduling turn without marking
+  /// this queue blocked; packet processing may continue in the current turn.
+  std::function<void()> wake;
   /// @brief Cancel through CP at the original execution points, including exception scope.
   /// @details Set queue.faulted, cancel pending work, and notify failed submissions.
   /// The processor sets queue.publication_faulted before calling this callback

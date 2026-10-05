@@ -462,8 +462,11 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
     } else {
+      auto &cu = wf.raw_cu();
+      const bool allow_private_batch =
+          GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
       const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id(), allow_private_batch);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -1037,7 +1040,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
+                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
+                     GpuVmAccessBatchGuard::active() && !wf.raw_cu().debug_active() &&
+                         wf.raw_cu().plugin_group().empty());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
