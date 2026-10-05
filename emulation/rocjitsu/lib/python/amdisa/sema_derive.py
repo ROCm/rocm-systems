@@ -33,10 +33,17 @@ from amdisa.sema_ast import (
 )
 from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
-from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
+from amdisa.semantics import (
+    F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_DTYPES,
+    is_float_relation,
+)
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
+
+# Call name prefix of a floating VOPC relation; the relation mnemonic follows.
+FLOAT_COMPARE_CALL = 'float_compare_'
 
 
 def _src(idx: int, ty: SemaType = SemaType.B32) -> SemaNode:
@@ -1387,7 +1394,19 @@ class _VectorCmp(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        cmp = _make_cmp(sem.operation or "", src0, src1)
+        op = sem.operation or ""
+        if is_float_relation(sem.data_type, op):
+            # comparison.h evaluates float relations on the raw encodings. The
+            # typed casts stay so enrichment still attaches the VOP3 modifiers.
+            name = f'{FLOAT_COMPARE_CALL}{op}'
+            cmp = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U1,
+                call_name=name,
+                children=(_id(name), src0, src1),
+            )
+        else:
+            cmp = _make_cmp(op, src0, src1)
         body = _assign(
             SemaNode(
                 SemaNodeKind.ARRAYDEREF,
