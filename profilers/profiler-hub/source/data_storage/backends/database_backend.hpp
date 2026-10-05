@@ -190,22 +190,26 @@ public:
         {
             auto raw = m_stmt.raw();
             T    row;
-            while(SqlitePolicy::step(raw) == SqlitePolicy::result_row)
+            int  rc = SqlitePolicy::result_done;
+            while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
             {
                 m_extractor(*m_backend, raw, row);
                 fn(std::as_const(row));
             }
+            m_backend->validate_sqlite3_result(rc, "", "Failed to read rows");
         }
 
         std::vector<T> to_vector()
         {
             std::vector<T> results;
             auto           raw = m_stmt.raw();
-            while(SqlitePolicy::step(raw) == SqlitePolicy::result_row)
+            int            rc  = SqlitePolicy::result_done;
+            while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
             {
                 results.emplace_back();
                 m_extractor(*m_backend, raw, results.back());
             }
+            m_backend->validate_sqlite3_result(rc, "", "Failed to read rows");
             return results;
         }
 

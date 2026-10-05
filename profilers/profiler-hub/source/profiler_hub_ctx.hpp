@@ -38,10 +38,18 @@ struct ph_ctx
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 
-    /** @brief Registers a future issued through this ctx, for cleanup on ~ph_ctx(). */
-    void register_future(ph_future* future);
-    /** @brief Unregisters a future previously passed to register_future(). */
-    void unregister_future(ph_future* future);
+    /**
+     * @brief Registers a future issued through this ctx, for cleanup on ~ph_ctx().
+     * @return false if the ctx is already shutting down and the future was not
+     *         registered.
+     */
+    [[nodiscard]] bool register_future(ph_future* future);
+    /**
+     * @brief Unregisters a future previously passed to register_future().
+     * @return false if the future was not registered (never issued, already
+     *         freed, or taken over by ~ph_ctx()).
+     */
+    [[nodiscard]] bool unregister_future(ph_future* future);
     /** @brief Checks a future was issued through this ctx (owned by it). */
     [[nodiscard]] bool owns_future(ph_future* future) const;
 
@@ -130,8 +138,9 @@ private:
     std::deque<track_events_result_t>    m_track_events_results;
     std::deque<std::vector<ph_sample_t>> m_track_samples_results;
 
-    profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
-
     mutable std::mutex             m_futures_mutex;
     std::unordered_set<ph_future*> m_live_futures;
+    bool                           m_closing{ false };
+
+    profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
 };
