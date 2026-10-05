@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -31,6 +32,17 @@ env_size(const char* name, size_t fallback)
     const auto parsed = std::strtoull(value, &end, 10);
     if(end == value || *end != '\0') return fallback;
     return static_cast<size_t>(parsed);
+}
+
+std::string
+existing_trace_path(std::string_view path)
+{
+    std::string file_path{ path };
+    if(!std::filesystem::is_regular_file(file_path))
+    {
+        throw std::runtime_error("trace file does not exist: " + file_path);
+    }
+    return file_path;
 }
 
 std::uint32_t
@@ -97,7 +109,7 @@ ph_ctx::default_connection_count()
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
-: m_file_path{ trace_path }
+: m_file_path{ existing_trace_path(trace_path) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
