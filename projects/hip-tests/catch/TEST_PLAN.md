@@ -712,7 +712,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
 
-### `library` (14 cases)
+### `library` (15 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -728,6 +728,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol` | hipLibraryGetKernel | an existing symbol resolves to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolveKernel` | hipLibraryGetKernel | a loaded valid image resolves a known kernel symbol to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_UnknownSymbol_IsRejected` | hipLibraryGetKernel | resolving an undefined symbol fails with a non-success status instead of a bogus handle |
+| `Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullStableModule` | hipLibraryGetModule | a loaded library yields a non-null stable module handle |
 | `Contract_Library_HipLibraryLoadData_FromRtc_Succeeds` | hipLibraryLoadData | a HIPRTC-produced code object loads into a non-null library handle and unloads cleanly |
 | `Contract_Library_HipLibraryLoadData_NullImage_IsRejected` | hipLibraryLoadData | rejects a null image with a non-success status rather than silently succeeding |
 
