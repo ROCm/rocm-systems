@@ -500,7 +500,6 @@ static void atfork_child() {
     g_trailer_written = false;
     // Incomplete is a property of an archive, and the child writes its own: a
     // failure the parent recorded must not cost the child its trailer.
-    g_capture_incomplete.store(false, std::memory_order_relaxed);
     // Re-open from the *base* dir so the forked child selects its own
     // pid-<pid> sub-archive.
     dir = g_base_dir;
@@ -765,7 +764,6 @@ bool open(const char* output_dir) {
   // Fresh per-process archive. Incomplete belongs to the archive, as in
   // atfork_child: a failure recorded against one closed earlier in this
   // process must not cost this one its trailer. A resumed archive keeps it.
-  g_capture_incomplete.store(false, std::memory_order_relaxed);
   g_seq_id.store(0, std::memory_order_relaxed);
   g_event_count.store(0, std::memory_order_relaxed);
   g_blob_count.store(0, std::memory_order_relaxed);
