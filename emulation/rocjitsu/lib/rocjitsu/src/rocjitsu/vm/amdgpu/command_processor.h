@@ -13,8 +13,8 @@
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
 ///   - AqlPacketProcessor: AQL framing, classification, and dependency decoding
-///   - Pm4PacketProcessor: the supported PM4 compute-queue packet subset
-///   - DispatchController: SPI+ADC WG iteration, CU resource check, WF creation
+///   - PM4 packet processing: command-stream decoding and execution in pm4/
+///   - CP dispatch admission: SPI+ADC WG iteration, CU resource check, WF creation
 ///   - CompletionTracker: per-dispatch WG counting, in-order signal retirement
 ///
 /// @see <a
@@ -30,8 +30,8 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -71,7 +71,6 @@ namespace amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class CommandProcessorCloseTestAccess;
-class QueueBindingFactory;
 enum class VmAccessOutcome : uint8_t;
 enum class QueueReconfigureStatus : uint8_t;
 enum class QueueSubmissionStatus : uint8_t;
@@ -166,13 +165,6 @@ public:
   /// @param rank This CP's XCD index.
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
-
-  /// @brief Create a PM4 queue binding factory backed by this CP's compute queues.
-  /// @details The returned factory is a lifetime/notification adapter. This CP
-  /// owns PM4 ring, packet, retry, and cursor-publication state so semantics do
-  /// not migrate into MES or a PCI/VFIO transport adapter.
-  [[nodiscard]] std::shared_ptr<QueueBindingFactory>
-  make_pm4_queue_binding_factory(Pm4PacketCallbacks callbacks);
 
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
