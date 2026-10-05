@@ -5275,6 +5275,17 @@ constexpr uint32_t sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
 }
 constexpr uint32_t s_cmp_eq_i32(uint32_t s0, uint32_t s1) { return sopc(0, s0, s1); }
 constexpr uint32_t s_cmp_gt_i32(uint32_t s0, uint32_t s1) { return sopc(2, s0, s1); }
+// SOPK: encoding[31:28]=0xB, op[27:23], sdst[22:16], simm16[15:0]
+constexpr uint32_t sopk(uint32_t op, uint32_t sdst, uint16_t simm16) {
+  return (0xBu << 28) | (op << 23) | (sdst << 16) | simm16;
+}
+// hwreg(id, offset, size) operand of S_GETREG/S_SETREG: id[5:0], offset[10:6], size-1[15:11]
+constexpr uint32_t HW_REG_MODE = 1;
+constexpr uint16_t hwreg(uint32_t id, uint32_t offset, uint32_t size) {
+  return static_cast<uint16_t>(id | (offset << 6) | ((size - 1) << 11));
+}
+// The value to write follows as a 32-bit literal dword.
+constexpr uint32_t s_setreg_imm32_b32(uint16_t hwreg) { return sopk(20, 0, hwreg); }
 // VOP1: encoding[31:25]=0x3F, vdst[24:17], op[16:9], src0[8:0]
 constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
@@ -5987,7 +5998,10 @@ TEST_P(IsaTest, VCmpEqF32_SetsVCC) {
   // Compare v0 (lane index as float-bits) with inline 0 (integer 0).
   // Lane 0: v0=0, compared with 0 -> equal -> VCC[0]=1.
   // Lane 1: v0=1, compared with 0 -> not equal -> VCC[1]=0.
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
+  // Bit pattern 1 is an F32 subnormal. Compares flush it to zero unless MODE
+  // preserves F32 input denormals, so enable them first.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
   uint64_t vcc = fx.vcc();
   EXPECT_TRUE(vcc & (1ULL << 0));  // lane 0: 0.0 == 0.0
   EXPECT_FALSE(vcc & (1ULL << 1)); // lane 1: int 1 as float != 0.0
@@ -6001,7 +6015,9 @@ TEST_P(IsaTest, VCndmaskB32) {
   // v_cmp_eq_f32 v0, 0 -> VCC[0]=1 (lane 0 = 0 == 0), VCC[1]=0 (1 != 0)
   // v_mov_b32 v1, inline 99
   // v_cndmask_b32 v2, v0, v1 -> lane 0: VCC=1 -> v1=99; lane 1: VCC=0 -> v0=1
-  fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
+  // Lane 1's bit pattern is an F32 subnormal; preserve F32 input denormals.
+  fx.load_program({enc::s_setreg_imm32_b32(enc::hwreg(enc::HW_REG_MODE, 4, 2)), 3u,
+                   enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), // VCC from v0 == 0
                    enc::v_mov_b32(1, enc::INLINE_CONST(42)),   // v1 = 42 (all lanes)
                    enc::v_cndmask_b32(2, enc::VGPR_SRC(0), 1), // v2 = VCC ? v1 : v0
                    SOPP_S_ENDPGM});
@@ -7134,6 +7150,30 @@ public:
   bool requires_serial_hot_hooks() const override { return false; }
 };
 
+class LiveHotHookSubscriptionPlugin final : public ExecutionPlugin {
+public:
+  explicit LiveHotHookSubscriptionPlugin(bool observes)
+      : ExecutionPlugin(observes ? "live_subscribed_hot_hook" : "live_unsubscribed_hot_hook"),
+        observes_(observes) {}
+
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
+    return observes_;
+  }
+  bool observes_before_execute_instruction() const override { return false; }
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_async_instruction_issued() const override { return false; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++sgpr_reads; }
+
+  uint32_t sgpr_reads = 0;
+
+private:
+  bool observes_ = false;
+};
+
 TEST(AqlDispatchTest, DebugPausedPoolWaveDoesNotKeepSchedulingContinuations) {
   VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
   f.cp()->set_dispatch_threads(2);
@@ -7225,6 +7265,48 @@ TEST(AqlDispatchTest, LivePluginReplacementPreservesPoolDuringActiveDispatch) {
 
   f.engine->run();
   EXPECT_TRUE(f.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, LivePluginReplacementRefreshesResidentWaveHotHookSubscriptions) {
+  const auto run_case = [](bool initial_observes, bool replacement_observes) {
+    SCOPED_TRACE(std::format("{} -> {}", initial_observes, replacement_observes));
+    VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+    f.soc_ptr->set_dispatch_threads(2);
+
+    auto initial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto initial = std::make_unique<LiveHotHookSubscriptionPlugin>(initial_observes);
+    auto *initial_ptr = initial.get();
+    ASSERT_TRUE(initial_group->add(std::move(initial)));
+    f.soc_ptr->set_plugin_group(initial_group);
+
+    auto code = make_multi_quantum_nop_kernel();
+    const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+    step_until_first_quantum(f, f.cu());
+
+    auto *wave = f.cu()->wf(0);
+    ASSERT_NE(wave, nullptr);
+    const uint32_t physical_sgpr = wave->sgpr_alloc().base;
+    EXPECT_EQ(f.cu()->read_sgpr(physical_sgpr), 0u);
+    EXPECT_EQ(initial_ptr->sgpr_reads, initial_observes ? 1u : 0u);
+
+    auto replacement_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto replacement = std::make_unique<LiveHotHookSubscriptionPlugin>(replacement_observes);
+    auto *replacement_ptr = replacement.get();
+    ASSERT_TRUE(replacement_group->add(std::move(replacement)));
+    f.soc_ptr->set_plugin_group(replacement_group);
+
+    EXPECT_EQ(f.cu()->read_sgpr(physical_sgpr), 0u);
+    EXPECT_EQ(replacement_ptr->sgpr_reads, replacement_observes ? 1u : 0u);
+    EXPECT_EQ(initial_ptr->sgpr_reads, initial_observes ? 1u : 0u);
+
+    f.engine->run();
+    EXPECT_TRUE(f.cu()->is_idle());
+  };
+
+  run_case(/*initial_observes=*/false, /*replacement_observes=*/true);
+  run_case(/*initial_observes=*/true, /*replacement_observes=*/false);
 }
 
 uint64_t instructions_visible_at_tick_ten(uint32_t dispatch_threads) {

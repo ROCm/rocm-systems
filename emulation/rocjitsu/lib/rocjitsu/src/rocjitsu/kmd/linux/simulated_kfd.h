@@ -10,7 +10,7 @@
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
