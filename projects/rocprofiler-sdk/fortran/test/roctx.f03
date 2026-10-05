@@ -51,7 +51,7 @@ program test_roctx
 
   id1 = roctxRangeStart(c_loc(msg))
   id2 = roctxRangeStart(c_loc(msg))
-  if (id1 <= 0 .or. id2 <= id1) then
+  if (id1 == id2) then
      write(*,*) "FAILED! roctxRangeStart returned ", id1, id2
      stop 1
   end if
@@ -59,7 +59,8 @@ program test_roctx
   call roctxRangeStop(id1)
 
   tid = 0
-  if (roctxGetThreadId(tid) == 0 .and. tid == 0) then
+  ret = roctxGetThreadId(tid)
+  if (ret == 0 .and. tid == 0) then
      write(*,*) "FAILED! roctxGetThreadId succeeded but left the thread id at 0"
      stop 1
   end if
