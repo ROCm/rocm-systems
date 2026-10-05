@@ -285,15 +285,14 @@ TEST(AieElfParse, RejectsMoreThanOnePdiPerKernel) {
   ASSERT_NE(dynsym_index, 0u);
   const Elf32_Shdr dynsym = SectionHeader(image, dynsym_index);
   ASSERT_GE(dynsym.sh_size, 4 * sizeof(Elf32_Sym));
-  std::memcpy(image.data() + dynsym.sh_offset + 3 * sizeof(Elf32_Sym) +
-                  offsetof(Elf32_Sym, st_name),
-              &new_name_offset, sizeof(new_name_offset));
+  std::memcpy(
+      image.data() + dynsym.sh_offset + 3 * sizeof(Elf32_Sym) + offsetof(Elf32_Sym, st_name),
+      &new_name_offset, sizeof(new_name_offset));
 
   // Point the second argument relocation at it, as a PDI address.
   ASSERT_TRUE(MutateRelocation(image, /*index=*/2, /*sym=*/3, kAddress64));
 
-  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS)
-      << "a second PDI was accepted";
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << "a second PDI was accepted";
   EXPECT_NE(error.find("more than one PDI per kernel"), std::string::npos)
       << "rejected for the wrong reason: " << error;
 }
