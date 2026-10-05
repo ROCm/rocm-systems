@@ -47,6 +47,12 @@ struct discovery_table_entry_t
 };
 
 using discovery_table_t = std::vector<discovery_table_entry_t>;
+
+// AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH overrides the sysfs PCI device directory.
+// This is primarily useful for deterministic packet-generation tests.
+bool
+use_custom_ip_discovery_path();
+
 discovery_table_t
 parse_ip_discovery(uint32_t domain, uint32_t bdf);
 
