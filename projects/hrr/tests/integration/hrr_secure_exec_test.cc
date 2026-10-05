@@ -44,6 +44,9 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23  // Linux ABI value; the same fallback as hip_capture_metadata.cpp
+#endif
 #endif
 
 HRR_TEST_CASE(Unit_HRR_BlankCaptureOutputCapturesNothing) {
@@ -210,6 +213,7 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
   CHECK(control.out.find(kSecureExecNotice) == std::string::npos);
   REQUIRE(run.ret == 0);
   CHECK(hrr_process_archives(cap).empty());
+  CHECK_FALSE(fs::exists(cap));
   CHECK(run.out.find(kSecureExecNotice) != std::string::npos);
   REQUIRE(unset.ret == 0);
   CHECK(unset.out.find(kSecureExecNotice) == std::string::npos);
