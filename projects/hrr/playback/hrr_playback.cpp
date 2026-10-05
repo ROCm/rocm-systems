@@ -65,6 +65,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
 #include <system_error>
@@ -77,6 +78,8 @@
 #ifndef _WIN32
 #include <link.h>
 #endif
+
+#include "hrr_safe_fs.h"
 
 namespace fs = std::filesystem;
 
@@ -960,9 +963,163 @@ static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
   return static_cast<uint64_t>(pid);
 }
 
+// Write `name` inside `dir` without following a symbolic link.
+//
+// The content goes to a new, unpredictably named file made with O_EXCL and
+// O_NOFOLLOW, is fsynced, and then renamed over `name`, all through a
+// descriptor for `dir` that was opened without following a link and checked.
+// A link planted at `name`, at the old predictable ".repair.tmp" name or in
+// place of `dir` is never written through. `fill` writes the content.
+// On failure the original file is untouched and *err says why.
+static bool write_file_in_dir(const fs::path& dir, const std::string& name,
+                              const std::function<bool(FILE*)>& fill, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(dir.string(), err);
+  if (!d.valid()) return false;
+  // Keep the permissions of the file being replaced (a group-readable archive
+  // stays group-readable); a new file gets the usual 0666 &~ umask.
+  mode_t new_mode = 0666;
+  bool have_old_mode = false;
+  switch (stat_entry(d.get(), name, err)) {
+    case Entry::Absent:
+      break;
+    case Entry::Regular: {
+      struct stat old_st;
+      if (::fstatat(d.get(), name.c_str(), &old_st, AT_SYMLINK_NOFOLLOW) == 0) {
+        new_mode = old_st.st_mode & 07777;
+        have_old_mode = true;
+      }
+      break;
+    }
+    case Entry::Other:
+      *err = "refusing " + (dir / name).string() + ": it is a symbolic link or not a regular file";
+      return false;
+    case Entry::Error:
+      return false;
+  }
+  std::string tmp_name;
+  Fd t = create_exclusive_temp(d.get(), name + ".repair", &tmp_name, err, new_mode);
+  if (!t.valid()) return false;
+  if (have_old_mode) (void)::fchmod(t.get(), new_mode);  // the umask must not narrow it
+  FILE* f = fdopen(t.get(), "wb");
+  if (!f) {
+    *err = errno_text("fdopen " + tmp_name);
+    t.reset();
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  t.release();  // owned by f now
+  bool ok = fill(f);
+  ok = (fflush(f) == 0) && ok;
+  ok = (::fsync(fileno(f)) == 0) && ok;
+  ok = (fclose(f) == 0) && ok;
+  if (!ok) {
+    *err = "write of " + (dir / name).string() + " failed";
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  if (!commit_replace(d.get(), tmp_name, name, err)) {
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  return true;
+#else
+  // Windows: no O_NOFOLLOW/openat. Refuse links, then write beside and replace.
+  std::error_code ec;
+  const fs::path target = dir / name;
+  if (fs::is_symlink(dir, ec) || fs::is_symlink(target, ec)) {
+    *err = "refusing " + target.string() + ": it is a symbolic link";
+    return false;
+  }
+  const fs::path tmp = target.string() + ".repair.tmp";
+  FILE* f = fopen(tmp.string().c_str(), "wb");
+  if (!f) {
+    *err = "cannot open " + tmp.string() + " for writing";
+    return false;
+  }
+  bool ok = fill(f);
+  ok = (fflush(f) == 0) && ok;
+  ok = (fclose(f) == 0) && ok;
+  if (!ok) {
+    fs::remove(tmp, ec);
+    *err = "write of " + target.string() + " failed";
+    return false;
+  }
+  // std::filesystem::rename replaces on Windows; fall back to remove + rename.
+  fs::rename(tmp, target, ec);
+  if (ec) {
+    fs::remove(target, ec);
+    fs::rename(tmp, target, ec);
+  }
+  if (ec) {
+    fs::remove(tmp, ec);
+    *err = "cannot replace " + target.string() + ": " + ec.message();
+    return false;
+  }
+  return true;
+#endif
+}
+
+// Refuse, before anything is written, an archive directory that is a link or
+// whose events.bin or manifest.json is a link or not a regular file, so repair
+// never ends half done on such an archive.
+static bool check_repair_targets(const fs::path& dir, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(dir.string(), err);
+  if (!d.valid()) return false;
+  const Entry ev = stat_entry(d.get(), "events.bin", err);
+  if (ev == Entry::Error) return false;
+  if (ev != Entry::Regular) {
+    *err = "refusing " + (dir / "events.bin").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  const Entry mf = stat_entry(d.get(), "manifest.json", err);
+  if (mf == Entry::Error) return false;
+  if (mf == Entry::Other) {
+    *err = "refusing " + (dir / "manifest.json").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  return true;
+#else
+  std::error_code ec;
+  for (const char* n : {"", "events.bin", "manifest.json"}) {
+    if (fs::is_symlink(dir / n, ec)) {
+      *err = "refusing " + (dir / n).string() + ": it is a symbolic link";
+      return false;
+    }
+  }
+  return true;
+#endif
+}
+
+// Refuse, before any process directory is touched, a root whose manifest.json
+// is a link or not a regular file, so a root repair never ends half done.
+static bool check_root_manifest_target(const fs::path& root, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(root.string(), err);
+  if (!d.valid()) return false;
+  const Entry mf = stat_entry(d.get(), "manifest.json", err);
+  if (mf == Entry::Error) return false;
+  if (mf == Entry::Other) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  return true;
+#else
+  std::error_code ec;
+  if (fs::is_symlink(root / "manifest.json", ec)) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link";
+    return false;
+  }
+  return true;
+#endif
+}
+
 static int repair_archive(const hrr::Archive& archive) {
-  std::string events_path = archive.path + "/events.bin";
-  std::string tmp_path    = events_path + ".repair.tmp";
+  const fs::path archive_dir(archive.path);
 
   if (archive.complete) {
     printf("[HRR] Archive already complete (%zu events); nothing to repair\n",
@@ -970,81 +1127,64 @@ static int repair_archive(const hrr::Archive& archive) {
     return 0;
   }
 
-  FILE* out = fopen(tmp_path.c_str(), "wb");
-  if (!out) {
-    fprintf(stderr, "[HRR] repair: cannot open %s for writing\n", tmp_path.c_str());
+  std::string err;
+  if (!check_repair_targets(archive_dir, &err)) {
+    fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
     return 1;
   }
 
-  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
-  bool ok = write_u(out, &fh, sizeof(fh));
+  // Rewrite events.bin trimmed to the last complete record plus the trailer.
+  const bool events_ok = write_file_in_dir(archive_dir, "events.bin", [&](FILE* out) {
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+    bool ok = write_u(out, &fh, sizeof(fh));
 
-  uint64_t max_seq = 0;
-  for (const auto& ev : archive.events) {
-    if (!ok) break;
-    // load_archive only ever stores complete records, so raw_payload always
-    // holds at least a full header. Assert it before ev.header() casts the
-    // bytes, so a future reader bug surfaces here instead of as silent UB.
-    assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
-           "repair: event raw_payload smaller than hrr_event_header");
-    ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
-    if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
-  }
+    uint64_t max_seq = 0;
+    for (const auto& ev : archive.events) {
+      if (!ok) break;
+      // load_archive only ever stores complete records, so raw_payload always
+      // holds at least a full header. Assert it before ev.header() casts the
+      // bytes, so a future reader bug surfaces here instead of as silent UB.
+      assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
+             "repair: event raw_payload smaller than hrr_event_header");
+      ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
+      if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
+    }
 
-  // Clean-shutdown trailer. Built via the shared hrr_make_eof_record() helper so
-  // the trailer layout cannot drift from the capture writer (writer::flush()).
-  // The offline tool leaves timestamp_ns / thread_id at 0.
-  if (ok) {
-    hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
-    ok = write_u(out, &rec, sizeof(rec));
-  }
-  fflush(out);
-  fclose(out);
-
-  if (!ok) {
-    fprintf(stderr, "[HRR] repair: write failed; leaving original untouched\n");
-    remove(tmp_path.c_str());
+    // Clean-shutdown trailer. Built via the shared hrr_make_eof_record() helper
+    // so the trailer layout cannot drift from the capture writer
+    // (writer::flush()). The offline tool leaves timestamp_ns / thread_id at 0.
+    if (ok) {
+      hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
+      ok = write_u(out, &rec, sizeof(rec));
+    }
+    return ok;
+  }, &err);
+  if (!events_ok) {
+    fprintf(stderr, "[HRR] repair: %s; leaving original untouched\n", err.c_str());
     return 1;
   }
 
-  // Atomically replace the original events.bin. POSIX rename() overwrites an
-  // existing destination, but Windows rename()/MoveFile without
-  // MOVEFILE_REPLACE_EXISTING fails when the target already exists. Use
-  // std::filesystem::rename (which maps to a replacing move on Windows) and, if
-  // that still fails, fall back to removing the destination first.
-  std::error_code ec;
-  fs::rename(tmp_path, events_path, ec);
-  if (ec) {
-    fs::remove(events_path, ec);
-    fs::rename(tmp_path, events_path, ec);
-  }
-  if (ec) {
-    fprintf(stderr, "[HRR] repair: cannot replace %s: %s\n",
-            events_path.c_str(), ec.message().c_str());
-    remove(tmp_path.c_str());
-    return 1;
-  }
-
-  fs::path archive_dir(archive.path);
-  std::string manifest_path = (archive_dir / "manifest.json").string();
+  const std::string manifest_path = (archive_dir / "manifest.json").string();
   ProcessInfo info{};
   if (!read_process_manifest(manifest_path, info))
     info.pid = pid_from_archive_dir(archive_dir);
 
-  FILE* mf = fopen(manifest_path.c_str(), "w");
-  if (mf) {
-    fprintf(mf,
-            "{\n"
-            "  \"pid\": %llu,\n"
-            "  \"parent_pid\": %llu,\n"
-            "  \"complete\": true,\n"
-            "  \"event_count\": %zu,\n"
-            "  \"blob_count\": %zu\n"
-            "}\n",
-            static_cast<unsigned long long>(info.pid),
-            static_cast<unsigned long long>(info.parent_pid),
-            archive.events.size(), archive.blob_count);
-    fclose(mf);
+  const bool manifest_ok = write_file_in_dir(archive_dir, "manifest.json", [&](FILE* mf) {
+    return fprintf(mf,
+                   "{\n"
+                   "  \"pid\": %llu,\n"
+                   "  \"parent_pid\": %llu,\n"
+                   "  \"complete\": true,\n"
+                   "  \"event_count\": %zu,\n"
+                   "  \"blob_count\": %zu\n"
+                   "}\n",
+                   static_cast<unsigned long long>(info.pid),
+                   static_cast<unsigned long long>(info.parent_pid),
+                   archive.events.size(), archive.blob_count) > 0;
+  }, &err);
+  if (!manifest_ok) {
+    fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+    return 1;
   }
 
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
@@ -1080,6 +1220,10 @@ static bool has_clean_trailer(const fs::path& archive_dir) {
 // repaired archive is indistinguishable from a cleanly finalized one.
 static bool write_root_manifest(const fs::path& root,
                                 std::vector<std::pair<fs::path, ProcessInfo>> processes) {
+  // A pid-* entry that is a link is not listed in the index.
+  processes.erase(std::remove_if(processes.begin(), processes.end(),
+                                 [](const auto& p) { return fs::is_symlink(p.first); }),
+                  processes.end());
   std::sort(processes.begin(), processes.end(),
             [](const auto& a, const auto& b) { return a.second.pid < b.second.pid; });
 
@@ -1089,31 +1233,31 @@ static bool write_root_manifest(const fs::path& root,
   if (!read_root_owner_pid(root, owner_pid))
     owner_pid = derive_owner_pid(processes);
 
-  FILE* f = fopen((root / "manifest.json").string().c_str(), "w");
-  if (!f) return false;
-
-  fprintf(f,
+  std::string err;
+  const bool ok = write_file_in_dir(root, "manifest.json", [&](FILE* f) {
+    bool good = fprintf(f,
           "{\n"
           "  \"version\": 1,\n"
           "  \"capture_mode\": \"in-tree\",\n"
           "  \"owner_pid\": %llu,\n"
           "  \"processes\": [\n",
-          static_cast<unsigned long long>(owner_pid));
-  for (size_t i = 0; i < processes.size(); ++i) {
-    const ProcessInfo& p = processes[i].second;
-    fprintf(f,
-            "    { \"pid\": %llu, \"parent_pid\": %llu, \"complete\": %s, "
-            "\"event_count\": %llu, \"blob_count\": %llu }%s\n",
-            static_cast<unsigned long long>(p.pid),
-            static_cast<unsigned long long>(p.parent_pid),
-            p.complete ? "true" : "false",
-            static_cast<unsigned long long>(p.event_count),
-            static_cast<unsigned long long>(p.blob_count),
-            (i + 1 == processes.size()) ? "" : ",");
-  }
-  fprintf(f, "  ]\n}\n");
-  fclose(f);
-  return true;
+          static_cast<unsigned long long>(owner_pid)) > 0;
+    for (size_t i = 0; i < processes.size(); ++i) {
+      const ProcessInfo& p = processes[i].second;
+      good = good && fprintf(f,
+              "    { \"pid\": %llu, \"parent_pid\": %llu, \"complete\": %s, "
+              "\"event_count\": %llu, \"blob_count\": %llu }%s\n",
+              static_cast<unsigned long long>(p.pid),
+              static_cast<unsigned long long>(p.parent_pid),
+              p.complete ? "true" : "false",
+              static_cast<unsigned long long>(p.event_count),
+              static_cast<unsigned long long>(p.blob_count),
+              (i + 1 == processes.size()) ? "" : ",") > 0;
+    }
+    return good && fprintf(f, "  ]\n}\n") > 0;
+  }, &err);
+  if (!ok) fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+  return ok;
 }
 
 // --repair on an archive root: repair every pid-<pid>/ sub-archive in turn,
@@ -1131,11 +1275,26 @@ static bool write_root_manifest(const fs::path& root,
 static bool repair_root(const std::string& archive_path, int& exit_code) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
+  // The root is the path the user named, so any link in it is theirs and is
+  // resolved here. Everything below it is the archive's, and is opened without
+  // following a link (write_file_in_dir).
+  std::error_code canon_ec;
+  const fs::path canonical_root = fs::canonical(root, canon_ec);
+  if (!canon_ec) root = canonical_root;
 
   std::vector<std::pair<fs::path, ProcessInfo>> processes = collect_process_dirs(root);
   // Nothing to fan out to: a root holding a single sub-archive is auto-resolved
   // by the reader, and an empty one is not an archive at all.
   if (processes.size() < 2) return false;
+
+  {
+    std::string err;
+    if (!check_root_manifest_target(root, &err)) {
+      fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+      exit_code = 1;
+      return true;
+    }
+  }
 
   printf("[HRR] Repairing %zu process captures under %s\n",
          processes.size(), archive_path.c_str());
@@ -1144,6 +1303,14 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
   for (const auto& entry : processes) {
     const fs::path& dir = entry.first;
     printf("[HRR] --- %s ---\n", dir.filename().string().c_str());
+    // A pid-* entry that is a link is the archive's doing, not a capture of
+    // this process tree: it is not read, repaired or indexed.
+    if (fs::is_symlink(dir)) {
+      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link\n",
+              dir.string().c_str());
+      failed++;
+      continue;
+    }
     // The reader reports recovery diagnostics on stderr. Flush stdout first so
     // those land under the process they belong to instead of being reordered
     // ahead of the whole run by block buffering when output is piped.
@@ -1495,6 +1662,14 @@ int main(int argc, char** argv) {
 
   // --repair: rewrite a crash-truncated archive as a clean one and exit
   if (do_repair) {
+    // A path the user named directly may be a link of their own: resolve it.
+    // A directory the reader found by scanning a root (pid-*) is the archive's,
+    // so it is left as found and a link there is refused by repair_archive.
+    std::error_code ec;
+    if (fs::equivalent(archive.path, archive_path, ec) && !ec) {
+      const fs::path canon = fs::canonical(archive.path, ec);
+      if (!ec) archive.path = canon.string();
+    }
     return repair_archive(archive);
   }
 
