@@ -115,15 +115,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     suite `CostModelMicrotest.*`. Covers the `modelMap[]` registry, its
     correspondence with `config/algorithm_registry.cc` (also `#include`d, via
     `ALGORITHM_REGISTRY_CC_PATH`), the per-id dispatch, and the init-time
-    `enabled[][]` seeding and env narrowing. The TU defines `ncclFuncStr` (from
-    `src/init.cc`, which this binary does not compile; `parseList` uses it as its
-    prefix table) and `ncclSymkKernelIdToString` (from `src/sym_kernels.cc`; the
-    generated `sym_kernels_host.cc` does NOT carry it). Do not duplicate either
-    in `fakes/`, and do not add `fakes/sym_kernels_index_fakes.cc` -- its
-    `ncclSymkGetKernelIndex`/`ncclSymkKernelList*` collide with the generated
-    file. `ncclFuncStr` is pinned to production by a configure-time
-    `rccl_assert_source_line` check plus a `static_assert` on
-    `NCCL_NUM_FUNCTIONS`.
+    `enabled[][]` seeding and env narrowing. This TU defines `ncclFuncStr` (from
+    `src/init.cc`) and `ncclSymkKernelIdToString` (from `src/sym_kernels.cc`, not
+    from the generated `sym_kernels_host.cc`); do not duplicate either in
+    `fakes/`, and do not add `fakes/sym_kernels_index_fakes.cc` to this binary --
+    it collides with the generated file.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result

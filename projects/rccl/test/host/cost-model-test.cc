@@ -4,22 +4,18 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/tuning/cost_model.cc -- the NCCL 2.31.2 unified
-// cost model's model registry and dispatch (AICOMRCCL-2007).
+// Host-only microtests for src/tuning/cost_model.cc: the unified cost model's
+// model registry and dispatch (AICOMRCCL-2007).
 //
-// The unit under test is modelMap[], which flattens three kernel families into
-// one id space:
+// The unit is modelMap[], which flattens three kernel families into one id space:
 //   [0, 21)                  general algo*NCCL_NUM_PROTOCOLS + proto
 //   [21, 39)                 ncclSymkKernelId_*   (device-API symmetric kernels)
 //   [39, NCCL_TUNING_COUNT)  ncclCeMethodId_*     (copy engine)
-// Every id is priced by one dispatch, so an off-by-one anywhere in that layout
-// silently mis-prices a whole family rather than failing to build. These tests
-// pin the layout and the dispatch to it.
+// An off-by-one in that layout mis-prices a whole family rather than failing to
+// build, so these tests pin the layout and the dispatch to it.
 //
-// Scoped to avoid the neighbours: ncclTuningExpandId's own decode/reject
-// behaviour is tuning-general-test.cc (AICOMRCCL-2400), and ncclTuningCompute's
-// selection logic is AICOMRCCL-2448. What is tested here is the registry table
-// itself and ncclTuningCostModelSimModel's routing into it.
+// Neighbours are out of scope: ncclTuningExpandId's decode/reject is
+// tuning-general-test.cc, ncclTuningCompute's selection is AICOMRCCL-2448.
 
 #include <gtest/gtest.h>
 
@@ -33,21 +29,16 @@
 #include "fakes/param_redirect.h"
 #include "sym_kernels.h"
 
-// src/init.cc:114 defines this and nothing on the micro link line does. parseList()
-// takes it as its prefix table, so NCCL_ALGO="allreduce:tree" cannot parse without
-// it. Mirrors production exactly; RcclAssertSourceLine in CMakeLists.txt pins the
-// first line, and the static_assert below pins the count, so a sixth collective
-// whose name lands on a continuation line cannot slip past both.
+// src/init.cc defines this; nothing on the micro link line does, and parseList() needs it as
+// its prefix table. RcclAssertSourceLine pins the first line, the static_assert the count.
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
                                                    "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"};
 static_assert(NCCL_NUM_FUNCTIONS == 5, "ncclFuncStr mirrors src/init.cc; add the new function name");
 
-// src/sym_kernels.cc:390 defines this, and nothing on this link line does: the generated
-// sym_kernels_host.cc carries only ncclSymkGetKernelIndex and the kernel-list tables.
-// cost_model.cc uses it solely in a TRACE, so mirror production's lookup rather than pulling
-// in sym_kernels_index_fakes.cc, whose ncclSymkGetKernelIndex/ncclSymkKernelList* would
-// collide with the generated file.
+// src/sym_kernels.cc defines this; the generated sym_kernels_host.cc carries only
+// ncclSymkGetKernelIndex and the kernel-list tables. Mirrored rather than pulled from
+// sym_kernels_index_fakes.cc, which would collide with that generated file.
 const char* ncclSymkKernelIdToString(int kernelId) {
   if (kernelId < 0 || kernelId >= ncclSymkKernelId_Count) return "Unknown";
   return ncclSymKernelStr[kernelId];
@@ -55,15 +46,9 @@ const char* ncclSymkKernelIdToString(int kernelId) {
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// Model-function seams.
-//
-// modelMap[] stores pointers to the per-family model functions, which live in
-// sibling TUs (ring.cc, tree.cc, ...) that are not on this link line. Defining
-// them here is both what makes the TU link and what makes dispatch observable:
-// the table points at these, so a call through modelMap[] lands in the matching
-// counter below.
-// ---------------------------------------------------------------------------
+// Model-function seams. modelMap[] points at per-family functions whose real TUs
+// (ring.cc, tree.cc, ...) are off this link line, so defining them here both links
+// the TU and makes dispatch observable.
 
 enum class ModelKind { None, Tree, Ring, Collnet, Nvls, Pat, Symk, Ce };
 
@@ -97,13 +82,13 @@ ncclResult_t RecordSim(ModelKind kind, struct ncclTuningResult_t* tuning) {
 
 // Name is both the production symbol infix and the ModelKind enumerator; the five match
 // exactly, so one parameter cannot be paired with the wrong family.
-#define DEFINE_MODEL_FAKE(Name)                                                                  \
-  ncclResult_t ncclTuning##Name##ModelInit(struct ncclComm*, int id, int[NCCL_NUM_FUNCTIONS]) {   \
-    return RecordInit(id);                                                                       \
-  }                                                                                              \
-  ncclResult_t ncclTuning##Name##ModelSim(struct ncclTuningInput_t* const,                       \
-                                          struct ncclTuningResult_t* const tuning) {             \
-    return RecordSim(ModelKind::Name, tuning);                                                   \
+#define DEFINE_MODEL_FAKE(Name) \
+  ncclResult_t ncclTuning##Name##ModelInit(struct ncclComm*, int id, int[NCCL_NUM_FUNCTIONS]) { \
+    return RecordInit(id); \
+  } \
+  ncclResult_t ncclTuning##Name##ModelSim(struct ncclTuningInput_t* const, \
+                                          struct ncclTuningResult_t* const tuning) { \
+    return RecordSim(ModelKind::Name, tuning); \
   }
 
 DEFINE_MODEL_FAKE(Tree)
@@ -122,8 +107,7 @@ ncclResult_t ncclTuningCeModelSim(struct ncclTuningInput_t* const, struct ncclTu
 }
 
 #include COST_MODEL_CC_PATH
-// After cost_model.cc: algorithm_registry.cc defines unguarded ALGBIT/F_* macros
-// and only the lookup helpers below are needed from it.
+// After cost_model.cc: algorithm_registry.cc defines unguarded ALGBIT/F_* macros.
 #include ALGORITHM_REGISTRY_CC_PATH
 
 namespace {
@@ -149,8 +133,8 @@ class CostModelMicrotest : public ::testing::Test {
     ResetNcclFakes();
   }
 
-  // LL128's default-enable rule reads minCompCap/maxCompCap; a matched pair above
-  // Hopper keeps isLL128Enabled() from vetoing for reasons unrelated to the test.
+  // A matched compcap pair above Hopper keeps isLL128Enabled() from vetoing for an
+  // unrelated reason.
   static std::unique_ptr<ncclComm> MakeComm() {
     auto comm = std::make_unique<ncclComm>();
     comm->minCompCap = comm->maxCompCap = 90;
@@ -173,8 +157,8 @@ class CostModelMicrotest : public ::testing::Test {
     ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
     result.id = id;
     result.valid = 1;
-    // Production's only caller decodes the id into result before dispatching
-    // (tuning.cc:141); it never passes an out-of-range id, so ignore that reject.
+    // Production's only caller decodes into result before dispatching (tuning.cc) and never
+    // passes an out-of-range id, so ignore that reject.
     (void)ncclTuningExpandId(id, &result.algo, &result.proto, &result.symKernelId, &result.ceMethodId);
     g_lastModel = ModelKind::None;
     lastRet_ = ncclTuningCostModelSimModel(id, &input, &result);
@@ -187,8 +171,7 @@ class CostModelMicrotest : public ::testing::Test {
     }
   }
 
-  // The family a given id must route to, derived from the id space rather than
-  // from modelMap[] -- otherwise the test would just restate the table.
+  // The family an id must route to, derived from the id space, not from modelMap[].
   static ModelKind ExpectedKind(int id) {
     if (id >= kCeOffset) return ModelKind::Ce;
     if (id >= kSymOffset) return ModelKind::Symk;
@@ -212,15 +195,13 @@ class CostModelMicrotest : public ::testing::Test {
 // Layout
 // ---------------------------------------------------------------------------
 
-// getModelEntry() bounds-checks against NCCL_TUNING_COUNT and indexes modelMap[] with the
-// result, so a table shorter than the id space reads out of bounds instead of failing.
-// Adding an ncclSymkKernelId_* without a modelMap row is exactly that mistake, and it must
-// stop the build rather than let 17 other cases index past the end first.
+// getModelEntry() bounds-checks against NCCL_TUNING_COUNT then indexes modelMap[], so a short
+// table reads out of bounds. static, not EXPECT: it must stop the build, not 17 other cases.
 static_assert(sizeof(modelMap) / sizeof(modelMap[0]) == static_cast<size_t>(NCCL_TUNING_COUNT),
               "modelMap[] must carry exactly one row per tuning id");
 
-// The three family offsets are pure macro algebra over the same two counts (tuning.h:17-19),
-// as are the masks derived from them, so these are build-time facts, not runtime ones.
+// The offsets and the masks derived from them are macro algebra over the same two counts
+// (tuning.h), so these are build-time facts.
 static_assert(kSymOffset == NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, "sym kernels follow the general rows");
 static_assert(kCeOffset == kSymOffset + ncclSymkKernelId_Count, "CE methods follow the sym kernels");
 static_assert(NCCL_TUNING_COUNT == kCeOffset + ncclCeMethodId_Count, "the id space ends after the CE methods");
@@ -233,10 +214,8 @@ static_assert((NCCL_TUNING_MASK_GENERAL_KERNELS & NCCL_TUNING_MASK_SYM_KERNELS) 
               "the three family masks must not overlap");
 
 TEST_F(CostModelMicrotest, FamilyMasksPartitionTheIdSpace) {
-  // Callers pass these straight to ncclTuningCompute as tuningMask, so each
-  // family's bits must sit where ncclTuningExpandId decodes that family. This is
-  // the half that can go red: tuning_general.cc:212/:216 spell the two family
-  // boundaries as their own expressions rather than reusing the macros.
+  // Each family's bits must sit where ncclTuningExpandId decodes that family. This is the half
+  // that can go red: tuning_general.cc respells both boundaries instead of reusing the macros.
   for (int i = 0; i < NCCL_TUNING_COUNT; i++) {
     uint64_t bit = 1ull << i;
     int algo = -9, proto = -9, sym = -9, ce = -9;
@@ -251,15 +230,9 @@ TEST_F(CostModelMicrotest, FamilyMasksPartitionTheIdSpace) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// modelMap[] <-> algRegistry[] correspondence
-//
-// cost_model.cc and algorithm_registry.cc each carry a comment demanding the
-// other stay in sync, and nothing enforces it. The registry is the user-facing
-// half -- ncclCollConfig_t::algSelection resolves names through it -- so a drift
-// means a name the user can ask for that the cost model will not price, or a
-// kernel the cost model prices that no name can reach.
-// ---------------------------------------------------------------------------
+// modelMap[] <-> algRegistry[] correspondence. Each file's comment demands the other stay in
+// sync and nothing enforces it. The registry is the user-facing half (algSelection resolves
+// names through it), so a drift means a name that cannot be priced, or a price with no name.
 
 TEST_F(CostModelMicrotest, RegistryNamesEveryModelledGeneralIdAndNoOther) {
   for (int id = 0; id < kSymOffset; id++) {
@@ -291,8 +264,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
 }
 
 TEST_F(CostModelMicrotest, RegistryCollMaskMirrorsModelMapEnabledColumns) {
-  // algorithm_registry.cc: "collMask mirrors modelMap[].enabled[func]". This is
-  // the assertion that sentence is worth.
+  // algorithm_registry.cc: "collMask mirrors modelMap[].enabled[func]".
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
     uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     for (int id = 0; id < kCeOffset; id++) {
@@ -306,10 +278,8 @@ TEST_F(CostModelMicrotest, RegistryCollMaskMirrorsModelMapEnabledColumns) {
 }
 
 TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
-  // algorithm_registry.h scopes the registry to [0,39) and cost_model.cc's
-  // "TODO: allow NCCL_ALGO=CE" is the other half of the same gap: CE methods are
-  // priced but cannot be named. Pinned so that adding CE rows forces this test to
-  // be revisited alongside the TODO rather than leaving the two halves to drift.
+  // The registry stops before the CE ids, and cost_model.cc's "TODO: allow NCCL_ALGO=CE" is the
+  // other half of that gap. Pinned so adding CE rows forces this test and the TODO together.
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
     uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     EXPECT_EQ(0ull, valid & NCCL_TUNING_MASK_CE) << "func " << ncclFuncStr[f];
@@ -323,8 +293,7 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
 }
 
 TEST_F(CostModelMicrotest, TagPrefixMatchStaysInsideItsFamily) {
-  // ncclAlgTagMask documents a name-prefix match: "RING" must span the three RING_*
-  // rows without reaching SYMK_RailRing_LsaSTMC, whose name merely contains "Ring".
+  // Prefix match: "RING" spans the three RING_* rows without reaching SYMK_RailRing_LsaSTMC.
   uint64_t ring = ncclAlgTagMask("RING");
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     EXPECT_NE(0ull, ring & (1ull << (NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p))) << "proto " << p;
@@ -360,10 +329,8 @@ TEST_F(CostModelMicrotest, EveryIdDispatchesToItsFamilyModel) {
 }
 
 TEST_F(CostModelMicrotest, UnimplementedCombinationsAreIgnoredNotFree) {
-  // The ten {nullptr,...} rows are combinations that do not exist (CollNet and
-  // NVLS under LL/LL128, PAT under LL/LL128). ncclTuningSelectBestTuning takes an
-  // argmin over timeUs, so leaving these at a default 0 would make an unbuildable
-  // kernel beat every real one.
+  // The ten {nullptr,...} rows are combinations that do not exist. The selector is an argmin
+  // over timeUs, so a default 0 would make an unbuildable kernel beat every real one.
   EnableEverything();
   int nullRows = 0;
   for (int id = 0; id < kSymOffset; id++) {
@@ -403,10 +370,8 @@ TEST_F(CostModelMicrotest, DisabledIdNeverReachesItsModel) {
 }
 
 TEST_F(CostModelMicrotest, NonPositiveModelTimeIsTreatedAsUnavailable) {
-  // A model that cannot run the input reports it by returning a non-positive
-  // time; without this the argmin would pick the candidate that opted out. The
-  // test is the SIGN boundary, not the sentinel: NCCL_TUNING_IGNORE is itself
-  // -1.0, so `timeUs <= 0.0` cannot distinguish it from a genuine negative.
+  // A model opts out by returning a non-positive time. The boundary is the SIGN, not the
+  // sentinel: NCCL_TUNING_IGNORE is -1.0, so `timeUs <= 0.0` cannot tell the two apart.
   EnableEverything();
   for (float t : {0.0f, -1.0f}) {
     g_modelTimeUs = t;
@@ -416,8 +381,8 @@ TEST_F(CostModelMicrotest, NonPositiveModelTimeIsTreatedAsUnavailable) {
     EXPECT_FLOAT_EQ(NCCL_TUNING_IGNORE, result.timeUs) << "time " << t;
   }
 
-  // The accept side of the same boundary: the smallest positive time still counts.
-  g_modelTimeUs = std::numeric_limits<float>::min();
+  // The accept side of the same boundary: the float adjacent to zero still counts.
+  g_modelTimeUs = std::numeric_limits<float>::denorm_min();
   ncclTuningResult_t accepted = Sim(kRingSimple);
   EXPECT_EQ(1, accepted.valid);
   EXPECT_FLOAT_EQ(g_modelTimeUs, accepted.timeUs);
@@ -445,13 +410,11 @@ TEST_F(CostModelMicrotest, InitSeedsEnabledColumnsFromModelMapAndRunsEachInitOnc
     expectedInits += expect;
     EXPECT_EQ(expect, g_initCalls[id]) << "tuning id " << id;
   }
-  // g_initCalls only counts ids inside the space, so the total is the one place an
-  // init call on an out-of-range id would show up.
+  // g_initCalls drops an out-of-range id, so the total is the only place one would show up.
   EXPECT_EQ(expectedInits, g_initCallTotal);
 
-  // enabled[][] starts as a copy of modelMap[].enabled, so it must match in BOTH
-  // directions on this comm: checking only the zeros would let init drop an
-  // enabled candidate silently.
+  // enabled[][] starts as a copy of modelMap[].enabled, so with no env set and LL128 eligible
+  // it must match BOTH ways; checking only the zeros would miss a dropped candidate.
   for (int id = 0; id < NCCL_TUNING_COUNT; id++) {
     for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
       EXPECT_EQ(modelMap[id].enabled[f] != 0, comm_->tuningContext.enabled[id][f] != 0)
@@ -461,10 +424,9 @@ TEST_F(CostModelMicrotest, InitSeedsEnabledColumnsFromModelMapAndRunsEachInitOnc
 }
 
 TEST_F(CostModelMicrotest, InitDisablesLl128ByDefaultButHonoursAnExplicitRequest) {
-  // protoEnable == 2 means "defaulted"; only then may isLL128Enabled() veto. With
-  // LL128_C2C off, that veto caps inter-node reach at PXB, so a PXN graph falls
-  // outside it. Intra stays at PATH_NVB so the separate intra gate passes and the
-  // C2C branch is what actually decides.
+  // protoEnable == 2 means "defaulted"; only then may isLL128Enabled() veto. With LL128_C2C
+  // off that veto caps inter-node reach at PXB, so a PXN graph falls outside it; intra stays
+  // at PATH_NVB so the C2C branch is what decides.
   g_loadParam = [](const char* env, int64_t deftVal) {
     return strcmp(env, "LL128_C2C") == 0 ? int64_t{0} : deftVal;
   };
@@ -489,8 +451,7 @@ TEST_F(CostModelMicrotest, AlgoEnvNarrowsSelectionToTheNamedAlgorithm) {
   EXPECT_EQ(1, comm_->tuningContext.enabled[kRingSimple][ncclFuncAllReduce]);
   EXPECT_EQ(0, comm_->tuningContext.enabled[treeSimple][ncclFuncAllReduce]);
 
-  // Naming an algorithm zeroes the symmetric-kernel enables too, so a general
-  // NCCL_ALGO does not silently leave device-API kernels in the running.
+  // Naming an algorithm zeroes the symmetric-kernel enables too.
   for (int id = kSymOffset; id < kCeOffset; id++) {
     EXPECT_EQ(0, comm_->tuningContext.enabled[id][ncclFuncAllReduce]) << "tuning id " << id;
   }
@@ -509,12 +470,9 @@ TEST_F(CostModelMicrotest, SymKernelEnvNarrowsSelectionToTheNamedKernel) {
 }
 
 TEST_F(CostModelMicrotest, NoModelMapRowCarriesAFinalizeYet) {
-  // ncclTuningCostModelFinalize's loop body only runs for rows with a finalize,
-  // and there are none, so the function is unobservable today. Pin that, so adding
-  // a finalize forces this test to grow a fake and start asserting the call.
-  // Note the return value is not asserted: cost_model.cc's `exit:` returns the
-  // ncclSuccess literal rather than ret, and `fail:` falls into it, so the call
-  // cannot report an error. That swallowed error is a separate follow-up.
+  // No modelMap row carries a finalize, so the function is unobservable today; pin that so
+  // adding one forces this test to grow a fake. The return is deliberately not asserted:
+  // cost_model.cc's `exit:` returns the literal ncclSuccess and `fail:` falls into it.
   for (int id = 0; id < NCCL_TUNING_COUNT; id++) {
     EXPECT_EQ(nullptr, modelMap[id].finalize) << "tuning id " << id << " gained a finalize; extend this test";
   }

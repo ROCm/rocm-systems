@@ -1651,7 +1651,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->protocol = NCCL_PROTO_SIMPLE;
           decision->nMaxChannels = interComm->p2pnChannels;
         } else {
-          // Zero-initialised: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
           struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = sendcount;
@@ -1667,7 +1667,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           intraProto = NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
-          // Zero-initialised: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
           struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = intraCount;

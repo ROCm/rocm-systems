@@ -32,9 +32,8 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
-# cost-model-test.cc defines ncclFuncStr itself (src/init.cc is not on the micro
-# link line) and parseList() indexes it as its prefix table, so a rename in
-# production must not leave the test parsing NCCL_ALGO against stale names.
+# cost-model-test.cc defines ncclFuncStr itself and parseList() indexes it as its prefix table,
+# so a rename in production must not leave the test parsing NCCL_ALGO against stale names.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
   "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
   "cost-model-test.cc: ncclFuncStr")

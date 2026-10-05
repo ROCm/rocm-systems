@@ -1707,18 +1707,16 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForwardsFuncAndBytesToTheTimeQuery)
 }
 
 // --- per-call algSelection narrowing (AICOMRCCL-2728) -----------------------
-// A registry mask bit IS its cost-model tuning id, so a general row sits at
-// (a * NCCL_NUM_PROTOCOLS + p). The mask reaches here as task->algMask, already
-// parsed and validated by ncclCollConfigGetAlgMask.
+// A registry mask bit IS its tuning id, so a general row sits at (a * NCCL_NUM_PROTOCOLS + p).
+// The mask arrives as task->algMask, already parsed and validated upstream.
 
 namespace {
 constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
 }  // namespace
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGeneralRows) {
-  // The bug this pins: before the filter existed the mask was parsed, validated
-  // and discarded, so naming RING_LL left every eligible cell a candidate and
-  // the argmin was free to pick something else entirely.
+  // Before the filter the mask was parsed, validated and discarded, so naming RING_LL left
+  // every eligible cell a candidate.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -1732,8 +1730,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGenera
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
-  // Prefix matching upstream of here yields several bits, e.g. "RING" -> all
-  // three RING protocols. Every named row must survive, not just the first.
+  // Prefix matching yields several bits ("RING" -> all three protocols); all must survive.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -1747,8 +1744,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {
-  // algMask == 0 is "automatic" and must not filter anything. Guards the whole
-  // existing suite against the filter silently narrowing the default path.
+  // algMask == 0 is "automatic": the filter must not narrow the default path.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -1762,13 +1758,14 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleC
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGeneralTableIntact) {
-  // A selection naming only SYMK_* rows has no general bits. The general table
-  // is what the symmetric scheduler falls back TO when it declines, so blanking
-  // it here would strand the collective with nothing to run.
+  // A SYMK_*-only selection has no general bits, and the general table is what the symmetric
+  // scheduler falls back TO. forceAlgSelection is 1, the nccl.h.in default, so the error must
+  // stay inside the generalMask != 0 guard instead of firing on every SYMK_* selection.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
   task.algMask = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -1777,13 +1774,14 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGenera
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_EnvForcedFunction_OverridesPerCallSelection) {
-  // NCCL_ALGO/NCCL_PROTO are global overrides and win over a per-call
-  // selection, matching ncclMakeSymmetricTaskList's effAlgMask rule.
+  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL win over a per-call selection. forceAlgSelection is
+  // 1 here too: an env-forced function must not error.
   CostComm cc;
   cc.get()->tuningContext.forced[ncclFuncAllReduce] = 1;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
   task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL);
+  task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -1792,11 +1790,9 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_EnvForcedFunction_OverridesPerCallS
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_NarrowsOnlyTheGeneralHalf) {
-  // What a real selection string yields: "RING_LL,SYMK_LL" on AllGather parses to
-  // the RING x LL bit plus the two symmetric AllGather LL kernels. The symmetric
-  // bits sit outside NCCL_TUNING_MASK_GENERAL_KERNELS, so the extraction must drop
-  // them and narrow to the one general row they accompany -- this is the only input
-  // shape where that mask-AND does any work.
+  // The shape a real selection string makes: "RING_LL,SYMK_LL" on AllGather is one general
+  // bit plus two symmetric ones. The symmetric bits must neither survive the extraction nor
+  // count as a named general row.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
@@ -1811,10 +1807,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_N
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionCannotResurrectAnIneligibleRow) {
-  // The filter only removes. Naming a row the eligibility guards already
-  // skipped must leave it IGNOREd, so an unavailable algorithm is never
-  // selected just because the user asked for it. forceAlgSelection is 0 here,
-  // which is the documented opt-in to falling back instead of erroring.
+  // The filter only removes: a row the eligibility guards already skipped stays IGNOREd.
+  // forceAlgSelection is 0, the documented opt-in to falling back instead of erroring.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -1828,10 +1822,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionCannotResurrectAnInelig
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForceAlgSelection_ErrorsWhenNothingNamedSurvives) {
-  // nccl.h.in documents forceAlgSelection=1 (the default) as an error on an
-  // unsatisfiable selection, but ncclCollConfigGetAlgMask can only enforce that
-  // against the registry at parse time. Whether a named row is eligible on THIS
-  // comm is only known here, so without this check the call silently fell back.
+  // nccl.h.in makes forceAlgSelection=1 an error on an unsatisfiable selection, but the
+  // parse-time check only sees the registry; eligibility on THIS comm is known only here.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -1844,8 +1836,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForceAlgSelection_ErrorsWhenNothing
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForceAlgSelection_StaysSilentWhenOneNamedRowSurvives) {
-  // The error must be reserved for "nothing left": naming two rows where only one
-  // is eligible is satisfiable, so force must not turn it into a failure.
+  // The error is only for "nothing left": two rows with one eligible is still satisfiable.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
