@@ -47,6 +47,9 @@ library:
   Unit_hipKernelSetAttributeForDevice_Negative_Parameters:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelSetCacheConfig_Positive:
+    <<: *level_2
+    tags: [module]
   Unit_hipKernelGetFunction_Negative_Parameters:
     <<: *level_2
     tags: [module]
