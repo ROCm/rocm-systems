@@ -1,23 +1,30 @@
-
-
 #include "fmt/base.h"
 #include "profiler-hub/cpp/reader.hpp"
 #include <fmt/format.h>
 
-int
-main()
-{
-    // constexpr auto trace_path = "/home/amd/Downloads/test.db";
-    // constexpr auto trace_path = "/home/amd/test_dbs/3106614_results.db";
-    constexpr auto trace_path = "/home/amd/test_dbs/rocpd-3930708-0.db";
+#include <memory>
 
-    auto storage = std::make_unique<profiler_hub::storage_t>(trace_path, "");
+int
+main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
+        fmt::println(stderr, "usage: {} <trace.db>", argv[0]);
+        return 1;
+    }
+
+    auto storage = std::make_unique<profiler_hub::storage_t>(argv[1], "");
     auto reader  = std::make_shared<profiler_hub::reader_t>(std::move(storage));
 
     const auto tracks = reader->get_all_tracks();
     for(const auto& track : tracks)
     {
         fmt::println("Track -> ID: {}, {}", track->id, track->name);
+    }
+
+    if(tracks.empty())
+    {
+        return 0;
     }
 
     const auto track_events = reader->get_events_for_track(tracks[0]);

@@ -9,7 +9,6 @@
 
 #include "data_storage/backends/sqlite_backend.hpp"
 #include "data_storage/read_statements.hpp"
-#include "entity_utility.hpp"
 #include "reader_catalog.hpp"
 
 #include <memory>

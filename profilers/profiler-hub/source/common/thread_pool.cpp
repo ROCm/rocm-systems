@@ -54,18 +54,7 @@ thread_pool::task_handle::cancel() const
     return true;
 }
 
-thread_pool::task_state
-thread_pool::task_handle::state() const
-{
-    std::scoped_lock lock{ m_block->mutex };
-    return m_block->state;
-}
-
-thread_pool::thread_pool(size_t                num_threads,
-                         std::function<void()> on_thread_start,
-                         std::function<void()> on_thread_stop)
-: m_on_thread_start{ std::move(on_thread_start) }
-, m_on_thread_stop{ std::move(on_thread_stop) }
+thread_pool::thread_pool(size_t num_threads)
 {
     if(num_threads == 0)
     {
@@ -120,8 +109,6 @@ thread_pool::submit(task_fn task)
 void
 thread_pool::worker_loop(const std::stop_token& pool_stop_token)
 {
-    if(m_on_thread_start) m_on_thread_start();
-
     while(!pool_stop_token.stop_requested())
     {
         std::shared_ptr<detail::task_control_block> block;
@@ -161,8 +148,6 @@ thread_pool::worker_loop(const std::stop_token& pool_stop_token)
         }
         block->cv.notify_all();
     }
-
-    if(m_on_thread_stop) m_on_thread_stop();
 }
 
 }  // namespace profiler_hub::common

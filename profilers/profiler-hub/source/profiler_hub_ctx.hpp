@@ -74,8 +74,7 @@ private:
                                                              m_catalog };
     profiler_hub::pooled_connection_source m_connection_source{ m_connection_pool };
 
-    profiler_hub::reader_types::track_info_list_t m_tracks;
-    std::vector<ph_track_t>                       m_c_tracks;
+    std::vector<ph_track_t> m_c_tracks;
     std::unordered_map<uint32_t, profiler_hub::reader_types::track_info_ptr_t>
         m_track_by_id;
 

@@ -10,11 +10,6 @@
 namespace profiler_hub::common
 {
 
-connection::connection(std::string_view file_path)
-: m_reader{ std::make_unique<profiler_hub::reader_t>(
-      std::make_unique<profiler_hub::storage_t>(std::string{ file_path }, "")) }
-{}
-
 connection::connection(std::string_view                                file_path,
                        std::shared_ptr<profiler_hub::reader_catalog_t> catalog)
 // std::make_unique can't invoke reader_t's private constructor -- it does
