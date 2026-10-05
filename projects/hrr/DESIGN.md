@@ -672,10 +672,12 @@ Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
 
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a non-empty directory and the
-process was not started in secure-execution mode (see
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+was not started in secure-execution mode (see
 [README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
-`rocclr/utils/flags.hpp`.
+`rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
+stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
+a value made only of whitespace as unset.
 
 On Linux the kernel sets `AT_SECURE` in the auxiliary vector for a set-user-ID,
 set-group-ID or file-capability exec, and for an LSM transition. Such a process can hold

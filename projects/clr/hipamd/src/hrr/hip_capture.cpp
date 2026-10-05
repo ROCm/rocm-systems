@@ -53,6 +53,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -106,8 +107,14 @@ static bool hrr_secure_exec() {
   return secure;
 }
 
+// CLR's flag parser stores an exported empty variable as a single space, so a
+// value that is only blanks counts as unset rather than as a directory named " ".
 static bool hrr_capture_requested() {
-  return !flagIsDefault(HIP_HRR_CAPTURE_OUTPUT) && HIP_HRR_CAPTURE_OUTPUT[0] != '\0';
+  if (flagIsDefault(HIP_HRR_CAPTURE_OUTPUT)) return false;
+  for (const char* p = HIP_HRR_CAPTURE_OUTPUT; *p != '\0'; ++p) {
+    if (!std::isspace(static_cast<unsigned char>(*p))) return true;
+  }
+  return false;
 }
 
 bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
