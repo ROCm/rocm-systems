@@ -91,6 +91,27 @@ typedef enum {
 } ComputePartition;
 #endif
 
+#ifdef _WIN32
+/**
+ * @brief Capabilities probed for a single VLD-capable VA profile.
+ *
+ * On Windows the probe VADisplay is terminated as soon as GetVaContext() has finished
+ * enumerating profiles, so every later capability query is answered from this cached
+ * record rather than from the VA driver. See VaContext::ProbeAllProfileCaps().
+ */
+typedef struct {
+    uint32_t rt_format_attrib;
+    // VA_FOURCC_* values reported by VASurfaceAttribPixelFormat, as given by the driver.
+    std::vector<int> va_fourcc_list;
+    // rocDecVideoSurfaceFormat bitmask derived from va_fourcc_list.
+    uint32_t output_format_mask;
+    uint32_t max_width;
+    uint32_t max_height;
+    uint32_t min_width;
+    uint32_t min_height;
+} VaProfileCaps;
+#endif
+
 typedef struct {
     int device_id;
     std::string gpu_uuid;
@@ -99,6 +120,8 @@ typedef struct {
     int drm_fd;
 #else
     LUID adapter_luid;
+    // Capabilities of every VLD-capable profile, probed once while the probe display was alive.
+    std::unordered_map<VAProfile, VaProfileCaps> profile_caps;
 #endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -198,6 +221,11 @@ private:
     // GPU PCI BDF -> render node index / compute partition (primary match key).
     std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
+#else
+    // Probes the capabilities of every VLD-capable profile into profile_caps. Must be called
+    // with the probe display still alive and the mutex held; a failure on an individual profile
+    // is skipped rather than propagated, leaving that profile reported as unsupported.
+    void ProbeAllProfileCaps(uint32_t va_ctx_idx);
 #endif
     VaContext();
     VaContext(const VaContext&) = delete;
