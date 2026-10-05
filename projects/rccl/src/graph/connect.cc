@@ -48,7 +48,7 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
  * ncclTopoPreset: Maps high-level topology graphs to local channel resources.
  *
  * This function bridges the gap between hardware discovery and active communication.
- * It populates the local rank's neighbor info (prev/next for Rings, up/down for Trees)
+ * It records the local rank's neighbor info (ring prev/next/send/recv, tree endpoints) in topoRanks
  * for every communication channel based on pre-calculated optimal paths.
  *
  * PRE-CONDITIONS & ASSUMPTIONS:
@@ -62,12 +62,11 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
  * channel duplication (typically 2 * nChannels).
  *
  * LOGIC DETAILS:
- * - Intra-node Mapping: Iterates through local GPUs to identify neighbors for Ring,
- * Tree, and CollNet algorithms.
- * - Channel Duplication (Factor of 2): Clones the first N channels into the next N
- * slots. This maximizes bandwidth by utilizing multiple SMs and hardware paths
- * for the same logical operation, pushing utilization closer to physical limits
- * without over-congesting hardware command queues.
+ * - Intra-node Mapping: Iterates through local GPUs to identify Ring neighbors and
+ * Tree endpoints, and records the number of channels filled in topoRanks->nChannels.
+ * - Channel Links: Only poisons comm->channels. ncclTopoPostset maps the final channel
+ * count onto the recorded channels, sets the ring, tree and CollNet chain links, and
+ * duplicates the channels.
  * - NVLS Setup: Identifies unique "Head" ranks for NVLink Switch groups to coordinate
  * multi-GPU data movement.
  *
@@ -151,8 +150,6 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     topoRanks->treeToParent[c] = -1;
     topoRanks->treeToChild0[c] = -1;
     topoRanks->treeToChild1[c] = -1;
-    topoRanks->treeUp[c] = topoRanks->treeDown[c] = -1;
-    topoRanks->collnetChainUp[c] = topoRanks->collnetChainDown[c] = -1;
     topoRanks->nvlsHeads[c] = -1; // Align NVLS with Tree/Ring sentinels
 
     struct ncclChannel* channel = comm->channels + c;
@@ -195,7 +192,6 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       permute_array_inplace(ringIntra,localRanks,localRankOrder + c*localRanks); 
     }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
-    int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + c * localRanks;
 
     for (int i = 0; i < localRanks; i++) {
       if (ringIntra[i] == rank) {
@@ -218,12 +214,6 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->treeToParent[c] = treeIntra[parentIndex];
         topoRanks->treeToChild0[c] = treeIntra[child0Index];
         topoRanks->treeToChild1[c] = treeIntra[child1Index];
-        topoRanks->treeUp[c] = (i == 0) ? -1 : treeIntra[i - 1];
-        topoRanks->treeDown[c] = (i == localRanks - 1) ? -1 : treeIntra[i + 1];
-      }
-      if (collNetIntra[i] == rank) {
-        topoRanks->collnetChainUp[c] = (i == 0) ? comm->nRanks : collNetIntra[i - 1];
-        topoRanks->collnetChainDown[c] = (i == localRanks - 1) ? -1 : collNetIntra[i + 1];
       }
     }
   }
@@ -938,15 +928,8 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   return ncclSuccess;
 }
 
-/**
- * Check if search actually filled all requested channels
- * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
- * gfx1151 having 1-GPU/node communicating via ethernet is special case
- * But call to this function is a safety net for all architectures, and is idempotent, This only
- * handles Ring and Trees
- */
 // Each rank's ncclTopoPreset fills topoRanks->nChannels channels, and the channel count can change before
-// ncclTopoPostset. Map every channel of the final count onto those, identically for rings, trees and CollNet chains.
+// ncclTopoPostset. Map every channel of the final count onto those, identically for rings and trees.
 static ncclResult_t expandTopoRanks(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
   for (int r = 0; r < nranks; r++) {
     struct ncclTopoRanks* t = allTopoRanks[r];
@@ -963,16 +946,30 @@ static ncclResult_t expandTopoRanks(struct ncclTopoRanks** allTopoRanks, int nra
       t->treeToParent[c] = t->treeToParent[src];
       t->treeToChild0[c] = t->treeToChild0[src];
       t->treeToChild1[c] = t->treeToChild1[src];
-      t->treeUp[c] = t->treeUp[src];
-      t->treeDown[c] = t->treeDown[src];
-      t->collnetChainUp[c] = t->collnetChainUp[src];
-      t->collnetChainDown[c] = t->collnetChainDown[src];
     }
     t->nChannels = std::max(t->nChannels, nChannels);
   }
   return ncclSuccess;
 }
 
+// Neighbors of `rank` in one intra-node chain row, -1 where it has none. The head's up is `headUp`.
+static void intraChainLinks(const int* intra, int localRanks, int rank, int headUp, int* up, int* down) {
+  *up = *down = -1;
+  for (int i = 0; i < localRanks; i++) {
+    if (intra[i] != rank) continue;
+    *up = (i == 0) ? headUp : intra[i - 1];
+    *down = (i == localRanks - 1) ? -1 : intra[i + 1];
+    return;
+  }
+}
+
+/**
+ * Check if search actually filled all requested channels
+ * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
+ * gfx1151 having 1-GPU/node communicating via ethernet is special case
+ * But call to this function is a safety net for all architectures, and is idempotent, This only
+ * handles Ring and Trees
+ */
 static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
   for (int r = 0; r < nranks; r++) {
     for (int c = 1; c < nChannels; c++) {
@@ -1011,6 +1008,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int nranks = comm->nRanks;
   int nNodes = comm->nNodes;
   int nChannels = comm->nChannels;
+  int presetChannels = 0;
+  const int localRanks = comm->topo->nodes[GPU].count;
   int minHeadNum = INT_MAX;
   int shared = parent && parent->nvlsSupport && parent->shareResources;
   int maxChannels;
@@ -1034,6 +1033,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes * MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes * MAXCHANNELS), ret, fail);
 
+  presetChannels = allTopoRanks[comm->rank]->nChannels;
   NCCLCHECKGOTO(expandTopoRanks(allTopoRanks, nranks, nChannels), ret, fail);
   NCCLCHECK(repairMissingChannels(allTopoRanks, nranks, nChannels));
   // Alternate rings to avoid crossing rails.
@@ -1092,13 +1092,14 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
 
   // Intra-node tree and CollNet chain links, for both halves like the rings below; inter-node links are added next.
+  // Only this rank reads them, so they come from the graph rows Preset used instead of the AllGather3 payload.
   for (int c = 0; c < nChannels; c++) {
-    const struct ncclTopoRanks* mine = allTopoRanks[comm->rank];
+    const int row = (c % presetChannels) * localRanks;
     struct ncclChannel* channel0 = comm->channels + c;
-    channel0->tree.up = mine->treeUp[c];
-    channel0->tree.down[0] = mine->treeDown[c];
-    channel0->collnetChain.up = mine->collnetChainUp[c];
-    channel0->collnetChain.down[0] = mine->collnetChainDown[c];
+    intraChainLinks(graphs[NCCL_ALGO_TREE]->intra + row, localRanks, comm->rank, -1, &channel0->tree.up,
+                    &channel0->tree.down[0]);
+    intraChainLinks(graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + row, localRanks, comm->rank, comm->nRanks,
+                    &channel0->collnetChain.up, &channel0->collnetChain.down[0]);
     if (c + nChannels < MAXCHANNELS) {
       struct ncclChannel* channel1 = channel0 + nChannels;
       channel1->tree.up = channel0->tree.up;

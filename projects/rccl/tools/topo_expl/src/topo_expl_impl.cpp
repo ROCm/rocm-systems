@@ -981,7 +981,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
 
   struct ncclTopoGraph* graphs[] = { &treeGraph, &ringGraph, &collNetGraph, &collNetGraph, &nvlsGraph, &nvlsGraph, &nvlsGraph};
 
-  int nChannelsOrig;
   struct ncclTopoRanks** allTopoRanks = NULL;
   int *nodesFirstRank = NULL, *nodesTreePatterns = NULL;
   int *rings = NULL;
@@ -1045,7 +1044,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
     goto fail;
   }
 
-  nChannelsOrig = comm->nChannels;
   NCCLCHECKGOTO(ncclCalloc(&allTopoRanks, comm->nRanks), ret, fail);
   int nc;
   nc = allGather3Data[0].nc;
@@ -1070,11 +1068,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
   comm->nChannels = treeGraph.nChannels = ringGraph.nChannels =
     (comm->topo->nodes[GPU].count != comm->topo->nRanks && comm->topo->nodes[NET].count)
     ? std::min(treeGraph.nChannels, ringGraph.nChannels) : ringGraph.nChannels;
-  if (comm->nChannels < nChannelsOrig) {
-    // We started duplicating channels during Preset(), so we need to move the
-    // duplicated channels since we have removed some.
-    for (int i=0; i<comm->nChannels; i++) memcpy(comm->channels+comm->nChannels+i, comm->channels+nChannelsOrig+i, sizeof(struct ncclChannel));
-  }
 
   // Determine CollNet support after all-gather now that we know nNodes and each node localRanks
   if (comm->config.collnetEnable == 1) {

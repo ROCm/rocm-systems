@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +52,7 @@ ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclInternalError; }
 namespace {
 
 constexpr int kRanks = 4;
+constexpr int kStale = 77;
 
 // One single-node communicator plus the graphs Preset() and Postset() read.
 class ConnectScene {
@@ -77,8 +79,9 @@ class ConnectScene {
       graphs_[a]->id = a;
       std::fill_n(graphs_[a]->intra, MAXCHANNELS * NCCL_TOPO_MAX_NODES, -1);
     }
-    fillChain(graphs_[NCCL_ALGO_RING], ringChannels);
-    fillChain(graphs_[NCCL_ALGO_TREE], treeChannels);
+    fillChain(graphs_[NCCL_ALGO_RING], ringChannels, /*rotate=*/false);
+    fillChain(graphs_[NCCL_ALGO_TREE], treeChannels, /*rotate=*/true);
+    fillChain(graphs_[NCCL_ALGO_COLLNET_CHAIN], treeChannels, /*rotate=*/true);
     graphs_[NCCL_ALGO_RING]->pattern = NCCL_TOPO_PATTERN_RING;
     graphs_[NCCL_ALGO_TREE]->pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
   }
@@ -87,20 +90,31 @@ class ConnectScene {
   ncclTopoRanks& topoRanks(int rank) { return topoRanks_[rank]; }
 
   // Preset() on every rank with comm->nChannels = presetChannels, ending with `rank` so the channel poisoning it
-  // does matches the rank Postset() then runs as.
+  // does matches the rank Postset() then runs as. Preset() permutes the ring rows in place, so each rank starts from
+  // the same rows, as it would in its own process.
   ncclResult_t presetAllRanks(int rank, int presetChannels) {
+    int* ringIntra = graphs_[NCCL_ALGO_RING]->intra;
+    const std::vector<int> ringRows(ringIntra, ringIntra + MAXCHANNELS * NCCL_TOPO_MAX_NODES);
     for (int i = 1; i <= kRanks; i++) {
       const int r = (rank + i) % kRanks;
       comm_->rank = r;
       comm_->nChannels = presetChannels;
       ncclResult_t res = ncclTopoPreset(comm_.get(), graphs_, &topoRanks_[r]);
+      std::copy(ringRows.begin(), ringRows.end(), ringIntra);
       if (res != ncclSuccess) return res;
     }
     return ncclSuccess;
   }
 
-  // What init.cc does between AllGather3 and Postset(): settle the final count, then call Postset().
+  // What init.cc does between AllGather3 and Postset(): settle the final count, then call Postset(). The links
+  // Postset() hands out are overwritten first, so a channel it leaves alone shows up as kStale.
   ncclResult_t postset(int nChannels) {
+    for (int c = 0; c < MAXCHANNELS; c++) {
+      ncclChannel& ch = comm_->channels[c];
+      ch.ring.prev = ch.ring.next = kStale;
+      ch.tree.up = ch.tree.down[0] = kStale;
+      ch.collnetChain.up = ch.collnetChain.down[0] = kStale;
+    }
     comm_->nChannels = nChannels;
     struct ncclTopoRanks* all[kRanks];
     for (int r = 0; r < kRanks; r++) all[r] = &topoRanks_[r];
@@ -111,10 +125,11 @@ class ConnectScene {
   }
 
  private:
-  static void fillChain(ncclTopoGraph* g, int nChannels) {
+  // Row c is 0..kRanks-1, rotated left by c when `rotate` is set so every row gives a rank different neighbors.
+  static void fillChain(ncclTopoGraph* g, int nChannels, bool rotate) {
     g->nChannels = nChannels;
     for (int c = 0; c < nChannels; c++) {
-      for (int i = 0; i < kRanks; i++) g->intra[c * kRanks + i] = i;
+      for (int i = 0; i < kRanks; i++) g->intra[c * kRanks + i] = rotate ? (i + c) % kRanks : i;
     }
   }
 
@@ -132,29 +147,47 @@ class ConnectMicrotest : public ::testing::TestWithParam<int> {
  protected:
   void SetUp() override { g_p2pDisable = 0; }
   void TearDown() override { g_p2pDisable = 0; }
+
+  // Channel c of the final count takes its intra-node links from preset row (c % finalChannels) % presetChannels.
+  // The tree and CollNet rows are rotated, so any other row gives this rank different neighbors.
+  static void ExpectIntraLinks(const ncclComm* comm, int rank, int presetChannels, int finalChannels) {
+    const int prev = (rank + kRanks - 1) % kRanks;
+    const int next = (rank + 1) % kRanks;
+    for (int c = 0; c < comm->nChannels; c++) {
+      const int row = (c % finalChannels) % presetChannels;
+      const int pos = (rank - row + kRanks) % kRanks;
+      const ncclChannel& ch = comm->channels[c];
+      EXPECT_EQ(pos == 0 ? -1 : prev, ch.tree.up) << "rank " << rank << " channel " << c;
+      EXPECT_EQ(pos == kRanks - 1 ? -1 : next, ch.tree.down[0]) << "rank " << rank << " channel " << c;
+      EXPECT_EQ(pos == 0 ? kRanks : prev, ch.collnetChain.up) << "rank " << rank << " channel " << c;
+      EXPECT_EQ(pos == kRanks - 1 ? -1 : next, ch.collnetChain.down[0]) << "rank " << rank << " channel " << c;
+    }
+  }
 };
 
-// The Navi SHM shape: graph generation forces many rings while the tree search falls back to one channel, so
-// Preset() fills a single channel and the count grows after AllGather3. Postset() then doubles 6 to 12 on gfx1201,
-// so the duplicate half is live as well. Every live channel must carry this rank's intra-node tree link.
+// The Navi SHM shape: graph generation forces many rings while the tree search finds fewer channels, so Preset()
+// fills 3 channels and the count grows to 6 after AllGather3. Postset() then doubles 6 to 12 on gfx1201, so the
+// duplicate half is live as well. Every live channel must carry the links of the preset row it maps onto.
 TEST_P(ConnectMicrotest, PresetPostset_ChannelCountGrowsPastPreset_EveryChannelHasTheIntraNodeTree) {
   const int rank = GetParam();
   const int kRingChannels = 6;
-  const int kTreeChannels = 1;
+  const int kTreeChannels = 3;
   g_p2pDisable = 1;
   ConnectScene scene("gfx1201", kRingChannels, kTreeChannels);
-  ASSERT_EQ(ncclSuccess, scene.presetAllRanks(rank, std::min(kRingChannels, kTreeChannels)));
+  ASSERT_EQ(ncclSuccess, scene.presetAllRanks(rank, kTreeChannels));
   ASSERT_EQ(ncclSuccess, scene.postset(kRingChannels));
 
   ncclComm* comm = scene.comm();
   ASSERT_EQ(2 * kRingChannels, comm->nChannels);
-  const int expectedUp = rank == 0 ? -1 : rank - 1;
-  const int expectedDown = rank == kRanks - 1 ? -1 : rank + 1;
-  for (int c = 0; c < comm->nChannels; c++) {
-    EXPECT_EQ(expectedUp, comm->channels[c].tree.up) << "rank " << rank << " channel " << c;
-    EXPECT_EQ(expectedDown, comm->channels[c].tree.down[0]) << "rank " << rank << " channel " << c;
-    EXPECT_EQ((rank + kRanks - 1) % kRanks, comm->channels[c].ring.prev) << "rank " << rank << " channel " << c;
-    EXPECT_EQ((rank + 1) % kRanks, comm->channels[c].ring.next) << "rank " << rank << " channel " << c;
+  ExpectIntraLinks(comm, rank, kTreeChannels, kRingChannels);
+  for (int c = 0; c < kTreeChannels; c++) {
+    EXPECT_NE(-1, comm->channels[c].ring.prev) << "rank " << rank << " channel " << c;
+    EXPECT_NE(kStale, comm->channels[c].ring.prev) << "rank " << rank << " channel " << c;
+  }
+  for (int c = kTreeChannels; c < comm->nChannels; c++) {
+    const int src = (c % kRingChannels) % kTreeChannels;
+    EXPECT_EQ(comm->channels[src].ring.prev, comm->channels[c].ring.prev) << "rank " << rank << " channel " << c;
+    EXPECT_EQ(comm->channels[src].ring.next, comm->channels[c].ring.next) << "rank " << rank << " channel " << c;
   }
 }
 
@@ -168,15 +201,11 @@ TEST_P(ConnectMicrotest, PresetPostset_ChannelCountUnchanged_DuplicatesMirrorThe
 
   ncclComm* comm = scene.comm();
   ASSERT_EQ(2 * kChannels, comm->nChannels);
-  for (int c = 0; c < comm->nChannels; c++) {
-    EXPECT_EQ(rank == 0 ? -1 : rank - 1, comm->channels[c].tree.up) << "rank " << rank << " channel " << c;
-    EXPECT_EQ(rank == kRanks - 1 ? -1 : rank + 1, comm->channels[c].tree.down[0])
-      << "rank " << rank << " channel " << c;
-  }
+  ExpectIntraLinks(comm, rank, kChannels, kChannels);
 }
 
-// A peer reporting fewer channels shrinks the count below what Preset() filled; the surviving channels and their
-// duplicates still carry the tree.
+// A peer reporting fewer channels shrinks the count below what Preset() filled; the surviving channels keep their
+// rows and their duplicates mirror them, rather than picking up preset rows 2 and 3.
 TEST_P(ConnectMicrotest, PresetPostset_ChannelCountShrinksBelowPreset_EveryChannelHasTheIntraNodeTree) {
   const int rank = GetParam();
   const int kPresetChannels = 4;
@@ -187,11 +216,7 @@ TEST_P(ConnectMicrotest, PresetPostset_ChannelCountShrinksBelowPreset_EveryChann
 
   ncclComm* comm = scene.comm();
   ASSERT_EQ(2 * kFinalChannels, comm->nChannels);
-  for (int c = 0; c < comm->nChannels; c++) {
-    EXPECT_EQ(rank == 0 ? -1 : rank - 1, comm->channels[c].tree.up) << "rank " << rank << " channel " << c;
-    EXPECT_EQ(rank == kRanks - 1 ? -1 : rank + 1, comm->channels[c].tree.down[0])
-      << "rank " << rank << " channel " << c;
-  }
+  ExpectIntraLinks(comm, rank, kPresetChannels, kFinalChannels);
 }
 
 INSTANTIATE_TEST_SUITE_P(EveryRank, ConnectMicrotest, ::testing::Range(0, kRanks));

@@ -10230,8 +10230,8 @@ TEST_F(InitMicrotest, InitTransportsRank_GraphInfoIsMarshalledPerAlgorithm_NotFr
   EXPECT_EQ(kRingChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
 }
 
-// ncclTopoPostset builds every channel from the gathered topoRanks, so shrinking the count after AllGather3
-// must leave the channel structs alone rather than relocate Preset()'s duplicates.
+// Shrinking the count after AllGather3 must leave the channel structs alone: the stubbed Postset stops the run, so
+// this only proves nothing relocates channels 1-3 (the deleted loop would copy channel 2 over channel 1).
 TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_LeavesTheChannelsToPostset) {
   const int kRingChannels = 6;
   const int kTreeChannels = 2;
