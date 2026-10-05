@@ -122,7 +122,7 @@ include(CTest)
 
 add_subdirectory(external)
 add_subdirectory(source)
-add_subdirectory(fortran-roctx)
+add_subdirectory(fortran)
 
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
