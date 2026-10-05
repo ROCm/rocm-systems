@@ -9,6 +9,7 @@ Python tier without terminating the workload.
 """
 
 import importlib.util
+import inspect
 import os
 import sys
 import threading
@@ -823,10 +824,15 @@ def install_function_apply_wrappers() -> bool:
             return
         try:
             base_apply = cls.apply
+            base_apply_get = (
+                inspect.getattr_static(cls, "apply").__get__
+                if getattr(base_apply, "__self__", None) is cls
+                else None
+            )
         except Exception:
             return
 
-        def wrapped_apply(*args: Any, **kwargs: Any) -> object:
+        def wrapped_apply(apply_cls: type, *args: Any, **kwargs: Any) -> object:
             location = core.resolve_user_caller_location()
             _push_scope(
                 "torch.autograd.Function.apply",
@@ -834,13 +840,16 @@ def install_function_apply_wrappers() -> bool:
                 backend=_BACKEND_NAME,
             )
             try:
+                # Rebind Python and built-in classmethods to the calling subclass.
+                if base_apply_get is not None:
+                    return base_apply_get(None, apply_cls)(*args, **kwargs)
                 return base_apply(*args, **kwargs)
             finally:
                 _pop_scope()
 
         wrapped_apply._roctx_wrapped = True
         try:
-            cls.apply = staticmethod(wrapped_apply)
+            cls.apply = classmethod(wrapped_apply)
         except Exception:
             return
 
