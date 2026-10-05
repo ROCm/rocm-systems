@@ -55,7 +55,6 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
-#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1405,10 +1404,9 @@ static const void* fat_binary_blob_ptr(const void* data) {
   return data;
 }
 
-// Byte size of a clang offload bundle, or 0 when the header is not one or fails
-// the checks HIP applies to it. HIP receives a registered fat binary as a bare
-// pointer, so it knows no image bound (image_bound in hip_fatbin.cpp) and these
-// checks are all that stands between the header and the read.
+// Compute the total byte size of a clang offload bundle blob.
+// Supports both uncompressed ("__CLANG_OFFLOAD_BUNDLE__") and compressed ("CCOB") formats.
+// Returns 0 if the format is unrecognised.
 static size_t compute_bundle_size(const void* blob) {
   if (!blob) return 0;
   const char* p = static_cast<const char*>(blob);
@@ -1416,16 +1414,7 @@ static size_t compute_bundle_size(const void* blob) {
   // Compressed format: magic "CCOB", header contains totalSize at byte 8.
   if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
                   hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
-    constexpr size_t kHeaderSize =
-        offsetof(hip::symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
     const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleCompressedHeader*>(blob);
-    if (hdr->totalSize < kHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: compressed bundle "
-          "totalSize %u is smaller than its %zu-byte header",
-          blob, static_cast<unsigned>(hdr->totalSize), kHeaderSize);
-      return 0;
-    }
     return static_cast<size_t>(hdr->totalSize);
   }
 
@@ -1438,38 +1427,30 @@ static size_t compute_bundle_size(const void* blob) {
   uint64_t n = hdr->numOfCodeObjects;
   if (n == 0) return 0;
 
-  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
-  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
-  // no length, so this bound is also what keeps the walk below in range.
-  constexpr size_t kEntryTableLimit = 4096;
-  constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
-  size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
-  uint64_t end = 0;
-  for (uint64_t i = 0; i < n; i++) {
-    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(p + pos);
-    if (kEntryTableLimit - pos < kEntryHeaderSize ||
-        entry->bundleEntryIdSize > kEntryTableLimit - pos - kEntryHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu ends "
-          "past the first %zu bytes, where HIP looks for it",
-          blob, static_cast<unsigned long long>(i), kEntryTableLimit);
-      return 0;
+  // Walk entries to find the last offset + size (that is the blob end).
+  // Guard against corrupt bundles: bundleEntryIdSize is read from untrusted
+  // memory (fires at static-init before any error handler is installed).
+  // A sane bundle ID is never > 4 KB; anything larger indicates corruption.
+  static constexpr uint64_t kMaxBundleIdSize = 4096;
+  static constexpr uint64_t kMaxEntries      = 4096;
+  size_t end = 0;
+  const uint8_t* cur = reinterpret_cast<const uint8_t*>(&hdr->desc[0]);
+  uint64_t safe_n = (n < kMaxEntries) ? n : kMaxEntries;
+  for (uint64_t i = 0; i < safe_n; i++) {
+    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(cur);
+    if (entry->bundleEntryIdSize > kMaxBundleIdSize) {
+      LogPrintfWarning("[HRR capture] compute_bundle_size: bundleEntryIdSize %llu too large"
+                       " — stopping walk at entry %llu",
+                       (unsigned long long)entry->bundleEntryIdSize,
+                       (unsigned long long)i);
+      break;
     }
-    pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
-    // HIP makes this check only for the code objects it picks for this host's GPUs.
-    // Every entry counts towards the end here, so capture checks them all.
-    const uint64_t entry_end = entry->offset + entry->size;
-    if (entry_end < entry->offset) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu has "
-          "an offset and size that overflow",
-          blob, static_cast<unsigned long long>(i));
-      return 0;
-    }
+    size_t entry_end = static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size);
     if (entry_end > end) end = entry_end;
+    // Advance past this entry: three uint64_t fields + bundleEntryIdSize bytes
+    cur += 3 * sizeof(uint64_t) + entry->bundleEntryIdSize;
   }
-  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
-  return static_cast<size_t>(end);
+  return end;
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
@@ -1477,17 +1458,6 @@ void** capture___hipRegisterFatBinary(const void* data) {
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
 
   const void* blob = fat_binary_blob_ptr(data);
-  // PlatformState is initialized before this shim is installed, so HIP has already
-  // digested the bundle, and no handle means it could not load it on this host: a bad
-  // header or, more often, no code object for any GPU here. Then no launch from it can
-  // succeed and be recorded, so replay never needs the blob.
-  if (blob && !r) {
-    LogPrintfWarning(
-        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
-        "(no code object for any GPU here, or a bad header)",
-        blob);
-    blob = nullptr;
-  }
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
 
   hrr_args___hipRegisterFatBinary a{};
@@ -2413,9 +2383,6 @@ void hip_capture_uninstall() {
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
 // blob_ptr is a StatCO module key: the unwrapped bundle for HIPF, the wrapper
 // for HIPK. fat_binary_blob_ptr() accepts either (see its comment).
-// These were registered before HIP initialized and are not digested yet, so
-// unlike the live shim there is no HIP verdict to check, only the header, and a
-// bundle with no code object for this host is still recorded.
 static void record_fat_binary_blob(const void* blob_ptr) {
   blob_ptr = fat_binary_blob_ptr(blob_ptr);
   if (!blob_ptr) return;
