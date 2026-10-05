@@ -76,6 +76,24 @@ architecture_t::cwsr_record_t::architecture () const
   return queue ().architecture ();
 }
 
+std::optional<std::array<uint32_t, 3>>
+architecture_t::cwsr_record_t::cluster_ids () const
+{
+  /* By default, even when the dispatch is not in cluster mode, we
+     think of a workgroup being in a single-workgroup cluster.  In
+     that case, the cluster is positioned at the same location with
+     the workgroup it contains.  */
+  return group_ids ();
+}
+
+std::array<uint32_t, 3>
+architecture_t::cwsr_record_t::nwg_in_cluster () const
+{
+  /* By default, there is a single workgroup.  See the comment in
+     cluster_ids above.  */
+  return {1, 1, 1};
+}
+
 /* Base class for all AMDGCN architectures.  */
 
 class amdgcn_architecture_t : public architecture_t
@@ -2523,13 +2541,23 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
   }
+
+  /* Number of COMPUTE_RELAUNCH registers.  */
+  virtual size_t num_compute_relaunch_states () const { return 1; }
+
+  /* Displacement between the bottom of one wave's save area and the top of
+     the next wave's save area.  */
+  virtual int context_save_area_adjustment () const { return 64; }
 
   std::optional<amdgpu_regnum_t>
   scalar_operand_to_regnum (int operand, bool priv = false) const override;
@@ -3345,7 +3373,8 @@ gfx9_architecture_t::control_stack_iterate (
   const
 {
   size_t wave_count = 0;
-  std::vector<uint32_t> state{ 0 };
+  std::vector<uint32_t> state (num_compute_relaunch_states (), 0);
+  bool in_cluster_so_far = false;
 
   agent_address_t last_wave_area = wave_area_address;
 
@@ -3360,16 +3389,26 @@ gfx9_architecture_t::control_stack_iterate (
         }
       else if (compute_relaunch_is_state (relaunch))
         {
-          state[0] = relaunch;
+          for (size_t j = 0; j < state.size (); ++j)
+            state[j] = control_stack[i + j];
+
+          i += state.size () - 1;
         }
       else
         {
-          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
-                                               last_wave_area - 64);
+          /* cwsr_record_t ctor marks the CWSR record to be in cluster mode
+             if the record is the first wave of a cluster, even if
+             in_cluster_so_far is false.  */
+          auto cwsr_record
+            = make_cwsr_record (queue, xcc_id, relaunch, state,
+                                last_wave_area
+                                - context_save_area_adjustment (),
+                                in_cluster_so_far);
+          in_cluster_so_far
+            = ((in_cluster_so_far || cwsr_record->is_first_of_cluster ())
+               && !cwsr_record->is_last_of_cluster ());
 
-          last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
-
+          last_wave_area = cwsr_record->begin ();
           wave_callback (std::move (cwsr_record));
           ++wave_count;
         }
@@ -3541,7 +3580,8 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    bool in_cluster) const override
     = 0;
 
   mi_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -3690,9 +3730,12 @@ class gfx908_t final : public mi_architecture_t
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -3754,9 +3797,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -3874,9 +3920,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -4298,9 +4347,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -4408,13 +4460,22 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
   }
+
+  /* On gfx10 and above, there are 2 COMPUTE_RELAUNCH registers for state.  */
+  size_t num_compute_relaunch_states () const override { return 2; }
+
+  /* On gfx10 and above, waves are packed back-to-back with no gap.  */
+  int context_save_area_adjustment () const override { return 0; }
 
   std::optional<amdgpu_regnum_t>
   scalar_operand_to_regnum (int operand, bool priv = false) const override;
@@ -4475,14 +4536,6 @@ public:
              std::vector<uint64_t> /* instruction_information  */>
   classify_instruction (agent_address_t address,
                         const instruction_t &instruction) const override;
-
-  size_t control_stack_iterate (
-    compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
-    size_t control_stack_words, agent_address_t wave_area_address,
-    amd_dbgapi_size_t wave_area_size,
-    const std::function<void (
-      std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
-    const override;
 
   bool can_halt_at_endpgm () const override { return false; }
   size_t largest_instruction_size () const override { return 20; }
@@ -5310,56 +5363,6 @@ gfx10_architecture_t::classify_instruction (
   return gfx9_architecture_t::classify_instruction (address, instruction);
 }
 
-size_t
-gfx10_architecture_t::control_stack_iterate (
-  compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
-  size_t control_stack_words, agent_address_t wave_area_address,
-  amd_dbgapi_size_t wave_area_size,
-  const std::function<void (
-    std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
-  const
-{
-  size_t wave_count = 0;
-  std::vector<uint32_t> state{ 0, 0 };
-
-  agent_address_t last_wave_area = wave_area_address;
-
-  for (size_t i = 2; /* Skip the 2 PM4 packets at the top of the stack.  */
-       i < control_stack_words; ++i)
-    {
-      uint32_t relaunch = control_stack[i];
-
-      if (compute_relaunch_is_event (relaunch))
-        {
-          /* Skip events.  */
-        }
-      else if (compute_relaunch_is_state (relaunch))
-        {
-          state[0] = relaunch;
-          /* On gfx10 and gfx11, there are 2 COMPUTE_RELAUNCH registers for
-             state.  */
-          state[1] = control_stack[++i];
-        }
-      else
-        {
-          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
-                                               last_wave_area);
-
-          last_wave_area = cwsr_record->begin ();
-          wave_callback (std::move (cwsr_record));
-          ++wave_count;
-        }
-    }
-
-  /* After iterating the control stack, we should have consumed all the data in
-     the wave save area, and last_wave_area should point to the bottom of the
-     wave save area.  */
-  if (last_wave_area != (wave_area_address - wave_area_size))
-    fatal_error ("Corrupted control stack or wave save area");
-
-  return wave_count;
-}
-
 class gfx10_1_t : public gfx10_architecture_t
 {
 protected:
@@ -5508,9 +5511,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
@@ -6359,9 +6365,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
@@ -7654,16 +7663,30 @@ protected:
       return utils::bit_extract (relaunch_wave, 13, 13);
     }
 
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_first_of_cluster (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 27, 27);
+    }
+
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_last_of_cluster (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 28, 28);
+    }
+
   public:
     cwsr_record_t (compute_queue_t &queue, uint32_t xcc_id,
                    uint32_t compute_relaunch_wave,
                    uint32_t compute_relaunch_state,
                    uint32_t compute_relaunch2_state,
-                   agent_address_t context_save_address)
+                   agent_address_t context_save_address,
+                   bool in_cluster)
       : gfx12_architecture_t::cwsr_record_t (
           queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
           compute_relaunch2_state, context_save_address)
     {
+      m_in_cluster = in_cluster || is_first_of_cluster ();
     }
 
     /* There's no "shared_vgpr" in gfx 125x anymore.  */
@@ -7672,20 +7695,30 @@ protected:
     size_t hwreg_count () const override;
     size_t lds_size () const override;
     bool is_last_wave () const override;
+    bool is_first_of_cluster () const override;
+    bool is_last_of_cluster () const override;
+    std::optional<std::array<uint32_t, 3>> cluster_ids () const override;
+    std::array<uint32_t, 3> nwg_in_cluster () const override;
+    std::optional<std::array<uint32_t, 3>> group_ids () const override;
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    bool m_in_cluster;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    bool in_cluster) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
-      compute_relaunch_state[1], context_save_address);
+      compute_relaunch_state[1], context_save_address, in_cluster);
   }
 
   /* A note regarding all the register methods in this class:
@@ -7779,6 +7812,8 @@ public:
   std::vector<agent_t::aperture_t>
   get_apertures (const os_agent_info_t &info) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
+
+  bool supports_clusters () const override { return true; }
 
 private:
   register_class_t &get_register_class (const char *class_name);
@@ -8048,6 +8083,81 @@ bool
 gfx12_5_architecture_t::cwsr_record_t::is_last_wave () const
 {
   return compute_relaunch_wave_payload_last_wave (m_compute_relaunch_wave);
+}
+
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_first_of_cluster () const
+{
+  return compute_relaunch_wave_payload_first_of_cluster (m_compute_relaunch_wave);
+}
+
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_last_of_cluster () const
+{
+  return compute_relaunch_wave_payload_last_of_cluster (m_compute_relaunch_wave);
+}
+
+std::optional<std::array<uint32_t, 3>>
+gfx12_5_architecture_t::cwsr_record_t::cluster_ids () const
+{
+  /* If we are not in cluster mode, pretend there is a
+     single-workgroup cluster.  That imaginary cluster would be
+     positioned in the same place as the workgroup.  */
+  if (!m_in_cluster)
+    return group_ids ();
+
+  /* If we are in cluster mode, the coordinates are fetched from the
+     registers the same way group ids are fetched in gfx12.  */
+  return gfx12_architecture_t::cwsr_record_t::group_ids ();
+}
+
+std::array<uint32_t, 3>
+gfx12_5_architecture_t::cwsr_record_t::nwg_in_cluster () const
+{
+  if (!m_in_cluster)
+    return {1, 1, 1};
+
+  uint32_t ttmp6;
+  const agent_address_t ttmp6_address
+    = register_address (amdgpu_regnum_t::ttmp6).value ();
+  agent ().read_agent_memory (ttmp6_address, &ttmp6);
+
+  std::array<uint32_t, 3> nwg;
+  nwg[0] = utils::bit_extract (ttmp6, 12, 15) + 1;
+  nwg[1] = utils::bit_extract (ttmp6, 16, 19) + 1;
+  nwg[2] = utils::bit_extract (ttmp6, 20, 23) + 1;
+
+  return nwg;
+}
+
+std::optional<std::array<uint32_t, 3>>
+gfx12_5_architecture_t::cwsr_record_t::group_ids () const
+{
+  if (!m_in_cluster)
+    return gfx12_architecture_t::cwsr_record_t::group_ids ();
+
+  auto cids = cluster_ids ();
+  dbgapi_assert (cids.has_value ());
+  std::array<uint32_t, 3> cluster_in_grid = cids.value ();
+
+  std::array<uint32_t, 3> nwg = nwg_in_cluster ();
+
+  uint32_t ttmp6;
+  const agent_address_t ttmp6_address
+    = register_address (amdgpu_regnum_t::ttmp6).value ();
+  agent ().read_agent_memory (ttmp6_address, &ttmp6);
+
+  std::array<uint32_t, 3> wg_in_cluster;
+  wg_in_cluster[0] = utils::bit_extract (ttmp6, 0, 3);
+  wg_in_cluster[1] = utils::bit_extract (ttmp6, 4, 7);
+  wg_in_cluster[2] = utils::bit_extract (ttmp6, 8, 11);
+
+  std::array<uint32_t, 3> wg_in_grid;
+  wg_in_grid[0] = cluster_in_grid[0] * nwg[0] + wg_in_cluster[0];
+  wg_in_grid[1] = cluster_in_grid[1] * nwg[1] + wg_in_cluster[1];
+  wg_in_grid[2] = cluster_in_grid[2] * nwg[2] + wg_in_cluster[2];
+
+  return wg_in_grid;
 }
 
 std::optional<agent_address_t>
@@ -8379,6 +8489,16 @@ public:
   }
 };
 
+class gfx1250_strict_t final : public gfx12_5_architecture_t
+{
+public:
+  gfx1250_strict_t ()
+    : gfx12_5_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT,
+                              "amdgcn-amd-amdhsa--gfx1250-strict")
+  {
+  }
+};
+
 architecture_t::architecture_t (elf_amdgpu_machine_t e_machine,
                                 std::string target_triple)
   : m_architecture_id (
@@ -8522,6 +8642,13 @@ architecture_t::get_info (amd_dbgapi_architecture_info_t query,
       utils::get_info (value_size, value,
                        regnum_to_register_id (amdgpu_regnum_t::pc));
       return;
+
+    case AMD_DBGAPI_ARCHITECTURE_INFO_CLUSTERS_SUPPORTED:
+      utils::get_info (value_size, value,
+                       (supports_clusters ()
+                        ? AMD_DBGAPI_CLUSTERS_SUPPORTED
+                        : AMD_DBGAPI_CLUSTERS_UNSUPPORTED));
+      return;
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
@@ -8569,6 +8696,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx1200_t> ());
       map.emplace (make_architecture<gfx1201_t> ());
       map.emplace (make_architecture<gfx1250_t> ());
+      map.emplace (make_architecture<gfx1250_strict_t> ());
       return map;
     }()
   };

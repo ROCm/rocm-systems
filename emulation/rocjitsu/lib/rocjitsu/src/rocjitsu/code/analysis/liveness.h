@@ -73,6 +73,12 @@ struct LivenessAnalysisOptions {
   /// encoded vector operands to physical VGPRs.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
+  /// @brief Concrete decoding target whose shared-instruction behavior applies.
+  ///
+  /// @details INVALID selects the architecture default, preserving gfx1250 as
+  /// the fail-closed CDNA5 behavior.
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
+
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
@@ -99,6 +105,24 @@ struct LivenessAnalysisOptions {
   /// prevents 8-bit destination fields from truncating v256 and above.
   uint16_t max_free_vgpr = static_cast<uint16_t>(
       std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
+
+  /// @brief Treat an EXEC-masked vector def as a kill.
+  ///
+  /// @details Defaults to false: a masked vector def preserves inactive lanes'
+  /// old values, so it is a kill only where an ExecMaskAnalysis proves EXEC
+  /// full, and a scope with no such analysis kills no VGPR at all. That is the
+  /// right conservatism for a whole kernel, whose divergence the caller does not
+  /// control while allocating registers around it.
+  ///
+  /// Set this when the analyzed body is responsible for its own EXEC. The
+  /// obligation that carries is that no read sees lanes no def in the body
+  /// wrote: narrowing EXEC keeps it, widening between a def and a read of that
+  /// register breaks it, and either way this option calls the register dead.
+  ///
+  /// An ExecMaskAnalysis, if supplied, takes precedence — where it reports
+  /// `Unknown` the result is the conservative one, so do not supply one
+  /// alongside this flag.
+  bool exec_masked_defs_kill = false;
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
   ///
@@ -135,6 +159,20 @@ struct LivenessAnalysisOptions {
 /// constrained to the block span, so callers can analyze one kernel without
 /// walking into other decoded code.
 [[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
+
+/// @brief One past the highest ordinary SGPR named by an explicit operand in
+///        @p blocks, counting operand width, or 0 if the scope names none.
+///
+/// @details An allocation floor for callers placing new scalar storage, computed
+/// without dataflow or a LivenessAnalysis instance. Implicit operands are
+/// excluded: an ordinary SGPR reached implicitly is also named explicitly
+/// (FLAT/GLOBAL `saddr` is both), so only special state would come in, which is
+/// not allocatable. Indices at or past REGISTER_SET_ALLOCATABLE_SGPRS are
+/// excluded as unreachable by any caller bound.
+///
+/// A partial scope understates the result and the gap it reports may hold
+/// registers the kernel is using.
+[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks);
 
 /// @brief Kernel-global register usage plus deferred backward CFG liveness.
 ///
@@ -297,6 +335,7 @@ private:
 
   bool available_ = true;
   mutable bool analyzed_ = false;
+  bool exec_masked_defs_kill_ = false;
   bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;

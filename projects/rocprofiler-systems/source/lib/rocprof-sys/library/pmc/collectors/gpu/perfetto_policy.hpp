@@ -28,11 +28,11 @@ struct track_description
 // Helper function to create enabled_metrics value from bit positions
 // See enabled_metrics definition in pmc/collectors/gpu/types.hpp for bit position
 // documentation
-inline constexpr std::uint32_t
+constexpr std::uint32_t
 make_metric_value(std::initializer_list<std::uint8_t> bit_positions)
 {
     std::uint32_t value = 0;
-    for(auto bit : bit_positions)
+    for(auto const bit : bit_positions)
     {
         value |= (1u << bit);
     }
@@ -59,21 +59,33 @@ inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
 {
     return {
-        { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
-        { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
-        { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
-        { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
-        { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
-        { MEMORY_USAGE_VALUE, { "Memory Usage", "megabytes", {} } },
-        { VCN_ACTIVITY_VALUE, { "VCN Activity", "%", {} } },
-        { JPEG_ACTIVITY_VALUE, { "JPEG Activity", "%", {} } },
-        { VCN_BUSY_VALUE, { "VCN Busy", "%", {} } },
-        { JPEG_BUSY_VALUE, { "JPEG Busy", "%", {} } },
-        { XGMI_VALUE, { "XGMI", "", {} } },
-        { PCIE_VALUE, { "PCIe", "", {} } },
-        { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
-        { GFX_CLOCK_VALUE, { "GFX Clock", "MHz", {} } },
-        { MEM_CLOCK_VALUE, { "Memory Clock", "MHz", {} } },
+        { GFX_BUSY_VALUE,
+          { .track_name = "GFX Busy", .units = "%", .track_indexes = {} } },
+        { UMC_BUSY_VALUE,
+          { .track_name = "UMC Avg. Busy", .units = "%", .track_indexes = {} } },
+        { MM_BUSY_VALUE, { .track_name = "MM Busy", .units = "%", .track_indexes = {} } },
+        { TEMPERATURE_VALUE,
+          { .track_name = "Temperature", .units = "deg C", .track_indexes = {} } },
+        { CURRENT_POWER_VALUE,
+          { .track_name = "Current Power", .units = "watts", .track_indexes = {} } },
+        { MEMORY_USAGE_VALUE,
+          { .track_name = "Memory Usage", .units = "megabytes", .track_indexes = {} } },
+        { VCN_ACTIVITY_VALUE,
+          { .track_name = "VCN Activity", .units = "%", .track_indexes = {} } },
+        { JPEG_ACTIVITY_VALUE,
+          { .track_name = "JPEG Activity", .units = "%", .track_indexes = {} } },
+        { VCN_BUSY_VALUE,
+          { .track_name = "VCN Busy", .units = "%", .track_indexes = {} } },
+        { JPEG_BUSY_VALUE,
+          { .track_name = "JPEG Busy", .units = "%", .track_indexes = {} } },
+        { XGMI_VALUE, { .track_name = "XGMI", .units = "", .track_indexes = {} } },
+        { PCIE_VALUE, { .track_name = "PCIe", .units = "", .track_indexes = {} } },
+        { SDMA_USAGE_VALUE,
+          { .track_name = "SDMA Usage", .units = "%", .track_indexes = {} } },
+        { GFX_CLOCK_VALUE,
+          { .track_name = "GFX Clock", .units = "MHz", .track_indexes = {} } },
+        { MEM_CLOCK_VALUE,
+          { .track_name = "Memory Clock", .units = "MHz", .track_indexes = {} } },
     };
 }
 
@@ -145,7 +157,7 @@ struct perfetto_policy
     {
         for(const auto& entry : device_entries)
         {
-            auto idx                         = entry.device->get_index();
+            auto const idx                   = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
                 std::make_unique<std::vector<detail::perfetto_amd_smi_sample>>(),
                 entry.supported_metrics,
@@ -168,7 +180,7 @@ struct perfetto_policy
     static void setup_counter_tracks(size_t                 device_index,
                                      const enabled_metrics& enabled_metric_config)
     {
-        auto addendum = [&](const char* name) {
+        auto const addendum = [&](const char* name) {
             return fmt::format("GPU {} [{}] (S)", name, device_index);
         };
 
@@ -200,7 +212,7 @@ struct perfetto_policy
 
         for(auto& [num, description] : tracks)
         {
-            auto enabled_metric = num & enabled_metric_config.value;
+            auto const enabled_metric = num & enabled_metric_config.value;
             if(enabled_metric == 0)
             {
                 continue;
@@ -221,9 +233,9 @@ struct perfetto_policy
                enabled_metric == detail::JPEG_BUSY_VALUE)
             {
                 // Per-XCP metrics (MI300): create tracks for each XCP partition
-                auto array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
-                                      ? MAX_NUM_VCN
-                                      : MAX_NUM_JPEG_V1;
+                auto const array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
+                                            ? MAX_NUM_VCN
+                                            : MAX_NUM_JPEG_V1;
                 for(std::size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
                 {
                     process_xcp_array(description, array_size, xcp);
@@ -233,9 +245,9 @@ struct perfetto_policy
                     enabled_metric == detail::JPEG_ACTIVITY_VALUE)
             {
                 // Device-level metrics (Radeon): flat array, no XCP dimension
-                auto array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
-                                      ? MAX_NUM_VCN
-                                      : MAX_NUM_JPEG_V1;
+                auto const array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
+                                            ? MAX_NUM_VCN
+                                            : MAX_NUM_JPEG_V1;
                 for(std::size_t i = 0; i < array_size; ++i)
                 {
                     description.track_indexes.emplace_back(counter_track::emplace(
@@ -306,7 +318,8 @@ struct perfetto_policy
                              std::uint64_t timestamp)
     {
         detail::get_perfetto_data()[device_index].samples->emplace_back(
-            detail::perfetto_amd_smi_sample{ timestamp, metric_values });
+            detail::perfetto_amd_smi_sample{ .timestamp = timestamp,
+                                             .metrics   = metric_values });
     }
 
     /**
@@ -332,7 +345,7 @@ private:
         size_t device_index, pmc::collectors::gpu::enabled_metrics enabled_metrics_cfg,
         pmc::collectors::gpu::enabled_metrics supported_metrics)
     {
-        auto& samples = *detail::get_perfetto_data()[device_index].samples;
+        auto const& samples = *detail::get_perfetto_data()[device_index].samples;
 
         LOG_DEBUG("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
                   "enabled=0x{:x}, supported=0x{:x}",

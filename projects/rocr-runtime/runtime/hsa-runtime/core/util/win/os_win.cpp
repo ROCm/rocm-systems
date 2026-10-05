@@ -572,7 +572,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
 
   if (!ConnectNamedPipe(connPipe, NULL)) {
     DWORD err = GetLastError();
-    if (err != ERROR_PIPE_CONNECTED) return INVALID_SOCKET_VALUE;
+    if (err != ERROR_PIPE_CONNECTED && err != ERROR_NO_DATA) return INVALID_SOCKET_VALUE;
   }
 
   // The current pipe instance is now connected to the client.

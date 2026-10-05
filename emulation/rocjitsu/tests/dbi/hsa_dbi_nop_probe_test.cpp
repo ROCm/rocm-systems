@@ -59,6 +59,14 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 using namespace rocjitsu::dbi_test;
 
+// ROCR's async-event pool is protected by an uninstrumented HybridMutex, so
+// TSan can report its allocator reuse as a race during HSA initialization.
+// Suppress only accesses originating in that external runtime.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
+
 namespace {
 
 using test::kernel_hsaco_path;
@@ -86,6 +94,11 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
 
 constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
                                        "vector_add_probe_gfx90a", "rj_nop_probe_gfx90a", "gfx90a"};
+constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
+                                       "vector_add_probe_gfx950", "rj_nop_probe_gfx950", "gfx950"};
+constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+                                       "vector_add_probe_gfx1201", "rj_nop_probe_gfx1201",
+                                       "gfx1201"};
 
 } // namespace
 
@@ -130,7 +143,8 @@ protected:
     std::string err;
     const auto resolved = resolve_probe_symbol(*probe_co, "rj_nop_probe", &err);
     ASSERT_TRUE(resolved.has_value()) << "resolve_probe_symbol(rj_nop_probe) failed: " << err;
-    const auto callable = build_probe_callable(*probe_co, *resolved, params_.arch, &err);
+    const auto callable =
+        build_probe_callable(*probe_co, *resolved, params_.arch, /*num_arg_dwords=*/0, &err);
     ASSERT_TRUE(callable.has_value()) << "build_probe_callable failed: " << err;
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
@@ -362,6 +376,56 @@ TEST_F(HsaDbiNopProbeCdna2Hardware, PatchedKernelDispatchMatchesOriginal) {
 }
 
 TEST_F(HsaDbiNopProbeCdna2Hardware, ProbeBodyIsActuallyCalledByGpu) {
+  run_probe_body_is_actually_called_by_gpu();
+}
+
+// gfx950 / CDNA4.
+
+class HsaDbiNopProbeCdna4Static : public HsaDbiNopProbeFixture {
+protected:
+  HsaDbiNopProbeCdna4Static() : HsaDbiNopProbeFixture(kCdna4Params) {}
+};
+
+class HsaDbiNopProbeCdna4Hardware : public HsaDbiNopProbeHardwareBase<kCdna4Params> {};
+
+TEST_F(HsaDbiNopProbeCdna4Static, PatchedElfContainsProbeCallInstrumentation) {
+  run_patched_elf_contains_probe_call_instrumentation();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, ProbeBodyIsActuallyCalledByGpu) {
+  run_probe_body_is_actually_called_by_gpu();
+}
+
+// gfx1201 / RDNA4.
+
+class HsaDbiNopProbeRdna4Static : public HsaDbiNopProbeFixture {
+protected:
+  HsaDbiNopProbeRdna4Static() : HsaDbiNopProbeFixture(kRdna4Params) {}
+};
+
+class HsaDbiNopProbeRdna4Hardware : public HsaDbiNopProbeHardwareBase<kRdna4Params> {};
+
+TEST_F(HsaDbiNopProbeRdna4Static, PatchedElfContainsProbeCallInstrumentation) {
+  run_patched_elf_contains_probe_call_instrumentation();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, ProbeBodyIsActuallyCalledByGpu) {
   run_probe_body_is_actually_called_by_gpu();
 }
 

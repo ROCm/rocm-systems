@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <cassert>
@@ -36,6 +37,8 @@ namespace {
   return count <= std::numeric_limits<uint8_t>::max();
 }
 
+// Iterative DFS from start that appends blocks in post-order, never leaving
+// the allowed set.
 void dfs_reverse_post_order(const BasicBlock &start,
                             const std::unordered_set<const BasicBlock *> &allowed,
                             std::unordered_set<const BasicBlock *> &visited,
@@ -61,6 +64,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
   }
 }
 
+// Ordinary registers that du overwrites on every path and in every lane.
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
   // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
   // but are not part of scratch-allocation liveness and must not become kills.
@@ -79,6 +83,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return kills;
 }
 
+// The 32-bit word at offset in text, or nullopt if it runs past the end.
 [[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   if (text.empty() || offset + sizeof(uint32_t) > text.size())
     return std::nullopt;
@@ -87,11 +92,16 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return word;
 }
 
+// True if inst may reach VGPRs through M0-relative or GPR-index addressing,
+// which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-VGPR access properties into decoded instruction
-  // metadata so future ISA variants cannot bypass this completeness gate.
+  // TODO: Move indirect-access properties into decoded instruction metadata so
+  // future ISA variants cannot bypass this completeness gate. The scalar
+  // s_movrel* family displaces an SGPR index through M0 the same way and has no
+  // equivalent gate here, so consumers needing one scan mnemonics themselves
+  // (code/patch/probe_live_in.cpp).
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -137,6 +147,7 @@ LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
 
 LivenessAnalysis LivenessAnalysis::unavailable() { return LivenessAnalysis(UnavailableTag{}); }
 
+// Blocks are visited in scope order, so unreachable blocks still appear.
 std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   std::vector<const BasicBlock *> postorder;
   std::unordered_set<const BasicBlock *> allowed;
@@ -157,15 +168,53 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
+namespace {
+
+// Raises bound past operand if it names an allocatable ordinary SGPR.
+void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
+  if (operand == nullptr)
+    return;
+  const auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != RegClass::SGPR)
+    return;
+  if (ref->index >= REGISTER_SET_ALLOCATABLE_SGPRS)
+    return;
+  bound = std::max<uint32_t>(bound, static_cast<uint32_t>(ref->index) + ref->width);
+}
+
+} // namespace
+
+// Syntactic scan over explicit operands; see liveness.h for what is excluded.
+uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
+  uint32_t bound = 0;
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      for (int i = 0; i < inst.num_src_operands(); ++i)
+        raise_sgpr_bound_for_operand(bound, inst.src_operand(i));
+      for (int i = 0; i < inst.num_dst_operands(); ++i)
+        raise_sgpr_bound_for_operand(bound, inst.dst_operand(i));
+    }
+  }
+  return bound;
+}
+
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec,
                                    LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  // The flag is inert when an ExecMaskAnalysis is supplied, which would silently
+  // give a caller that set it the conservative answer instead.
+  assert(!(exec && options.exec_masked_defs_kill) &&
+         "exec_masked_defs_kill has no effect alongside an ExecMaskAnalysis");
+  exec_masked_defs_kill_ = options.exec_masked_defs_kill;
   // Own the EXEC-state analysis; the backward dataflow is deferred to the first
   // query (ensure_analyzed), which consults it for kills. May be null: kills then
-  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill).
+  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill)
+  // unless exec_masked_defs_kill declared the scope runs under one mask.
   exec_ = std::move(exec);
   deferred_blocks_.assign(blocks.begin(), blocks.end());
   scoped_blocks_.reserve(blocks.size());
@@ -180,9 +229,19 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
   if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
+    const IsaTargetRegistry &registry = default_isa_target_registry();
+    const IsaTargetDescriptor *architecture = registry.find(options.arch);
+    const IsaTargetDescriptor *target_architecture = registry.find(options.target);
+    const IsaGpuTargetDescription *target =
+        target_architecture != nullptr && target_architecture->architecture_id == options.arch
+            ? registry.find_gpu_target(options.target)
+            : nullptr;
+    if (target == nullptr && architecture != nullptr)
+      target = registry.find_default_gpu_target(*architecture);
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
         deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
-        options.additional_entry_blocks);
+        options.additional_entry_blocks,
+        target != nullptr && target->capabilities.setreg_vgpr_msb_fixup);
   }
   collect_global_register_usage(deferred_scope, options.text, options.arch);
 }
@@ -234,9 +293,12 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   }
 
   // Without an EXEC-state analysis, treat every program point as `Unknown` so
-  // kill_defs never promotes an EXEC-masked vector def to a kill.
+  // kill_defs never promotes an EXEC-masked vector def to a kill, unless the
+  // caller declared the whole scope runs under one mask (exec_masked_defs_kill).
   const auto exec_before = [this](const Instruction &inst) {
-    return exec_ ? exec_->before(inst) : ExecState::Unknown;
+    if (exec_)
+      return exec_->before(inst);
+    return exec_masked_defs_kill_ ? ExecState::Full : ExecState::Unknown;
   };
 
   const bool filter_live_before = restrict_live_before_to_instructions;

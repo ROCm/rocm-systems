@@ -31,27 +31,153 @@ pub type EmulatorKind = String;
 /// The emulator half of a profile: which backend, how it runs, and the
 /// system it emulates.
 ///
-/// Unknown fields are rejected; see [`crate::profile`] for why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Additional fields are passed to the selected emulator's
+/// configuration, or refused by a backend that has none — see
+/// [`EmulatorDef::reject_extra`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EmulatorDef {
+    /// Fields with no typed meaning to mirage, handed to the backend as
+    /// they were written. Deserialization never puts one of the field
+    /// names below in here; [`Serialize`] guarantees the same for a map
+    /// built in Rust, because a flattened map that shadows a typed
+    /// field would otherwise write a profile with duplicate JSON keys
+    /// that mirage could never read back.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+
     /// Which emulator backend runs this profile, by its canonical
     /// lowercase name.
     pub emulator: EmulatorKind,
 
     /// Which of the backend's plugins to enable, each with its argument
     /// object. See [`PluginsDef`] for what an empty object means.
+    #[serde(default)]
     pub plugins: PluginsDef,
 
     /// Functional or clocked emulation.
+    #[serde(default)]
     pub exec_mode: ExecMode,
 
     /// Backend-specific configuration overrides, e.g.
     /// `{"gpu_model": "cdna3"}`.
+    #[serde(default)]
     pub options: SimpleMap,
 
     /// System topology (rack/node/GPU layout plus the per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
+}
+
+impl EmulatorDef {
+    /// Refuse passthrough fields on behalf of a backend that does not
+    /// forward them.
+    ///
+    /// [`extra`](Self::extra) is a promise the *rocjitsu* backend keeps:
+    /// it merges these keys into the simulation config it synthesises,
+    /// so a profile can reach a rocjitsu setting mirage has no typed
+    /// field for. No other backend reads them. Since the map lives on
+    /// the shared `EmulatorDef`, dropping `deny_unknown_fields` to make
+    /// that promise possible also stopped every *other* backend
+    /// rejecting a key it will never act on — a misspelled or
+    /// unsupported field under a HotSwap or rocjitsu-dbt emulator would
+    /// parse, and the session would come up with the defaults it was
+    /// meant to change, silently.
+    ///
+    /// So a backend without a passthrough calls this from
+    /// [`EmulatorBackend::validate_profile`], which the CLI and the
+    /// daemon both run before a profile is written — the last point at
+    /// which the user is still looking at the document the key came
+    /// from.
+    ///
+    /// # Errors
+    ///
+    /// Names the offending keys and the backend that has no use for
+    /// them.
+    pub fn reject_extra(&self, backend: &str) -> std::result::Result<(), String> {
+        if self.extra.is_empty() {
+            return Ok(());
+        }
+        let keys = self
+            .extra
+            .keys()
+            .map(|key| format!("{key:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(format!(
+            "emulator field(s) {keys} are not {backend} settings and {backend} has \
+             no configuration to pass them to; remove them, or correct the spelling \
+             of the mirage field that was meant"
+        ))
+    }
+
+    /// The agent every GPU in this system instantiates, when this
+    /// definition is resolved.
+    ///
+    /// `None` while either reference is still a name. Resolving one means
+    /// reading the on-disk stores, which is [`Self::resolve_refs`]'s job
+    /// and not something an accessor should do behind a caller's back —
+    /// an accessor that silently hit the filesystem would also silently
+    /// pick up an edit made after bring-up, which is the whole class of
+    /// bug a session snapshot exists to prevent.
+    #[must_use]
+    pub fn agent(&self) -> Option<&crate::agent::AgentDef> {
+        match &self.topology {
+            MaybeRef::Owned(topology) => match &topology.agent {
+                MaybeRef::Owned(agent) => Some(agent),
+                MaybeRef::Ref(_) => None,
+            },
+            MaybeRef::Ref(_) => None,
+        }
+    }
+
+    /// Follow every by-name reference in this definition, in place, so
+    /// that afterwards [`Self::agent`] answers.
+    ///
+    /// Done once, when a session is created, so the rest of that
+    /// session's life reads documents nothing can edit underneath it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a topology or agent reference names a
+    /// document that does not exist or does not parse.
+    pub fn resolve_refs(&mut self) -> Result<()> {
+        let mut topology = match &self.topology {
+            MaybeRef::Owned(topology) => topology.clone(),
+            MaybeRef::Ref(name) => crate::store::topology_get(name)?,
+        };
+        if let MaybeRef::Ref(name) = &topology.agent {
+            topology.agent = MaybeRef::Owned(crate::agent::store::get(name)?);
+        }
+        self.topology = MaybeRef::Owned(topology);
+        Ok(())
+    }
+}
+
+/// Written as `extra` with the typed fields laid over it.
+///
+/// Not derived: `#[serde(flatten)]` streams both halves, so an `extra`
+/// holding a typed field's name — `extra` is public, and the profile
+/// parser is the only thing that currently keeps one out — emits that
+/// key twice. `state::write_json` streams straight to the file, so the
+/// result is a profile on disk that fails to parse with `duplicate
+/// field`, and the user's only copy of it is unreadable. Building a
+/// `Value` first makes the typed field win instead.
+impl Serialize for EmulatorDef {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        let mut value = serde_json::Value::Object(self.extra.clone());
+        for (key, typed) in [
+            ("emulator", serde_json::to_value(&self.emulator)),
+            ("plugins", serde_json::to_value(&self.plugins)),
+            ("exec_mode", serde_json::to_value(&self.exec_mode)),
+            ("options", serde_json::to_value(&self.options)),
+            ("topology", serde_json::to_value(&self.topology)),
+        ] {
+            value[key] = typed.map_err(serde::ser::Error::custom)?;
+        }
+        value.serialize(serializer)
+    }
 }
 
 /// Whether the host's hardware/environment can actually run an
@@ -230,6 +356,56 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// Health of the emulator for a session, e.g. whether the underlying
     /// runtime is present and responsive.
     fn health(&self, ctx: &SessionContext) -> SessionHealth;
+
+    /// Whether this backend stands up a synthetic GPU whose ISA the
+    /// workload's own ROCm runtime has to recognise.
+    ///
+    /// `false` — the default — for a backend that retargets code onto the
+    /// host's real GPU. Such a backend still has an agent, and that agent
+    /// still names a device, but ROCr is never asked to enumerate it, so
+    /// the ISA says nothing about whether the session will work. A new
+    /// backend therefore gets silence without having to know that the
+    /// preflight in [`crate::rocr`] exists.
+    fn presents_emulated_device(&self) -> bool {
+        false
+    }
+
+    /// Reconcile `profile` with configuration only this backend can read,
+    /// so that the profile describes the machine the session will really
+    /// stand up.
+    ///
+    /// Called once, on an already-resolved profile, before a session
+    /// freezes it. The case it exists for is a drop-in emulator config
+    /// file: the file describes a device of its own, and without this the
+    /// profile's agent would still name the device the profile was
+    /// written around — a device that is not the one about to exist.
+    /// Rather than reporting the real device separately and leaving two
+    /// answers in play, a backend corrects the agent here and everything
+    /// downstream keeps reading the one document.
+    ///
+    /// A backend that cannot tell what the file describes must clear the
+    /// agent's `gfx_target_version` rather than leave a stale value: no
+    /// answer is a verdict the preflight handles, and a confident wrong
+    /// one is not.
+    ///
+    /// `session_dir` is the session's scratch directory, already created.
+    /// A backend that reads a file here should snapshot it there and point
+    /// the profile at the snapshot, so the device it reports and the
+    /// configuration it later injects come from one reading of the file
+    /// rather than two.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when the profile is unusable — not when the
+    /// backend simply has nothing to correct, which is the default.
+    fn reconcile_profile(
+        &self,
+        profile: &mut ProfileDef,
+        session_dir: &std::path::Path,
+    ) -> Result<()> {
+        let _ = (profile, session_dir);
+        Ok(())
+    }
 
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
     /// workload run under this emulator. Returns an error when the

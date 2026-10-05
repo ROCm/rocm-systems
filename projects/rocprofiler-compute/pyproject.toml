@@ -3,6 +3,7 @@ name = "rocprof_compute"
 # Baseline floor for the project (profile mode). Analyze mode requires >=3.9,
 # enforced at runtime in src/rocprof-compute.
 requires-python = ">=3.8"
+dynamic = ["version"]
 
 [tool.ruff]
 line-length = 88
@@ -69,6 +70,7 @@ addopts = [
 pythonpath = [
     ".",
     "src",
+    "src/membw_analysis",
     "src/rocprof_compute_soc",
     "src/roofline",
     "src/rocprof_compute_analyze/utils",
@@ -84,7 +86,6 @@ markers = [
     "time_unit",
     "decimal",
     "col",
-    "kernel_verbose",
     "serial",
     "num_xcds_spec_class",
     "num_xcds_cli_output",

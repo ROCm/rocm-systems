@@ -32,6 +32,12 @@ inline __device__ int loadInt(int* ptr) {
   return v;
 }
 
+inline __device__ ssize_t loadSsize(ssize_t* ptr) {
+  ssize_t v;
+  v = __atomic_load_n(ptr, __ATOMIC_RELAXED);
+  return v;
+}
+
 template <typename RedFn, typename T, int Unroll, int BytePerPack, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>
@@ -599,6 +605,22 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
   // For Dword or larger reads or writes, the two LSBs of the byte-address are ignored, thus forcing Dword
   // alignment.
   constexpr int AlignedPathPackSize = 4;
+  constexpr int NativeScalarUnroll = Unroll * (16 / sizeof(T)) / 2;
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  // Larger pack loops make LLVM register allocation scale pathologically on gfx1250.
+  // Limit the helper's work quantum; its outer loop still consumes all requested bytes.
+  constexpr int ScalarUnroll = (useAcc && NativeScalarUnroll > 64) ? 64 : NativeScalarUnroll;
+  constexpr int CopyUnroll = ScalarUnroll * 2 / (16 / sizeof(T));
+#else
+  constexpr int ScalarUnroll = NativeScalarUnroll;
+  constexpr int CopyUnroll = Unroll;
+#endif
+  static_assert(useAcc || ScalarUnroll == NativeScalarUnroll,
+                "ScalarUnroll must remain unchanged when the bias path is disabled.");
+  static_assert(useAcc || CopyUnroll == Unroll,
+                "CopyUnroll must remain unchanged when the bias path is disabled.");
+  static_assert(CopyUnroll * (16 / sizeof(T)) / 2 == ScalarUnroll,
+                "CopyUnroll must reproduce ScalarUnroll.");
 
   if NCCL_IF_CONSTEXPR (BigPackSize > sizeof(T)) {
     // Check that all pointers are AlignedPathPackSize aligned.
@@ -625,20 +647,20 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
                                                                    nDsts, dstPtrFn, nBytesBehind, nBytesAhead);
 #else
       if constexpr (useAcc)
-        reduceCopyPacksWithBias<RedFn, T, Unroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize, MultimemSrcs,
-                                MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
+        reduceCopyPacksWithBias<RedFn, T, CopyUnroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize,
+                                MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
           nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn, /*&*/ nBytesBehind,
           /*&*/ nBytesAhead, accPtrFn);
       else if constexpr (Pipeline)
-        reduceCopyPacksPipelined<RedFn, T, Unroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize, MultimemSrcs,
-                                 MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
+        reduceCopyPacksPipelined<RedFn, T, CopyUnroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize,
+                                 MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
           nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn, /*&*/ nBytesBehind,
           /*&*/ nBytesAhead);
       else
-        reduceCopyPacks<RedFn, T, Unroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize, MultimemSrcs, MinSrcs,
-                        MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp,
-                                                                            nSrcs, srcPtrFn, nDsts, dstPtrFn,
-                                                                            /*&*/ nBytesBehind, /*&*/ nBytesAhead);
+        reduceCopyPacks<RedFn, T, CopyUnroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize, MultimemSrcs,
+                        MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
+          nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn, /*&*/ nBytesBehind,
+          /*&*/ nBytesAhead);
 #endif
       if (nBytesAhead == 0) return;
 
@@ -714,19 +736,19 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
   }
 #else
   if constexpr (useAcc)
-    reduceCopyPacksWithBias<RedFn, T, Unroll * (16 / sizeof(T)) / 2, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs,
+    reduceCopyPacksWithBias<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs,
                             MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp,
                                                                                 nSrcs, srcPtrFn, nDsts, dstPtrFn,
                                                                                 /*&*/ nBytesBehind, /*&*/ nBytesAhead,
                                                                                 accPtrFn);
   else if constexpr (Pipeline)
-    reduceCopyPacksPipelined<RedFn, T, Unroll * (16 / sizeof(T)) / 2, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs,
-                             MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
+    reduceCopyPacksPipelined<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs,
+                             MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
       nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
   else
-    reduceCopyPacks<RedFn, T, Unroll * (16 / sizeof(T)) / 2, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs,
-                    MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn,
-                                                               nDsts, dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
+    reduceCopyPacks<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts,
+                    MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts,
+                                                dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
 
 #endif
   if (nBytesAhead == 0) return;

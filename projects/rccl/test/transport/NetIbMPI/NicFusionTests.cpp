@@ -17,9 +17,8 @@ static constexpr int kConnectPollTimeoutSec = 30;
 // Virtual Device Tests
 
 TEST_F(NetIbMPITest, MakeVirtualDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -47,9 +46,8 @@ TEST_F(NetIbMPITest, MakeVirtualDevice) {
 }
 
 TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -66,9 +64,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
 TEST_F(NetIbMPITest, MakeVirtualDeviceNegativeNdevs) {
     // A negative count clears every per-device check, because the build loop never runs.
     // Without an explicit bound it registers a vNIC with no constituent device.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -97,9 +94,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
         GTEST_SKIP() << "Set NCCL_IB_MERGE_NICS=0 to exercise the merge-disabled guard";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -138,9 +134,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceCrossNuma) {
     // still succeed. Picks a cross-NUMA pair by reading each device's numa_node
     // from sysfs (correct on any layout, no fixed indices); skips when no such
     // pair exists or merging is disabled.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
     if (mergeEnv && atoi(mergeEnv) == 0) {
@@ -185,9 +180,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
     // physical index >= the physical device count. The reported device count
     // (merged) is always >= the physical count, so using it as the index is
     // guaranteed out of range regardless of how many vNICs already exist.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -205,9 +199,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
 TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
     // Listing the same physical device twice must be deduped into a single-device
     // vNIC rather than rejected or double-counted.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     // Dedup yields a 1-device vNIC, which requires merging to be enabled
     // (NCCL_IB_MERGE_NICS defaults to 1). Skip only when it is explicitly off,
@@ -245,9 +238,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
 // NIC Fusion (vNIC) Tests
 
 TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -309,9 +301,8 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     // Skip when resiliency is enabled: asymmetric makeVDevice leaves stale
     // entries in the global IbCastMergedDevs table (IbCastNMergedDevs is not
@@ -425,9 +416,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
     // Exercises CheckVProps' rail-local mismatch + ndevs-swap arms on accept,
     // reached when the two ranks' vNICs share no physical devices. Requires
     // NCCL_IB_WARN_RAIL_LOCAL=1 (defaults off) and >=5 physical NICs.
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -514,9 +504,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -591,9 +580,8 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -614,6 +602,77 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
     ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
+
+    // Parameterized by MPIEnvironment::nThreads. Every regMr on a fused device
+    // fans out across both members' protection domains and MR caches, so
+    // concurrent cycling on one address doubles the contended surface. The vNIC
+    // itself is created once on the main thread: the merged-device table is
+    // process-global.
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        // One region, cycled by every worker so they contend on a single MR cache
+        // entry, but sliced for the traffic that follows: the serial body moves
+        // data through the address it just recycled, and a shared payload buffer
+        // would have the workers overwriting each other's verification.
+        const size_t slotSize   = kSmallBufferSize;
+        const size_t sharedSize = slotSize * nThreads;
+        auto shared = makeHostBufferAutoGuard(malloc(sharedSize));
+        ASSERT_NE(shared.get(), nullptr);
+        // Workers cannot dismiss the shared guard themselves: several can time out at
+        // once and AutoGuard::release() writes a plain bool, so concurrent calls would
+        // be a data race. They raise this instead, and the guard is dismissed once on
+        // this thread after RunThreadedBody has joined them all.
+        std::atomic<bool> retainShared{false};
+
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), nThreads, "threaded RegDeregCycling_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                for (int i = 0; i < 50; i++) {
+                    void* mhandle = nullptr;
+                    result = WorkerRegister(workerComm, shared.get(), sharedSize,
+                                            NCCL_PTR_HOST, &mhandle);
+                    if (!result.ok) return result;
+                    if (DeregisterMemory(workerComm, mhandle) != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "deregMr failed during vNIC cache cycling";
+                        return result;
+                    }
+                }
+
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, shared.get(), sharedSize, NCCL_PTR_HOST,
+                                        &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                void* slot = static_cast<char*>(shared.get()) + threadIdx * slotSize;
+                bool outstanding = false;
+                result = WorkerSendRecvPattern(rank, pair, slot, slotSize, 530, mhandle,
+                                               WorkerSeed(threadIdx, 0), kDefaultTimeoutMs,
+                                               &outstanding);
+                if (!result.ok && outstanding) {
+                    // shared is one allocation split into per-worker slots and outlives
+                    // every worker thread, so a timed-out request here means a live NIC
+                    // write into memory the whole test -- not just this worker -- is
+                    // about to free. Dismissing it leaks the region rather than freeing
+                    // memory another rank's hardware can still touch.
+                    result.msg += "; the shared buffer and this worker's registration are "
+                                  "retained, since the request may still reference them";
+                    // This worker's own registration is its own to dismiss; the shared
+                    // allocation is flagged for the main thread.
+                    mhandleGuard.release();
+                    retainShared.store(true, std::memory_order_release);
+                }
+                return result;
+            });
+        // After the join, so this is the only thread touching the guard. Leaks the one
+        // region rather than freeing memory a timed-out request may still be written into.
+        if (retainShared.load(std::memory_order_acquire)) shared.release();
+        return;
+    }
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
@@ -670,9 +729,8 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
 }
 
 TEST_F(NetIbMPITest, LargeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -693,6 +751,25 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
     ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
+
+    // Parameterized by MPIEnvironment::nThreads: several striped transfers run at
+    // once over the fused device. The per-worker size shrinks with the worker
+    // count: every registration on a fused device is pinned once per member, so
+    // 64 MB per worker exhausts registration resources at high worker counts
+    // while adding nothing to the striping coverage.
+    if (MPIEnvironment::nThreads > 1) {
+        const size_t threadedSize =
+            std::max<size_t>(4 * 1024 * 1024,
+                             (64 * 1024 * 1024) / MPIEnvironment::nThreads);
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded LargeTransfer_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, threadedSize, 540,
+                                          WorkerSeed(threadIdx, 5400), kLargeTransferTimeoutMs);
+            });
+        return;
+    }
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
@@ -726,7 +803,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 
     // Extended timeout for 16MB transfer across doubled QPs.
     int sizes[1] = {0};
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     // Full 64MB byte-by-byte verification
     // ncclIbMultiSend would corrupt data at QP split points.
@@ -737,9 +814,8 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, MixedSizes_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -761,17 +837,30 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
-
     // Sizes: 1B, 3MB, 3B, 5MB, 7B, 7MB, 64B, 16MB, 1B, 11MB, 4MB, 1B.
     // Tiny sizes may use only one QP, large ones stripe across both.
     // Odd MB sizes (3, 5, 7, 11) produce uneven QP splits.
-    std::vector<size_t> testSizes = {
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {
         1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
         64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1
     };
+
+    // Parameterized by MPIEnvironment::nThreads: the uneven-split ladder runs on
+    // every worker's own fused connection simultaneously.
+    if (MPIEnvironment::nThreads > 1) {
+        // Per-size allocation and registration, as the serial body does: on a fused
+        // device every regMr fans out across both members, and that churn is what
+        // this test is about.
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
+                             /*repeats=*/1, "threaded MixedSizes_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(vdev, pair, connGuard);
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -801,7 +890,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         int sizes[1] = {0};
-        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeout : kDefaultTimeoutMs;
+        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
         ASSERT_EQ(WaitForCompletion(request, sizes, timeout), ncclSuccess);
 
         // Prevent request reuse race between iterations.
@@ -815,9 +904,8 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
 }
 
 TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -838,16 +926,26 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
-
     // Sizes around 128-byte QP striping alignment boundaries.
     // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
     // These sizes produce uneven QP splits where one QP gets more data than the other.
     // 127: all on QP 0, QP 1 posts zero-sge. 129: 128B on QP 0, 1B on QP 1.
     // 255: 128B each, QP 1 gets 127B. 257: 256B on QP 0, 1B remainder on QP 1.
-    std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
+    // 128-byte striping boundary on both members of the fused device at once.
+    if (MPIEnvironment::nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
+                             /*repeats=*/2, "threaded UnalignedSizeTransfer_VNic",
+                             SweepRegistration::PerSize);
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(vdev, pair, connGuard);
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -892,9 +990,8 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, Bidirectional_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1028,9 +1125,8 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
 }
 
 TEST_F(NetIbMPITest, FlushRepeated_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1057,6 +1153,125 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
     ASSERT_GE(vdev, 0);
 
     const int rank = MPIEnvironment::world_rank;
+
+    // Parameterized by MPIEnvironment::nThreads: concurrent GPU receives and
+    // flushes on one fused device. Workers inherit this rank's HIP device from
+    // the harness, since the current device is thread-local.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 20;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded FlushRepeated_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t size = kSmallBufferSize;
+                void* gpuBuffer = nullptr;
+                if (hipMalloc(&gpuBuffer, size) != hipSuccess) {
+                    result.ok = false;
+                    result.msg = "hipMalloc failed";
+                    return result;
+                }
+                auto gpuGuard = makeDeviceBufferAutoGuard(gpuBuffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, gpuBuffer, size, NCCL_PTR_CUDA, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+                // One pattern per worker: a per-iteration seed aliases modulo 256.
+                const int seed = WorkerSeed(threadIdx, 6000);
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    if (rank == 1
+                        && initializeBufferWithPattern<uint8_t>(gpuBuffer, size,
+                                                                makeBytePattern(seed))
+                               != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "GPU buffer initialization failed";
+                        return result;
+                    }
+
+                    // Cleared before every receive, not just the first: the expected
+                    // pattern is the same on all iterations, so after iteration 0 a
+                    // flush that did nothing would leave the previous payload in place
+                    // and verify clean. Zeroing first makes each iteration prove that
+                    // this transfer's data became visible.
+                    if (rank == 0 && hipMemset(gpuBuffer, 0, size) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "clearing the GPU receive buffer failed at iteration "
+                                     + std::to_string(iter);
+                        return result;
+                    }
+
+                    // The size is checked too, so a short receive cannot verify on a
+                    // tail this clearing happened to leave at the expected value.
+                    int received = 0;
+                    bool outstanding = false;
+                    result = WorkerSendRecvRaw(rank, pair, gpuBuffer, size, 600, mhandle,
+                                               kDefaultTimeoutMs, &received,
+                                               /*busyPoll=*/false, &outstanding);
+                    if (!result.ok) {
+                        // Per-worker gpuGuard/mhandleGuard, unlike the shared allocation
+                        // above: a timed-out request here is this worker's own, so only
+                        // its own guards need to survive it.
+                        if (outstanding) {
+                            result.msg += "; the GPU buffer and its registration are "
+                                          "retained, since the request may still "
+                                          "reference them";
+                            mhandleGuard.release();
+                            gpuGuard.release();
+                        }
+                        return result;
+                    }
+
+                    if (rank != 0) continue;
+                    if (received != static_cast<int>(size)) {
+                        result.ok = false;
+                        result.msg = "iteration " + std::to_string(iter) + " received "
+                                     + std::to_string(received) + " of "
+                                     + std::to_string(size) + " bytes";
+                        return result;
+                    }
+
+                    void* flushBuffers[1] = {gpuBuffer};
+                    int flushSizes[1] = {static_cast<int>(size)};
+                    void* flushHandles[1] = {mhandle};
+                    void* flushRequest = nullptr;
+                    // A null request means the flush was a no-op; an error
+                    // return means the flush itself failed.
+                    if (FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes, flushHandles,
+                                  &flushRequest)
+                        != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "FlushRecv failed at iteration " + std::to_string(iter);
+                        return result;
+                    }
+                    if (flushRequest != nullptr) {
+                        result = WorkerWait(flushRequest, nullptr);
+                        if (!result.ok) {
+                            // A failed wait means the timeout was reached, so this flush
+                            // request -- unlike the ordinary send/recv above -- has no
+                            // separate outstanding flag: not completing within the
+                            // timeout is what the failure already says.
+                            result.msg += "; the GPU buffer and its registration are "
+                                          "retained, since the flush may still "
+                                          "reference them";
+                            mhandleGuard.release();
+                            gpuGuard.release();
+                            return result;
+                        }
+                    }
+                    if (!verifyBufferData<uint8_t>(gpuBuffer, size, makeBytePattern(seed))) {
+                        result.ok = false;
+                        result.msg = "GPU data verification failed after flush";
+                        return result;
+                    }
+                }
+                return result;
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
@@ -1104,6 +1319,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
             ncclResult_t flushResult = FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes,
                                                  flushHandles, &flushRequest);
+            EXPECT_EQ(flushResult, ncclSuccess) << "Iter " << iter << ": FlushRecv failed";
             if (flushResult == ncclSuccess && flushRequest != nullptr) {
                 ASSERT_EQ(WaitForCompletion(flushRequest, nullptr), ncclSuccess);
             }
@@ -1118,9 +1334,8 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 }
 
 TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1140,6 +1355,35 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
     ASSERT_GE(vdev, 0);
 
     const int rank = MPIEnvironment::world_rank;
+
+    // Parameterized by MPIEnvironment::nThreads: every worker reuses one
+    // registration across its iterations, so the fused device serves many
+    // long-lived MRs at once.
+    if (MPIEnvironment::nThreads > 1) {
+        static constexpr int kThreadedIters = 100;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded SequentialTransfers_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                const size_t size = kSmallBufferSize;
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, size);
+                if (!host.result.ok) return host.result;
+
+                // Worker-constant, as above.
+                ThreadResult result;
+                const int seed = WorkerSeed(threadIdx, 7000);
+                bool outstanding = false;
+                for (int iter = 0; iter < kThreadedIters; iter++) {
+                    result = WorkerSendRecvPattern(rank, pair, host.buffer, size, 700,
+                                                   host.mhandle, seed, kDefaultTimeoutMs,
+                                                   &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                return result;
+            });
+        return;
+    }
 
     // Single connection through the vNIC, reused across all 100 iterations.
     ConnectionPair pair;
@@ -1207,9 +1451,8 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 //   - Flush semantics for GPU memory receives
 // =============================================================================
 TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1336,9 +1579,8 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly kExactTwoProcesses processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1461,9 +1703,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
 }
 
 TEST_F(NetIbMPITest, MultidirectionalTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1600,9 +1841,8 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
 }
 
 TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1818,9 +2058,8 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 //
 // =============================================================================
 TEST_F(NetIbMPITest, MergeMultipleDevices) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     // With merging off, every ndevs > 1 request is refused and the over-limit case would
     // pass for the wrong reason.
@@ -1981,9 +2220,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
 }
 
 TEST_F(NetIbMPITest, Reconnect_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -2071,9 +2309,8 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;

@@ -66,6 +66,34 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_LaunchAfterSet) {
   HIP_CHECK(hipFree(d_out));
 }
 
+HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_FunctionOverride) {
+  HIP_CHECK(hipSetDevice(0));
+  std::string code_object = "library_code_load.code";
+  hipLibrary_t library = nullptr;
+  hipKernel_t kernel = nullptr;
+  hipFunction_t function = nullptr;
+
+  HIP_CHECK(hipLibraryLoadFromFile(&library, code_object.c_str(), nullptr, nullptr, 0, nullptr,
+                                   nullptr, 0));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
+  HIP_CHECK(hipKernelGetFunction(&function, kernel));
+
+  HIP_CHECK(hipFuncSetAttribute(function, hipFuncAttributeMaxDynamicSharedMemorySize, 0));
+  HIP_CHECK(
+      hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 1024, kernel, 0));
+
+  int function_value = -1;
+  int kernel_value = -1;
+  HIP_CHECK(hipFuncGetAttribute(&function_value, HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                                function));
+  HIP_CHECK(hipKernelGetAttribute(&kernel_value, HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                                  kernel, 0));
+  REQUIRE(function_value == 0);
+  REQUIRE(kernel_value == 1024);
+
+  HIP_CHECK(hipLibraryUnload(library));
+}
+
 HIP_TEST_CASE(Unit_hipKernelSetAttribute_Negative_Parameters) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));

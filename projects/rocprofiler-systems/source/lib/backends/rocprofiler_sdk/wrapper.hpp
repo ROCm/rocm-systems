@@ -117,6 +117,9 @@ struct wrapper
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
+#if ROCPROFILER_VERSION >= 700
+    using async_correlation_id_t = rocprofiler_async_correlation_id_t;
+#endif
 
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
@@ -305,12 +308,19 @@ struct wrapper
         rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t;
     using kfd_event_dropped_record =
         rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
+    using kfd_event_page_migrate_record =
+        rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t;
+    using kfd_event_page_fault_record =
+        rocprofiler_buffer_tracing_kfd_event_page_fault_record_t;
     using kfd_event_queue_operation_t = rocprofiler_kfd_event_queue_operation_t;
     using kfd_event_unmap_from_gpu_operation_t =
         rocprofiler_kfd_event_unmap_from_gpu_operation_t;
     using kfd_page_fault_operation_t   = rocprofiler_kfd_page_fault_operation_t;
     using kfd_page_migrate_operation_t = rocprofiler_kfd_page_migrate_operation_t;
     using kfd_queue_operation_t        = rocprofiler_kfd_queue_operation_t;
+    using kfd_event_page_migrate_operation_t =
+        rocprofiler_kfd_event_page_migrate_operation_t;
+    using kfd_event_page_fault_operation_t = rocprofiler_kfd_event_page_fault_operation_t;
 #endif
 
     // ─── Status constants ────────────────────────────────────────────────────────
@@ -324,6 +334,8 @@ struct wrapper
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
@@ -460,6 +472,12 @@ struct wrapper
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 #endif
 
     // ─── Counter flag constants ───────────────────────────────────────────────────

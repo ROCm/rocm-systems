@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: MIT
+
+name: rocddi Linux checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/rocddi-ci.yml"
+      - "runtimes/**"
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/rocddi-ci.yml"
+      - "runtimes/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-abi:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["1.85.0", "1.98.0"]
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+    defaults:
+      run:
+        working-directory: runtimes
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build lld binutils python3
+      - name: Install Rust
+        run: rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy,rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Test workspace
+        run: cargo test --workspace --all-targets --all-features --locked
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Check documentation
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+      - name: Build release libraries
+        run: cargo build --workspace --release --locked
+      - name: Check release artifacts
+        run: |
+          test -f target/release/libamdf.a
+          test -f target/release/librocddi_runtime.so
+          test ! -e target/release/libamdf.so
+          test ! -e target/release/libhsa_runtime64.so
+          readelf -d target/release/librocddi_runtime.so |
+            grep -q 'SONAME.*libhsa-runtime64.so.1'
+          readelf -d target/release/librocddi_runtime.so |
+            grep -q 'FLAGS_1.*NODELETE'
+      - name: Check CMake library staging
+        if: matrix.rust == '1.98.0'
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/rocddi-cmake" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/rocddi-cmake"
+          library_dir="$RUNNER_TEMP/rocddi-cmake/lib"
+          test "$library_dir/libamdf.so" -ef \
+            "$library_dir/libhsa_runtime64.so"
+          test "$library_dir/libhsa-runtime64.so" -ef \
+            "$library_dir/libhsa-runtime64.so.1"
+      - name: Compile HSA GPU probe sources
+        run: |
+          for source in hsa/libhsa/tests/gpu/*_smoke.c; do
+            cc -std=gnu11 -Wall -Wextra -Werror -fsyntax-only \
+              -I api-headers/include "$source"
+          done
+      - name: Check C/Rust ABI layouts
+        run: |
+          python3 ddi/libamdf/tests/abi/check_layout.py
+          python3 hsa/libhsa/tests/abi/check_layout.py
+
+  aarch64-source:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTUP_TOOLCHAIN: "1.85.0"
+    defaults:
+      run:
+        working-directory: runtimes
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Rust and Linux AArch64 standard library
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          rustup target add --toolchain 1.85.0 aarch64-unknown-linux-gnu
+      - name: Check every workspace target for Linux AArch64
+        run: cargo check --workspace --all-targets --all-features --locked --target aarch64-unknown-linux-gnu
+
+  aarch64-native:
+    runs-on: ubuntu-24.04-arm
+    env:
+      RUSTUP_TOOLCHAIN: "1.85.0"
+    defaults:
+      run:
+        working-directory: runtimes
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Rust and LLD
+        run: |
+          sudo apt-get update && sudo apt-get install -y lld
+          rustup toolchain install 1.85.0 --profile minimal --component clippy
+      - name: Run CPU-only workspace tests on Linux AArch64
+        run: cargo test --workspace --all-targets --all-features --locked
+      - name: Check Linux AArch64 lints
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  host-storage-miri:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: runtimes
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install pinned Miri toolchain
+        run: rustup toolchain install nightly-2026-09-25 --profile minimal --component miri,rust-src
+      - name: Check callback-backed host storage under Miri
+        run: |
+          MIRIFLAGS="-Zmiri-tree-borrows -Zmiri-strict-provenance" \
+            cargo +nightly-2026-09-25 miri test --package rocddi --locked host_storage::tests
+          for seed in 1 2 3 4 5 6 7 8; do
+            MIRIFLAGS="-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-seed=$seed" \
+              cargo +nightly-2026-09-25 miri test --package rocddi --locked \
+                shared_callbacks_release_once_after_concurrent_clone_and_drop
+          done

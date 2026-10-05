@@ -114,7 +114,7 @@ def _collect_shared_execute_body_variants(specs, plan):
                 spec, out_dir, sem, config=config, shared_plan=plan
             )
             code_gen.gen_all()
-            for key, data in code_gen._shared_execute_bodies.items():
+            for key, data in code_gen._shared_execute_candidates.items():
                 variants.setdefault(key, {})[name] = data
     return variants
 

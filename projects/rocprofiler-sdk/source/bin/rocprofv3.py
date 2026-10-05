@@ -52,6 +52,7 @@ CONST_VERSION_INFO = {
 PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
+ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
 
 
 class dotdict(dict):
@@ -1239,6 +1240,13 @@ For attachment profiling of running processes:
     )
 
     att_options.add_argument(
+        "--att-resource-mode",
+        help="When to allocate thread trace resources: profiler-selected, HSA initialization, or the first code object per GPU. Default: code-object.",
+        default=None,
+        choices=ATT_RESOURCE_MODES,
+    )
+
+    att_options.add_argument(
         "--att-shader-engine-mask",
         help="Bitmask of shader engines to enable. Default 0x1",
         default=None,
@@ -2206,6 +2214,8 @@ def run(app_args, args, **kwargs):
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
+            if not e_file_contents.strip():
+                warning("Extra counter file '{}' was empty.", args.extra_counters)
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
     if args.pmc and args.pmc_groups:
@@ -2380,6 +2390,18 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
+        if args.att_resource_mode is not None:
+            if args.att_resource_mode not in ATT_RESOURCE_MODES:
+                fatal_error(
+                    f"Invalid att_resource_mode: {args.att_resource_mode}. "
+                    f"Valid choices are: {', '.join(ATT_RESOURCE_MODES)}"
+                )
+            update_env(
+                "ROCPROF_ATT_PARAM_RESOURCE_MODE",
+                args.att_resource_mode,
+                overwrite=True,
+            )
+
         if args.att_target_cu is not None:
             update_env(
                 "ROCPROF_ATT_PARAM_TARGET_CU",
@@ -2542,17 +2564,6 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
-
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
-
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
             _args, "att_no_intercept", False
@@ -2609,6 +2620,48 @@ def main(argv=None):
     if replay_enabled and cli_has_pmc:
         cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
         cli_multipass = False
+
+    def multipass_source(cmd_args, inp_args):
+        """Return why the arguments request application-replay counter multi-pass."""
+        cli_pmc = getattr(cmd_args, "pmc", None)
+        input_pmc_jobs = [itr for itr in inp_args if has_set_attr(itr, "pmc")]
+
+        if (
+            cli_pmc is not None
+            and len(cli_pmc) > 1
+            and getattr(cmd_args, "replay_mode", None) != "kernel"
+        ):
+            return "multiple --pmc flags"
+        if len(input_pmc_jobs) > 1:
+            return "multiple input-file jobs"
+        if cli_pmc is not None and input_pmc_jobs:
+            return "--pmc combined with input-file pmc"
+        return None
+
+    def multipass_incompatible_message(cmd_args, inp_args):
+        """Return an error for options incompatible with counter multi-pass."""
+        source = multipass_source(cmd_args, inp_args)
+        if source is None:
+            return None
+        if has_set_attr(cmd_args, "pid") or any(
+            has_set_attr(itr, "pid") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with attach mode (--pid)"
+            )
+        if has_set_attr(cmd_args, "collection_period") or any(
+            has_set_attr(itr, "collection_period") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with --collection-period"
+            )
+        return None
+
+    incompatible = multipass_incompatible_message(cmd_args, inp_args)
+    if incompatible is not None:
+        fatal_error(incompatible)
 
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 

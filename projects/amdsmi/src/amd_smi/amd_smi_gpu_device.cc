@@ -174,7 +174,10 @@ struct ComputeProcessCache {
 };
 
 std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
-std::unordered_map<uint32_t, ComputeProcessCache*> compute_process_cache_map;
+// Never destroyed: a thread can still be inside get_compute_process_list_impl()
+// while the library's static destructors run at exit.
+auto& compute_process_cache_map =
+    *new std::unordered_map<uint32_t, std::unique_ptr<ComputeProcessCache>>();
 std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
@@ -187,9 +190,9 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   {
     std::lock_guard<std::mutex> lock(compute_process_list_mutex);
     if (compute_process_cache_map.find(gpu_id_) == compute_process_cache_map.end()) {
-      compute_process_cache_map[gpu_id_] = new ComputeProcessCache();
+      compute_process_cache_map[gpu_id_] = std::make_unique<ComputeProcessCache>();
     }
-    cache_ptr = compute_process_cache_map[gpu_id_];
+    cache_ptr = compute_process_cache_map[gpu_id_].get();
   }
 
   /**
@@ -1224,7 +1227,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, but we can read any usable
+   * For cases where the 'ualink' directory exists in the sysfs path, but we cannot read any usable
    * content, return AMDSMI_STATUS_NO_DATA.
    */
   fabric_info = local_fabric_info;
@@ -1233,13 +1236,11 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, and we can read all files with
-   * usable content, return AMDSMI_STATUS_SUCCESS. Otherwise, return AMDSMI_STATUS_UNEXPECTED_DATA
-   * (some files are missing or empty).
+   * Return SUCCESS if at least one sysfs file yielded usable content, matching the API spec.
+   * If we reach here, link_info_files_in_scope > 0 (NO_DATA case already handled above).
    */
-  return (link_info_files_with_usable_content == link_info_files_in_scope)
-             ? amdsmi_status_t::AMDSMI_STATUS_SUCCESS
-             : amdsmi_status_t::AMDSMI_STATUS_UNEXPECTED_DATA;
+  return (link_info_files_with_usable_content > 0) ? amdsmi_status_t::AMDSMI_STATUS_SUCCESS
+                                                   : amdsmi_status_t::AMDSMI_STATUS_NO_DATA;
 }
 
 }  // namespace amd::smi
