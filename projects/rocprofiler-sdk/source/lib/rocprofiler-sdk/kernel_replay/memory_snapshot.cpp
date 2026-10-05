@@ -76,7 +76,7 @@ with_inventory_check(void* gpu_addr, size_t size, CopyFn&& copy)
         });
 }
 
-// A writable module-scope variable (__device__ global) discovered in a loaded executable.
+// A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
 struct module_variable_t
 {
     void*  gpu_addr = nullptr;
@@ -123,19 +123,9 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
-    // Constants cannot be changed by the replayed kernel, so they do not need restoring. More
-    // importantly, HSA may place them in read-only GPU pages: including one in the snapshot makes
-    // restore() issue a host->device write to read-only memory and can fault the GPU. Query the
-    // symbol attribute instead of inferring writability from its segment or address.
-    bool is_const = false;
-    if(core->hsa_executable_symbol_get_info_fn(
-           symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST, &is_const) != HSA_STATUS_SUCCESS)
-    {
-        out->incomplete = true;
-        return HSA_STATUS_SUCCESS;
-    }
-    if(is_const) return HSA_STATUS_SUCCESS;
-
+    // __constant__ variables are captured too; restoring them is harmless. Do not skip them via
+    // HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST: ROCr reports that attribute inverted (true for
+    // symbols in writable sections), so filtering on it drops the __device__ globals instead.
     uint64_t addr = 0;
     uint32_t size = 0;
     if(core->hsa_executable_symbol_get_info_fn(
@@ -195,7 +185,7 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 // Enumerate module-scope variables visible to `agent` across all loaded executables. They live in
 // the executable's data segment -- not in the allocation tracker's inventory -- so a kernel that
 // mutates a __device__ global would otherwise leak that mutation across replay passes. Must run at
-// snap time (not executable-load time): writable globals may be initialized after load.
+// snap time (not executable-load time): constant memory may not be populated at load.
 module_variable_scan_t
 discover_module_variables(hsa_agent_t agent)
 {
@@ -439,10 +429,9 @@ snap(hsa_agent_t agent)
         }
     }
 
-    // Writable module-scope variables (__device__ globals) live in the loaded executable's data
-    // segment, not in the allocation tracker, so capture them here too. Constants were excluded
-    // during discovery because kernels cannot mutate them and restore must not write their
-    // read-only pages. Restored via the same per-block host->device copy as tracked allocations.
+    // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
+    // data segment, not in the allocation tracker, so capture them here too. Restored via the same
+    // per-block host->device copy as tracked allocations (see restore()).
     for(const auto& var : module_vars)
     {
         if(!capture(var.gpu_addr, var.size, "module variable", /*from_tracker=*/false))
