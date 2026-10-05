@@ -30,7 +30,9 @@ include(rj_configure_target)
 # configuration. Runtime callers can override this default through
 # ConSanOptions, while constexpr planners and offline tests retain the JSON as
 # their source of truth. Reconfigure when the JSON changes.
-set(_RJ_GFX1250_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250_mi455x.json")
+set(_RJ_GFX1250_CONFIG
+    "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250_mi455x.json"
+)
 set_property(
     DIRECTORY
     APPEND
@@ -478,7 +480,6 @@ set(_rj_waitcheck_sources
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/decoder.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/execution_backend.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/operand.cpp
-    ${ROCJITSU_SRC_DIR}/rocjitsu/isa/register_set.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/target_registry.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/target_registry_composition.cpp
 )

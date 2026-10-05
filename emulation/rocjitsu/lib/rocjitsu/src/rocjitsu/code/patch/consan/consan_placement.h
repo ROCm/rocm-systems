@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/isa/register_set.h"
+
 #include "rocjitsu/code/patch/consan/consan.h"
 
 #include <cstdint>
@@ -16,7 +18,6 @@
 #include <vector>
 
 namespace rocjitsu {
-class RegisterSet;
 class AmdGpuCodeObject;
 class BasicBlock;
 class Instruction;

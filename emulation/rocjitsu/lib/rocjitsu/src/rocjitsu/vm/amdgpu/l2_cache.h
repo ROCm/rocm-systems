@@ -196,9 +196,32 @@ public:
   template <typename F>
   [[nodiscard]] VmAccessOutcome atomic_rmw(uint64_t addr, uint32_t size, F &&fn,
                                            uint32_t vmid = 0) {
+    const auto vm_access = snapshot_atomic_access(vmid);
     DeviceCacheCoherence::AtomicBoundary boundary = coherence_->acquire_atomic_boundary();
+    return atomic_rmw(boundary, addr, size, std::forward<F>(fn), vmid, vm_access);
+  }
+
+  /// @brief Select local VM backing before acquiring the device coherence boundary.
+  /// @details Take a fresh snapshot for each attempt, including retries. VMID-zero
+  /// physical accesses and transport-backed atomics do not need a local snapshot.
+  [[nodiscard]] std::optional<GpuVmAccess> snapshot_atomic_access(uint32_t vmid) const {
+    if (!backing_memory_ || vmid == 0 || !gpu_vm_)
+      return std::nullopt;
+    return gpu_vm_->snapshot_vmid(vmid);
+  }
+
+  /// @brief Perform one backing atomic within an existing device boundary.
+  /// @details A vector instruction can prepare the cache hierarchy once for all
+  /// its lanes. Each backing RMW remains atomic with respect to host accesses.
+  /// @param vm_access Result of snapshot_atomic_access(vmid) for this attempt.
+  template <typename F>
+  [[nodiscard]] VmAccessOutcome atomic_rmw(const DeviceCacheCoherence::AtomicBoundary &boundary,
+                                           uint64_t addr, uint32_t size, F &&fn, uint32_t vmid,
+                                           const std::optional<GpuVmAccess> &vm_access) {
     if (boundary.outcome() != VmAccessOutcome::Complete)
       return boundary.outcome();
+    if (!boundary.belongs_to(coherence_.get()))
+      return VmAccessOutcome::Malformed;
 
     if (backing_memory_) {
       backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
@@ -210,7 +233,6 @@ public:
       }
       if (gpu_vm_ == nullptr)
         return VmAccessOutcome::Unavailable;
-      std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
       if (!vm_access)
         return VmAccessOutcome::Faulted;
       return vm_access->atomic_modify(addr, size, [&](std::span<std::byte> target) {

@@ -18,8 +18,12 @@
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Selects the SDMA packet layout and ordinary linear-copy count width.
+/// @details LegacyExtendedCount retains the legacy layout but extends ordinary
+/// linear-copy counts from 22 to 30 bits.
 enum class SdmaPacketDialect {
   Legacy,
+  LegacyExtendedCount,
   Gfx11Plus,
   Gfx1250,
   Oss7,
@@ -37,6 +41,7 @@ struct SdmaPacketCapabilities {
 constexpr SdmaPacketCapabilities sdma_packet_capabilities(SdmaPacketDialect dialect) {
   switch (dialect) {
   case SdmaPacketDialect::Legacy:
+  case SdmaPacketDialect::LegacyExtendedCount:
     return {/*wait_signal_copy=*/false,
             /*compact_wait_signal_copy=*/false,
             /*fence64=*/false,

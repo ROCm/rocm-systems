@@ -130,7 +130,13 @@ public:
       const size_t clear_begin = std::max(static_cast<size_t>(base), chunk_base);
       const size_t clear_end = std::min(range_end, valid_chunk_end);
       if (clear_begin == chunk_base && clear_end == valid_chunk_end) {
-        chunk.reset();
+        // Retain up to 64 KiB of retired chunks per register file for reuse.
+        // They are logically absent and are zeroed when materialized again;
+        // excess chunks release their allocations immediately.
+        if (spare_count_ < spares_.size())
+          spares_[spare_count_++] = std::move(chunk);
+        else
+          chunk.reset();
       } else {
         std::ranges::fill(
             chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
@@ -146,7 +152,7 @@ public:
   [[nodiscard]] static constexpr uint32_t registers_per_chunk() noexcept { return REGS_PER_CHUNK; }
 
   /// @brief Count chunks with materialized register storage.
-  /// @returns Number of currently materialized chunks.
+  /// @returns Number of currently materialized chunks, excluding retained spares.
   [[nodiscard]] size_t materialized_chunk_count() const noexcept {
     return static_cast<size_t>(
         std::ranges::count_if(chunks_, [](const auto &chunk) { return chunk != nullptr; }));
@@ -156,7 +162,7 @@ public:
     assert(idx < total_regs_);
     auto &chunk = chunks_[idx / REGS_PER_CHUNK];
     if (!chunk)
-      chunk = std::make_unique<Chunk>();
+      chunk = acquire_chunk();
     return chunk->registers[idx % REGS_PER_CHUNK];
   }
 
@@ -177,7 +183,7 @@ public:
 
       auto &chunk = chunks_[chunk_idx];
       if (!chunk)
-        chunk = std::make_unique<Chunk>();
+        chunk = acquire_chunk();
 
       for (; local_idx < chunk_end; ++local_idx)
         function(chunk->registers[local_idx]);
@@ -229,7 +235,7 @@ public:
         [&](size_t chunk_idx, size_t chunk_offset, size_t run_size, size_t source_offset) {
           auto &chunk = chunks_[chunk_idx];
           if (!chunk)
-            chunk = std::make_unique<Chunk>();
+            chunk = acquire_chunk();
           auto *destination = reinterpret_cast<std::byte *>(chunk->registers.data());
           std::memcpy(destination + chunk_offset, source.data() + source_offset, run_size);
         });
@@ -246,7 +252,7 @@ public:
             return;
           auto &chunk = chunks_[chunk_idx];
           if (!chunk)
-            chunk = std::make_unique<Chunk>();
+            chunk = acquire_chunk();
           auto *destination = reinterpret_cast<std::byte *>(chunk->registers.data());
           std::memcpy(destination + chunk_offset, run.data(), run.size());
         });
@@ -261,6 +267,18 @@ private:
   struct Chunk {
     std::array<RegType, REGS_PER_CHUNK> registers{};
   };
+
+  std::unique_ptr<Chunk> acquire_chunk() {
+    if (spare_count_ == 0)
+      return std::make_unique<Chunk>();
+    auto chunk = std::move(spares_[--spare_count_]);
+    std::ranges::fill(chunk->registers, RegType{});
+    return chunk;
+  }
+
+  // At most 64 KiB per register file, independent of the logical capacity.
+  std::array<std::unique_ptr<Chunk>, (64 * 1024) / sizeof(Chunk)> spares_{};
+  size_t spare_count_ = 0;
 
   template <typename Function>
   static void visit_byte_runs(uint32_t base, size_t byte_count, Function &&function) {
@@ -331,6 +349,7 @@ public:
     data_.init(total_regs);
     uint32_t num_blocks = (regs_per_block > 0) ? (total_regs / regs_per_block) : 0;
     free_blocks_.assign(num_blocks, true);
+    free_block_count_ = num_blocks;
     needs_reset_.assign(num_blocks, false);
   }
 
@@ -339,12 +358,13 @@ public:
   /// @returns Base register index, or -1 if no free block.
   /// @post On success, every register in the returned allocation block is zero.
   int32_t allocate(uint32_t count) {
-    if (count == 0 || regs_per_block_ == 0)
+    if (count == 0 || regs_per_block_ == 0 || free_block_count_ == 0)
       return -1;
     assert(count <= regs_per_block_ && "requested register count exceeds block size");
     for (size_t i = 0; i < free_blocks_.size(); ++i) {
       if (free_blocks_[i]) {
         free_blocks_[i] = false;
+        --free_block_count_;
         uint32_t base = static_cast<uint32_t>(i * regs_per_block_);
         if (needs_reset_[i]) {
           data_.reset(base, regs_per_block_);
@@ -368,14 +388,15 @@ public:
       return;
     assert(!free_blocks_[block] && "double-free of register block");
     free_blocks_[block] = true;
+    ++free_block_count_;
     if constexpr (Storage == RegisterFileStorage::SOFTWARE_LAZY) {
-      // Immediately restore the retired block's zero state and release wholly
-      // covered chunks. Layouts whose blocks share chunks receive one final
-      // whole-file reset so their boundary chunks can also be released.
+      // Immediately restore the retired block's logical zero state. Wholly
+      // covered chunks become absent; up to 64 KiB is retained for reuse.
+      // Layouts whose blocks share chunks receive one final whole-file reset
+      // so their boundary chunks can also be reclaimed.
       const bool independently_reclaimable = data_.can_reclaim_independently(regs_per_block_);
       const bool all_blocks_free =
-          !independently_reclaimable &&
-          std::ranges::all_of(free_blocks_, [](bool is_free) { return is_free; });
+          !independently_reclaimable && free_block_count_ == free_blocks_.size();
       if (all_blocks_free) {
         data_.reset(0, total_regs_);
       } else {
@@ -484,13 +505,10 @@ public:
 
   /// @brief Count the number of free allocation blocks.
   /// @returns Number of blocks available for allocation.
-  uint32_t free_block_count() const {
-    return static_cast<uint32_t>(
-        std::count(free_blocks_.begin(), free_blocks_.end(), true));
-  }
+  uint32_t free_block_count() const { return free_block_count_; }
 
   /// @brief Count chunks with materialized backing storage.
-  /// @returns Number of currently materialized chunks.
+  /// @returns Number of currently materialized chunks, excluding retained spares.
   [[nodiscard]] size_t materialized_chunk_count() const
     requires requires(const detail::RegisterStorage<RegType, Storage, MaxRegisters> &storage) {
       storage.materialized_chunk_count();
@@ -523,6 +541,7 @@ private:
   uint32_t total_regs_ = 0;                                      ///< Total registers.
   uint32_t regs_per_block_ = 0;                                  ///< Registers per block.
   std::vector<bool> free_blocks_; ///< One bit per block (true = free).
+  uint32_t free_block_count_ = 0;
   std::vector<bool> needs_reset_; ///< Blocks dirtied by prior allocation.
 };
 

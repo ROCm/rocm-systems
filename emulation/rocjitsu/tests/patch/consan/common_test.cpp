@@ -874,6 +874,7 @@ TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
       config.lds_size_kb = 64;
       auto cu = amdgpu::ComputeUnitCore::create("wave_delay", config, &memory, &cache);
       ASSERT_NE(cu, nullptr);
+      cu->set_shader_engine_location(0, 0, 8);
       std::array<amdgpu::Wavefront *, 2> waves{};
       for (size_t i = 0; i < words->size(); ++i)
         memory.write32(i * sizeof(uint32_t), (*words)[i]);

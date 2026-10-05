@@ -15,9 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -293,10 +291,11 @@ struct VmMtypeSnapshot {
   }
 };
 
-/// @brief Request-local policy cache, including the binding that owns it.
+/// @brief Policy cache that does not retain the binding's backing.
+/// @details Like an L1 cache, it requires externally serialized access.
 class VmMtypeCache {
   friend class GpuVmAccess;
-  std::shared_ptr<GpuVmAccessState> access_state_;
+  std::weak_ptr<GpuVmAccessState> access_state_;
   VmMtypeSnapshot snapshot_;
 };
 
@@ -470,11 +469,13 @@ public:
 
 /// @brief Immutable, operation-scoped view of one GPU address-space binding.
 ///
-/// @details The snapshot retains the translator and physical backing selected under the
-/// GpuVm lock.  A multi-page access therefore cannot observe half of an old
-/// root and half of its replacement.  Replacement or invalidation advances the
-/// cache namespace used by subsequent snapshots; an already-started operation
-/// is allowed to finish against the binding it captured.
+/// @details The registry lock selects an immutable translator/backing generation.
+/// Ordinary snapshots share that generation's retirement state; each pinned
+/// snapshot has independent retirement state and survives root replacement.
+/// Access methods hold a shared revocation lease, allowing an in-flight access
+/// to finish without mixing roots. Invalidation and unregistration revoke both
+/// kinds of snapshot. Functional instruction fetch reuses an ordinary snapshot
+/// within a quantum, checking is_current() before reuse.
 class GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.
@@ -492,7 +493,7 @@ public:
                                               VmAccessKind access) const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
-  /// @brief Reuse a copied policy while both its binding and mutation token are valid.
+  /// @brief Reuse a copied policy while its access state and mutation token are valid.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address, VmMtypeCache &cache) const;
   /// @brief Query whether a complete virtual range currently permits an access.
   /// @details This side-effect-free query is for provisioning and routing decisions
@@ -570,6 +571,15 @@ public:
   /// @details The VM retains the shared translator and backing in every access
   /// snapshot. @p legacy_cache_compatible describes cache-addressing behavior,
   /// not the frontend that supplied the binding.
+  /// The fault reporter is shared across snapshots and generations. Invocations
+  /// are serialized per registration. Same-thread callback reentry is allowed
+  /// only through independent access states, such as a fresh snapshot_pinned().
+  /// Nested access through the reporting state is forbidden: its revocation
+  /// lease is not recursive, and ordinary snapshot()/snapshot_vmid() calls
+  /// share that state. A reporter must not wait for another thread to fault
+  /// through the same registration. Accesses can hold a revocation lease while
+  /// reporting, so a reporter must defer invalidating, replacing, or unregistering
+  /// that binding.
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, std::shared_ptr<AddressSpaceTranslator> translator,
                          std::shared_ptr<PhysicalMemoryAccess> physical_memory,
@@ -580,6 +590,7 @@ public:
   /// @details Internal model queues can retain and snapshot this explicit
   /// handle while a frontend-owned address space with the same numeric VMID
   /// remains discoverable through find_vmid() and snapshot_vmid().
+  /// The fault reporter follows the same contract as register_address_space().
   [[nodiscard]] AddressSpaceHandle
   register_unrouted_address_space(uint32_t vmid, std::shared_ptr<AddressSpaceTranslator> translator,
                                   std::shared_ptr<PhysicalMemoryAccess> physical_memory,
@@ -676,11 +687,8 @@ private:
     uint64_t translation_epoch = 1;
     uint32_t queue_references = 0;
     std::shared_ptr<GpuVmBindingState> binding_state;
-    std::shared_ptr<AddressSpaceTranslator> translator;
-    std::shared_ptr<PhysicalMemoryAccess> physical_memory;
     std::shared_ptr<GpuVmAccessState> access_state;
     std::vector<std::weak_ptr<GpuVmAccessState>> pinned_access_states;
-    std::function<void(uint64_t, VmAccessKind)> fault_reporter;
     bool legacy_cache_compatible = false;
     bool device_gart = false;
   };

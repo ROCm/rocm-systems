@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -102,6 +103,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   uint32_t num_iods = soc.num_iods();
   uint32_t num_ses = 0;
   uint32_t num_cus = 0;
+  uint32_t cus_per_shader_array = 0;
   flatbuffers::Offset<fb::ComputeUnitConfig> fb_cu;
 
   if (num_xcds > 0) {
@@ -111,6 +113,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       auto *se = xcd->shader_engine(0);
       num_cus = se->num_compute_units();
       if (num_cus > 0) {
+        cus_per_shader_array = se->compute_unit(0)->cus_per_shader_array();
         const auto &cu_cfg = se->compute_unit(0)->config();
         // Store an explicit zero even though it is the stable wire default. It
         // means unbounded for a new checkpoint, while field absence remains the
@@ -125,7 +128,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
     }
   }
 
-  auto fb_se = fb::CreateShaderEngineConfig(builder, num_cus, fb_cu);
+  auto fb_se = fb::CreateShaderEngineConfig(builder, num_cus, fb_cu, cus_per_shader_array);
   auto fb_xcd = fb::CreateXcdConfig(builder, num_ses, fb_se);
   auto fb_gpu = fb::CreateAmdgpuConfig(builder, num_xcds, num_iods, fb_xcd);
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
@@ -170,6 +173,9 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
       vm_config.soc.xcd.num_shader_engines = xcd->num_shader_engines();
       if (auto *se = xcd->shader_engine()) {
         vm_config.soc.xcd.shader_engine.num_compute_units = se->num_compute_units();
+        // Legacy checkpoints lack this geometry. Keep it unknown so WGP-ID
+        // reads remain unsupported instead of reporting an SE-local index.
+        vm_config.soc.xcd.shader_engine.cus_per_shader_array = se->cus_per_shader_array();
         if (auto *cu = se->compute_unit()) {
           auto &cu_cfg = vm_config.soc.xcd.shader_engine.compute_unit;
           cu_cfg.num_wf_slots = cu->num_wf_slots();
@@ -363,7 +369,17 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       result.thread_allocations.push_back(
           {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
   const auto &xcd = vm_config.soc.xcd;
-  const uint32_t capacity = xcd.num_shader_engines * xcd.shader_engine.num_compute_units;
+  auto checked_capacity = [](uint64_t n) {
+    if (n > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument("Checkpoint execution capacity exceeds uint32 range");
+    return static_cast<uint32_t>(n);
+  };
+  const uint32_t cus =
+      checked_capacity(uint64_t{xcd.num_shader_engines} * xcd.shader_engine.num_compute_units);
+  // The stored topology is uniform: each nonempty XCD contributes CUs-1 workers
+  // to the shared pool, whose inclusive width also counts one caller.
+  const uint32_t capacity =
+      checked_capacity(1 + uint64_t{vm_config.soc.num_xcds} * (std::max(cus, 1u) - 1));
   const uint32_t host_threads = amdgpu::available_host_threads();
   result.execution_threads = resolve_execution_threads(
       {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,

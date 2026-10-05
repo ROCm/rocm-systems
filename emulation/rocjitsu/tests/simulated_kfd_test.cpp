@@ -169,7 +169,9 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthPreservesContentsAndZeroFillsExtens
   EXPECT_EQ(initial[kInitialSize - 1], 0xa5);
   EXPECT_EQ(grown[0], 0x5a);
   EXPECT_EQ(grown[kInitialSize - 1], 0xa5);
-  EXPECT_EQ(grown[kInitialSize], 0);
+  auto *extension = memory->resolve_host_ptr(kScratchGpuVa + kInitialSize, process_id);
+  ASSERT_NE(extension, nullptr);
+  EXPECT_EQ(*extension, 0);
   EXPECT_NE(memory->resolve_host_ptr(kScratchGpuVa + kGrownSize - 1, process_id), nullptr);
 
   EXPECT_EQ(t.driver()->close(), 0);

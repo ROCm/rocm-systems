@@ -1426,7 +1426,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   process.map_pages(kRingVa, ring.data(), sizeof(ring));
   process.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
   uint64_t doorbell = 1;
-  amdgpu::AqlQueueConfig hw{};
+  amdgpu::ComputeQueueConfig hw{};
   hw.address_space = address_space;
   hw.process_id = process.process_id();
   hw.queue_id = 1;

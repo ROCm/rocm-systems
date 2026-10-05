@@ -356,20 +356,20 @@ def test_packed_true16_simd_bases_use_physical_vgpr_indices(
     # In true16 e32 encodings, selector 128 + N names the high half of vN,
     # not v(128 + N). Strict allocation checks consume these physical bases,
     # so packed selectors must be normalized before generic VGPR resolution.
-    assert read_base.index('packed_16bit_vgpr_source') < read_base.index(
+    assert 'resolved_vgpr_offset_exec(wf)' in read_base
+    assert 'resolved_vgpr_offset_exec(wf)' in write_base
+    resolver = _generated_function_body(
+        operand_exec, 'Operand::resolved_vgpr_offset_exec'
+    )
+    assert resolver.index('packed_16bit_vgpr_source') < resolver.index(
         'resolved_vgpr_offset_for_operand'
     )
-    assert read_base.index('packed_16bit_vgpr_dst') < read_base.index(
+    assert resolver.index('packed_16bit_vgpr_dst') < resolver.index(
         'resolved_vgpr_offset_for_operand'
     )
-    assert write_base.index('packed_16bit_vgpr_dst') < write_base.index(
-        'resolved_vgpr_offset_for_operand'
+    assert (
+        'return packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8)' in resolver
     )
-    assert write_base.index('packed_16bit_vgpr_source') < write_base.index(
-        'resolved_vgpr_offset_for_operand'
-    )
-    assert 'uint32_t off = packed->reg +' in read_base
-    assert 'uint32_t off = packed->reg +' in write_base
 
 
 def test_gfx1250_addtid_uses_m0_byte_base_addresses(
@@ -547,8 +547,10 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
 def test_ds_atomic_generator_only_writes_back_explicit_return_destination() -> None:
     codegen = object.__new__(CodeGenerator)
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
-    codegen._append_wait_counter_type = lambda lines, _sem, _semantic_class: lines.append(
-        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    codegen._append_wait_counter_type = (
+        lambda lines, _sem, _semantic_class: lines.append(
+            '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+        )
     )
     sem = InstructionSemantics(
         'DS_ADD_U32', 'ds_atomic', operation='add', elem_size=4, num_elems=1
@@ -1801,6 +1803,27 @@ def test_unrelated_restricted_scalar_destination_remains_restricted():
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_SREG_NOVCC'
 
 
+@pytest.mark.parametrize(
+    'name,semantic_class,expected_type',
+    [
+        ('V_READFIRSTLANE_B32', 'vector_readfirstlane', 'OPR_SREG'),
+        ('V_READLANE_B32', 'vector_readlane', 'OPR_SREG'),
+        ('V_DIV_SCALE_F32', 'vector_div_scale', 'OPR_SREG_NOVCC'),
+    ],
+)
+def test_readlane_family_vcc_destination_policy_is_scoped(
+    name, semantic_class, expected_type
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SREG', 'OPR_SREG_NOVCC'])
+    sem = InstructionSemantics(name, semantic_class)
+    vdst = Operand('vdst', 32, 'OPR_SREG_NOVCC', False, True, False, False, 0)
+    src = Operand('src1', 32, 'OPR_SREG_NOVCC', True, False, False, False, 1)
+
+    assert codegen._constructor_operand_type(sem, vdst) == expected_type
+    assert codegen._constructor_operand_type(sem, src) == 'OPR_SREG_NOVCC'
+
+
 def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -1841,6 +1864,15 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
     assert 'lane &= wf.kernel_wave_size() - 1;' not in body
     assert 'read_scalar_selected_lane(src0, lane)' in body
     assert 'src1.encoding_value_' not in body
+
+    inst = Instruction('V_READFIRSTLANE_B32', 'ENC_VOP1', 2, operands[:2])
+    sem = InstructionSemantics('V_READFIRSTLANE_B32', 'vector_readfirstlane')
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP1')
+
+    assert 'uint64_t exec = wf.exec();' in body
+    assert 'exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0' in body
+    assert 'read_scalar_selected_lane(src0, lane)' in body
+    assert 'read_lane(src0, lane)' not in body
 
     operands = [
         Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
@@ -3749,7 +3781,7 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
                 'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
             )
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
-            assert 'amdgpu::pseudo_scalar::execute_f16(' in body
+            assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
             assert 'wf.fp_denorm_mode_f16_f64()' in body
 
@@ -4672,6 +4704,23 @@ def test_generated_rdna3_5_sendmsg_return_uses_symbolic_disassembly(
 
     assert 'return "sendmsg(MSG_RTN_GET_DOORBELL)";' in sendmsg_return
     assert 'return std::format("sendmsg({}, 0, 0)", value);' in sendmsg_return
+
+
+def test_gfx11_graphics_sources_use_vgpr_selectors():
+    for profile in (Rdna3Profile(), Rdna3_5Profile()):
+        for source in ('src0', 'src1', 'src2'):
+            assert (
+                profile.normalize_operand_type('ENC_VINTERP', source, 'OPR_VGPR')
+                == 'OPR_SRC_VGPR'
+            )
+        assert (
+            profile.normalize_operand_type('ENC_VINTERP', 'vdst', 'OPR_VGPR')
+            == 'OPR_VGPR'
+        )
+        assert (
+            profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
+        )
+        assert profile.has_gfx11_image_address_extension
 
 
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
@@ -6061,7 +6110,7 @@ def test_generated_modern_dpp_source_policy_covers_non_vop1_families(
         assert 'dpp_plan_.row_bank_mask' in body, class_name
         assert 'dpp_plan_.source_write_mask' in body, class_name
         assert 'dpp_bound_ctrl_, dpp_fi_,' in body, class_name
-        assert 'wf.exec(), true' in body, class_name
+        assert re.search(r'wf\.exec\(\),\s*true', body), class_name
 
     vop3_model = (rdna4 / 'vop3.cpp').read_text()
     vop3_exec = _execution_source_path(
@@ -6560,15 +6609,16 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     rdna4_generated_root: Path,
 ):
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
-
     body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
-
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'float src = util::f16_to_f32(static_cast<uint16_t>(raw));' in body
     assert 'if (inst_.abs & (1u << 0))' in body
-    assert 'src = std::fabs(src);' in body
     assert 'if (inst_.neg & (1u << 0))' in body
-    assert 'std::bit_cast<uint32_t>(src)' in body
+    assert 'util::f16_to_f32' in body
+    assert 'std::fabs(sv)' in body
+    assert 'sv = -sv' in body
+    assert 'amdgpu::fp_mode::cvt_f32_f16' in body
+    assert 'wf.fp_denorm_mode_f16_f64()' in body
+    assert 'wf.ieee_mode()' in body
 
 
 def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(

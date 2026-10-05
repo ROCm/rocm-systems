@@ -182,10 +182,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   inst_cache_.set_l2(l2_);
 
-  // Enable pool allocation for the hot decode-execute path.
-  // Instructions decoded during step() are always deleted before the CU
-  // (and its decoder) are destroyed, so pool allocation is safe here.
-  decoder_->enable_pool();
+  // Decoded instructions use heap storage: cache entries and asynchronous
+  // work can outlive an issue quantum and move between execution workers.
+  // Do not install this decoder's pool on the constructing thread.
 
   wfs_.resize(config.num_wf_slots);
   free_wf_slot_bits_.assign((config.num_wf_slots + 63u) / 64u, ~uint64_t{0});
@@ -390,6 +389,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if (!wfs_[wf_id])
     wfs_[wf_id] = create_wavefront(wf_id);
   auto *wf = wfs_[wf_id].get();
+  wf->activity_tracked_ = true;
   const uint32_t dispatched_wave_size = wave_size == 0 ? wf->default_wf_size_ : wave_size;
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
       dispatched_wave_size > wf->max_wf_size_)
@@ -456,7 +456,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   ++wf->dispatch_generation_;
   if (wf->dispatch_generation_ == 0)
     ++wf->dispatch_generation_;
-  wf->state_ = WfState::RUNNING;
+  wf->set_state(WfState::RUNNING);
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
   free_wf_slot_bits_[wf_id / 64u] &= ~(uint64_t{1} << (wf_id % 64u));
@@ -502,14 +502,6 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   }
   wf.trace_inst_count_ = 0;
   wf.reset();
-  if (!has_active_wfs()) {
-    if (wave_state_depth_ != 0) {
-      instruction_access_cleanup_pending_ = true;
-    } else {
-      // Cancellation outside instruction issue has no in-flight snapshot user.
-      auto retired = std::exchange(instruction_vm_access_, std::nullopt);
-    }
-  }
 }
 
 void ComputeUnitCore::flush_cp_notifications() {
@@ -1602,6 +1594,9 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     async_execution::stats.flush();
 }
 
+thread_local ComputeUnitCore::InstructionVmSnapshot *ComputeUnitCore::instruction_vm_snapshot_ =
+    nullptr;
+
 template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
     Wavefront *active,
@@ -1616,7 +1611,12 @@ template <bool EnableAsync>
     }
   };
 
+  std::optional<GpuVmAccess> fresh_vm_access;
   const GpuVmAccess *vm_access = nullptr;
+  InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
+  // A callback may recursively issue another wave. Keep its fetch from
+  // replacing the snapshot borrowed by this instruction's later debug probes.
+  ScopedInstructionVmSnapshot nested_scope(nullptr);
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1626,15 +1626,24 @@ template <bool EnableAsync>
       return;
     }
     const AddressSpaceHandle address_space = active->address_space();
-    if (!instruction_vm_access_ || instruction_address_space_ != address_space ||
-        (!address_space && instruction_vmid_ != vmid) || !instruction_vm_access_->is_current()) {
-      instruction_vm_access_ =
+    if (snapshot && snapshot->compute_unit == this) {
+      auto &cached = *snapshot;
+      if (cached.owner != gpu_vm_ || cached.address_space != address_space || cached.vmid != vmid ||
+          !cached.access || !cached.access->is_current()) {
+        cached.access =
+            address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+        cached.owner = gpu_vm_;
+        cached.address_space = address_space;
+        cached.vmid = vmid;
+      }
+      if (cached.access)
+        vm_access = &*cached.access;
+    } else {
+      fresh_vm_access =
           address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-      instruction_address_space_ = address_space;
-      instruction_vmid_ = vmid;
+      if (fresh_vm_access)
+        vm_access = &*fresh_vm_access;
     }
-    if (instruction_vm_access_)
-      vm_access = &*instruction_vm_access_;
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -1710,7 +1719,9 @@ template <bool EnableAsync>
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
-  DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
+  const bool reuse_decoded = !debug_active();
+  DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
+                                                    decode_error.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
@@ -1727,6 +1738,8 @@ template <bool EnableAsync>
   }
   Instruction *inst = decoded.value().get();
   ++decoded_instruction_count_;
+  DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
+                                                       active->pc, vmid, words, reuse_decoded);
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
@@ -1927,6 +1940,7 @@ template <bool EnableAsync>
   }();
 
   if (execution_result.failed()) [[unlikely]] {
+    return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
@@ -1949,7 +1963,7 @@ template <bool EnableAsync>
   // pc, and allocations are now zeroed, so the after-execute hook, result logging,
   // and pc-advance below must not run on the dead slot. The dedicated
   // onAmdgpuWavefrontHalted hook already fired (with live state) from halt().
-  // s_endpgm is never a memory op, so just reclaim the decoded instruction.
+  // The completed s_endpgm can return to the decoded cache on scope exit.
   //
   // Note the intentional asymmetry: an s_endpgm that defers to ENDING (pending
   // memory waits) is NOT halted here, so it DOES fire onAmdgpuAfterExecuteInstruction
@@ -2131,8 +2145,6 @@ template <bool EnableAsync>
         return;
       }
     }
-  } else {
-    decoded.value().reset();
   }
 
   active->pc += inst_size;

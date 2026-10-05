@@ -229,7 +229,10 @@ following dimensions:
 `RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
 An untouched chunk is represented by a null entry and reads as zero; its
 storage is allocated and zero-initialized on the first mutable access. Retiring
-a wave releases wholly covered chunks and clears any shared boundary chunk.
+a wave makes wholly covered chunks logically absent and clears any shared
+boundary chunk. Each lazy register file retains up to 64 KiB of retired chunks,
+which are zeroed when reused; excess chunks release their allocations.
+`materialized_chunk_count()` excludes these retained spares.
 The implementation uses only portable C++ allocation and does not require
 virtual-memory APIs. Mutable handles and handles into materialized registers
 remain stable until their allocation retires, but the complete register file is

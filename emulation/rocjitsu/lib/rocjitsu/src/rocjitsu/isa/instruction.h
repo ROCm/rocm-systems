@@ -114,9 +114,9 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// Thread-local because each CU partition thread has its own decoder/pool.
-  /// Instructions are wholly owned by their CU and always allocated/freed
-  /// on the same thread.
+  /// @details Pool users must allocate and free on the bound thread, with the
+  /// decoder outliving its pooled instructions. CU execution instead forces
+  /// heap allocation so instructions can survive quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
@@ -206,6 +206,13 @@ public:
   /// and must not be called. No virtual dispatch.
   /// This is a low-level backend callback. AMDGPU callers should use the CU's
   /// execute_instruction() API to reset and check simulator execution failures.
+  /// @details Decoded non-memory instructions without DynamicInstState may be
+  /// reused across waves without a reset. Executors must read register values,
+  /// EXEC and other execution state from the current context, and restore any
+  /// temporary operand delegates before returning. Put persistent per-issue
+  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// per-execution member flags must be assigned on every execution, as with
+  /// set_memory_wait_result_written().
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -228,6 +235,7 @@ public:
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
+  /// @details An instruction retaining this state cannot enter a decoded cache.
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 

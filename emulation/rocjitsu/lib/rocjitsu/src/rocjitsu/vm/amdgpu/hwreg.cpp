@@ -37,6 +37,7 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  HwId1Gfx1250,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -354,7 +355,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::HwId1, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::HwId1Gfx1250, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::HwId2, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
@@ -482,6 +483,11 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::HwId1Gfx1250:
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+      return HwregAccessResult::Unsupported;
+    raw_value = wf.hw_id1_raw();
+    return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -537,6 +543,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::HwId1Gfx1250:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
