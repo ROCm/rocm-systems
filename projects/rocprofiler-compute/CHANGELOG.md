@@ -26,10 +26,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * `--roof-only` is now `--roofline`
     * `--bench-only` is now `--roofline-bench-only`
     * `--device` is now `--roofline-device`
+  * Analyze mode:
+    * `--sort` is now `--roofline-sort`
+    * `--mem-level` is now `--roofline-mem-level` (`-m` still works)
+    * `--roofline-data-type` is now `--roofline-data-types` (`-R` still works)
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
-* `-m/--mem-level` now accepts `ALL`, which is also its default.
+* `-m/--roofline-mem-level` now accepts `ALL`, which is also its default.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
@@ -57,7 +61,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
+* The old roofline option names (`--roof-only`, `--bench-only`, `--device`, `--sort`, `--mem-level`, and `--roofline-data-type`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 ### Known issues
 

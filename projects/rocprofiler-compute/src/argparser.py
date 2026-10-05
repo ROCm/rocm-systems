@@ -30,6 +30,9 @@ DEPRECATED_OPTIONS = {
     "--roof-only": "Use --roofline instead.",
     "--bench-only": "Use --roofline-bench-only instead.",
     "--device": "Use --roofline-device instead.",
+    "--sort": "Use --roofline-sort instead.",
+    "--mem-level": "Use --roofline-mem-level instead.",
+    "--roofline-data-type": "Use --roofline-data-types instead.",
     "--retain-rocpd-output": ".db files will be retained automatically.",
 }
 
@@ -842,6 +845,7 @@ Examples:
     ## Roofline Command Line Options (analyze: visualization)
     roofline_group_analyze = analyze_parser.add_argument_group("Roofline Options")
     roofline_group_analyze.add_argument(
+        "--roofline-sort",
         "--sort",
         dest="sort",
         required=False,
@@ -851,11 +855,13 @@ Examples:
         choices=["kernels", "dispatches"],
         help=(
             "Overlay top kernels or top dispatches (Default: kernels).\n"
-            "Values: kernels, dispatches"
+            "Values: kernels, dispatches\n"
+            "Deprecated alias: --sort."
         ),
     )
     roofline_group_analyze.add_argument(
         "-m",
+        "--roofline-mem-level",
         "--mem-level",
         dest="mem_level",
         required=False,
@@ -865,11 +871,13 @@ Examples:
         default=["ALL"],
         help=(
             "Filter by memory level (Default: ALL).\n"
-            f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}"
+            f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}\n"
+            "Deprecated alias: --mem-level."
         ),
     )
     roofline_group_analyze.add_argument(
         "-R",
+        "--roofline-data-types",
         "--roofline-data-type",
         dest="roofline_data_type",
         required=False,
@@ -879,7 +887,8 @@ Examples:
         default=["FP32"],
         help=(
             "Choose datatypes to view roofline HTMLs for (Default: FP32).\n"
-            f"Values: {', '.join(ROOFLINE_DATA_TYPES)}"
+            f"Values: {', '.join(ROOFLINE_DATA_TYPES)}\n"
+            "Deprecated alias: --roofline-data-type."
         ),
     )
 

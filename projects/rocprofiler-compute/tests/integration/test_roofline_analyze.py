@@ -54,7 +54,7 @@ def test_analyze_generates_roofline_html(
             "analyze",
             "--path",
             workload_dir,
-            "--roofline-data-type",
+            "--roofline-data-types",
             "FP32",
         ])
         assert code == 0
@@ -90,7 +90,7 @@ def test_analyze_roofline_datatype_independently(
             "analyze",
             "--path",
             workload_dir,
-            "--roofline-data-type",
+            "--roofline-data-types",
             dtype,
         ])
         assert code == 0
@@ -116,7 +116,7 @@ def test_analyze_roofline_multiple_datatypes_single_invocation(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         "FP32",
         "FP64",
         "BF16",
@@ -166,7 +166,7 @@ def test_analyze_roofline_idempotent(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         "FP32",
     ]
 
@@ -209,7 +209,7 @@ def test_roof_invalid_data_type(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Invalid --roofline-data-type should be rejected by the analyze argparser."""
+    """Invalid --roofline-data-types should be rejected by the analyze argparser."""
     workload_dir = integration_common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -218,12 +218,12 @@ def test_roof_invalid_data_type(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         "INVALID_TYPE",
     ])
 
     err = capsys.readouterr().err
-    assert "--roofline-data-type" in err
+    assert "--roofline-data-types" in err
     assert "invalid choice" in err
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -233,7 +233,7 @@ def test_roof_invalid_mem_level(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Invalid --mem-level should be rejected by the analyze argparser."""
+    """Invalid --roofline-mem-level should be rejected by the analyze argparser."""
     workload_dir = integration_common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -242,12 +242,12 @@ def test_roof_invalid_mem_level(
         "analyze",
         "--path",
         workload_dir,
-        "--mem-level",
+        "--roofline-mem-level",
         "INVALID_LEVEL",
     ])
 
     err = capsys.readouterr().err
-    assert "--mem-level" in err
+    assert "--roofline-mem-level" in err
     assert "invalid choice" in err
 
     common.clean_output_dir(config["cleanup"], workload_dir)
@@ -268,7 +268,7 @@ def test_roof_mem_levels(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     mem_level: str,
 ) -> None:
-    """Analyze with --mem-level generates roofline HTML output."""
+    """Analyze with --roofline-mem-level generates roofline HTML output."""
     workload_src = roofline_mem_level_dirs[mem_level]
     if not Path(workload_src).exists():
         pytest.skip(f"Workload directory {workload_src} not found")
@@ -281,7 +281,7 @@ def test_roof_mem_levels(
         "analyze",
         "--path",
         workload_dir,
-        "--mem-level",
+        "--roofline-mem-level",
         mem_level,
     ])
     assert code == 0
@@ -319,7 +319,7 @@ def test_analyze_roofline_datatype_html_legend(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
+        "--roofline-data-types",
         dtype,
     ])
     assert code == 0
