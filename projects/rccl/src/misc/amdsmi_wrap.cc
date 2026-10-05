@@ -4,12 +4,16 @@
 #include "alt_rsmi.h"
 #include "core.h"
 #include "utils.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 #include <cstring>
 #include <mutex>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <thread>
 
 static int is_wsl2 = -1;
 
@@ -56,6 +60,10 @@ static int is_wsl2 = -1;
 
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB",
            0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
+
+// Declared in rccl_vars.h; defined here because RCCL_PARAM also defines a mutex.
+RCCL_PARAM(FabricTelemetryEnable, "FABRIC_TELEMETRY_ENABLE", 0); // Opt-in: sample and log fabric telemetry
+RCCL_PARAM(FabricTelemetryIntervalMs, "FABRIC_TELEMETRY_INTERVAL_MS", 1000); // Sampling period in milliseconds
 
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name) arglist = nullptr;
@@ -850,4 +858,315 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
     return "UNKNOWN";
   }
   return telemName;
+}
+
+/*************************************************************************
+ * Fabric Telemetry Session
+ *
+ * RCCL_FABRIC_TELEMETRY_ENABLE opts into periodic sampling of every amd_smi
+ * fabric telemetry category; RCCL_FABRIC_TELEMETRY_INTERVAL_MS sets the period.
+ *
+ * The session is process-global and reference counted by the communicators that
+ * joined it. Telemetry storage is keyed by device, which communicators sharing a
+ * GPU -- including every split -- have in common, so no single communicator can
+ * own it; the last reference to drop frees it.
+ ************************************************************************/
+
+namespace {
+
+const char* fabricTelemetryStatusString(amdsmi_status_t status) {
+  const char* text = nullptr;
+  if (pfn_amdsmi_status_code_to_string != nullptr) {
+    pfn_amdsmi_status_code_to_string(status, &text);
+  }
+  return text != nullptr ? text : "an unknown error";
+}
+
+struct FabricTelemetryDevice {
+  uint32_t index;
+  // Identity of the communicator that opened telemetry on this device, tagged onto
+  // its report lines. Counters are per device, so when several communicators share
+  // one the reports cover all of them but keep the first one's identity.
+  uint64_t commHash;
+  int rank;
+  int refCount; // communicators on this device; the last one out frees the telemetry
+  amdsmi_processor_handle handle;
+  amdsmi_fabric_telemetry_t* telemetry;
+  amdsmiFabricTelemetryBaseline baseline;        // previous tick, for the periodic report
+  amdsmiFabricTelemetryBaseline sessionBaseline; // first sample, for the report at destroy
+  bool warnedSampleFailure; // a device that starts failing fails every tick; say so once
+};
+
+// Serializes acquire against release so a session cannot be started while the
+// previous one is still stopping. Held across the sampler join, which telemetryLock
+// cannot be: the sampler holds telemetryLock whenever it is awake.
+// Lock order is telemetryLifecycleLock -> telemetryLock -> fabricLock.
+std::mutex telemetryLifecycleLock;
+
+std::mutex telemetryLock; // guards everything below; always taken before fabricLock
+std::condition_variable telemetryStopCv;
+std::vector<FabricTelemetryDevice> telemetryDevices;
+std::thread telemetrySamplerThread;
+int64_t telemetryIntervalMs = 0;
+bool telemetryStopFlag = false;
+// The process-wide preconditions are checked once. Nothing they test can start
+// working later, so re-checking per communicator would only repeat the warnings.
+bool telemetryPreflightDone = false;
+bool telemetryUnsupported = false;
+
+// Caller holds telemetryLock. Reduces one device's latest sample against the given
+// baseline and logs the categories that moved. Pass dev->baseline to measure since
+// the previous tick, or dev->sessionBaseline to measure since the device joined;
+// scope names which, and is empty for the periodic report.
+void fabricTelemetryReportLocked(FabricTelemetryDevice* dev, amdsmiFabricTelemetryBaseline* baseline,
+                                 const char* scope) {
+  amdsmiFabricTelemetryCategoryReport reports[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
+  const int reportCount =
+    amdSmiFabricTelemetryDiff(dev->telemetry, baseline, amd_smi_fabricTelemIdToString, reports);
+
+  for (int r = 0; r < reportCount; r++) {
+    const amdsmiFabricTelemetryCategoryReport* report = &reports[r];
+    if (report->changedCount == 0) continue;
+
+    // A reported category always has at least one mover, but terminate up front so
+    // the %s below cannot read uninitialized stack if that ever stops holding.
+    char movers[512] = {};
+    int off = 0;
+    for (int m = 0; m < report->moverCount; m++) {
+      const int written = snprintf(movers + off, sizeof(movers) - off, "%s%s[%s] +%lu", off > 0 ? ", " : "",
+                                   report->movers[m].name, report->movers[m].instance, report->movers[m].delta);
+      if (written < 0 || written >= (int)(sizeof(movers) - off)) break;
+      off += written;
+    }
+    INFO(NCCL_INIT, "fabric telemetry GPU %u comm 0x%lx rank %d %s%s: gen=%lu changed=%d/%d top: %s", dev->index,
+         dev->commHash, dev->rank, amdSmiFabricTelemetryCategoryName(report->category), scope, report->generation,
+         report->changedCount, report->itemCount, movers);
+  }
+}
+
+// Caller holds telemetryLock. Reports what this device's counters did over the whole
+// time it was sampled, so a run too short for the firmware to publish more than one
+// generation still produces output. Takes a fresh sample first: the periodic ticks
+// only see what the firmware had published by the time they ran.
+void fabricTelemetryFinalReportLocked(FabricTelemetryDevice* dev) {
+  if (dev->telemetry == nullptr) return;
+
+  amdsmi_status_t status;
+  {
+    std::lock_guard<std::mutex> locked(fabricLock);
+    status = pfn_amdsmi_get_fabric_telemetry_data(dev->handle, dev->telemetry);
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    INFO(NCCL_INIT, "fabric telemetry: GPU %u final read returned %s, no closing report", dev->index,
+         fabricTelemetryStatusString(status));
+    return;
+  }
+  fabricTelemetryReportLocked(dev, &dev->sessionBaseline, " since start");
+}
+
+// Caller holds telemetryLock. Returns telemetryDevices.end() if the device is not
+// being sampled. An iterator rather than a pointer so the caller can erase it.
+std::vector<FabricTelemetryDevice>::iterator fabricTelemetryFindLocked(uint32_t index) {
+  return std::find_if(telemetryDevices.begin(), telemetryDevices.end(),
+                      [index](const FabricTelemetryDevice& dev) { return dev.index == index; });
+}
+
+// Caller holds telemetryLock. Safe while the sampler is running: the sampler only
+// touches telemetryDevices while holding the same lock.
+void fabricTelemetryFreeDeviceLocked(FabricTelemetryDevice* dev) {
+  if (dev->telemetry == nullptr) return;
+  amdsmi_status_t status;
+  {
+    std::lock_guard<std::mutex> locked(fabricLock);
+    status = pfn_amdsmi_free_fabric_telemetry(dev->handle, dev->telemetry);
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    WARN("fabric telemetry: freeing GPU %u telemetry returned %s", dev->index, fabricTelemetryStatusString(status));
+  }
+  dev->telemetry = nullptr;
+}
+
+void fabricTelemetrySamplerMain() {
+  std::unique_lock<std::mutex> lock(telemetryLock);
+  while (true) {
+    // Waiting first makes the baseline taken at start the reference for the first
+    // reported sample, and lets teardown interrupt a long period immediately.
+    telemetryStopCv.wait_for(lock, std::chrono::milliseconds(telemetryIntervalMs), [] { return telemetryStopFlag; });
+    if (telemetryStopFlag) return;
+
+    for (FabricTelemetryDevice& dev : telemetryDevices) {
+      amdsmi_status_t status;
+      {
+        std::lock_guard<std::mutex> locked(fabricLock);
+        status = pfn_amdsmi_get_fabric_telemetry_data(dev.handle, dev.telemetry);
+      }
+      if (status != AMDSMI_STATUS_SUCCESS) {
+        if (!dev.warnedSampleFailure) {
+          dev.warnedSampleFailure = true;
+          WARN("fabric telemetry: sampling GPU %u returned %s, suppressing further reports for this device",
+               dev.index, fabricTelemetryStatusString(status));
+        }
+        continue;
+      }
+      dev.warnedSampleFailure = false;
+      fabricTelemetryReportLocked(&dev, &dev.baseline, "");
+    }
+  }
+}
+
+// Caller holds telemetryLock. Checks the preconditions that apply to the whole
+// process and resolves the sampling period. Runs once; the result is sticky,
+// since nothing it tests can start working later.
+bool fabricTelemetryPreflightLocked() {
+  if (telemetryPreflightDone) return !telemetryUnsupported;
+  telemetryPreflightDone = true;
+  telemetryUnsupported = true;
+
+  if (!rcclParamUseAmdSmiLib()) {
+    WARN("fabric telemetry: RCCL_FABRIC_TELEMETRY_ENABLE requires RCCL_USE_AMD_SMI_LIB=1, the sysfs fabric "
+         "discovery path exposes no telemetry; telemetry disabled");
+    return false;
+  }
+  if (pfn_amdsmi_alloc_fabric_telemetry == nullptr || pfn_amdsmi_get_fabric_telemetry_data == nullptr ||
+      pfn_amdsmi_free_fabric_telemetry == nullptr) {
+    WARN("fabric telemetry: the loaded amd_smi exports no fabric telemetry entry points; telemetry disabled");
+    return false;
+  }
+  if (amd_smi_ensureFabricInitialized() != ncclSuccess) {
+    WARN("fabric telemetry: fabric discovery failed; telemetry disabled");
+    return false;
+  }
+
+  const int64_t requestedMs = rcclParamFabricTelemetryIntervalMs();
+  const int64_t intervalMs = amdSmiFabricTelemetryResolveIntervalMs(requestedMs);
+  if (intervalMs == 0) {
+    WARN("fabric telemetry: RCCL_FABRIC_TELEMETRY_INTERVAL_MS=%ld is not a usable period; telemetry disabled",
+         requestedMs);
+    return false;
+  }
+  if (intervalMs != requestedMs) {
+    WARN("fabric telemetry: RCCL_FABRIC_TELEMETRY_INTERVAL_MS=%ld is below the %ld ms floor, using the floor",
+         requestedMs, kAmdSmiFabricTelemetryMinIntervalMs);
+  }
+
+  telemetryIntervalMs = intervalMs;
+  telemetryUnsupported = false;
+  return true;
+}
+
+// Caller holds telemetryLock, and the device is not already in telemetryDevices.
+// Returns false with nothing added if this device cannot supply telemetry, which
+// leaves the rest of the session alone.
+bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
+  if ((int)index >= amdsmiFabricDeviceCount || !amdsmiFabricDevices[index].fabricSupported) return false;
+
+  FabricTelemetryDevice dev = {};
+  dev.index = index;
+  dev.commHash = commHash;
+  dev.rank = rank;
+  if (getProcessorHandle(dev.index, &dev.handle) != ncclSuccess) return false;
+
+  amdsmi_status_t status;
+  {
+    std::lock_guard<std::mutex> locked(fabricLock);
+    status = pfn_amdsmi_alloc_fabric_telemetry(dev.handle, kAmdSmiFabricTelemetryAllCategories, &dev.telemetry);
+  }
+  if (status != AMDSMI_STATUS_SUCCESS || dev.telemetry == nullptr) {
+    INFO(NCCL_INIT, "fabric telemetry: GPU %u allocation returned %s, skipping this device", dev.index,
+         fabricTelemetryStatusString(status));
+    return false;
+  }
+
+  // A reported-active fabric does not imply reachable telemetry: amd_smi sources
+  // fabric info from sysfs but telemetry from the IFoE config character device,
+  // which is root-only by default, so fabricSupported is not a sufficient gate.
+  // Read once here so an unusable device is dropped at init rather than warning
+  // on every tick.
+  {
+    std::lock_guard<std::mutex> locked(fabricLock);
+    status = pfn_amdsmi_get_fabric_telemetry_data(dev.handle, dev.telemetry);
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    INFO(NCCL_INIT,
+         "fabric telemetry: GPU %u reports an active fabric but its first read returned %s, skipping this device "
+         "(telemetry needs access to the IFoE config device, which is root-only unless a udev rule widens it)",
+         dev.index, fabricTelemetryStatusString(status));
+    fabricTelemetryFreeDeviceLocked(&dev);
+    return false;
+  }
+
+  dev.refCount = 1;
+  telemetryDevices.push_back(std::move(dev));
+  // Establishes both reference points from this first sample. Neither reports
+  // anything yet; the periodic one is measured against the previous tick and the
+  // session one against this sample.
+  FabricTelemetryDevice* added = &telemetryDevices.back();
+  fabricTelemetryReportLocked(added, &added->baseline, "");
+  fabricTelemetryReportLocked(added, &added->sessionBaseline, " since start");
+  return true;
+}
+
+} // namespace
+
+ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commHash, int rank, bool* acquired) {
+  *acquired = false;
+  if (rcclParamFabricTelemetryEnable() == 0) return ncclSuccess;
+
+  std::lock_guard<std::mutex> lifecycle(telemetryLifecycleLock);
+  std::lock_guard<std::mutex> lock(telemetryLock);
+  if (!fabricTelemetryPreflightLocked()) return ncclSuccess;
+
+  auto dev = fabricTelemetryFindLocked(deviceIndex);
+  if (dev != telemetryDevices.end()) {
+    dev->refCount++;
+    *acquired = true;
+    INFO(NCCL_INIT,
+         "fabric telemetry: GPU %u already sampled for comm 0x%lx rank %d, comm 0x%lx rank %d shares its reports",
+         deviceIndex, dev->commHash, dev->rank, commHash, rank);
+    return ncclSuccess;
+  }
+  if (!fabricTelemetryAddDeviceLocked(deviceIndex, commHash, rank)) return ncclSuccess;
+  *acquired = true;
+
+  // The sampler picks up devices added while it is running, so it is only started
+  // for the first one.
+  if (!telemetrySamplerThread.joinable()) {
+    telemetryStopFlag = false;
+    telemetrySamplerThread = std::thread(fabricTelemetrySamplerMain);
+    INFO(NCCL_INIT, "fabric telemetry: sampling all %u categories every %ldms",
+         (unsigned)AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX, telemetryIntervalMs);
+  }
+  INFO(NCCL_INIT, "fabric telemetry: sampling GPU %u for comm 0x%lx rank %d", deviceIndex, commHash, rank);
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex) {
+  std::lock_guard<std::mutex> lifecycle(telemetryLifecycleLock);
+
+  std::thread sampler;
+  uint64_t stoppedCommHash = 0;
+  int stoppedRank = -1;
+  {
+    std::lock_guard<std::mutex> lock(telemetryLock);
+    auto dev = fabricTelemetryFindLocked(deviceIndex);
+    if (dev == telemetryDevices.end() || --dev->refCount > 0) return ncclSuccess;
+
+    stoppedCommHash = dev->commHash;
+    stoppedRank = dev->rank;
+    fabricTelemetryFinalReportLocked(&*dev);
+    fabricTelemetryFreeDeviceLocked(&*dev);
+    telemetryDevices.erase(dev);
+    if (!telemetryDevices.empty()) return ncclSuccess;
+
+    telemetryStopFlag = true;
+    sampler = std::move(telemetrySamplerThread);
+  }
+
+  // Joined without telemetryLock, which the sampler holds whenever it is awake.
+  // telemetryLifecycleLock keeps an acquire from starting a second session here.
+  telemetryStopCv.notify_all();
+  if (sampler.joinable()) sampler.join();
+  INFO(NCCL_INIT, "fabric telemetry: stopped, last device was GPU %u for comm 0x%lx rank %d", deviceIndex,
+       stoppedCommHash, stoppedRank);
+  return ncclSuccess;
 }

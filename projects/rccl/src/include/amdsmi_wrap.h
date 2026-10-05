@@ -9,6 +9,7 @@
 #include <ctime>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "nccl.h"
 #include "device.h"
@@ -782,6 +783,253 @@ ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported);
  * @return ncclResult_t ncclSuccess on success
  */
 ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info);
+
+/**
+ * @brief Category mask selecting every telemetry category amd_smi defines
+ *
+ * UALOE, Switch, Crypto, PFC, NetPort and the two derived sets occupy a dense
+ * 0..MAX-1 range, so the full mask is derived from the enum rather than OR-ing
+ * the names. That keeps it correct if a category is added, and avoids depending
+ * on AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK(), which only the compat block above
+ * is guaranteed to define.
+ */
+constexpr uint32_t kAmdSmiFabricTelemetryAllCategories = (1u << AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX) - 1u;
+
+/*************************************************************************
+ * Fabric telemetry sample reduction
+ *
+ * Everything below turns one raw telemetry sample into a reportable summary. It
+ * is deliberately free of amd_smi calls, locks and logging so the part of the
+ * feature that is easy to get wrong -- cumulative-counter differencing, baseline
+ * invalidation, generation-count staleness -- can be exercised without a fabric.
+ * The session plumbing in amdsmi_wrap.cc supplies the samples and does the logging.
+ ************************************************************************/
+
+// Floor on the sampling period. One sample reads every counter of every category
+// of every device (~12k values per GPU) over the IFoE config character device, so
+// an unbounded period would let a diagnostic aid disturb the fabric it measures.
+constexpr int64_t kAmdSmiFabricTelemetryMinIntervalMs = 100;
+
+// Counters reported per category per sample. A category holds up to a few thousand
+// counters and an active fabric moves hundreds of them per interval, so a report
+// carries only the largest movers.
+constexpr int kAmdSmiFabricTelemetryTopMovers = 3;
+
+constexpr size_t kAmdSmiFabricTelemetryLabelSize = sizeof(amdsmi_fabric_label_t::text);
+
+/**
+ * @brief Clamp a requested sampling period to one that is safe to use
+ *
+ * @param[in] requestedMs Period as configured
+ * @return The period to sample at, or 0 if telemetry should stay off
+ */
+inline int64_t amdSmiFabricTelemetryResolveIntervalMs(int64_t requestedMs) {
+  if (requestedMs <= 0) return 0;
+  return requestedMs < kAmdSmiFabricTelemetryMinIntervalMs ? kAmdSmiFabricTelemetryMinIntervalMs : requestedMs;
+}
+
+inline const char* amdSmiFabricTelemetryCategoryName(unsigned category) {
+  switch (category) {
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE: return "UALOE";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH: return "Switch";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO: return "Crypto";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC: return "PFC";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT: return "NetPort";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE: return "DerivedUALOE";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT: return "DerivedNetPort";
+  default: return "Unknown";
+  }
+}
+
+struct amdsmiFabricTelemetryMover {
+  const char* name; //!< Counter name, owned by the name lookup (statically allocated by amd_smi)
+  char instance[kAmdSmiFabricTelemetryLabelSize + 1]; //!< Owning instance, NUL-terminated
+  uint64_t delta;                                     //!< Increase since the previous sample
+};
+
+// amd_smi instance labels are a fixed char array that need not be NUL-terminated,
+// so they cannot be handed to anything that expects a C string as-is.
+inline void amdSmiFabricTelemetryCopyLabel(char (&dst)[kAmdSmiFabricTelemetryLabelSize + 1], const char* src) {
+  memcpy(dst, src, kAmdSmiFabricTelemetryLabelSize);
+  dst[kAmdSmiFabricTelemetryLabelSize] = '\0';
+}
+
+// Keep the `capacity` largest deltas, largest first.
+inline void amdSmiFabricTelemetryRecordMover(amdsmiFabricTelemetryMover* top, int capacity,
+                                             const amdsmiFabricTelemetryMover& candidate) {
+  if (top[capacity - 1].delta >= candidate.delta) return;
+  top[capacity - 1] = candidate;
+  for (int slot = capacity - 1; slot > 0 && top[slot - 1].delta < top[slot].delta; slot--) {
+    std::swap(top[slot - 1], top[slot]);
+  }
+}
+
+/**
+ * @brief Running per-device reference point that samples are compared against
+ *
+ * `values` holds the previous sample flattened in category/instance/item traversal
+ * order. The firmware layout is fixed for a given device, so a flat index is a
+ * stable counter identity and avoids building a per-counter map on every tick.
+ */
+struct amdsmiFabricTelemetryBaseline {
+  std::vector<uint64_t> values;
+  uint64_t generation[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
+  bool established; //!< False until a full sample has been recorded to compare against
+};
+
+/**
+ * @brief What one category contributed to a sample
+ */
+struct amdsmiFabricTelemetryCategoryReport {
+  unsigned category;
+  uint64_t generation;
+  int itemCount;    //!< Counters present across every instance of the category
+  int changedCount; //!< Counters that increased since the previous sample
+  int moverCount;   //!< Valid entries in `movers`
+  bool stale;       //!< Generation count did not advance, so the firmware published nothing new
+  amdsmiFabricTelemetryMover movers[kAmdSmiFabricTelemetryTopMovers];
+};
+
+using amdsmiFabricTelemetryNameFn = const char* (*)(uint64_t telemId);
+
+/**
+ * @brief Compare a sample against the baseline and summarize what moved
+ *
+ * Counters are cumulative since firmware boot, so the reportable quantity is the
+ * difference between samples. The first call after a start, or after the sample
+ * layout changes, only records values and reports no deltas.
+ *
+ * @param[in] telemetry Sample to reduce
+ * @param[in,out] baseline Reference point, advanced to this sample on return
+ * @param[in] nameFn Resolves a counter ID to a name; must not return nullptr
+ * @param[out] reports One entry per category present, so it must have room for
+ * AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX entries
+ * @return Number of entries written to `reports`
+ */
+inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
+                                     amdsmiFabricTelemetryBaseline* baseline,
+                                     amdsmiFabricTelemetryNameFn nameFn,
+                                     amdsmiFabricTelemetryCategoryReport* reports) {
+  const bool rebaseline = !baseline->established;
+  const size_t previousCount = baseline->values.size();
+  size_t flat = 0;
+  int reportCount = 0;
+
+  for (unsigned cat = 0; cat < AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX; cat++) {
+    const amdsmi_fabric_telemetry_dataset_t* dataset = telemetry->datasets[cat];
+    if (dataset == nullptr) continue;
+
+    // The firmware republishes a whole dataset under a new generation count, so an
+    // unchanged count means there is nothing new to report. The values are still
+    // walked, because skipping them would misalign every later category's flat index.
+    const bool stale = !rebaseline && dataset->generation_count == baseline->generation[cat];
+    baseline->generation[cat] = dataset->generation_count;
+
+    amdsmiFabricTelemetryCategoryReport* report = &reports[reportCount++];
+    *report = {};
+    report->category = cat;
+    report->generation = dataset->generation_count;
+    report->stale = stale;
+
+    for (unsigned i = 0; i < dataset->instance_count; i++) {
+      const amdsmi_fabric_telemetry_instance_t* inst = &dataset->instances[i];
+      if (inst->items == nullptr) continue;
+
+      for (unsigned k = 0; k < inst->item_count; k++) {
+        const uint64_t value = inst->items[k].value;
+        report->itemCount++;
+
+        if (flat >= baseline->values.size()) {
+          baseline->values.push_back(value);
+          flat++;
+          continue;
+        }
+        const uint64_t prev = baseline->values[flat];
+        baseline->values[flat] = value;
+        flat++;
+
+        // A value that went backwards means the firmware restarted; treat it as a new
+        // reference point rather than reporting a huge wrapped delta.
+        if (stale || rebaseline || value <= prev) continue;
+
+        report->changedCount++;
+        amdsmiFabricTelemetryMover mover = {nameFn(inst->items[k].id), {}, value - prev};
+        amdSmiFabricTelemetryCopyLabel(mover.instance, inst->name.text);
+        amdSmiFabricTelemetryRecordMover(report->movers, kAmdSmiFabricTelemetryTopMovers, mover);
+        if (report->moverCount < kAmdSmiFabricTelemetryTopMovers) report->moverCount++;
+      }
+    }
+  }
+
+  // Trim entries describing counters the sample no longer carries. Growth already
+  // appended, so this only ever shrinks.
+  baseline->values.resize(flat);
+
+  // A category appearing or disappearing shifts every flat index after it, so any
+  // delta computed above compared unrelated counters. Compare against the count from
+  // before this walk, since the walk itself grows the vector. A rebaseline walk is
+  // exempt: it reported nothing to begin with, and the vector now holds the sample
+  // exactly, so it becomes the new reference point.
+  if (!rebaseline && flat != previousCount) {
+    baseline->established = false;
+    for (int r = 0; r < reportCount; r++) {
+      reports[r].changedCount = 0;
+      reports[r].moverCount = 0;
+    }
+  } else {
+    baseline->established = true;
+  }
+  return reportCount;
+}
+
+/**
+ * @brief Add a device to the process-wide fabric telemetry session
+ *
+ * A no-op unless RCCL_FABRIC_TELEMETRY_ENABLE is set. Adding the first device
+ * starts the sampler thread, which logs what moved every
+ * RCCL_FABRIC_TELEMETRY_INTERVAL_MS.
+ *
+ * Only the devices passed here are sampled, so a process reports on the GPUs it
+ * actually uses rather than on every GPU in the node. Without that, each rank of
+ * an n-GPU job would sample all n devices and emit n duplicate log streams.
+ *
+ * The telemetry allocation is per device and reference counted, not per
+ * communicator: several communicators (and every split) can share a device.
+ *
+ * Always returns ncclSuccess: telemetry is diagnostic, so being unable to collect
+ * it disables the feature instead of failing communicator creation.
+ *
+ * @param[in] deviceIndex amd_smi device index to sample, as returned by
+ * amd_smi_getDeviceIndexByPciBusId()
+ * @param[in] commHash hash of the calling communicator, tagged onto this device's
+ * report lines so they can be correlated with the rest of its init logging
+ * @param[in] rank the caller's rank within that communicator, tagged on alongside
+ * the hash because the device index alone does not say which rank owns the GPU.
+ * The counters are per device, so a device shared by several communicators keeps
+ * the identity of whichever opened it.
+ * @param[out] acquired Set to true if a reference was taken, meaning the caller
+ * owes a matching amd_smi_fabricTelemetryRelease() for the same device. False if
+ * telemetry is off or this device cannot supply it, in which case no release is
+ * needed.
+ * @return ncclResult_t ncclSuccess
+ */
+ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commHash, int rank, bool* acquired);
+
+/**
+ * @brief Drop a reference taken by amd_smi_fabricTelemetryAcquire()
+ *
+ * A device's last reference logs a closing report and frees its telemetry storage;
+ * the session's last device stops the sampler thread. Must only be called with a
+ * device index whose acquire set *acquired.
+ *
+ * The closing report covers the whole time the device was sampled rather than just
+ * the last period, so a run too short for the firmware to publish more than one
+ * generation still produces output where the periodic ticks found nothing new.
+ *
+ * @param[in] deviceIndex the index passed to the matching acquire
+ * @return ncclResult_t ncclSuccess
+ */
+ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex);
 
 /**
  * @brief Allocate storage for fabric telemetry data
