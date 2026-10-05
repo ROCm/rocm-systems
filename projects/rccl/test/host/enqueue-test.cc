@@ -1490,6 +1490,9 @@ struct CostTable {
   }
 };
 
+// A general row's mask bit, for the per-call algSelection cases below.
+constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
+
 ncclTaskColl CostTask(ncclFunc_t f, ncclDataType_t dt = ncclFloat32,
                       ncclDevRedOp_t devOp = ncclDevSum) {
   ncclTaskColl t{};
@@ -1710,10 +1713,6 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForwardsFuncAndBytesToTheTimeQuery)
 // A registry mask bit IS its tuning id, so a general row sits at (a * NCCL_NUM_PROTOCOLS + p).
 // The mask arrives as task->algMask, already parsed and validated upstream.
 
-namespace {
-constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
-}  // namespace
-
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGeneralRows) {
   // Before the filter the mask was parsed, validated and discarded, so naming RING_LL left
   // every eligible cell a candidate.
@@ -1825,6 +1824,38 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionCannotResurrectAnInelig
   EXPECT_FALSE(tbl.written(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE));
   EXPECT_LT(1, tbl.countWritten()) << "an unsatisfiable selection with force off is automatic";
   EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_ZeroCostNamedRowCountsAsEligible) {
+  // The eligibility rule must be `>= 0.0`, matching topoGetAlgoInfo's argmin. A zero cost is a
+  // real candidate, so tightening this to `> 0.0` would error on a perfectly selectable row.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  ScriptAllTimes(0.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(1, tbl.countWritten());
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NamingPatLiftsItsHeuristicSizeWindow) {
+  // The PAT size window exists to keep the AUTO selector off PAT outside a good range, and
+  // NCCL_ALGO already lifts it. A per-call selection is just as explicit, so it must lift it too,
+  // or one selection string succeeds at 1 MiB and hard-fails at 4 MiB on the same comm.
+  CostComm cc;
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllGather);
+  task.algMask = GeneralBit(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  ScriptAllTimes(1.0f);
+
+  // 64 MiB is outside every nNodes band of the window.
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
+                                             /*userAlgoInput=*/0, tbl.ptr()));
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE));
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_ScaledSentinelCellDoesNotCountAsEligible) {

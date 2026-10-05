@@ -2959,6 +2959,16 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     return ncclSuccess;
   }
 
+  // Per-call algSelection mask. A registry mask bit IS its tuning id, so a general row sits at
+  // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
+  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
+  // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
+  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
+  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // Naming a row per call is as explicit as naming it in NCCL_ALGO, so it lifts the same heuristic
+  // windows below. Without this, one selection string succeeds at 1 MiB and fails at 4 MiB.
+  const bool patNamed = (generalMask >> (NCCL_ALGO_PAT * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)) & 1;
+
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
     // CollNetDirect is only supported for up to 8 local GPUs
@@ -2974,7 +2984,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))
       continue;
     if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
-      if (!userAlgoInput) {
+      if (!userAlgoInput && !patNamed) {
         int nNodes = comm->nNodes;
         bool inRange = false;
         if (nNodes <= 4) {
@@ -3012,14 +3022,8 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     }
   }
 
-  // Per-call algSelection filter. A registry mask bit IS its tuning id, so a general row sits at
-  // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
-  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
-  // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
-  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
-  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
-  // A symmetric-only selection ("SYMK_LL") names no general row; leave the table as the fallback
-  // the symmetric scheduler declines to.
+  // Apply the filter. A symmetric-only selection ("SYMK_LL") names no general row; leave the table
+  // as the fallback the symmetric scheduler declines to.
   if (generalMask != 0) {
     // Decide before blanking. `>= 0.0`, not `!= IGNORE`: the fp8 relegation above scales a -1.0
     // sentinel cell to -1024.0, and topoGetAlgoInfo's argmin accepts only a non-negative time.
@@ -3032,8 +3036,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     // Every named row is ineligible here (NVLS_SIMPLE without NVLS). nccl.h.in makes that an error
     // by default; with force off the contract is automatic selection, so leave the table alone.
     if (!anyLeft && info->forceAlgSelection) {
-      WARN("algSelection names only general algorithm(s) that are unavailable for %s",
-           ncclFuncToString(info->func));
+      WARN("algSelection names only general algorithm(s) that are unavailable for %s", ncclFuncToString(info->func));
       return ncclInvalidArgument;
     }
     if (anyLeft) {
