@@ -239,14 +239,12 @@ inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
 }
 
 /// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
-/// @details Raw half decoding preserves signaling NaNs and subnormals; the
-/// instruction applies MODE input flushing and target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, uint32_t denorm_mode,
-                            bool ieee_mode) {
+/// @details Raw half decoding preserves signaling NaNs. The caller flushes the
+/// half under MODE before widening it; this applies target-specific NaN quieting.
+inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch,
+                            [[maybe_unused]] uint32_t denorm_mode, bool ieee_mode) {
   uint32_t bits = std::bit_cast<uint32_t>(source);
   const uint32_t magnitude = bits & 0x7fffffffu;
-  if (!(denorm_mode & 1u) && magnitude < 0x38800000u)
-    return bits & 0x80000000u;
   if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
     bits |= 0x00400000u;
   return bits;
@@ -810,10 +808,7 @@ enum class Arithmetic : uint8_t { ADD, SUB, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO }
 namespace detail {
 
 template <typename Float> inline Float flush_denormal(Float value) {
-  if constexpr (sizeof(Float) == 8)
-    return std::bit_cast<double>(denormal::flush<fp_format::F64>(std::bit_cast<uint64_t>(value)));
-  else
-    return pseudo_scalar::detail::flush_input_f32(value, 0);
+  return denormal::flush_value(value);
 }
 
 template <Arithmetic operation, typename Float>
@@ -896,21 +891,19 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 }
 
 /// @brief Evaluate F16 arithmetic before output modifiers and destination rounding.
+/// @details The caller flushes each source half under MODE before widening it.
 template <Arithmetic operation>
 inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode,
-                             uint32_t denorm_mode) {
+                             [[maybe_unused]] uint32_t denorm_mode) {
   detail::ScopedFenv environment(round_mode);
-  lhs = pseudo_scalar::detail::flush_input_f16(lhs, denorm_mode);
-  rhs = pseudo_scalar::detail::flush_input_f16(rhs, denorm_mode);
-  addend = pseudo_scalar::detail::flush_input_f16(addend, denorm_mode);
   return detail::evaluate_arithmetic<operation>(static_cast<double>(lhs), static_cast<double>(rhs),
                                                 static_cast<double>(addend));
 }
 
 /// @brief Scale an F16 input exactly before output modifiers and final F16 rounding.
-inline double ldexp_f16(float value, int32_t adjustment, uint32_t denorm_mode) {
+/// @details The caller flushes the source half under MODE before widening it.
+inline double ldexp_f16(float value, int32_t adjustment, [[maybe_unused]] uint32_t denorm_mode) {
   detail::ScopedFenv environment(0);
-  value = pseudo_scalar::detail::flush_input_f16(value, denorm_mode);
   // Every finite nonzero half lies in [2^-24, 2^16). Bounding the adjustment
   // keeps the intermediate normal in F64 while retaining all F16 rounding
   // outcomes, including directed underflow and output scaling by up to four.

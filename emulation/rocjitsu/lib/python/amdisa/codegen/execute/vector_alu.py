@@ -21,6 +21,19 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
 
+# F16 helpers that expect their source flushed under MODE before widening.
+_F16_FLUSHED_SOURCE_OPS = frozenset(
+    {'exp2', 'log2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos'}
+)
+
+
+def _flush_f16(read: str) -> str:
+    """Flush a raw F16 register read under MODE before it is widened."""
+    return (
+        f'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>({read}, '
+        'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()))'
+    )
+
 
 def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
     return (
@@ -157,7 +170,7 @@ def gen_vector_unary(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16_mode(s, wf.fp16_ovfl()));'
             ),
             'f32_f16': (
-                f'    float s = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));\n'
+                f'    float s = util::f16_to_f32(static_cast<uint16_t>({_flush_f16(f"amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)")}));\n'
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::fp_mode::cvt_f32_f16(s, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));'
             ),
             'f16_u16': (
@@ -422,6 +435,8 @@ def gen_vector_unary(
             if is_vop3
             else f'amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)'
         )
+        if op in _F16_FLUSHED_SOURCE_OPS:
+            s_read = _flush_f16(s_read)
         L.append('    float s = util::f16_to_f32(static_cast<uint16_t>(' f'{s_read}));')
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
@@ -642,6 +657,8 @@ def gen_vector_binop(
             if is_vop3
             else f'amdgpu::RegisterAccess(wf).read_lane({s1}, lane)'
         )
+        if op == 'ldexp':
+            s0_read = _flush_f16(s0_read)
         L.append(
             '    float sv0 = util::f16_to_f32(static_cast<uint16_t>(' f'{s0_read}));'
         )

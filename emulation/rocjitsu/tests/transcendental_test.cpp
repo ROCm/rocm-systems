@@ -361,7 +361,11 @@ TEST(TranscendentalTest, HalfLogExpCompleteHardwareDigests) {
       for (bool quiet : {false, true}) {
         uint64_t digest = 14695981039346656037ull;
         for (uint32_t input = 0; input < 65536; ++input) {
-          const float value = util::f16_to_f32(static_cast<uint16_t>(input));
+          // Generated bodies flush the source half under MODE before widening it.
+          const uint32_t flushed =
+              rocjitsu::amdgpu::input_denormal::flush_input<rocjitsu::amdgpu::fp_format::F16>(
+                  input, rocjitsu::amdgpu::input_denormal::Policy::make(sample.denorm_mode));
+          const float value = util::f16_to_f32(static_cast<uint16_t>(flushed));
           const float result =
               logarithm ? log_exp_f16<true>(value, sample.denorm_mode, sample.overflow, quiet)
                         : log_exp_f16<false>(value, sample.denorm_mode, sample.overflow, quiet);

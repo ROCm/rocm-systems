@@ -37,6 +37,13 @@ namespace {
 
 using namespace rocjitsu;
 
+// Generated bodies flush the source half under MODE before widening it.
+float flushed_f16_source(uint16_t half, uint32_t denorm_mode) {
+  return util::f16_to_f32(
+      static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+          uint32_t{half}, amdgpu::input_denormal::Policy::make(denorm_mode))));
+}
+
 using BaseEncodingWords = std::array<uint32_t, 2>;
 using InstructionWords = std::array<uint32_t, 3>;
 using EncodingLookup = std::optional<BaseEncodingWords> (*)(std::string_view);
@@ -938,8 +945,9 @@ TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModi
                           false, round_mode, denorm_mode, omod, false, false),
                       test[omod + 1]);
         EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
-                      amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(0x0001), false, false,
-                      round_mode, denorm_mode, 0, false, false),
+                      amdgpu::pseudo_scalar::Operation::RSQ,
+                      flushed_f16_source(0x0001, denorm_mode), false, false, round_mode,
+                      denorm_mode, 0, false, false),
                   (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
       }
   }
@@ -1000,13 +1008,13 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
                                                0, 0, 0, false),
             0x80000000u);
 
-  const float f16_negative_minimum = util::f16_to_f32(0x8001u);
   const float f16_negative_maximum = util::f16_to_f32(0xFBFFu);
-  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT, f16_negative_minimum, false,
-                                                       false, 0, 0, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT,
+                                                       flushed_f16_source(0x8001u, 0), false, false,
+                                                       0, 0, 0, false, false),
             0x00008000u);
   const uint32_t f16_allowed_negative_input = amdgpu::transcendental::execute_pseudo_f16(
-      Operation::SQRT, f16_negative_minimum, false, false, 0, 1, 0, false, false);
+      Operation::SQRT, flushed_f16_source(0x8001u, 1), false, false, 0, 1, 0, false, false);
   EXPECT_EQ(f16_allowed_negative_input & 0x7C00u, 0x7C00u);
   EXPECT_NE(f16_allowed_negative_input & 0x03FFu, 0u);
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,

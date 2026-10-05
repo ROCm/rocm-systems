@@ -37,21 +37,6 @@ struct EvaluationResult {
   ResultProvenance provenance;
 };
 
-inline float flush_input_f32(float value, uint32_t denorm_mode) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((denorm_mode & 1u) == 0 && (bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
-    return std::copysign(0.0f, value);
-  return value;
-}
-
-inline float flush_input_f16(float value, uint32_t denorm_mode) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if ((denorm_mode & 1u) == 0 && magnitude != 0 && magnitude < 0x38800000u)
-    return std::bit_cast<float>(bits & 0x80000000u);
-  return value;
-}
-
 inline float quiet_nan(float value) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
   // Test signaling NaNs specifically: a general NaN check can become a host

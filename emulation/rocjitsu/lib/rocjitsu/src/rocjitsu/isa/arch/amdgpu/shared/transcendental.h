@@ -65,7 +65,8 @@ inline float exp_f32(float x, bool quiet_snan = true) {
 }
 
 namespace detail {
-// The caller establishes nearest rounding and preserves the host environment.
+// The caller establishes nearest rounding and preserves the host environment,
+// and flushes the source half under MODE before widening it (input_denormal.h).
 // The returned F32 value represents the already rounded architectural half.
 template <bool Logarithm>
 inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
@@ -77,11 +78,6 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
     if constexpr (Logarithm)
       return bits & 0x80000000u ? std::bit_cast<float>(0xffc00000u) : x;
     return bits & 0x80000000u ? 0.0f : x;
-  }
-  if (!(denorm_mode & 1u) && magnitude < 0x38800000u) {
-    bits &= 0x80000000u;
-    magnitude = 0;
-    x = std::bit_cast<float>(bits);
   }
   double value;
   if constexpr (Logarithm) {
@@ -137,23 +133,24 @@ inline float cos_f32(float x, uint32_t denorm_mode = 3, bool quiet_snan = true) 
   return util::amdgpu_trig_f32(x, true, denorm_mode, quiet_snan);
 }
 
-/// @brief Half transcendental operations share input, rounding and output policies.
+/// @brief Half transcendental operations share rounding and output policies.
 /// @details Evaluate in F32, then round to half before applying any modifiers.
-/// FP16_OVFL also saturates infinity produced from zero or a flushed input.
+/// The caller flushes the source half under MODE before widening it
+/// (input_denormal.h). FP16_OVFL also saturates infinity produced from zero or
+/// a flushed input.
 enum class HalfOperation { RCP, RSQ, SQRT, SIN, COS };
 
 template <HalfOperation Op>
 inline float map_f16(float source, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
-  const float input = pseudo_scalar::detail::flush_input_f16(source, denorm_mode);
   float value;
   if constexpr (Op == HalfOperation::RCP)
-    value = util::amdgpu_rcp_f32(input, quiet_snan);
+    value = util::amdgpu_rcp_f32(source, quiet_snan);
   else if constexpr (Op == HalfOperation::RSQ)
-    value = util::amdgpu_rsq_f32(input, quiet_snan);
+    value = util::amdgpu_rsq_f32(source, quiet_snan);
   else if constexpr (Op == HalfOperation::SQRT)
-    value = util::amdgpu_sqrt_f32(input, quiet_snan);
+    value = util::amdgpu_sqrt_f32(source, quiet_snan);
   else
-    value = util::amdgpu_trig_f32(input, Op == HalfOperation::COS, 3, quiet_snan);
+    value = util::amdgpu_trig_f32(source, Op == HalfOperation::COS, 3, quiet_snan);
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   if (fp16_ovfl && (bits & 0x7fffffffu) == 0x7f800000u &&
       (std::bit_cast<uint32_t>(source) & 0x7fffffffu) < 0x7f800000u)
@@ -174,6 +171,7 @@ inline util::native<float> map_f16_simd(util::native<float> source, uint32_t den
 /// @brief Apply the vector half mapping and result stages to a pseudo-scalar op.
 /// @details Physical gfx1201 ignores guest rounding for every half transcendental.
 /// Half rounding and output-denormal handling precede OMOD, just as for vectors.
+/// The caller flushes the source half under MODE before widening it.
 inline uint32_t execute_pseudo_f16(pseudo_scalar::Operation operation, float source, bool absolute,
                                    bool negate, [[maybe_unused]] uint32_t round_mode,
                                    uint32_t denorm_mode, uint32_t omod, bool clamp,
