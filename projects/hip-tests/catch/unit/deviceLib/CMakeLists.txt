@@ -72,6 +72,7 @@ set(AMD_TEST_SRC
     fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
+    ocp_scale_gate.cc
     memcpy_async.cc
     bfloat16_atomic_test.cc
     fp16_atomic_test.cc
