@@ -13,7 +13,11 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import (
+    CommaListAction,
+    non_negative_int,
+    omniarg_parser,
+)
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
@@ -255,6 +259,49 @@ def test_help_defaults_match_parser_defaults():
             if isinstance(value, list):
                 value = ", ".join(str(item) for item in value)
             assert match.group(2) == str(value), name
+
+
+# =============================================================================
+# Comma separated lists
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "dest", "expected"),
+    [
+        (["-R", "FP16,FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["-R", "FP16", "FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["-R", "FP16", "-R", "FP32"], "roofline_data_type", ["FP16", "FP32"]),
+        (["--cols", "0,2"], "cols", [0, 2]),
+    ],
+    ids=["comma", "space", "repeated", "item_type"],
+)
+def test_comma_list_forms_are_equivalent(argv, dest, expected):
+    assert getattr(build_args(["analyze"] + argv), dest) == expected
+
+
+@pytest.mark.parametrize(
+    ("options", "value", "error"),
+    [
+        ({"item_choices": ["A", "B"]}, "A,C", "invalid choice: 'C'"),
+        ({"item_type": int}, "1,x", "invalid int value: 'x'"),
+        ({"item_type": non_negative_int}, "1,-2", "must be a non-negative integer"),
+    ],
+    ids=["choice", "value_error", "type_error_message"],
+)
+def test_comma_list_rejects_bad_items(options, value, error, capsys):
+    parser = argparse.ArgumentParser(prog="rocprof-compute")
+    parser.add_argument("--items", action=CommaListAction, **options)
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--items", value])
+    assert exc.value.code == 2
+    assert f"argument --items: {error}" in capsys.readouterr().err
+
+
+def test_comma_list_append_keeps_occurrences():
+    args = build_args(["analyze", "-k", "1,2", "-k", "3", "-d", "4,5"])
+    assert args.gpu_kernel == [[1, 2], [3]]
+    assert args.gpu_dispatch_id == [["4", "5"]]
 
 
 # =============================================================================

@@ -412,6 +412,7 @@ Filtering options
 ``-b``, ``--block <block-id|block-alias|metric-id>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Multiple values are separated by commas, for example ``-b 2,5``.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
@@ -451,7 +452,7 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -b 10 7 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b 10,7 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -480,7 +481,7 @@ The following example only collects the counters required to calculate ``Total V
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -b 11.1.1 12.1.1 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b 11.1.1,12.1.1 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -1160,7 +1161,7 @@ Torch operator mapping can be combined with other profiling options. Use
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute profile -b 11 12 --experimental --torch-trace --name mnist -- python train.py
+   $ rocprof-compute profile -b 11,12 --experimental --torch-trace --name mnist -- python train.py
 
    # Combine with iteration multiplexing
    $ rocprof-compute profile --experimental --torch-trace --name mnist --iteration-multiplexing kernel -- python train.py

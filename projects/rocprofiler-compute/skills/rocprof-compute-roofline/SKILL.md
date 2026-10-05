@@ -85,11 +85,11 @@ the hierarchy.
 ```bash
 # Ceilings for the precision the kernel actually uses
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -R FP16 BF16
+    -R FP16,BF16
 
 # Ceilings for a specific level
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -m HBM L2
+    -m HBM,L2
 ```
 
 `-R` defaults to FP32. A mixed-precision or matrix kernel compared against the

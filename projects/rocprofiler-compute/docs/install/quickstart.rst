@@ -216,14 +216,14 @@ Dynamic process attachment can be performed with specific block IDs, verbose out
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV --attach-pid <process id>
+    $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1,4.1.1,5.1.1 --no-roof -VVV --attach-pid <process id>
 
 Use multiple blocks (5 and 7) for detailed metric collection
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile --name vcopy -b 5 7 -- ./vcopy -n 1048576 -b 256
+    $ rocprof-compute profile --name vcopy -b 5,7 -- ./vcopy -n 1048576 -b 256
 
 
 .. _analysis-quickstart:
@@ -288,14 +288,14 @@ Show or display System speed-of-light (2) and roofline (4) analysis
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2 4
+   rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2,4
 
 Analyze dispatches 12 and 34 from mixbench workload with 3 decimal precision:
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35 --decimal 3
+   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13,35 --decimal 3
 
 Compare two workloads to evaluate the impact of code optimizations
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
