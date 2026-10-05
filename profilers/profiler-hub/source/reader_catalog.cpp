@@ -35,12 +35,12 @@ void
 reader_catalog_t::build_string_list(data_storage::schema_v3::read_statements& stmts)
 {
     const auto& statement   = stmts.string_statement();
-    const auto  string_list = statement().to_vector();
+    auto        string_list = statement().to_vector();
 
     string_utility.reserve(string_list.size());
-    for(const auto& string : string_list)
+    for(auto& string : string_list)
     {
-        string_utility.emplace(string.id, string.value);
+        string_utility.emplace(string.id, std::move(string.value));
     }
 }
 
