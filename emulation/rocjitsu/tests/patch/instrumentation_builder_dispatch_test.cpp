@@ -55,7 +55,8 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_v_readlane_b32(20, 10, 3, ROCJITSU_CODE_ARCH_CDNA4),
             (std::array<uint32_t, 2>{0xd2890014u, 0x0001070au}));
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0070u);
-  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0070u);
+  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_CDNA4),
+            (std::vector<uint32_t>{0xbf8c0070u}));
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8cc07fu);
@@ -64,12 +65,15 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8cc07fu);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf890007u);
+  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA3),
+            (std::vector<uint32_t>{0xbf89fc07u, 0xbc7c0000u}));
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
-  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA3), 0xbc7c0000u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
   EXPECT_EQ(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc80000u);
-  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc90000u);
+  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4),
+            (std::vector<uint32_t>{0xbfc90000u}));
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc00000u);
   EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc10000u);
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA5), 0xbfc00000u);

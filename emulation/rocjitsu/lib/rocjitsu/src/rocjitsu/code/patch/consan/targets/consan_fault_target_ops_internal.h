@@ -13,6 +13,9 @@ namespace rocjitsu::consan::fault_target_detail {
 [[nodiscard]] AtomicFaultEncoding
 classify_cdna3_cdna4_atomic_fault_encoding(std::string_view mnemonic, uint32_t size);
 
+[[nodiscard]] AtomicFaultEncoding classify_rdna3_atomic_fault_encoding(std::string_view mnemonic,
+                                                                       uint32_t size);
+
 [[nodiscard]] AtomicFaultEncoding
 classify_rdna4_cdna5_atomic_fault_encoding(std::string_view mnemonic, uint32_t size);
 

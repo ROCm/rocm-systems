@@ -17,6 +17,8 @@ AtomicFaultEncoding classify_atomic_fault_encoding(std::string_view mnemonic, ui
                                                    rj_code_arch_t arch) {
   if (arch_is_cdna3_or_cdna4(arch))
     return fault_target_detail::classify_cdna3_cdna4_atomic_fault_encoding(mnemonic, size);
+  if (arch_is_rdna3(arch))
+    return fault_target_detail::classify_rdna3_atomic_fault_encoding(mnemonic, size);
   if (arch_is_rdna4_or_cdna5(arch))
     return fault_target_detail::classify_rdna4_cdna5_atomic_fault_encoding(mnemonic, size);
   return AtomicFaultEncoding::Unsupported;
@@ -27,8 +29,8 @@ bool atomic_fault_supports_scope(AtomicFaultEncoding encoding) {
 }
 
 bool atomic_fault_supports_order(AtomicFaultEncoding encoding) {
-  return encoding == AtomicFaultEncoding::CdnaFlat || encoding == AtomicFaultEncoding::FlatLike ||
-         encoding == AtomicFaultEncoding::Buffer;
+  return encoding == AtomicFaultEncoding::CdnaFlat || encoding == AtomicFaultEncoding::Rdna3Flat ||
+         encoding == AtomicFaultEncoding::FlatLike || encoding == AtomicFaultEncoding::Buffer;
 }
 
 bool atomic_fault_supports_address(AtomicFaultEncoding encoding) {

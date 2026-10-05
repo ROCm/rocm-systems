@@ -408,8 +408,13 @@ build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t
 
 template <bool Store, bool IncludesLds>
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_memory0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    if constexpr (Store) {
+      // GFX11 needs two instructions to drain both vector stores and LDS.
+      return IncludesLds ? std::nullopt : build_rdna3_s_wait_vscnt0(arch);
+    }
     return IncludesLds ? build_rdna3_s_wait_vmcnt_lgkmcnt0(arch) : build_rdna3_s_wait_vmcnt0(arch);
+  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return IncludesLds ? build_cdna3_s_wait_vmcnt_lgkmcnt0(arch) : build_cdna3_s_wait_vmcnt0(arch);
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
@@ -425,9 +430,19 @@ build_s_wait_flat_load0(rj_code_arch_t arch) {
   return build_s_wait_memory0<false, true>(arch);
 }
 
-[[nodiscard]] inline constexpr std::optional<uint32_t>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_s_wait_flat_store0(rj_code_arch_t arch) {
-  return build_s_wait_memory0<true, true>(arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    const auto lds = build_rdna3_s_wait_lgkmcnt0(arch);
+    const auto store = build_rdna3_s_wait_vscnt0(arch);
+    if (!lds || !store)
+      return std::nullopt;
+    return std::vector<uint32_t>{*lds, *store};
+  }
+  const auto wait = build_s_wait_memory0<true, true>(arch);
+  if (!wait)
+    return std::nullopt;
+  return std::vector<uint32_t>{*wait};
 }
 
 // Instrumentation-owned global memory never aliases LDS. Keep these waits

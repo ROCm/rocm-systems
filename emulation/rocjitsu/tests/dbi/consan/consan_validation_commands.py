@@ -722,7 +722,11 @@ def _doctor(
         python = _sharktank_python()
         try:
             completed = subprocess.run(
-                [str(python), "-c", "import iree.compiler, iree.runtime, numpy, pytest"],
+                [
+                    str(python),
+                    "-c",
+                    "import iree.compiler, iree.runtime, numpy, pytest",
+                ],
                 env=_clean_environment(
                     None, sharktank_workloads[0], None, target, workspace
                 ),
@@ -835,10 +839,19 @@ def _kernel_allowlist_file(target: str | None, workload: Workload) -> Path | Non
     try:
         names = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:
-        raise ValidationError(f"cannot read generated kernel allowlist {path}: {error}") from error
-    if not names or len(names) != len(set(names)) or any(
-        not name.strip() or name != name.strip() or "\x00" in name
-        or name.startswith("#") for name in names
+        raise ValidationError(
+            f"cannot read generated kernel allowlist {path}: {error}"
+        ) from error
+    if (
+        not names
+        or len(names) != len(set(names))
+        or any(
+            not name.strip()
+            or name != name.strip()
+            or "\x00" in name
+            or name.startswith("#")
+            for name in names
+        )
     ):
         raise ValidationError(f"invalid generated kernel allowlist: {path}")
     return path
@@ -907,7 +920,13 @@ def _clean_environment(
                 raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_MODE")
             if delay_mode == "sleep_wave" and int(delay or "0") != 0:
                 if target not in {"gfx1201", "gfx1250"} or int(delay) not in {
-                    1, 3, 7, 15, 31, 63, 127
+                    1,
+                    3,
+                    7,
+                    15,
+                    31,
+                    63,
+                    127,
                 }:
                     raise ValidationError(
                         "nonzero sleep_wave requires gfx1201/gfx1250 and maximum "
@@ -926,8 +945,11 @@ def _clean_environment(
     preset = os.environ.get("CONSAN_VALIDATION_DEFAULT_PRESET")
     report_cap = os.environ.get("CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE")
     if profile == "default" and report_cap is not None:
-        if (not report_cap.isascii() or not report_cap.isdecimal()
-                or not 0 < int(report_cap) <= 1024 * 1024 * 1024):
+        if (
+            not report_cap.isascii()
+            or not report_cap.isdecimal()
+            or not 0 < int(report_cap) <= 1024 * 1024 * 1024
+        ):
             raise ValidationError("invalid CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE")
         environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"] = report_cap
     banks = os.environ.get("CONSAN_VALIDATION_WATCHPOINT_BANKS")
@@ -1016,8 +1038,15 @@ def _setting_metadata(name: str) -> dict:
     }:
         category = "instrumentation-selection"
     elif name in ORDINARY_FORBIDDEN_ENVIRONMENT or name in {
+        "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES",
+        "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE",
+        "RJ_CONSAN_PRESET",
         "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
         "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
+        "RJ_CONSAN_SC_DELAY",
+        "RJ_CONSAN_SC_DELAY_MODE",
+        "RJ_CONSAN_SC_DELAY_READS_ONLY",
+        "RJ_CONSAN_WATCHPOINT_BANKS",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT",
         "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
@@ -1265,20 +1294,30 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
-        disable_sleep = os.environ.get("CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP")
+        disable_sleep = os.environ.get(
+            "CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP"
+        )
         if disable_sleep not in (None, "0", "1"):
-            raise ValidationError("invalid CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP")
+            raise ValidationError(
+                "invalid CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP"
+            )
         if disable_sleep == "1":
             command.append("--disable-benchmark-sleep")
         skip_timing = os.environ.get("CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES")
         if skip_timing not in (None, "0", "1"):
-            raise ValidationError("invalid CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES")
+            raise ValidationError(
+                "invalid CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES"
+            )
         if skip_timing == "1":
             if overhead or minimum_timed_ms != 0:
-                raise ValidationError("cannot skip Tensile timing dispatches for a timing measurement")
+                raise ValidationError(
+                    "cannot skip Tensile timing dispatches for a timing measurement"
+                )
             command.append("--skip-timing-dispatches")
         inner_timeout = workload.tensile_inner_timeout_seconds
-        timeout_override = os.environ.get("CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS")
+        timeout_override = os.environ.get(
+            "CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS"
+        )
         if timeout_override is not None:
             if (
                 not timeout_override.isascii()

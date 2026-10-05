@@ -338,6 +338,40 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   }));
 }
 
+TEST(ConSan, FaultAtomicWeakenOrderRemovesRdna3VscntReleaseBoundary) {
+  const RdnaWorkgroupClauseReleaseFixture fixture =
+      make_rdna_workgroup_clause_release_code_object(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_FALSE(fixture.bytes.empty());
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.fault_atomic_weaken_order = true;
+  options.fault_atomic_order_edge = AtomicOrderEdge::Release;
+  options.fault_atomic_index = 0;
+  options.fault_require_exactly_one = true;
+
+  const TransformArtifacts result = test_lower_consan(fixture.bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  const auto mutation = std::ranges::find_if(result.patches, [](const PatchInfo &patch) {
+    return patch.phase == PatchPhase::Mutation && patch.kind == PatchKind::InlineAtomicOrderRewrite;
+  });
+  ASSERT_NE(mutation, result.patches.end());
+  EXPECT_EQ(mutation->anchor_offset, fixture.wait_text_offset);
+  EXPECT_EQ(mutation->original_size, sizeof(uint32_t));
+  ASSERT_FALSE(result.replacement.empty());
+  const uint64_t text_file_offset = result.program_inventory.kernels().front().text_file_offset;
+  uint32_t weakened_wait = 0;
+  std::memcpy(&weakened_wait,
+              result.replacement.data() + text_file_offset + fixture.wait_text_offset,
+              sizeof(weakened_wait));
+  EXPECT_EQ(weakened_wait, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("removed associated s_waitcnt_vscnt") != std::string::npos;
+  }));
+}
+
 TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
   const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});

@@ -1549,8 +1549,9 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
       if (fence != nullptr)
         removed_boundary += "/";
-      removed_boundary += encoding == AtomicFaultEncoding::CdnaFlat
-                              ? "s_waitcnt"
+      removed_boundary += encoding == AtomicFaultEncoding::CdnaFlat ? "s_waitcnt"
+                          : encoding == AtomicFaultEncoding::Rdna3Flat
+                              ? "s_waitcnt_vscnt"
                               : (wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt");
     }
     result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +

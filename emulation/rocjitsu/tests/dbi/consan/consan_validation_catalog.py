@@ -38,6 +38,7 @@ EMPIRICAL_MAX_INNER_REPETITIONS = 1_000_000
 PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
+ATOMIC_ORDER_ONLY_TARGETS = NATIVE_CDNA_TARGETS | {"gfx1100"}
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
 QWEN_BUILD_MANIFEST_SCHEMA_VERSION = 1
@@ -1355,17 +1356,23 @@ def _validate_workload_manifest() -> None:
 _validate_workload_manifest()
 
 
+def _target_admits_workload(target: str, workload: Workload) -> bool:
+    if workload.targets is not None and target not in workload.targets:
+        return False
+    # Native gtests are architecture-specific even when their canonical row is
+    # shared. Admit them only when the target has a complete command registry.
+    return workload.kind != "gtest" or target in NATIVE_GTEST_TARGETS
+
+
 def _workloads_for_target(target: str) -> tuple[Workload, ...]:
     return tuple(
-        workload
-        for workload in WORKLOADS
-        if workload.targets is None or target in workload.targets
+        workload for workload in WORKLOADS if _target_admits_workload(target, workload)
     )
 
 
 def _workload_for_target(target: str, workload_id: str) -> Workload:
     workload = WORKLOAD_BY_ID[workload_id]
-    if workload.targets is not None and target not in workload.targets:
+    if not _target_admits_workload(target, workload):
         raise ValidationError(f"{target} manifest excludes workload: {workload_id}")
     return workload
 
@@ -1376,9 +1383,9 @@ def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         # Supporting rows may deliberately carry only an exact oracle and
         # coverage denominator while the family fault remains on a sibling.
         return ()
-    if target in NATIVE_CDNA_TARGETS:
-        # CDNA compiler atomics encode ordering through surrounding cache and
-        # wait operations, but have no RDNA4/CDNA5-style instruction scope field.
+    if target in ATOMIC_ORDER_ONLY_TARGETS:
+        # CDNA3/4 and RDNA3 encode ordering through surrounding cache and wait
+        # operations, but have no RDNA4/CDNA5-style instruction scope field.
         families = tuple(
             family for family in families if family != "atomic-weaken-scope"
         )
@@ -1404,6 +1411,7 @@ class _NativeGtestTarget:
     d128_block_run_timeout_seconds: int | None = None
     d128_pressure_run_timeout_seconds: int | None = None
     matrix_run_timeout_seconds: int | None = None
+    streamk_oracle_prefix: str = ""
 
 
 def _cdna_gtest_target(
@@ -1428,6 +1436,17 @@ def _cdna_gtest_target(
 
 
 NATIVE_GTEST_TARGETS = {
+    "gfx1100": _NativeGtestTarget(
+        id="gfx1100",
+        build_dir="hip-moi-build-gfx1100-tests",
+        executable_family="gfx1100",
+        matrix_executable_family="gfx1100_wmma",
+        suite_family="Gfx1100",
+        matrix_suite_family="Gfx1100Wmma",
+        matrix_operation="Wmma",
+        d128_block_oracle="ExactContextMatchesHostReference",
+        streamk_oracle_prefix="ConSanOracle",
+    ),
     "gfx1201": _NativeGtestTarget(
         id="gfx1201",
         build_dir="hip-moi-build",
@@ -1568,7 +1587,8 @@ def _streamk_overrides(
                 f"{target.matrix_executable_family}_{executable_stem}",
             ),
             f"HipMoi{target.matrix_suite_family}{suite_stem}."
-            f"{oracle_stem}{target.matrix_operation}Partials",
+            f"{target.streamk_oracle_prefix}{oracle_stem}"
+            f"{target.matrix_operation}Partials",
         )
     return overrides
 
@@ -1958,13 +1978,16 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
     override = dict(TARGET_WORKLOAD_OVERRIDES.get(target, {}).get(workload.id, {}))
     if workload.kind == "gtest":
         native_overrides = NATIVE_GTEST_WORKLOAD_OVERRIDES.get(target)
-        if native_overrides is not None:
-            native_override = native_overrides.get(workload.id)
-            if native_override is None:
-                raise ValidationError(
-                    f"{target} gtest workload has no target-specific registry entry: {workload.id}"
-                )
-            override.update(native_override)
+        if native_overrides is None:
+            raise ValidationError(
+                f"{target} gtest workload has no target-specific registry"
+            )
+        native_override = native_overrides.get(workload.id)
+        if native_override is None:
+            raise ValidationError(
+                f"{target} gtest workload has no target-specific registry entry: {workload.id}"
+            )
+        override.update(native_override)
     resolved = replace(workload, **override) if override else workload
     _validate_tensile_sharding(resolved)
     return resolved

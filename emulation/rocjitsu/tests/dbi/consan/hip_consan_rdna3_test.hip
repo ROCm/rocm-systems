@@ -43,6 +43,66 @@ int main(int argc, char **argv) {
 
 namespace {
 
+__global__ __launch_bounds__(32) void rdna3_publication_store_for_instrumentation(
+    uint8_t *out, uint32_t unaligned) {
+  __shared__ uint32_t lds[32];
+  const uint32_t lds_address = threadIdx.x * sizeof(uint32_t);
+  uint8_t *address = out + 8u * threadIdx.x + unaligned;
+  const uint32_t value = 0x12345600u + threadIdx.x;
+  asm volatile("" : : "v"(lds) : "memory");
+  asm volatile("ds_store_b32 %[address], %[value]\n\t" RJ_CONSAN_RDNA3_NOP_CAVE
+               "s_waitcnt lgkmcnt(0)\n\t"
+               :
+               : [address] "v"(lds_address), [value] "v"(value)
+               : "memory");
+  // Use the original FLAT store even for an unaligned address. A C++ uint32_t
+  // dereference would impose alignment before instrumentation sees the access.
+  asm volatile("s_waitcnt_vscnt null, 0\n\t"
+               "flat_store_b32 %[address], %[value]\n\t" RJ_CONSAN_RDNA3_NOP_CAVE
+               "s_waitcnt lgkmcnt(0)\n\t"
+               "s_waitcnt_vscnt null, 0\n\t"
+               :
+               : [address] "v"(address), [value] "v"(value)
+               : "memory");
+  // A qualified atomic makes this owner participate in publication tracking.
+  auto *phase = reinterpret_cast<uint32_t *>(out + 32u * 8u);
+  if (threadIdx.x == 0u)
+    __hip_atomic_fetch_add(phase, 32u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+  uint32_t loaded;
+  asm volatile("ds_load_b32 %[loaded], %[address]\n\t" RJ_CONSAN_RDNA3_NOP_CAVE
+               "s_waitcnt lgkmcnt(0)\n\t"
+               : [loaded] "=v"(loaded)
+               : [address] "v"(lds_address)
+               : "memory");
+}
+
+void run_publication_store(uint32_t unaligned) {
+  std::array<uint8_t, 32u * 8u + sizeof(uint32_t)> output;
+  output.fill(0xa5u);
+  const uint32_t initial_phase = 0u;
+  std::memcpy(output.data() + 32u * 8u, &initial_phase, sizeof(initial_phase));
+  auto expected = output;
+  const uint32_t final_phase = 32u;
+  std::memcpy(expected.data() + 32u * 8u, &final_phase, sizeof(final_phase));
+  for (uint32_t lane = 0; lane < 32u; ++lane) {
+    const uint32_t value = 0x12345600u + lane;
+    std::memcpy(expected.data() + 8u * lane + unaligned, &value, sizeof(value));
+  }
+  uint8_t *device_output = nullptr;
+  HIP_ASSERT(hipMalloc(&device_output, output.size()));
+  HIP_ASSERT(hipMemcpy(device_output, output.data(), output.size(), hipMemcpyHostToDevice));
+  rdna3_publication_store_for_instrumentation<<<1, 32>>>(device_output, unaligned);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(output.data(), device_output, output.size(), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_output));
+  EXPECT_EQ(output, expected);
+}
+
+TEST(ConSanRdna3Test, AlignedPublicationStorePreservesOutput) { run_publication_store(0u); }
+
+TEST(ConSanRdna3Test, UnalignedPublicationStorePreservesOutput) { run_publication_store(1u); }
+
 __global__
 __launch_bounds__(64) void rdna3_barrier_ordered_accesses_for_instrumentation(uint32_t *out) {
   __shared__ volatile uint32_t lds[32];

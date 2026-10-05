@@ -5,10 +5,86 @@
 #include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/cdna5/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/rdna3/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSan, Rdna3PublicationObservationPreservesEncoding) {
+  for (uint32_t segment : {0u, 2u})
+    for (uint32_t op :
+         {rdna3::kFlatStoreB32Flat, rdna3::kFlatAtomicAddU32Flat, rdna3::kFlatAtomicOrB32Flat})
+      for (uint32_t cache : {0u, 1u, 2u, 3u}) {
+        rdna3::FlatMachineInst original{};
+        original.encoding = 0x37u;
+        original.seg = segment;
+        original.op = op;
+        original.offset = segment == 0u ? 0xffcu : 0x1ffcu;
+        original.addr = 18u;
+        original.data = 23u;
+        original.saddr = segment == 0u ? 0x7cu : 6u;
+        original.dlc = cache & 1u;
+        original.slc = (cache >> 1u) & 1u;
+        original.vdst = 255u;
+        const bool store = op == rdna3::kFlatStoreB32Flat;
+        const auto result = detail::build_rdna3_publication_observation(
+            {reinterpret_cast<const uint8_t *>(&original), sizeof(original)}, 42u, store);
+        ASSERT_TRUE(result);
+        auto expected = original;
+        expected.glc = 1u;
+        expected.vdst = 42u;
+        if (store)
+          expected.op = rdna3::kFlatAtomicSwapB32Flat;
+        EXPECT_EQ(std::memcmp(result->data(), &expected, sizeof(expected)), 0);
+      }
+}
+
+TEST(ConSan, Rdna3PublicationObservationRejectsUnsupportedForms) {
+  rdna3::FlatMachineInst original{};
+  original.encoding = 0x37u;
+  original.seg = 2u;
+  original.op = rdna3::kFlatAtomicOrB32Flat;
+  const auto build = [&](const auto &raw, uint16_t destination = 42u, bool store = false) {
+    return detail::build_rdna3_publication_observation(
+        {reinterpret_cast<const uint8_t *>(&raw), sizeof(raw)}, destination, store);
+  };
+  ASSERT_TRUE(build(original));
+  EXPECT_FALSE(build(original, 256u));
+  EXPECT_FALSE(build(original, 42u, true));
+  for (uint32_t segment : {1u, 3u}) {
+    auto raw = original;
+    raw.seg = segment;
+    EXPECT_FALSE(build(raw));
+  }
+  for (uint32_t op : {rdna3::kFlatLoadB32Flat, rdna3::kFlatAtomicSwapB32Flat,
+                      rdna3::kFlatAtomicCmpswapB32Flat, rdna3::kFlatAtomicAddU64Flat}) {
+    auto raw = original;
+    raw.op = op;
+    EXPECT_FALSE(build(raw));
+  }
+  auto raw = original;
+  raw.glc = 1u;
+  EXPECT_FALSE(build(raw));
+  raw = original;
+  raw.sve = 1u;
+  EXPECT_FALSE(build(raw));
+  raw = original;
+  raw.pad_25 = 1u;
+  EXPECT_FALSE(build(raw));
+  raw = original;
+  raw.encoding = 0x36u;
+  EXPECT_FALSE(build(raw));
+  for (uint32_t offset : {0x1000u, 0x1ffcu, 0x1fffu}) {
+    raw = original;
+    raw.seg = 0u;
+    raw.offset = offset;
+    EXPECT_FALSE(build(raw));
+    raw.seg = 2u;
+    EXPECT_TRUE(build(raw));
+  }
+  EXPECT_FALSE(detail::build_rdna3_publication_observation({}, 42u, false));
+}
 
 TEST(ConSan, Cdna5PublicationObservationPreservesScaledAddressAndScope) {
   for (uint32_t family : {0xecu, 0xeeu})
@@ -338,7 +414,7 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
 TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
   for (const auto &target : kAtomicTargets) {
     SCOPED_TRACE(target.arch);
-    for (const int32_t offset : {-(1 << 23), -12, 12, 4095, 4096, (1 << 23) - 1}) {
+    for (const int32_t offset : {-(1 << 23), -4096, -12, -1, 0, 12, 4095, 4096, (1 << 23) - 1}) {
       SCOPED_TRACE(offset);
       for (const bool rmw : {false, true}) {
         auto site = exact_flat_atomic(target);
@@ -349,8 +425,10 @@ TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
           site.destination_vgpr.reset();
         }
         const auto classification = classify_atomic_lowering(site, target.arch, rmw);
-        if (target.instruction_size != 12u &&
-            !(target.arch == ROCJITSU_CODE_ARCH_CDNA4 && offset >= 0 && offset <= 4095)) {
+        const bool unsigned_offset =
+            (target.arch == ROCJITSU_CODE_ARCH_CDNA4 || target.arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+            offset >= 0 && offset <= 4095;
+        if (target.instruction_size != 12u && !unsigned_offset && offset != 0) {
           EXPECT_FALSE(classification.address_available());
           continue;
         }
@@ -359,11 +437,53 @@ TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
         const auto plan = plan_atomic_address(*classification.form, 32u, 7u,
                                               RegisterAllocationSource::DescriptorGrowth);
         ASSERT_TRUE(plan.supported());
-        EXPECT_EQ(plan.kind, AtomicAddressKind::FlatGuestPairMaterialized);
+        EXPECT_EQ(plan.kind, offset == 0 ? AtomicAddressKind::FlatGuestPair
+                                         : AtomicAddressKind::FlatGuestPairMaterialized);
         EXPECT_EQ(plan.signed_byte_offset, offset);
         EXPECT_EQ(plan.input_address_vgpr, 3u);
-        EXPECT_EQ(plan.result_address_vgpr, 37u);
+        EXPECT_EQ(plan.result_address_vgpr, offset == 0 ? 3u : 37u);
         EXPECT_TRUE(build_atomic_address_materialization(plan, 82u, 84u, target.arch));
+      }
+    }
+  }
+}
+
+TEST(ConSanAtomicClassifier, Rdna3RawFlatOffsetsRejectIgnoredHighBit) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  for (uint32_t segment : {0u, 2u}) {
+    for (uint32_t offset : {0u, 0xfffu, 0x1000u, 0x1ffcu, 0x1fffu}) {
+      SCOPED_TRACE(segment);
+      SCOPED_TRACE(offset);
+      rdna3::FlatMachineInst raw{};
+      raw.encoding = 0x37u;
+      raw.seg = segment;
+      raw.op = rdna3::kFlatAtomicAddU32Flat;
+      raw.offset = offset;
+      raw.addr = 2;
+      raw.data = 4;
+      raw.saddr = kRdna3FlatNoSaddr;
+      raw.glc = 1;
+      raw.vdst = 5;
+      std::array<uint32_t, 3> words{};
+      std::memcpy(words.data(), &raw, sizeof(raw));
+      words.back() = build_s_endpgm(arch);
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
+      const auto inventory = test_semantic_inventory(make_rdna3_lds_code_object(words), options);
+      ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+      ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
+      const auto sites = test_decoded_sites<AtomicSite>(
+          inventory.program_inventory, inventory.program_inventory.kernels().front());
+      ASSERT_EQ(sites.size(), 1u);
+      const auto classification = classify_atomic_lowering(sites.front(), arch);
+      if (segment == 0u && offset > 0xfffu) {
+        EXPECT_EQ(classification.normalization_reason, AtomicClassifierReason::UnsupportedOffset);
+        EXPECT_FALSE(classification.address_available());
+      } else {
+        ASSERT_TRUE(classification.form);
+        const int32_t expected =
+            offset > 0xfffu ? static_cast<int32_t>(offset) - 0x2000 : static_cast<int32_t>(offset);
+        EXPECT_EQ(classification.form->signed_byte_offset, expected);
       }
     }
   }

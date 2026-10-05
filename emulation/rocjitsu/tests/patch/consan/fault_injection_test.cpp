@@ -9,6 +9,18 @@
 namespace rocjitsu::consan {
 namespace {
 
+TEST(ConSan, Rdna3AtomicFaultTargetOperationsSupportOrderOnly) {
+  EXPECT_EQ(classify_atomic_fault_encoding("flat_atomic_add_u32", 8u, ROCJITSU_CODE_ARCH_RDNA3),
+            AtomicFaultEncoding::Rdna3Flat);
+  EXPECT_EQ(classify_atomic_fault_encoding("global_atomic_or_b32", 8u, ROCJITSU_CODE_ARCH_RDNA3),
+            AtomicFaultEncoding::Rdna3Flat);
+  EXPECT_EQ(classify_atomic_fault_encoding("flat_atomic_add_u32", 12u, ROCJITSU_CODE_ARCH_RDNA3),
+            AtomicFaultEncoding::Unsupported);
+  EXPECT_TRUE(atomic_fault_supports_order(AtomicFaultEncoding::Rdna3Flat));
+  EXPECT_FALSE(atomic_fault_supports_scope(AtomicFaultEncoding::Rdna3Flat));
+  EXPECT_FALSE(atomic_fault_supports_address(AtomicFaultEncoding::Rdna3Flat));
+}
+
 TEST(ConSan, Rdna4Cdna5AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites) {
   const auto bytes_of = []<typename Raw>(Raw &raw) {
     return std::span<uint8_t>(reinterpret_cast<uint8_t *>(&raw), sizeof(raw));

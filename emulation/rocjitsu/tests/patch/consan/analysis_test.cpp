@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_packed_fields.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/decoder.h"
@@ -216,6 +217,10 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
     EXPECT_TRUE(wait.drains_load) << arch;
     EXPECT_TRUE(wait.drains_lds) << arch;
     EXPECT_TRUE(wait.drains_lds || wait.release_boundary) << arch;
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      EXPECT_FALSE(wait.drains_store);
+      EXPECT_FALSE(wait.release_boundary);
+    }
   }
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -234,6 +239,8 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   EXPECT_TRUE(rdna3.bounded_release_counter_form);
   EXPECT_TRUE(is_exact_zero(rdna3));
   EXPECT_TRUE(rdna3.drains_store);
+  EXPECT_FALSE(rdna3.drains_load);
+  EXPECT_FALSE(rdna3.drains_lds);
   EXPECT_TRUE(rdna3.drains_lds || rdna3.release_boundary);
   EXPECT_TRUE(rdna3.release_boundary);
   const WaitInstructionEncoding rdna3_nonzero = classify_wait_instruction(
@@ -241,6 +248,12 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   EXPECT_TRUE(rdna3_nonzero.bounded_release_counter_form);
   EXPECT_FALSE(is_exact_zero(rdna3_nonzero));
   EXPECT_FALSE(rdna3_nonzero.release_boundary);
+
+  const auto rdna3_lds =
+      classify_wait_instruction("s_waitcnt", 0xbf89fc07u, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(rdna3_lds.drains_lds);
+  EXPECT_FALSE(rdna3_lds.drains_store);
+  EXPECT_FALSE(rdna3_lds.release_boundary);
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     const auto store = build_s_wait_storecnt0(arch);
@@ -3629,6 +3642,86 @@ TEST(ConSan, Cdna4PublicationReplaysWideAtomicWithBorrowedScalarAddress) {
   wave->halt();
 }
 
+TEST(ConSan, Rdna3PublicationHeaderStoresAndFallbackWaitForCompletion) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr uint64_t report = 0x1234567800000000ull;
+  constexpr uint16_t base = 56u;
+  constexpr uint16_t ticket = base + detail::AtomicScratchLayout::kValue;
+  const auto guest = build_rdna3_flat_store_b32(2, 4, 0, arch);
+  ASSERT_TRUE(guest);
+  detail::AtomicEvidenceSourceView source;
+  SyncSequence store_sequence;
+  store_sequence.operation = SyncOperation::OrdinaryStore;
+  source.sequence = &store_sequence;
+  source.site.size = sizeof(*guest);
+  source.site.width_bits = 32;
+  source.site.address_vgpr = 2;
+  source.site.data_vgpr = 4;
+  source.site.raw_saddr = kRdna3FlatNoSaddr;
+  source.site.raw_vaddr = 2;
+  source.site.raw_vdata = 4;
+  source.site.raw_ioffset = 0;
+  source.site.raw_th = 0;
+  source.site.scope = MemoryScope::Agent;
+  source.site.returns_old_value = false;
+  source.site.mnemonic = "flat_store_b32";
+  const auto classification = classify_atomic_lowering(source.site, arch, false);
+  ASSERT_TRUE(classification.form);
+  const auto address =
+      plan_atomic_address(*classification.form, base, detail::atomic_scratch_count(),
+                          RegisterAllocationSource::DescriptorGrowth);
+  ASSERT_TRUE(address.supported());
+  detail::SyncEmissionPlan plan;
+  plan.supercollider_report_buffer_address = report;
+  plan.exec_save_sgpr = 0;
+  plan.special_state = detail::SpecialStateSgprs{2, 4};
+  plan.dispatch_id.literal = 1;
+  plan.owner_epoch_vgprs = {.owner = 62, .epoch = 63};
+  plan.scratch_vgpr = base;
+  plan.publication_modifications_complete = true;
+  ReportBufferLayout layout;
+  layout.publication_event_capacity = 8;
+  layout.publication_events_offset = 256;
+  std::vector<std::string> errors;
+  uint32_t guest_offset = 0, guest_size = 0;
+  const auto words = detail::build_publication_cave_words(
+      {reinterpret_cast<const uint8_t *>(guest->data()), sizeof(*guest)}, source,
+      *classification.form, 0, address, plan, nullptr, nullptr, nullptr, arch, layout, errors,
+      &guest_offset, &guest_size, detail::PublicationCapture::Transition);
+  ASSERT_TRUE(words) << testing::PrintToString(errors);
+
+  const auto expect_header_stores = [&](size_t offset, uint32_t value, size_t count) {
+    std::vector<uint32_t> expected;
+    const uint64_t address = report + offset;
+    InstructionSequence encoding(expected);
+    ASSERT_TRUE(encoding.emit_all(
+        instrumentation::build_v_mov_b32_literal(base, static_cast<uint32_t>(address), arch),
+        instrumentation::build_v_mov_b32_literal(base + 1u, static_cast<uint32_t>(address >> 32u),
+                                                 arch),
+        instrumentation::build_v_mov_b32_literal(ticket, value, arch),
+        instrumentation::build_flat_store_b32(base, ticket, arch, 0u),
+        instrumentation::build_s_wait_global_store0(arch)));
+    size_t matches = 0;
+    auto cursor = words->begin();
+    while ((cursor = std::search(cursor, words->end(), expected.begin(), expected.end())) !=
+           words->end()) {
+      ++matches;
+      cursor += expected.size();
+    }
+    EXPECT_EQ(matches, count);
+  };
+  expect_header_stores(offsetof(ReportHeader, publication_flags),
+                       kPublicationTraceEnabled | kPublicationTraceComplete, 1u);
+  // Both capacity overflow and unaligned stores must invalidate the trace.
+  expect_header_stores(offsetof(ReportHeader, publication_dropped_count), 1u, 2u);
+
+  std::vector<uint32_t> fallback(guest->begin(), guest->end());
+  fallback.push_back(0xbf89fc07u); // s_waitcnt lgkmcnt(0)
+  fallback.push_back(0xbc7c0000u); // s_waitcnt_vscnt null, 0
+  EXPECT_NE(std::search(words->begin(), words->end(), fallback.begin(), fallback.end()),
+            words->end());
+}
+
 TEST(ConSan, Cdna4PublicationLdsCompletionUsesCommunicationAfterCachePrefix) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
   for (bool drain_lds : {false, true}) {
@@ -4032,8 +4125,7 @@ TEST(ConSan, LdsPublicationCompletionDoesNotInventGlobalRelease) {
   for (const bool drain_global : {false, true}) {
     SCOPED_TRACE(drain_global);
     std::vector<uint32_t> words = {
-        0xEC06C07Cu,
-        0x04000000u,
+        0xEC06C07Cu, 0x04000000u,
         0x00000000u, // flat_store_b64
     };
     if (drain_global)
@@ -4042,12 +4134,10 @@ TEST(ConSan, LdsPublicationCompletionDoesNotInventGlobalRelease) {
     const uint64_t lds_wait_offset = words.size() * sizeof(uint32_t);
     words.insert(words.end(), {
                                   0xBFC60000u, // s_wait_dscnt 0
-                                  0xEE0D400Cu,
-                                  0x01980002u,
+                                  0xEE0D400Cu, 0x01980002u,
                                   0x00000002u, // returning global atomic add
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC000u,
-                                  0x00000000u,
+                                  0xEE0AC000u, 0x00000000u,
                                   0x00000000u, // global_inv
                               });
     TestOptions options;
@@ -4701,9 +4791,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   TestOptions options;

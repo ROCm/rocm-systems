@@ -20,7 +20,8 @@ struct DeviceState {
 
 __device__ __forceinline__ void release_vector_vglobal(uint32_t *flag) {
   const uint32_t one = 1u;
-  asm volatile("s_waitcnt_vscnt null, 0\n\t"
+  asm volatile("s_waitcnt lgkmcnt(0)\n\t"
+               "s_waitcnt_vscnt null, 0\n\t"
                "global_atomic_add_u32 %0, %1, off\n\t"
                "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :

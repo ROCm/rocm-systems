@@ -3891,6 +3891,60 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
             )
+            foreach(_alignment IN ITEMS Aligned Unaligned)
+                rj_add_consan_hip_case(
+                    NAME "ConSanGfx1100Physical.${_alignment}PublicationBaseline"
+                    TARGET hip_consan_gfx1100_test
+                    FILTER "ConSanRdna3Test.${_alignment}PublicationStorePreservesOutput"
+                    RUN_SERIAL
+                    ENVIRONMENT "${_rj_consan_gfx1100_device}"
+                )
+                if(_alignment STREQUAL "Aligned")
+                    set(_publication_regex
+                        "ConSan publication reader=.*flags=3.*events=33 capacity=[1-9][0-9][0-9]+ dropped=0"
+                    )
+                    set(_publication_verdict
+                        "ConSan publication event .*operation=3.*complete=true"
+                    )
+                    set(_publication_fail
+                        "incomplete or malformed atomic publication evidence"
+                    )
+                else()
+                    # Keep the event count below capacity so overflow detection
+                    # cannot mask a missing dropped marker.
+                    set(_publication_regex
+                        "incomplete or malformed atomic publication evidence flags=3 events=33 capacity=[1-9][0-9][0-9]+ dropped=1"
+                    )
+                    set(_publication_verdict
+                        "ConSan analysis verdict .*dynamic_complete=false"
+                    )
+                    set(_publication_fail
+                        "ConSan publication event .*complete=true"
+                    )
+                endif()
+                rj_add_consan_hip_case(
+                    NAME "ConSanGfx1100Physical.${_alignment}PublicationTrace"
+                    TARGET hip_consan_gfx1100_test
+                    FILTER "ConSanRdna3Test.${_alignment}PublicationStorePreservesOutput"
+                    RUN_SERIAL
+                    PASS_REGEX "${_publication_regex}"
+                    ALSO_PASS_REGEX "${_publication_verdict}"
+                    FAIL_REGEX "${_publication_fail}"
+                    ENVIRONMENT
+                        "${_rj_consan_gfx1100_device}"
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                        "RJ_CONSAN_MODE=default"
+                        "RJ_CONSAN_TRACK_BARRIERS=0"
+                        "RJ_CONSAN_TRACK_ATOMICS=1"
+                        "RJ_CONSAN_TEST_KERNEL_FILTER=rdna3_publication_store_for_instrumentation"
+                        "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE=1"
+                        "RJ_CONSAN_LOG=3"
+                        "RJ_CONSAN_REQUIRE_PATCH=1"
+                )
+            endforeach()
+            unset(_publication_regex)
+            unset(_publication_verdict)
+            unset(_publication_fail)
             rj_add_consan_hip_case(
                 NAME "ConSanGfx1100Physical.PostInstrumentationHealth"
                 TARGET hip_consan_gfx1100_test
@@ -3902,7 +3956,7 @@ function(rj_add_consan_hip_tests)
                 "ConSanGfx1100Physical.PostInstrumentationHealth"
                 PROPERTIES
                     DEPENDS
-                        "ConSanGfx1100Physical.SuperColliderClean;ConSanGfx1100Physical.SuperColliderAllSupportedSites;ConSanGfx1100Physical.Detection;ConSanGfx1100Physical.DetectsRace"
+                        "ConSanGfx1100Physical.SuperColliderClean;ConSanGfx1100Physical.SuperColliderAllSupportedSites;ConSanGfx1100Physical.Detection;ConSanGfx1100Physical.DetectsRace;ConSanGfx1100Physical.AlignedPublicationTrace;ConSanGfx1100Physical.UnalignedPublicationTrace"
             )
             unset(_rj_consan_gfx1100_clean)
             unset(_rj_consan_gfx1100_device)
