@@ -616,12 +616,13 @@ class RocProfCompute:
         if not block_active:
             return
 
+        block_options = "-b/--block, --speed-of-light, --memory-chart or --roofline"
         if args.list_metrics is not None:
-            console_error("Cannot use --list-metrics with --blocks")
+            console_error(f"Cannot use --list-metrics with {block_options}.")
         if args.list_blocks is not None:
-            console_error("Cannot use --list-blocks with --blocks")
+            console_error(f"Cannot use --list-blocks with {block_options}.")
         if getattr(args, "list_available_metrics", False):
-            console_error("Cannot use --list-available-metrics with --blocks")
+            console_error(f"Cannot use --list-available-metrics with {block_options}.")
 
     @demarcate
     def _run_bench_only(self) -> None:
