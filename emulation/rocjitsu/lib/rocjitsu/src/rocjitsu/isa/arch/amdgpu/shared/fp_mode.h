@@ -1047,8 +1047,9 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
   uint64_t result;
   {
     detail::ScopedFenv environment(round_mode);
-    const double value = std::fma(std::bit_cast<double>(src0), std::bit_cast<double>(src1),
-                                  std::bit_cast<double>(src2));
+    // evaluate_arithmetic keeps the FMA inside the guest rounding environment.
+    const double value = detail::evaluate_arithmetic<Arithmetic::FMA>(
+        std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2));
     result = std::bit_cast<uint64_t>(value);
   }
   if ((denorm_mode & 2u) == 0)
@@ -1076,10 +1077,11 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
     const double rhs = std::bit_cast<double>(src1);
     const double value = [&] {
       switch (operation) {
+      // evaluate_arithmetic keeps these inside the guest rounding environment.
       case BinaryF64Op::Add:
-        return lhs + rhs;
+        return detail::evaluate_arithmetic<Arithmetic::ADD>(lhs, rhs, 0.0);
       case BinaryF64Op::Multiply:
-        return lhs * rhs;
+        return detail::evaluate_arithmetic<Arithmetic::MUL>(lhs, rhs, 0.0);
       case BinaryF64Op::MaximumNumber:
         if (std::isnan(lhs))
           return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
