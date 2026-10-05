@@ -56,8 +56,13 @@ function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
     # Python subprocess: the directory containing bin/<executable> is sys.prefix for every
     # layout this project builds against (system install, conda env, venv). TheRock's
     # superbuild relies on this same derivation when forwarding Python root dirs to this
-    # project, so this is a proven equivalence, not a new assumption.
-    cmake_path(GET Python3_EXECUTABLE PARENT_PATH _bin_dir)
+    # project. Resolve symlinks first so a relocated/aliased executable (e.g. a plain
+    # `/usr/local/bin/python -> /opt/some-env/bin/python` symlink) still yields the real
+    # prefix; this does NOT handle exec-based shims (e.g. pyenv), which have no resolvable
+    # filesystem relationship to the real interpreter -- unsupported here, as nothing in
+    # this project's build/CI uses them.
+    get_filename_component(_real_executable "${Python3_EXECUTABLE}" REALPATH)
+    cmake_path(GET _real_executable PARENT_PATH _bin_dir)
     cmake_path(GET _bin_dir PARENT_PATH _root_dir)
     set(${_VAR}_ROOT_DIR "${_root_dir}" PARENT_SCOPE)
 endfunction()
