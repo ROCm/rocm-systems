@@ -122,6 +122,8 @@
         { "name": "PutValue_Inline",          "description": "GIN device inline put-value",                           "test_filter": "GinMPIDeviceTests.PutValue_Inline" },
         { "name": "Signal_NoPayload",         "description": "GIN device signal, no payload",                         "test_filter": "GinMPIDeviceTests.Signal_NoPayload" },
         { "name": "Signal_HighIdNoOverflow",  "description": "GIN device signal with high id, no overflow",           "test_filter": "GinMPIDeviceTests.Signal_HighIdNoOverflow" },
+        { "name": "Signal_ExplicitWeak",      "description": "Weak indexed GIN signal publishes its bundled put",     "test_filter": "GinMPIDeviceTests.Signal_ExplicitWeak" },
+        { "name": "Signal_ExplicitStrong",    "description": "GDA and SDMA do not read the strong bit; a pass shows queue order, not strong-signal enforcement", "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong" },
         { "name": "WaitCounter_Local",        "description": "GIN device wait-counter, local",                        "test_filter": "GinMPIDeviceTests.WaitCounter_Local" },
         { "name": "WaitCounterAndSignal",     "description": "GIN device wait-counter combined with signal",          "test_filter": "GinMPIDeviceTests.WaitCounterAndSignal" },
         { "name": "Barrier_TwoRanks",         "description": "GIN device two-rank barrier",                           "test_filter": "GinMPIDeviceTests.Barrier_TwoRanks" },
@@ -129,6 +131,7 @@
           "name": "BarrierSession_LsaOnly", "description": "ncclBarrierSession LSA-only (2 ranks/node, non-trivial LSA team)", "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly",
           "num_ranks": 4, "num_gpus": 2
         },
+        { "name": "WindowRegister_AfterDevCommCreate", "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)", "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate" },
         {
           "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
           "num_ranks": 4, "num_gpus": 2
@@ -185,7 +188,17 @@
         {
           "name": "ReduceScatter_Symmetric_Avg", "description": "Symmetric-memory ReduceScatter avg (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric_Avg",
           "num_ranks": 4, "num_gpus": 2
-        }
+        },
+        { "name": "BarrierFence_PutMakesInboundPutVisible", "description": "Put-fenced barrier makes inbound put visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutMakesInboundPutVisible_SingleNode" },
+        { "name": "BarrierFence_PutIncludesSelfPut", "description": "Put-fenced barrier covers self-put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutIncludesSelfPut_SingleNode" },
+        { "name": "BarrierFence_GetMakesLocalGetVisible", "description": "Get-fenced barrier makes local get visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_GetMakesLocalGetVisible_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesGet", "description": "Default fence covers local get (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesGet_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" },
+        { "name": "GetFlush_Visibility", "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)", "test_filter": "GinMPIDeviceTests.GetFlush_Visibility" },
+        { "name": "GetFlushAsyncWait_Visibility", "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel", "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility" },
+        { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" }
       ]
     },
     "gin_devmpi_gda": {
@@ -204,6 +217,7 @@
       },
       "tests": [
         { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
+        { "name": "WindowRegister_AfterDevCommCreate" },
         { "name": "BarrierSession_Hybrid",       "num_gpus": 4 },
         { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
         { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },

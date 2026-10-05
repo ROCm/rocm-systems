@@ -17,14 +17,17 @@
 #include <functional>
 
 #include "channel.h"
+#include "fail_loud.h"
 #include "graph.h"
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this floor stands in for
 #include "signature-drift.h"
+#include "transport.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
 ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclComm;
@@ -60,6 +63,12 @@ int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
 static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop = DefaultNcclProxyStop;
 
+static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportP2pSetup");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
+    g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+
 void ResetTransportStubs() {
   g_rcclUseAinicValue = false;
   g_useAinic = DefaultUseAinic;
@@ -71,6 +80,7 @@ void ResetTransportStubs() {
   g_ncclNvlsInitCalls = 0;
   g_ncclNvlsTuningResult = ncclSuccess;
   g_ncclNvlsTuningCalls = 0;
+  g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
 }
 
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
@@ -115,9 +125,10 @@ ncclResult_t ncclTuningInit(struct ncclComm* comm) { return ncclSuccess; }
 // ncclTreeBasePostset (src/graph/connect.cc): topo_stubs.cc, next to ncclTopoPreset/ncclTopoPostset.
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
 ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
-#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
-ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
-#endif
+ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
+                                   bool* needsProxy) {
+  return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);
+}
 
 // ppc64le TOC references survive --gc-sections, so netTransport must have
 // a definition even though the code path that uses it is dead.

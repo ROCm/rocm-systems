@@ -186,6 +186,7 @@ def add_general_group(
             "   Triton trace (--triton-trace, --list-triton-operators, "
             "--triton-operator)\n"
             "   ML API trace (--ml-api-trace)\n"
+            "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
         ),
@@ -213,6 +214,9 @@ def omniarg_parser(
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
+    skills_note = _skills_note(rocprof_compute_home)
+    if skills_note is not None:
+        parser.description = f"{parser.description}\n\n{skills_note}"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -223,6 +227,7 @@ def omniarg_parser(
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
+        description=skills_note,
         usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
@@ -579,7 +584,7 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+        help="\t\t\tEnable Memory Bandwidth Analysis counters (block 30).",
     )
 
     profile_group.add_argument(
@@ -638,6 +643,7 @@ Examples:
     analyze_parser = subparsers.add_parser(
         "analyze",
         help="Analyze existing profiling results at command line",
+        description=skills_note,
         usage="""
 rocprof-compute analyze --path <workload_path> [analyze options]
 
@@ -673,6 +679,12 @@ Examples:
         nargs="+",
         action="append",
         help="\t\tSpecify the raw data root dirs or desired results directory.",
+    )
+    analyze_group.add_argument(
+        "--verify-deps",
+        dest="verify_deps",
+        action="store_true",
+        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
     )
     analyze_group.add_argument(
         "--list-stats",
@@ -896,6 +908,7 @@ Examples:
             "FP4",
             "FP6",
             "FP8",
+            "MXFP8",
             "FP16",
             "BF16",
             "FP32",
@@ -913,6 +926,7 @@ Examples:
             "\t\t   FP4\n"
             "\t\t   FP6\n"
             "\t\t   FP8\n"
+            "\t\t   MXFP8\n"
             "\t\t   FP16\n"
             "\t\t   BF16\n"
             "\t\t   FP32\n"
@@ -1030,20 +1044,6 @@ Examples:
     # Experimental Features
     ## ----------------------------
     analyze_group.add_argument(
-        "--membw-analysis",
-        dest="membw_analysis",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
-        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
-    )
-
-    analyze_group.add_argument(
         "--gui",
         type=int,
         nargs="?",
@@ -1070,3 +1070,16 @@ Examples:
         help="\t\tActivate a Textual User Interface (TUI) to "
         "interact with rocprofiler-compute metrics.",
     )
+
+
+def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
+    """Return the help line that points to the Agent Skills README, if shipped."""
+    # Source checkout first, then the install's share directory.
+    for skills_dir in (
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / "rocprofiler-compute" / "skills",
+    ):
+        readme = skills_dir / "README.md"
+        if readme.is_file():
+            return f"Agent Skills: see {readme} to install them."
+    return None

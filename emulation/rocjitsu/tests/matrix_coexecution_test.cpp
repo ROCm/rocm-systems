@@ -56,14 +56,14 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
   }
   memory.write32(pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
   amdgpu::MmaAdmissionCache::Words first;
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   for (unsigned i = 0; i != 1000; ++i)
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.decodes, 3u);
   EXPECT_EQ(cache.stats.plans, 1u);
   EXPECT_EQ(cache.stats.hits, 999u);
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.decodes, 3u);
   EXPECT_EQ(cache.stats.plans, 1u);
@@ -72,14 +72,14 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
   // A changed future word outside the initial fetch must invalidate the plan.
   memory.write32(pc + 16, 0xbf800001); // s_nop, changes the saved decode window.
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.plans, 2u);
   EXPECT_GT(cache.stats.decodes, 3u);
 
   memory.write32(pc + 8, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first));
   const auto decodes = cache.stats.decodes;
   const auto plans = cache.stats.plans;
@@ -111,7 +111,7 @@ TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
       memory.write32(pc + 8 + i * 4, hazard == 4 ? 0xffffffffu : b[i]);
     }
     amdgpu::MmaAdmissionCache::Words first;
-    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first).has_value(),
               hazard == 0);
     if (hazard == 0) {
@@ -143,7 +143,7 @@ TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
     }
     memory.write32(pc + 32, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
     amdgpu::MmaAdmissionCache::Words first;
-    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first),
               pc + (hazard ? 16 : 24));
   }

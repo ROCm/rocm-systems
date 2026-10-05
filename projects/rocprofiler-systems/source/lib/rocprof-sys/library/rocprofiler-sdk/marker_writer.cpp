@@ -18,9 +18,7 @@
 
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 void
@@ -89,5 +87,4 @@ default_marker_policy::add_thread_info(const trace_cache::info::thread& thread_i
     trace_cache::get_metadata_registry().add_thread_info(thread_info);
 }
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
