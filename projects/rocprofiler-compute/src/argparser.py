@@ -24,10 +24,12 @@ ROOFLINE_DATA_TYPES = [
     "I64",
 ]
 
-
 # Deprecated options and what to do instead. A renamed option keeps its old
 # name as an extra option string until the old name is removed.
 DEPRECATED_OPTIONS = {
+    "--roof-only": "Use --roofline instead.",
+    "--bench-only": "Use --roofline-bench-only instead.",
+    "--device": "Use --roofline-device instead.",
     "--retain-rocpd-output": ".db files will be retained automatically.",
 }
 
@@ -200,8 +202,8 @@ Examples:
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n my_bench --bench-only
+\trocprof-compute profile -n vcopy_roof --roofline -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n my_bench --roofline-bench-only
 ---------------------------------------------------------------------------------
         """,  # noqa: E501
         prog="rocprof-compute",
@@ -382,7 +384,7 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-blocks <arch> to see\n"
             "all valid block ids and aliases.\n"
-            "Cannot be used with --set, --roof-only or --bench-only."
+            "Cannot be used with --set, --roofline or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -399,7 +401,7 @@ Examples:
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "For available sets, see --list-sets.\n"
-            "Cannot be used with --block, --roof-only or --bench-only."
+            "Cannot be used with --block, --roofline or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -459,6 +461,7 @@ Examples:
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
+        "--roofline",
         "--roof-only",
         dest="roof_only",
         required=False,
@@ -466,10 +469,12 @@ Examples:
         action="store_true",
         help=(
             "Profile roofline data only.\n"
-            "Cannot be used with --block, --set or --bench-only."
+            "Cannot be used with --block, --set or --roofline-bench-only.\n"
+            "Deprecated alias: --roof-only."
         ),
     )
     roofline_group.add_argument(
+        "--roofline-bench-only",
         "--bench-only",
         dest="bench_only",
         required=False,
@@ -479,10 +484,12 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with --block, --set, --roof-only or --no-roof."
+            "Cannot be used with --block, --set, --roofline or --no-roof.\n"
+            "Deprecated alias: --bench-only."
         ),
     )
     roofline_group.add_argument(
+        "--roofline-device",
         "--device",
         dest="device",
         metavar="<id>",
@@ -490,7 +497,9 @@ Examples:
         default=0,
         type=int,
         help=(
-            "Target GPU device ID per amd-smi for roofline benchmarking (Default: 0)."
+            "Target GPU device ID per amd-smi for roofline benchmarking "
+            "(Default: 0).\n"
+            "Deprecated alias: --device."
         ),
     )
 
