@@ -210,7 +210,7 @@ template <> struct WordOps<RegisterSetWordType::Avx2M256> {
 #endif
 
 // Range and set operations shared by scalar and SIMD words.
-template <RegisterSetWordType wordType> struct WordArrayOps : WordOps<wordType> {
+template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<wordType> {
   using Word = typename WordOps<wordType>::Word;
   using WordOps<wordType>::kWordBits;
   using WordOps<wordType>::word_all_bits;
