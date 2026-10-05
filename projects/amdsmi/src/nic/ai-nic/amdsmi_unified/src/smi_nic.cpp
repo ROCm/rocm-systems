@@ -283,6 +283,18 @@ void SmiNicPort::collect_vendor_statistics() const {
   // counters simply stay absent, same as any other name the table allows but
   // the driver does not expose.
   auto fec_result = transport_->get_fec_statistics(iface_);
+  if (amd::smi::nic::log::is_enabled()) {
+    std::string fec_text = "fec stats " + iface_ + ":";
+    if (fec_result.success) {
+      for (size_t i = 0; i < fec_result.value.names.size(); ++i) {
+        fec_text +=
+            " " + fec_result.value.names[i] + "=" + std::to_string(fec_result.value.values[i]);
+      }
+    } else {
+      fec_text += " error=" + std::to_string(fec_result.error_code);
+    }
+    NIC_LOG_DEBUG(fec_text);
+  }
   if (fec_result.success) {
     for (size_t i = 0; i < fec_result.value.names.size(); ++i) {
       // `-S` wins on a name collision: emplace is a no-op if the key already
