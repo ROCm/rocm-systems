@@ -921,6 +921,13 @@ memory:
   Unit_hipMemcpyBatchAsync_Indirect_TooLarge:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child:
+    <<: *level_2
+    tags: [transfer]
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
     <<: *level_2
     tags: [transfer]

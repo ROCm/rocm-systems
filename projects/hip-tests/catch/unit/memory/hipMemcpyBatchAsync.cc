@@ -8,6 +8,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -1226,6 +1229,65 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_TooLarge) {
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 0 : SIZE_MAX));
+}
+
+/**
+ * With SDMA disabled ROCr rejects indirect copies; the shader fallback must not copy the pointer
+ * slot in their place. Runs the child test case in a process with HSA_ENABLE_SDMA=0.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled) {
+  if (getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) != hipSuccess) {
+    HIP_SKIP_TEST("SDMA indirect copies are not supported on this device.");
+  }
+
+  hip::SpawnProc proc(getSelfExePath());
+  proc.setEnv("HSA_ENABLE_SDMA", "0");
+  REQUIRE(proc.run("Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child") == 0);
+}
+
+/**
+ * Child of Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled, not meant to run on its own.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child) {
+  const char* enableSdma = std::getenv("HSA_ENABLE_SDMA");
+  if (enableSdma == nullptr || std::string(enableSdma) != "0") {
+    HIP_SKIP_TEST("Only run by Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled.");
+  }
+
+  constexpr size_t kSizeInBytes = 4096;
+  const unsigned int flag = GENERATE(hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst);
+  const bool indirectSrc = flag == hipMemcpyFlagExtOpIndirectSrc;
+  CAPTURE(indirectSrc);
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> srcValues(kSizeInBytes, 10);
+  const std::vector<unsigned char> dstValues(kSizeInBytes, 0);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  void* src = addBuffer(allocations, srcValues, LinearAllocs::hipMalloc);
+  void* dst = addBuffer(allocations, dstValues, LinearAllocs::hipMalloc);
+
+  // As large as the copy, so a linear copy of it stays in bounds; the bytes after the pointer are a
+  // canary.
+  void* target = indirectSrc ? src : dst;
+  std::vector<unsigned char> slotValues(kSizeInBytes, 0xEE);
+  std::memcpy(slotValues.data(), &target, sizeof(target));
+  void* slot = addBuffer(allocations, slotValues, LinearAllocs::hipMalloc);
+
+  void* srcPtr = indirectSrc ? slot : src;
+  void* dstPtr = indirectSrc ? dst : slot;
+  size_t size = kSizeInBytes;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flag};
+  size_t attrs_idxs[1] = {0};
+
+  // The batch fails after the call returns, so only the memory is checked.
+  HIP_CHECK(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(slot, slotValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(src, srcValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
 }
 
 /**
