@@ -18,6 +18,7 @@
 #include "ScopedHook.h"
 #include "fakes/dev_runtime_fakes.h"
 #include "fakes/nccl_fakes.h"  // g_loadParam, used by param_redirect.h
+#include "fakes/nccl_stubs.h"
 
 #include "fakes/param_redirect.h"
 #include "fakes/nvtx_redirect.h"
@@ -39,6 +40,12 @@ class CeCollMicrotest : public ::testing::Test {
   ncclCeCollArgs args_{};
   ncclKernelPlan plan_{};
   uint8_t staging_ = 0;
+  uint8_t allocated_ = 0;
+  // Lets a regressed launch-time staging setup reach the window registration the tests count instead of aborting.
+  ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t) {
+    *ptr = &allocated_;
+    return ncclSuccess;
+  }};
 
   void SetUp() override {
     ResetDevRuntimeFakes();

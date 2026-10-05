@@ -215,6 +215,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroCe -- src/ce_coll.cc. Its own binary: every other target links ce_fakes.cc.
   set(TEST_MICRO_CE_SOURCE_FILES
     ce-coll-test.cc
+    fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -228,6 +229,7 @@ function(rccl_define_micro_source_lists)
     fakes/devcomm_fakes.cc               # ncclTeamLsa
     fakes/env_fakes.cc
     fakes/os_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeArStagingBytes
     fakes/recorder_fakes.cc
     fakes/rma_fakes.cc
     fakes/strongstream_stubs.cc

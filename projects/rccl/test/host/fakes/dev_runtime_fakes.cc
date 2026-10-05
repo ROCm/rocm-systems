@@ -60,6 +60,11 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, siz
   return g_devrWindowRegisterInGroup(comm, ptr, size, winFlags, outWinDev);
 }
 
+// Floor for ce_coll.cc's staging-setup failure path, which deregisters the window it registered.
+ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclCommWindowDeregister");
+}
+
 // Floors for the LSA addressing ce_coll.cc's copy paths reach.
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm*, struct ncclDevrWindow*, size_t, int, void**) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaRankPtr");

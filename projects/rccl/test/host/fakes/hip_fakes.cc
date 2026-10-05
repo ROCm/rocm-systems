@@ -903,7 +903,7 @@ hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, std::uint64_t va
     return g_hipStreamWriteValue64(stream, ptr, value, flags);
 }
 
-hipError_t hipStreamWriteValue32(hipStream_t, void*, uint32_t, unsigned int)
+hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int)
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
 }
