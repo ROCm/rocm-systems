@@ -1,14 +1,15 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "topology_nearest.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <vector>
+
+#include "topology_nearest_internal.h"
 
 namespace {
 
@@ -35,24 +36,34 @@ struct Topology {
 
   amdsmi_status_t Query(amdsmi_topology_nearest_t* result,
                         amdsmi_link_type_t type = AMDSMI_LINK_TYPE_XGMI) {
-    return amd::smi::get_link_topology_nearest(
-        &source, type, result,
-        [this](uint32_t* count, amdsmi_socket_handle* handles) {
+    struct ScopedState {
+      explicit ScopedState(Topology* topology) : previous(current) { current = topology; }
+      ~ScopedState() { current = previous; }
+      Topology* previous;
+    } state(this);
+    const amd::smi::detail::TopologyDeps deps = {
+        [](uint32_t* count, amdsmi_socket_handle* handles) {
+          auto& topology = *current;
+          ++topology.socket_calls;
           if (!handles) {
-            *count = static_cast<uint32_t>(sockets.size());
-            return socket_count_status;
+            *count = static_cast<uint32_t>(topology.sockets.size());
+            return topology.socket_count_status;
           }
-          *count = std::min(*count, static_cast<uint32_t>(sockets.size()));
-          for (uint32_t i = 0; i < *count; ++i) handles[i] = &sockets[i];
-          return socket_fill_status;
+          *count = std::min(*count, static_cast<uint32_t>(topology.sockets.size()));
+          for (uint32_t i = 0; i < *count; ++i) handles[i] = &topology.sockets[i];
+          *count += topology.socket_fill_extra;
+          return topology.socket_fill_status;
         },
-        [this](amdsmi_socket_handle socket, uint32_t* count, amdsmi_processor_handle* handles) {
+        [](amdsmi_socket_handle socket, uint32_t* count, amdsmi_processor_handle* handles) {
+          ++current->processor_calls;
           const auto& devices = *static_cast<std::vector<amdsmi_processor_handle>*>(socket);
           *count = std::min(*count, static_cast<uint32_t>(devices.size()));
           std::copy_n(devices.begin(), *count, handles);
-          return processor_status;
+          *count += current->processor_fill_extra;
+          return current->processor_status;
         },
         [](amdsmi_processor_handle, amdsmi_processor_handle target, bool* accessible) {
+          ++current->access_calls;
           const auto& peer = *static_cast<Peer*>(target);
           *accessible = peer.accessible;
           return peer.access_status;
@@ -68,18 +79,65 @@ struct Topology {
           const auto& peer = *static_cast<Peer*>(target);
           *weight = peer.weight;
           return peer.weight_status;
-        });
+        }};
+    return amd::smi::detail::get_link_topology_nearest(&source, type, result, deps);
   }
 
+  inline static thread_local Topology* current = nullptr;
   Peer source;
   std::deque<Peer> peers;
   std::vector<std::vector<amdsmi_processor_handle>> sockets;
+  uint32_t socket_fill_extra = 0;
+  uint32_t processor_fill_extra = 0;
+  uint32_t socket_calls = 0;
+  uint32_t processor_calls = 0;
+  uint32_t access_calls = 0;
   amdsmi_status_t socket_count_status = AMDSMI_STATUS_SUCCESS;
   amdsmi_status_t socket_fill_status = AMDSMI_STATUS_SUCCESS;
   amdsmi_status_t processor_status = AMDSMI_STATUS_SUCCESS;
 };
 
+void ExpectUnchanged(const amdsmi_topology_nearest_t& result,
+                     const amdsmi_topology_nearest_t& expected) {
+  EXPECT_EQ(result.count, expected.count);
+  for (uint32_t i = 0; i < kCapacity; ++i) {
+    EXPECT_EQ(result.processor_list[i], expected.processor_list[i]) << i;
+  }
+  for (uint32_t i = 0; i < std::size(result.reserved); ++i) {
+    EXPECT_EQ(result.reserved[i], expected.reserved[i]) << i;
+  }
+}
+
 }  // namespace
+
+TEST(SystemUnit, TopologyNearestRejectsOverreportedSocketCount) {
+  Topology topology;
+  topology.socket_fill_extra = 1;
+  amdsmi_topology_nearest_t result{};
+  result.count = UINT32_MAX;
+  std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
+  const auto expected = result;
+
+  EXPECT_EQ(topology.Query(&result), AMDSMI_STATUS_UNEXPECTED_SIZE);
+  EXPECT_EQ(topology.processor_calls, 0u);
+  ExpectUnchanged(result, expected);
+}
+
+TEST(SystemUnit, TopologyNearestRejectsOverreportedProcessorCount) {
+  Topology topology;
+  for (uint32_t i = 0; i < kCapacity; ++i) topology.AddPeer(0, 1, i);
+  topology.processor_fill_extra = 1;
+  amdsmi_topology_nearest_t result{};
+  result.count = UINT32_MAX;
+  std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
+  const auto expected = result;
+
+  EXPECT_EQ(topology.Query(&result), AMDSMI_STATUS_UNEXPECTED_SIZE);
+  EXPECT_EQ(topology.access_calls, 0u);
+  ExpectUnchanged(result, expected);
+}
 
 TEST(SystemUnit, TopologyNearestBoundsCountToStoredPeers) {
   Topology topology(2);
@@ -95,6 +153,21 @@ TEST(SystemUnit, TopologyNearestBoundsCountToStoredPeers) {
   for (uint32_t i = 0; i < result.count; ++i) {
     EXPECT_EQ(result.processor_list[i], peers[peers.size() - 1 - i]) << i;
   }
+}
+
+TEST(SystemUnit, TopologyNearestInitializesWholeOutput) {
+  Topology topology;
+  auto* peer = &topology.AddPeer(0, 1, 10);
+  amdsmi_topology_nearest_t result;
+  result.count = UINT32_MAX;
+  std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
+
+  ASSERT_EQ(topology.Query(&result), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(result.count, 1u);
+  EXPECT_EQ(result.processor_list[0], peer);
+  for (uint32_t i = 1; i < kCapacity; ++i) EXPECT_EQ(result.processor_list[i], nullptr);
+  for (auto value : result.reserved) EXPECT_EQ(value, 0u);
 }
 
 TEST(SystemUnit, TopologyNearestResetsCapacityForEachSocket) {
@@ -173,10 +246,14 @@ TEST(SystemUnit, TopologyNearestNoSocketsClearsOutput) {
   amdsmi_topology_nearest_t result{};
   result.count = kCapacity;
   std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
 
   ASSERT_EQ(topology.Query(&result), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(topology.socket_calls, 1u);
+  EXPECT_EQ(topology.processor_calls, 0u);
   EXPECT_EQ(result.count, 0u);
   for (auto peer : result.processor_list) EXPECT_EQ(peer, nullptr);
+  for (auto value : result.reserved) EXPECT_EQ(value, 0u);
 }
 
 TEST(SystemUnit, TopologyNearestSkipsSourceAndUnavailablePeers) {
@@ -201,23 +278,32 @@ TEST(SystemUnit, TopologyNearestNoMatchingPeersClearsOutput) {
   amdsmi_topology_nearest_t result{};
   result.count = kCapacity;
   std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
 
   ASSERT_EQ(topology.Query(&result), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(result.count, 0u);
   for (auto peer : result.processor_list) EXPECT_EQ(peer, nullptr);
+  for (auto value : result.reserved) EXPECT_EQ(value, 0u);
 }
 
 TEST(SystemUnit, TopologyNearestPropagatesDiscoveryErrors) {
   Topology topology;
   topology.AddPeer(0, 1, 10);
   amdsmi_topology_nearest_t result{};
+  result.count = UINT32_MAX;
+  std::fill_n(result.processor_list, kCapacity, &topology.source);
+  for (auto& value : result.reserved) value = UINT64_MAX;
+  const auto expected = result;
 
   topology.socket_count_status = AMDSMI_STATUS_NOT_SUPPORTED;
   EXPECT_EQ(topology.Query(&result), AMDSMI_STATUS_NOT_SUPPORTED);
+  ExpectUnchanged(result, expected);
   topology.socket_count_status = AMDSMI_STATUS_SUCCESS;
   topology.socket_fill_status = AMDSMI_STATUS_API_FAILED;
   EXPECT_EQ(topology.Query(&result), AMDSMI_STATUS_API_FAILED);
+  ExpectUnchanged(result, expected);
   topology.socket_fill_status = AMDSMI_STATUS_SUCCESS;
   topology.processor_status = AMDSMI_STATUS_INVAL;
   EXPECT_EQ(topology.Query(&result), AMDSMI_STATUS_INVAL);
+  ExpectUnchanged(result, expected);
 }

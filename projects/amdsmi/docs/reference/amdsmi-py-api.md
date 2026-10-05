@@ -6455,12 +6455,27 @@ Input parameters:
 * `link_type` The AmdSmiLinkType level to search for nearest devices
 
 Output: Dictionary holding the following fields.
-* `processor_list` list of all nearest device handlers found
+* `processor_list` list of stored accessible peer GPU handles, excluding `processor_handle`.
 
+On bare-metal Linux, peers matching `link_type` are ordered by ascending hop
+count, then ascending link weight. Order among peers with equal hops and weight
+is unspecified. Peers whose accessibility, link-type, or link-weight query fails
+are skipped, so success does not guarantee a complete list.
+
+At most `AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP` handles are returned. If more
+peers match, only the nearest that fit are stored. A full list does not reveal
+whether peers were omitted; there is no separate total count or truncation flag.
+The native `count` is the number stored. Unused native array slots and reserved
+fields are zeroed on success; neither is exposed in the Python dictionary.
+
+Socket and processor discovery errors propagate as library exceptions. A
+returned discovery count exceeding its buffer capacity is an error, not a
+partial result.
 
 Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
 
 * `AmdSmiLibraryException`
+* `AmdSmiParameterException`
 
 #### Possible Library Exceptions
 
@@ -6469,6 +6484,7 @@ Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
 - `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_UNEXPECTED_SIZE` - A socket or processor discovery count exceeds its buffer capacity
 
 Example:
 

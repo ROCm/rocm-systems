@@ -61,7 +61,7 @@
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "topology_nearest.h"
+#include "topology_nearest_internal.h"
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
@@ -6054,7 +6054,11 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
   }
 
   AMDSMI_CHECK_INIT();
-  return amd::smi::get_link_topology_nearest(processor_handle, link_type, topology_nearest_info);
+  const amd::smi::detail::TopologyDeps deps = {
+      amdsmi_get_socket_handles, amdsmi_get_processor_handles, amdsmi_is_P2P_accessible,
+      amdsmi_topo_get_link_type, amdsmi_topo_get_link_weight};
+  return amd::smi::detail::get_link_topology_nearest(processor_handle, link_type,
+                                                     topology_nearest_info, deps);
 }
 
 static const std::map<amdsmi_virtualization_mode_t, std::string> virtualization_mode_map = {

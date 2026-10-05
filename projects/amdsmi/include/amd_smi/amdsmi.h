@@ -6896,8 +6896,10 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details Returns accessible peers matching link_type, excluding processor_handle.
+ *           Peers whose accessibility, link type, or link weight query fails are skipped.
  *           If more peers match than fit in processor_list, only the nearest
  *           AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP peers are stored.
+ *           A count equal to capacity does not indicate whether peers were omitted.
  *
  *  @note Peers are ordered by ascending hop count, then ascending link weight.
  *        Order among peers with equal hop count and link weight is unspecified.
@@ -6908,10 +6910,13 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *
  *  @param[out] topology_nearest_info Caller-provided structure with fixed processor_list
  *              storage; no separate allocation is needed. On success, count is the
- *              number of handles stored, regardless of its input value. Unused
- *              processor_list entries are set to NULL.
+ *              number of handles stored. Previous field values are not read; unused
+ *              processor_list entries and reserved fields are zeroed. On failure,
+ *              the structure is unchanged.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *          Socket and processor discovery errors are propagated; a returned discovery
+ *          count exceeding its buffer capacity yields ::AMDSMI_STATUS_UNEXPECTED_SIZE.
  */
 amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                                                  amdsmi_link_type_t link_type,
