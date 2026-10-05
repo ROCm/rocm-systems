@@ -278,8 +278,8 @@ TEST_F(NetIbMPITest, NullCommClose) {
 //      Every call is rank-symmetric and non-fatal, and there is no allocation
 //      to check, so both ranks reach the barrier whatever happens.
 TEST_F(NetIbMPITest, NullCommCastDataPath) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
 
     // A fixed buffer rather than an allocation: every guard returns before it
     // touches the data, so nothing needs a heap, and checking a malloc here
