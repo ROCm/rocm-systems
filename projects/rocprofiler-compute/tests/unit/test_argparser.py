@@ -244,7 +244,7 @@ def test_help_shows_option_metavars(capsys):
     assert "-t, --time-unit <unit>" in out
     assert "--torch-operator [patterns]..." in out
     assert "--list-metrics <arch>" in out
-    assert "Values: HBM, L2, vL1D, L0, LDS" in out
+    assert "Values: ALL, HBM, L2, vL1D, L0, LDS" in out
 
 
 def test_help_defaults_match_parser_defaults():
