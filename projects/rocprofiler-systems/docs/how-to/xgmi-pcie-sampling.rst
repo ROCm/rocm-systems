@@ -113,7 +113,7 @@ Edit ``.rocprofsys.cfg`` with the following settings:
 
 .. note::
 
-   Refer to these steps to `Install and build TransferBench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/install.html#install-transferbench>`_.
+   Refer to these steps to `Building TransferBench from source <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/build_from_source.html>`__.
 
 At the end of the run, a similar message appears::
 
