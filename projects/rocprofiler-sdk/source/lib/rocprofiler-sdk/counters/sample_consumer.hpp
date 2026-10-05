@@ -31,7 +31,6 @@
 #include <cstddef>
 #include <functional>
 #include <mutex>
-#include <new>
 #include <thread>
 #include <utility>
 
@@ -70,17 +69,6 @@ public:
 
         if(!exited) cv.wait(lk, [&] { return exited.load(); });
         if(consumer.joinable()) consumer.join();
-    }
-
-    // fork copies this object but not the consumer thread. Replace the thread
-    // handle, mutex, and condition variable so the child can exit.
-    void release_after_fork()
-    {
-        valid.store(false);
-        exited.store(true);
-        ::new(static_cast<void*>(&consumer)) std::thread();
-        ::new(static_cast<void*>(&cv)) std::condition_variable();
-        ::new(static_cast<void*>(&mut)) std::mutex();
     }
 
     void add(DataType&& params)

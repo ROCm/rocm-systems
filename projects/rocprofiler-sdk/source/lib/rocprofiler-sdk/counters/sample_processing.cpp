@@ -176,7 +176,10 @@ callback_thread_get()
     auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
     static std::once_flag once;
     std::call_once(once, []() {
-        ::pthread_atfork(nullptr, nullptr, []() { callback_thread_slot()->release_after_fork(); });
+        ::pthread_atfork(nullptr, nullptr, []() {
+            if(auto* v = callback_thread_slot())
+                ::new(v) callback_consumer_t{&process_completed_cb};
+        });
     });
     return consumer;
 }

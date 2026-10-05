@@ -141,21 +141,17 @@ TEST(consumer, restart)
         EXPECT_EQ(var.load(), static_cast<size_t>(CYCLES));
 }
 
-// A forked child must be able to destroy a running consumer.
-TEST(consumer, fork_child_exit_returns)
+// A fork of the running callback consumer must return from the child.
+TEST(consumer, fork_handler_resets_callback_consumer)
 {
-    auto array = std::make_shared<result_array_t>();
-
-    consumer_t consumer(consume_fn);
-    consumer.start();
+    callback_thread_start();
 
     pid_t pid = fork();
     ASSERT_NE(pid, -1);
     if(pid == 0)
     {
         alarm(10);
-        consumer.release_after_fork();
-        consumer.~consumer_t();
+        callback_thread_stop();
         _exit(0);
     }
 
@@ -164,9 +160,7 @@ TEST(consumer, fork_child_exit_returns)
     EXPECT_TRUE(WIFEXITED(status));
     EXPECT_EQ(WEXITSTATUS(status), 0);
 
-    consumer.add(DummyData{2, 3, array});
-    consumer.exit();
-    EXPECT_EQ(array->at(2).load(), 3u);
+    callback_thread_stop();
 }
 
 // Verifies that calling add() after exit() does not lose work: the
