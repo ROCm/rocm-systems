@@ -38,6 +38,11 @@ resolved routing masks. Mixed global/shared FLAT functional execution still has 
 existing first-request-lane routing limitation; the checker does not repair memory
 routing.
 
+GFX12 block transfers use their issue-time M0 DWORD mask for register dependencies.
+Disabled load destinations and store-data words do not require completion or replay
+waits. Address registers remain replay sources even when they overlap disabled data
+words. An empty M0 mask still occupies the instruction's counter positions.
+
 Legacy VMEM writeback can avoid an overwrite warning only when the pending result
 and the incoming producer share an ordered completion class. On legacy RDNA,
 ordinary loads, image samples and BVH results share VMcnt but keep separate

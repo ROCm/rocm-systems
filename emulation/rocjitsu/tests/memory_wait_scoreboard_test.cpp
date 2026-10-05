@@ -2344,6 +2344,111 @@ TEST(XcntExecutionTest, VectorAddressAndExecRespectPartialTranslationAndLoadWait
     }
 }
 
+TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (bool scratch : {false, true}) {
+      for (bool load : {false, true}) {
+        if (!load && arch != ROCJITSU_CODE_ARCH_CDNA5)
+          continue; // XCNT replay is currently qualified only for CDNA5.
+        for (uint32_t mask : {0u, 1u, 0x80000001u, 0x55555555u, 0xffffffffu}) {
+          SCOPED_TRACE(testing::Message() << "arch=" << arch << " scratch=" << scratch
+                                          << " load=" << load << " mask=" << mask);
+          GpuMemory memory("block_wait_memory");
+          L2Cache l2("block_wait_l2");
+          ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 128;
+          config.lds_size_kb = 64;
+          auto cu = ComputeUnitCore::create("block_wait_cu", config, &memory, &l2);
+          auto *wf = cu->dispatch_wf(0, 0x100, 128, 128, 32);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec(1);
+          wf->set_mode_raw(1u << 25);
+          wf->set_m0(mask);
+          for (uint32_t reg = 0; reg < 64; ++reg)
+            cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+          const uint16_t opcode = load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock;
+          const auto words = scratch
+                                 ? cdna5::build_vscratch(opcode, {.saddr = 124,
+                                                                  .vdst = uint8_t(load ? 32 : 0),
+                                                                  .vsrc = uint8_t(load ? 0 : 32),
+                                                                  .vaddr = 0})
+                                 : cdna5::build_vglobal(opcode, {.saddr = 124,
+                                                                 .vdst = uint8_t(load ? 32 : 0),
+                                                                 .vsrc = uint8_t(load ? 0 : 32),
+                                                                 .vaddr = 0});
+          auto decoder = Decoder::create(arch);
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(words, 0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+          wf->set_m0(~mask); // Tracking must use the same snapshot as execution.
+          cu->track_memory_wait(*decoded.value(), *wf);
+          auto &scoreboard = *wf->memory_wait_scoreboard();
+          const auto counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
+          EXPECT_EQ(scoreboard.outstanding(counter), 1u); // Even M0=0 occupies a slot.
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+            EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::X), 1u);
+          for (uint16_t word = 0; word < 32; ++word) {
+            // A diagnostic retires its dependency to suppress repeats. Reissue
+            // before each probe so every word is checked independently.
+            if (word != 0) {
+              scoreboard.wait(counter, 0);
+              scoreboard.wait(WaitCounterKind::X, 0);
+              cu->track_memory_wait(*decoded.value(), *wf);
+            }
+            const auto before =
+                load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+            scoreboard.access({RegClass::VGPR, static_cast<uint16_t>(32 + word), 1}, 1, 0xf,
+                              /*write=*/!load);
+            const auto after =
+                load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+            EXPECT_EQ(after - before, (mask >> word) & 1u) << "word=" << word;
+          }
+          scoreboard.wait(counter, 0);
+          scoreboard.wait(WaitCounterKind::X, 0);
+          EXPECT_TRUE(scoreboard.empty());
+        }
+      }
+    }
+  }
+}
+
+TEST(XcntExecutionTest, BlockStoreMaskedDataStillProtectsOverlappingAddress) {
+  GpuMemory memory("block_address_memory");
+  L2Cache l2("block_address_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 128;
+  auto cu = ComputeUnitCore::create("block_address_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_mode_raw(1u << 25);
+  wf->set_m0(1); // v33/v34 are not store data, but they form the address.
+  for (uint32_t reg = 32; reg < 64; ++reg)
+    cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+  const auto words =
+      cdna5::build_vglobal(cdna5::kGlobalStoreBlock, {.saddr = 124, .vsrc = 32, .vaddr = 33});
+  auto decoder = Decoder::create(config.arch);
+  util::StringDiagnostic error;
+  auto decoded = decoder->decode_window(words, 0, error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+  cu->track_memory_wait(*decoded.value(), *wf);
+  auto &scoreboard = *wf->memory_wait_scoreboard();
+  scoreboard.access({RegClass::VGPR, 35, 1}, 1, 0xf, true);
+  EXPECT_EQ(cu->xcnt_diagnostic_count(), 0u);
+  scoreboard.access({RegClass::VGPR, 33, 2}, 1, 0xf, true);
+  EXPECT_EQ(cu->xcnt_diagnostic_count(), 1u);
+}
+
 TEST(XcntExecutionTest, StoreDataIsProtectedAndSourceReadsAreAllowed) {
   for (unsigned wait = 0; wait < 4; ++wait) {
     SCOPED_TRACE(wait);
