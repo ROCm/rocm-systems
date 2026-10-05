@@ -65,7 +65,7 @@ Generate the profile for this example using the following command.
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n instmix --no-roof -- ./instmix
+   $ rocprof-compute profile -n instmix -- ./instmix
 
 Analyze the instruction mix section.
 

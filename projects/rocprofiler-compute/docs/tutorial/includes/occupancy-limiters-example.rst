@@ -25,7 +25,7 @@ Finally, we generate our ROCm Compute Profiler profile as:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n occupancy --no-roof -- ./occupancy
+   $ rocprof-compute profile -n occupancy -- ./occupancy
 
 .. _occupancy-experiment-design:
 

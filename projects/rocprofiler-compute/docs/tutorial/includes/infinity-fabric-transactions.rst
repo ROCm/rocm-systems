@@ -64,7 +64,7 @@ In our first experiment, we consider the simplest possible case, a
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n coarse_grained_local --no-roof -- ./fabric -t 1 -o 0
+   $ rocprof-compute profile -n coarse_grained_local -- ./fabric -t 1 -o 0
    Using:
      mtype:CoarseGrained
      mowner:Device
@@ -163,7 +163,7 @@ accelerator. Our code uses the ``hipExtMallocWithFlag`` API with the
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n fine_grained_local --no-roof -- ./fabric -t 0 -o 0
+   $ rocprof-compute profile -n fine_grained_local -- ./fabric -t 0 -o 0
    Using:
      mtype:FineGrained
      mowner:Device
@@ -245,7 +245,7 @@ substantial change in the L2-Fabric metrics:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n fine_grained_remote --no-roof -- ./fabric -t 0 -o 2
+   $ rocprof-compute profile -n fine_grained_remote -- ./fabric -t 0 -o 2
    Using:
      mtype:FineGrained
      mowner:Remote
@@ -339,7 +339,7 @@ fine-grained memory using the ``hipHostMalloc`` API:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n fine_grained_host --no-roof -- ./fabric -t 0 -o 1
+   $ rocprof-compute profile -n fine_grained_host -- ./fabric -t 0 -o 1
    Using:
      mtype:FineGrained
      mowner:Host
@@ -416,7 +416,7 @@ allocation as coarse-grained:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n coarse_grained_host --no-roof -- ./fabric -t 1 -o 1
+   $ rocprof-compute profile -n coarse_grained_host -- ./fabric -t 1 -o 1
    Using:
      mtype:CoarseGrained
      mowner:Host
@@ -484,7 +484,7 @@ operations to fine-grained memory allocated on the host:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n fine_grained_host_write --no-roof -- ./fabric -t 0 -o 1 -p 1
+   $ rocprof-compute profile -n fine_grained_host_write -- ./fabric -t 0 -o 1 -p 1
    Using:
      mtype:FineGrained
      mowner:Host
@@ -576,7 +576,7 @@ operations to the CPU’s DRAM.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile -n fine_grained_host_add --no-roof -- ./fabric -t 0 -o 1 -p 2
+   $ rocprof-compute profile -n fine_grained_host_add -- ./fabric -t 0 -o 1 -p 2
    Using:
      mtype:FineGrained
      mowner:Host
