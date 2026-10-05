@@ -163,6 +163,7 @@ def write_otf2(importData, config):
                     graph_exec_attribute = archive.definitions.attribute(
                         name="graph_exec_id",
                         description="process-monotonic hipGraphExec_t identifier",
+                        type=Type.UINT64,
                     )
                     graph_node_attribute = archive.definitions.attribute(
                         name="graph_node_id",
@@ -170,10 +171,12 @@ def write_otf2(importData, config):
                             "Zero-based HIP graph node ordinal within a launch; "
                             "valid only when graph_exec_id is nonzero"
                         ),
+                        type=Type.UINT64,
                     )
                     kernel_dispatch_count_attribute = archive.definitions.attribute(
                         name="kernel_dispatch_count",
                         description="kernel dispatch packets written during a HIP graph launch",
+                        type=Type.UINT64,
                     )
                     hip_event_attributes = {perfetto_category: "hip_event"}
                     # OTF2 attributes default to Type.STRING; both of these carry
