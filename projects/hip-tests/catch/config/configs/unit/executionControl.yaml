@@ -108,15 +108,15 @@ executionControl:
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize:
     <<: *level_2
-    tags: [attributes, kernel]
+    tags: [attributes, kernel, P0]
   Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
     <<: *level_2
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
-    tags: [attributes, kernel]
+    tags: [attributes, kernel, P0]
   Unit_hipFuncSetAttribute_Positive_Parameters:
     <<: *level_2
-    tags: [attributes, kernel]
+    tags: [attributes, kernel, P0]
   Unit_hipFuncSetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [attributes, kernel]

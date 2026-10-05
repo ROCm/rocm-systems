@@ -8,5 +8,7 @@ cluster:
     disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipClusterLaunch_CompilerDirective_Basic:
     <<: *level_2
+    tags: [P0]
   Unit_hipClusterLaunch_LaunchApi_Basic:
     <<: *level_2
+    tags: [P0]
