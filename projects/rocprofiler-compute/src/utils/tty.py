@@ -210,7 +210,7 @@ def is_roofline_shown(
     if not has_roofline_style or (
         args.filter_metrics
         and "4" not in args.filter_metrics
-        and "roof" not in args.filter_metrics
+        and "roofline" not in args.filter_metrics
     ):
         return False
 

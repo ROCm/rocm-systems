@@ -31,6 +31,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
+* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
+
 * `-m/--roofline-mem-level` now accepts `ALL`, which is also its default.
 
 * `--specs-correction` takes a comma-separated list of `name:value` pairs, like other list options. The quoted form `--specs-correction="num_xcd:4,cu_per_gpu:64"` still works.

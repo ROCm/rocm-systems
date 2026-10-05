@@ -45,7 +45,7 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more optio
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
@@ -85,11 +85,11 @@ the hierarchy.
 
 ```bash
 # Ceilings for the precision the kernel actually uses
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline \
     -R FP16,BF16
 
 # Ceilings for a specific level
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline \
     -m HBM,L2
 ```
 
