@@ -3865,6 +3865,16 @@ TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(g_unreplayable_ran_out.load());
 }
 
+// Records through the compiler dispatch table, which the capture shutdown
+// leaves in place.
+static void hrr_push_pop_launch_config() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
+}
+
 // ---------------------------------------------------------------------------
 // Unit_HRR_ForkedChildRecordsAfterShutdown_Direct
 //
@@ -3886,13 +3896,7 @@ TEST_CASE("Unit_HRR_ForkedChildRecordsAfterShutdown_Direct", "[.][hrr-direct]") 
 
   pid_t pid = fork();
   if (pid == 0) {
-    g_hrr_after_capture_shutdown = [] {
-      dim3 grid, block;
-      size_t shared = 0;
-      hipStream_t stream = nullptr;
-      (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
-      (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
-    };
+    g_hrr_after_capture_shutdown = hrr_push_pop_launch_config;
     exit(0);
   }
   REQUIRE(pid > 0);
@@ -3901,5 +3905,32 @@ TEST_CASE("Unit_HRR_ForkedChildRecordsAfterShutdown_Direct", "[.][hrr-direct]") 
   REQUIRE(status != -1);
   REQUIRE(WIFEXITED(status));
   REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkAfterCaptureShutdown_Direct
+//
+// A process that forks after its own capture shutdown has no archive open.
+// Its child must not open one on its first record either: nothing in the
+// child would finalize it. The parent forks after its shutdown, and the child
+// records through the compiler dispatch table before it exits. The parent
+// exits 3 if the child did not exit cleanly. Unit_HRR_ForkAfterCaptureShutdown
+// checks that only the parent has an archive.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    pid_t pid = fork();
+    if (pid == 0) {
+      hrr_push_pop_launch_config();
+      _exit(0);
+    }
+    const int status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+    if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(3);
+  };
 }
 #endif  // !_WIN32

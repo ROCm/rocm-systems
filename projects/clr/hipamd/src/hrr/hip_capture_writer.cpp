@@ -523,7 +523,8 @@ static void atfork_child() {
   // Only async-signal-safe work from here: drop the parent's events fd and
   // forget its paths, so neither shutdown nor the crash path writes into the
   // parent's archive. reopen_after_fork() opens the child's.
-  if (g_events_fd >= 0) {
+  const bool parent_open = g_events_fd >= 0;
+  if (parent_open) {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
@@ -535,7 +536,9 @@ static void atfork_child() {
   // The child's archive is a new one: an event the parent dropped is not
   // missing from it.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
-  if (!g_base_dir.empty()) g_reopen_after_fork.store(true, std::memory_order_relaxed);
+  // After close() nothing would finalize a child's archive. A parent that is
+  // itself a child yet to open its archive passes its flag on unchanged.
+  if (parent_open) g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
 
 static void install_atfork_handlers_once() {
