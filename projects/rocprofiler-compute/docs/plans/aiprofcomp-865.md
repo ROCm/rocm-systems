@@ -16,10 +16,10 @@ Full historical plan drafts are preserved on branch
 | Term | Meaning |
 |------|---------|
 | **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). |
-| **SPP (Single-pass packable)** | Default packing objective: every metric whose PMC set fits one hardware bucket gets a co-located perfmon replay. |
+| **SPP (Single-pass packable)** | Collection + analyze contract: every metric whose PMC set fits one hardware bucket gets a co-located perfmon replay, and its expression is same-pass–bound at analyze time. |
 | **SLOT_LIMIT** | Metric whose full PMC set cannot fit one hardware bucket under `perfmon_config` slot limits, even with global repack. |
 | **POLICY_GAP** | Metric that is multi-bucket under the old shipping layout but **is** packable in one bucket with SPP (fixed by Phase 1, not Phase 2). |
-| **Same-pass bind** | Analyze-time binding of each packable metric’s expression to counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
+| **Same-pass bind** | SPP analyze half: bind each packable metric’s expression to counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
 | **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). |
 | **COLLECT_SUM / COLLECT_RATIO** | Analyze composites for sum-of-subcollectables and ratio-of-collectables parents. |
 
@@ -50,7 +50,7 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 ```
 408 YAML metrics (gfx942 default)
 ├── 374 with profile PMCs
-│   ├── 358 single-pass (all packable)     ← Phase 1 SPP (~14 passes)
+│   ├── 358 single-pass (all packable)     ← Phase 1 SPP (~14 passes + same-pass bind)
 │   └── 16 SLOT_LIMIT                      ← Phase 2 collectables
 └── 34 with no profile PMCs                ← out of packing scope
 ```
@@ -58,17 +58,19 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 | Goal | Detail |
 |------|--------|
 | Packable metrics | Full PMC set in **one** replay (duplication across passes allowed when unions conflict) |
+| Analyze contract (SPP) | Same-pass bind so duplicated hub counters are not cross-pass merged |
 | SLOT_LIMIT parents | Decompose into single-pass subcollectables; compose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO` |
-| Analyze contract | Same-pass bind so duplicated hub counters are not cross-pass merged |
 | Escape hatch | `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE=1` restores legacy merged-pass analyze |
 
-**SPP spans collection and post-analysis.** Packing without same-pass bind still yields wrong ratios under PMC duplication; bind without packing still leaves packable metrics multi-bucket. Phase 1 ships packing; Phase 2 ships bind + SLOT composites (stacked).
+**SPP is collection + post-analysis.** Packing without same-pass bind still yields wrong ratios under PMC duplication; bind without packing still leaves packable metrics multi-bucket. Phase 1 ships both. Phase 2 is only SLOT_LIMIT collectables / composites.
 
 ---
 
 ## 4. Solution
 
-### 4.1 Phase 1 design — Single-pass packable (collection)
+### 4.1 Phase 1 design — SPP (collection + same-pass bind)
+
+#### Collection — single-pass packing
 
 **Replace** the shipping heuristic + priority coalesce as the default allocator in
 `_allocate_perfmon_counter_files`.
@@ -82,16 +84,26 @@ Algorithm (normative sketch):
 
 **Locked decisions:**
 
-- Default path is SPP; optional `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` during migration.
+- Default path is SPP packing; optional `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` during migration.
 - Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics — packing covers them.
 - Priority policy YAML is not required for the packable guarantee.
-- gfx942 offline gates: `packable_multi == 0`, passes ≈ **14**, SLOT_LIMIT == **16**, SLOT extra passes == **0**.
+- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SLOT_LIMIT == **16**, SLOT extra passes == **0**.
 
-**Primary code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
+**Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
-### 4.2 Phase 2 design — Collectables + same-pass bind (analyze)
+#### Analyze — same-pass bind
 
-#### Slot-limited parents
+When packing duplicates hub counters across passes:
+
+1. Preserve per-pass PMC columns as `{counter}@pass:{key}` shadows at load time.
+2. Bind each packable metric’s expression to a co-located pass (`PassLayout` / `pass_provenance.py`).
+3. Wire CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
+
+Without this bind, SPP layouts can produce impossible percent averages/maxes (e.g. CPC Utilization avg ≫ 100%).
+
+**Primary bind code:** `pass_provenance.py`, `file_io` / `utils_analysis` shadow columns, analyze CLI+DB bind paths.
+
+### 4.2 Phase 2 design — Collectables (SLOT_LIMIT only)
 
 When \(M = (A+B)/C\) cannot fit one bucket:
 
@@ -113,17 +125,25 @@ Submetrics are normal single-pass metrics. Parents are analyze-time composites (
 
 gfx942: **16** SLOT_LIMIT parents ≈ **10** unique PMC sets (panel mirrors share sets).
 
-#### Same-pass bind (companion to SPP duplication)
+#### gfx942 SLOT_LIMIT conversion summary
 
-When Phase 1 duplicates hub counters across passes:
+All **16** former SLOT_LIMIT parents (**10** unique PMC sets) are analyze-time composites under SPP. Sub-collectables are single-bucket; offline eval reports `slot_limit_metrics: 0`.
 
-1. Preserve per-pass PMC columns as `{counter}@pass:{key}` shadows at load time.
-2. Bind each packable metric’s expression to a co-located pass (`PassLayout` / `pass_provenance.py`).
-3. Wire CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
+| Unique set | Composite |
+|------------|-----------|
+| VALU FLOPs | `COLLECT_SUM` F16/F32/F64 rates |
+| vL1D hit | `COLLECT_SUM` non-RW hit + atom correction |
+| HBM Bandwidth | `COLLECT_SUM` rd/wr BW |
+| AI HBM/L2/L1/LDS | `COLLECT_RATIO`(FLOP pieces, bytes) |
+| Perf GFLOPs | `COLLECT_SUM` VALU+MFMA rates |
+| IPC Issued | `COLLECT_SUM` two IPC slices |
+| Read Instructions | `COLLECT_SUM` load + (−store−atomic) |
 
-Without this bind, SPP layouts can produce impossible percent averages/maxes (e.g. CPC Utilization avg ≫ 100%).
+`min`/`max` on composite parents are `None` (avg-only) so they do not re-introduce the full PMC set into grouping.
 
-**Primary code:** `collectable.py`, `weighted_avg.py`, aggregation/expression/evaluation_pipeline; `pass_provenance.py`, `file_io` / analyze CLI+DB bind; gfx942 SLOT YAML conversions.
+Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py --arch gfx942` → `slot_limit_metrics: 0`, `packable_multi: 0`, passes: 14.
+
+**Primary code:** `collectable.py`, `weighted_avg.py`, aggregation/expression/evaluation_pipeline composite path; gfx942 SLOT YAML conversions.
 
 ---
 
@@ -132,10 +152,11 @@ Without this bind, SPP layouts can produce impossible percent averages/maxes (e.
 | Layer | Check |
 |-------|--------|
 | Offline packing | `eval_single_pass_packable.py` / inspector: `packable_multi == 0`, pass count, SLOT fill +0 |
-| Unit tests | Packing (`test_counter_grouping_single_pass`); collectables / WA / `COLLECT_RATIO`; same-pass bind (`test_pass_provenance`, DB bind tests) |
+| Same-pass bind | Unit tests (`test_pass_provenance`, DB bind tests); health report P0 ratios ≤ 100% where expected |
+| Collectables | WA / `COLLECT_RATIO` unit tests; gfx942 `slot_limit_metrics == 0` after Phase 2 |
 | Health report | SPP vs legacy health runners + `generate_metric_health_report.py` on gfx942 (and other arches as needed) |
 | Hardware spot-check | gfx942 CPX/SPX: P0 HBM / WGM / CPC ratios sane (avg/max ≤ 100% where expected) |
-| Regression workload | MI-PATH `ns3d*` (AIPROFCOMP-265 class): SPP + same-pass bind vs legacy packing / legacy pass merge |
+| Regression workload | MI-PATH `ns3d*` (AIPROFCOMP-265 class): SPP (packing + bind) vs legacy packing / legacy pass merge |
 | Multi-arch | Re-baseline gfx908, gfx90a, gfx950, gfx115x, gfx1250 offline after Phase 1 |
 
-**Stack pairing:** Phase 1 packing alone must not be treated as the full SPP product guarantee until Phase 2 same-pass bind is present.
+**Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2 (collectables / `WEIGHTED_AVG` / `COLLECT_*` only).
