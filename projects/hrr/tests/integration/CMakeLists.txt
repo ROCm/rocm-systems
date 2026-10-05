@@ -30,6 +30,11 @@
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
 # [.][hrr-direct] workload.
+#
+# hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
+# its hidden [.][hrr-direct] workload registers valid and altered bundle
+# headers itself, before and after HIP initialises. It compiles its kernel with
+# hipRTC, so it is a plain C++ translation unit.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -59,6 +64,7 @@ add_executable(hrr-integration-tests
   ${HRR_GPU_WORKLOAD_SOURCES}
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_fatbin_header_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17

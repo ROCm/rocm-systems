@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -8,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/simd_test_hooks.h"
 
 #include <array>
 #include <bit>
@@ -2251,5 +2254,166 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
   EXPECT_EQ(restored_mxcsr, host_mxcsr);
 #endif
 }
+
+// Floating compares flush their inputs under MODE.FP_DENORM before the
+// relation. Each case runs one decoded RDNA4 compare, built with the generated
+// encoders, on lanes whose src0 cycles through +tiny, -tiny, +0 and 1.0
+// with src1 = +0. V_CMP_EQ then selects lane 2 of each group of four when input
+// denormals are kept, and lanes 0-2 when they are flushed. F16 sources hold a
+// NaN in their high half, so only the .l halves may be read.
+struct CompareInputFlushCase {
+  std::string name;
+  std::array<uint32_t, 2> words;
+  unsigned width;
+  bool vop3;
+  uint32_t mode;
+  uint32_t expected;
+};
+
+void PrintTo(const CompareInputFlushCase &test, std::ostream *stream) { *stream << test.name; }
+
+std::vector<CompareInputFlushCase> compare_input_flush_cases() {
+  constexpr uint32_t KEEP = 0x44444444u;
+  constexpr uint32_t FLUSH = 0x77777777u;
+  // MODE.FP_DENORM is [5:4] for F32 and [7:6] for F16/F64; bit 0 of each field
+  // allows input denormals. The modes set the two fields differently and vary
+  // the output bit alone, so reading the other format's field or the output
+  // bit gives the wrong mask.
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 8> F32_MODES = {{
+      {0xf0u, KEEP},
+      {0x00u, FLUSH},
+      {0x30u, KEEP},
+      {0xc0u, FLUSH},
+      {0xe0u, FLUSH},
+      {0xd0u, KEEP},
+      {0xb0u, KEEP},
+      {0x70u, KEEP},
+  }};
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 8> F16_F64_MODES = {{
+      {0xf0u, KEEP},
+      {0x00u, FLUSH},
+      {0x30u, FLUSH},
+      {0xc0u, KEEP},
+      {0xe0u, KEEP},
+      {0xd0u, KEEP},
+      {0xb0u, FLUSH},
+      {0x70u, KEEP},
+  }};
+  struct Form {
+    const char *name;
+    std::array<uint32_t, 2> words;
+    unsigned width;
+    bool vop3;
+  };
+  // Source operands encode VGPR n as 256 + n; VOPC vsrc1 is the VGPR index.
+  constexpr uint16_t V0 = 256, V1 = 257, V2 = 258;
+  const auto vopc = [](uint16_t op, uint8_t vsrc1) {
+    return std::array<uint32_t, 2>{rdna4::build_vopc(op, {.src0 = V0, .vsrc1 = vsrc1})[0], 0u};
+  };
+  const auto vop3 = [](uint16_t op, uint16_t src1) {
+    return rdna4::build_vop3(op, {.vdst = 6, .src0 = V0, .src1 = src1});
+  };
+  const std::array<Form, 6> forms = {{
+      // v_cmp_eq_f32_e32 vcc_lo, v0, v1
+      {"EqF32E32", vopc(rdna4::kVCmpEqF32Vopc, 1), 32, false},
+      // v_cmp_eq_f32_e64 s6, v0, v1
+      {"EqF32E64", vop3(rdna4::kVCmpEqF32Vop3, V1), 32, true},
+      // v_cmp_eq_f16_e32 vcc_lo, v0.l, v1.l
+      {"EqF16E32", vopc(rdna4::kVCmpEqF16Vopc, 1), 16, false},
+      // v_cmp_eq_f16_e64 s6, v0.l, v1.l
+      {"EqF16E64", vop3(rdna4::kVCmpEqF16Vop3, V1), 16, true},
+      // v_cmp_eq_f64_e32 vcc_lo, v[0:1], v[2:3]
+      {"EqF64E32", vopc(rdna4::kVCmpEqF64Vopc, 2), 64, false},
+      // v_cmp_eq_f64_e64 s6, v[0:1], v[2:3]
+      {"EqF64E64", vop3(rdna4::kVCmpEqF64Vop3, V2), 64, true},
+  }};
+  std::vector<CompareInputFlushCase> cases;
+  for (const Form &form : forms)
+    for (const auto &[mode, expected] : form.width == 32 ? F32_MODES : F16_F64_MODES) {
+      constexpr char HEX[] = "0123456789abcdef";
+      const std::string suffix = {HEX[mode >> 4], HEX[mode & 0xfu]};
+      cases.push_back({std::string(form.name) + "Mode" + suffix, form.words, form.width, form.vop3,
+                       mode, expected});
+    }
+  return cases;
+}
+
+class ValuCompareInputFlushTest : public testing::TestWithParam<CompareInputFlushCase> {};
+
+// Restores the process force-scalar gate if an assertion leaves the test early.
+struct ForceScalarGuard {
+  bool original = util::force_scalar();
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
+};
+
+TEST_P(ValuCompareInputFlushTest, HonorsModeOnScalarAndSimdPaths) {
+  const CompareInputFlushCase &test = GetParam();
+  amdgpu::GpuMemory memory("compare_memory");
+  amdgpu::L2Cache cache("compare_cache");
+  cache.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+      amdgpu::ComputeUnitCore::create("valu_compare", config, &memory, &cache);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  DecodeResult decoded = decoder->decode(test.words.data());
+  ASSERT_FALSE(decoded.failed());
+  std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  const uint32_t vgpr = wave->vgpr_alloc().base;
+  const uint32_t sgpr = wave->sgpr_alloc().base;
+  const bool wave64 = wave->wf_size() == 64;
+  const uint64_t full_exec = wave64 ? ~uint64_t{0} : 0xffffffffu;
+  const uint64_t expected_lanes = test.expected | (uint64_t{test.expected} << 32);
+  // +tiny, -tiny, +0 and 1.0 in each format.
+  constexpr std::array<uint32_t, 4> F16_SOURCES = {0x7e000001u, 0x7e008001u, 0x7e000000u,
+                                                   0x7e003c00u};
+  constexpr std::array<uint32_t, 4> F32_SOURCES = {0x00000001u, 0x80000001u, 0u, 0x3f800000u};
+  constexpr std::array<uint32_t, 4> F64_HIGH = {0u, 0x80000000u, 0u, 0x3ff00000u};
+  constexpr std::array<uint32_t, 4> F64_LOW = {1u, 1u, 0u, 0u};
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    util::set_force_scalar_for_testing(scalar);
+    for (const uint64_t exec : {full_exec, full_exec & uint64_t{0x0f0f0f0f0f0f0f0f}}) {
+      wave->set_exec(exec);
+      wave->set_mode_raw(test.mode);
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+        if (test.width == 64) {
+          cu->write_vgpr(vgpr + 0, lane, F64_LOW[lane % 4]);
+          cu->write_vgpr(vgpr + 1, lane, F64_HIGH[lane % 4]);
+          cu->write_vgpr(vgpr + 2, lane, 0u);
+          cu->write_vgpr(vgpr + 3, lane, 0u);
+        } else {
+          cu->write_vgpr(vgpr + 0, lane,
+                         test.width == 16 ? F16_SOURCES[lane % 4] : F32_SOURCES[lane % 4]);
+          cu->write_vgpr(vgpr + 1, lane, test.width == 16 ? 0x7e000000u : 0u);
+        }
+      }
+      // Stale destination bits must be replaced, including inactive lanes.
+      wave->set_vcc_mask(uint64_t{0xdeadbeefdeadbeef});
+      cu->write_sgpr(sgpr + 6, 0xdeadbeefu);
+      cu->write_sgpr(sgpr + 7, 0xdeadbeefu);
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+      uint64_t result = wave->vcc_mask();
+      if (test.vop3)
+        result = cu->read_sgpr(sgpr + 6) |
+                 (wave64 ? uint64_t{cu->read_sgpr(sgpr + 7)} << 32 : uint64_t{0});
+      EXPECT_EQ(result & full_exec, expected_lanes & exec)
+          << (scalar ? "scalar" : "SIMD") << " exec 0x" << std::hex << exec;
+    }
+  }
+  wave->halt();
+}
+
+INSTANTIATE_TEST_SUITE_P(CompareInputFlush, ValuCompareInputFlushTest,
+                         testing::ValuesIn(compare_input_flush_cases()),
+                         [](const testing::TestParamInfo<CompareInputFlushCase> &info) {
+                           return info.param.name;
+                         });
 
 } // namespace
