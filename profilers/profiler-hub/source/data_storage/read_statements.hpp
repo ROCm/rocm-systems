@@ -428,8 +428,10 @@ struct read_statements
                                 m_uuid));
             } catch(const std::runtime_error& err)
             {
-                // TODO
-                LOG_ERROR("Fail to execute indexing query...");
+                LOG_ERROR("Failed to create the track topology index on {}_{}: {}",
+                          table,
+                          m_uuid,
+                          err.what());
             }
         }
     }

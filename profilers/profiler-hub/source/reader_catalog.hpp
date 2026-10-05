@@ -142,6 +142,7 @@ struct reader_catalog_t
                                                                        topology_to_track;
     std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> track_to_topology;
     std::unordered_map<reader_types::track_info_ptr_t, size_t>         track_to_db_id;
+    std::unordered_map<size_t, reader_types::track_info_ptr_t> sample_track_by_db_id;
 
 private:
     // Discovers "thread" tracks directly from the duration-event tables

@@ -10,8 +10,12 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <exception>
+#include <filesystem>
 #include <limits>
+#include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 
@@ -23,7 +27,50 @@ env_size(const char* name, size_t fallback)
 {
     const char* value = std::getenv(name);
     if(value == nullptr || value[0] == '\0') return fallback;
-    return static_cast<size_t>(std::strtoull(value, nullptr, 10));
+
+    char*      end    = nullptr;
+    const auto parsed = std::strtoull(value, &end, 10);
+    if(end == value || *end != '\0') return fallback;
+    return static_cast<size_t>(parsed);
+}
+
+std::string
+existing_trace_path(std::string_view path)
+{
+    std::string file_path{ path };
+    if(!std::filesystem::is_regular_file(file_path))
+    {
+        throw std::runtime_error("trace file does not exist: " + file_path);
+    }
+    return file_path;
+}
+
+std::uint32_t
+to_list_size(size_t size)
+{
+    if(size > std::numeric_limits<std::uint32_t>::max())
+    {
+        throw std::length_error("result has more elements than the C API can report");
+    }
+    return static_cast<std::uint32_t>(size);
+}
+
+profiler_hub::reader_types::event_filter_t
+make_window_filter(uint64_t start_ts, uint64_t end_ts)
+{
+    using bound_t = profiler_hub::reader_types::timestamp_ns_t;
+
+    constexpr auto max_bound =
+        static_cast<bound_t>(std::numeric_limits<std::int64_t>::max());
+
+    profiler_hub::reader_types::event_filter_t filter;
+    if(start_ts != 0 || end_ts != 0)
+    {
+        filter.time_window.start = std::min<bound_t>(start_ts, max_bound);
+        filter.time_window.end =
+            (end_ts != 0) ? std::min<bound_t>(end_ts, max_bound) : max_bound;
+    }
+    return filter;
 }
 
 ph_track_category_t
@@ -52,7 +99,7 @@ size_t
 ph_ctx::default_thread_pool_size()
 {
     const auto hw = std::thread::hardware_concurrency();
-    return env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2));
+    return std::max<size_t>(1, env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2)));
 }
 
 size_t
@@ -62,7 +109,7 @@ ph_ctx::default_connection_count()
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
-: m_file_path{ trace_path }
+: m_file_path{ existing_trace_path(trace_path) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
@@ -81,26 +128,35 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 
 ph_ctx::~ph_ctx()
 {
-    std::scoped_lock lock{ m_futures_mutex };
-    for(auto* future : m_live_futures)
+    std::unordered_set<ph_future*> live;
+    {
+        std::scoped_lock lock{ m_futures_mutex };
+        m_closing = true;
+        live.swap(m_live_futures);
+    }
+
+    for(auto* future : live)
     {
         std::ignore = future->m_handle.cancel();
         future->m_handle.wait();
+        delete future;
     }
 }
 
-void
+bool
 ph_ctx::register_future(ph_future* future)
 {
     std::scoped_lock lock{ m_futures_mutex };
+    if(m_closing) return false;
     m_live_futures.insert(future);
+    return true;
 }
 
-void
+bool
 ph_ctx::unregister_future(ph_future* future)
 {
     std::scoped_lock lock{ m_futures_mutex };
-    m_live_futures.erase(future);
+    return m_live_futures.erase(future) != 0;
 }
 
 bool
@@ -136,15 +192,7 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
                               uint64_t start_ts,
                               uint64_t end_ts)
 {
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = start_ts;
-        filter.time_window.end =
-            (end_ts != 0) ? end_ts
-                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
-                                std::numeric_limits<std::int64_t>::max());
-    }
+    const auto filter = make_window_filter(start_ts, end_ts);
 
     track_events_result_t result;
     result.events = conn.reader().get_events_for_track(track, filter);
@@ -161,9 +209,8 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
     std::scoped_lock lock{ m_track_results_mutex };
     auto&            stored = m_track_events_results.emplace_back(std::move(result));
 
-    return ph_event_list_t{ .list_size =
-                                static_cast<std::uint32_t>(stored.c_events.size()),
-                            .events = stored.c_events.data() };
+    return ph_event_list_t{ .list_size = to_list_size(stored.c_events.size()),
+                            .events    = stored.c_events.data() };
 }
 
 std::vector<ph_event_t>
@@ -222,12 +269,24 @@ ph_ctx::build_thread_track_events(
     };
 
     std::atomic<size_t> next{ 0 };
+    std::atomic<bool>   failed{ false };
+    std::mutex          error_mutex;
+    std::exception_ptr  first_error;
     const auto          worker = [&](profiler_hub::common::connection& worker_conn) {
-        for(size_t i = next.fetch_add(1); i < items.size(); i = next.fetch_add(1))
+        try
         {
-            auto& item = items[i];
-            worker_conn.reader().visit_track_events_in_id_range(
-                track, item.type, item.begin, item.end, visitor, &item.out);
+            for(size_t i = next.fetch_add(1); i < items.size() && !failed.load();
+                i        = next.fetch_add(1))
+            {
+                auto& item = items[i];
+                worker_conn.reader().visit_track_events_in_id_range(
+                    track, item.type, item.begin, item.end, visitor, &item.out);
+            }
+        } catch(...)
+        {
+            const std::scoped_lock lock{ error_mutex };
+            if(!first_error) first_error = std::current_exception();
+            failed.store(true);
         }
     };
 
@@ -243,6 +302,8 @@ ph_ctx::build_thread_track_events(
         }
         worker(conn);
     }
+
+    if(first_error) std::rethrow_exception(first_error);
 
     size_t total = 0;
     for(const auto& item : items)
@@ -297,7 +358,8 @@ ph_ctx::build_sorted_track_events(
     if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
        track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
     {
-        return build_thread_track_events(conn, track, env_size("PH_READ_PARTS", 8));
+        return build_thread_track_events(
+            conn, track, std::max<size_t>(1, env_size("PH_READ_PARTS", 8)));
     }
 
     const auto events = conn.reader().get_events_for_track(track, {});
@@ -363,9 +425,8 @@ ph_ctx::get_cached_track_samples(
             });
     });
 
-    return ph_sample_list_t{ .list_size =
-                                 static_cast<std::uint32_t>(entry->samples.size()),
-                             .samples = entry->samples.data() };
+    return ph_sample_list_t{ .list_size = to_list_size(entry->samples.size()),
+                             .samples   = entry->samples.data() };
 }
 
 ph_event_list_t
@@ -386,7 +447,7 @@ ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr
             });
     });
 
-    return ph_event_list_t{ .list_size = static_cast<std::uint32_t>(entry->events.size()),
+    return ph_event_list_t{ .list_size = to_list_size(entry->events.size()),
                             .events    = entry->events.data() };
 }
 
@@ -396,15 +457,7 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
                                uint64_t start_ts,
                                uint64_t end_ts)
 {
-    profiler_hub::reader_types::event_filter_t filter;
-    if(start_ts != 0 || end_ts != 0)
-    {
-        filter.time_window.start = start_ts;
-        filter.time_window.end =
-            (end_ts != 0) ? end_ts
-                          : static_cast<profiler_hub::reader_types::timestamp_ns_t>(
-                                std::numeric_limits<std::int64_t>::max());
-    }
+    const auto filter = make_window_filter(start_ts, end_ts);
 
     const auto samples = conn.reader().get_counter_events_for_track(track, filter);
 
@@ -419,7 +472,7 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
     std::scoped_lock lock{ m_track_results_mutex };
     auto&            stored = m_track_samples_results.emplace_back(std::move(c_samples));
 
-    return ph_sample_list_t{ .list_size = static_cast<std::uint32_t>(stored.size()),
+    return ph_sample_list_t{ .list_size = to_list_size(stored.size()),
                              .samples   = stored.data() };
 }
 
@@ -431,7 +484,8 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end())
+    if(track_it == m_track_by_id.end() ||
+       track_it->second->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
@@ -454,7 +508,8 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               start_ts,
               end_ts);
     const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end())
+    if(track_it == m_track_by_id.end() ||
+       track_it->second->category != profiler_hub::reader_types::track_kind_t::pmc_agent)
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
@@ -499,7 +554,8 @@ ph_ctx::initialize_track_list()
                                        // agent+queue category tracks)
                                ? static_cast<std::uint32_t>(track->thread_info->thread_id)
                                : 0,
-            .event_count = static_cast<std::uint32_t>(track->event_count),
+            .event_count = static_cast<std::uint32_t>(std::min<size_t>(
+                track->event_count, std::numeric_limits<std::uint32_t>::max())),
             .agent_id    = static_cast<std::uint32_t>(track->agent_id),
             .category    = to_c_track_category(track->category),
             .queue_id    = static_cast<std::uint32_t>(track->queue_id),

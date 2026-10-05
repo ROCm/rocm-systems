@@ -278,6 +278,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         track_utility.emplace(track_info_ptr->id, track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, sample_track_id);
         track_to_topology.emplace(track_info_ptr, no_topology);
+        sample_track_by_db_id.emplace(sample_track_id, track_info_ptr);
     }
 
     // PMC/counter tracks: one row per (nid,agent_id,pmc_id), already grouped
@@ -458,9 +459,11 @@ reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statement
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
         {
+            if(!row.tid.has_value()) continue;
+
             topology_key_t key{ .nid = row.nid,
                                 .pid = row.pid.value_or(0),
-                                .tid = row.tid.value_or(0) };
+                                .tid = row.tid.value() };
             auto&          stats = key_stats[key];
             stats.count += row.count;
             stats.merge(row.min_start, row.max_end);
