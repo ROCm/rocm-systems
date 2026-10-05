@@ -104,18 +104,11 @@ the process lifetime.
 The private PyTorch C++ layout is not a stable upstream ABI. Supporting a
 minor means its recorded layouts have been validated, not that every custom
 build of that minor is guaranteed compatible. The accepted policy uses the
-minor-version gate and real-header tests; exact wheel identities and ELF
-build ids are not runtime acceptance criteria. AOTI version information used
+minor-version gate and validation against real headers; exact wheel identities
+and ELF build ids are not runtime acceptance criteria. AOTI version information used
 to interpret dtype differences is separate from that acceptance policy.
 
 ## Validation and extension points
-
-Native validation links real libtorch and compares the shim's layouts and
-behavior with upstream headers. ROCPROFCOMPUTE_TORCH_ROOT selects that test
-dependency; it is not needed to build the production collector. Loader tests
-cover generic-artifact discovery, accepted and rejected minors, the plain-C
-revision, runtime symbol promotion, and fallback. Marker and integration tests
-cover arguments, scopes, balanced ranges, and launcher propagation.
 
 Adding another supported PyTorch minor requires validating the private layouts
 and symbol behavior before extending the loader's supported set. Changes to
