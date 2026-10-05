@@ -93,11 +93,9 @@ def add_general_group(
         ),
         default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
-    # Nowhere to load specs from in db mode
-    if parser.usage:
-        general_group.add_argument(
-            "-s", "--specs", action="store_true", help="Print system specs and exit."
-        )
+    general_group.add_argument(
+        "-s", "--specs", action="store_true", help="Print system specs and exit."
+    )
 
     general_group.add_argument(
         "--experimental",
