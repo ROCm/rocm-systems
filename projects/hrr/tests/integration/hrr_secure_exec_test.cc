@@ -32,10 +32,48 @@
 #include <vector>
 
 #if defined(__linux__)
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <link.h>
+#include <sys/auxv.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#endif
+
+
+#undef HRR_SKIP
+#define HRR_SKIP(m) FAIL("DEBUG SKIP: " << m)
+
+#if defined(__linux__)
+static std::string dbg_status() {
+  std::string r;
+  std::ifstream st("/proc/self/status");
+  std::string l;
+  while (std::getline(st, l))
+    if (l.rfind("NoNewPrivs", 0) == 0 || l.rfind("Seccomp", 0) == 0 || l.rfind("Cap", 0) == 0 ||
+        l.rfind("Uid", 0) == 0 || l.rfind("Gid", 0) == 0 || l.rfind("Groups", 0) == 0)
+      r += l + "\n";
+  return r;
+}
+
+TEST_CASE("Unit_HRR_SecureExecProbe_Direct", "[.][hrr-direct]") {
+  std::printf("PROBE AT_SECURE=%lu uid=%d euid=%d gid=%d egid=%d\n%s", getauxval(AT_SECURE),
+              (int)getuid(), (int)geteuid(), (int)getgid(), (int)getegid(), dbg_status().c_str());
+  int n = 0;
+  (void)hipGetDeviceCount(&n);
+  dl_iterate_phdr(
+      [](dl_phdr_info* i, size_t, void*) {
+        if (std::strstr(i->dlpi_name, "amdhip") || std::strstr(i->dlpi_name, "hsa-runtime"))
+          std::printf("PROBE lib %s\n", i->dlpi_name);
+        return 0;
+      },
+      nullptr);
+  std::printf("PROBE devices=%d\n", n);
+  std::fflush(stdout);
+}
 #endif
 
 HRR_TEST_CASE(Unit_HRR_BlankCaptureOutputCapturesNothing) {
@@ -106,6 +144,13 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
   gid_t gid = 0;
   if (!pick_other_group(&gid)) HRR_SKIP("the user has no supplementary group to use");
 
+  std::string mounts;
+  {
+    std::ifstream mi("/proc/self/mountinfo");
+    std::string l;
+    while (std::getline(mi, l)) mounts += l + "\n";
+  }
+  INFO("Parent: dir=" << dir.path << " gid=" << gid << "\n" << dbg_status() << "mountinfo:\n" << mounts);
   const fs::path exe = dir.path / "hrr-integration-tests";
   std::error_code ec;
   fs::copy_file("/proc/self/exe", exe, ec);
@@ -130,6 +175,13 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
                << ret << (loader_failed(out) ? ", loader error" : "") << ")");
   }
 
+  std::string probe_plain;
+  {
+    hrr::test::SpawnProc pp(exe.string(), true, true);
+    pp.setEnv("LD_LIBRARY_PATH", "");
+    probe_plain = (pp.run("\"Unit_HRR_SecureExecProbe_Direct\""), pp.getOutput());
+  }
+  INFO("Probe plain:\n" << probe_plain);
   struct stat st {};
   if (chmod(exe.c_str(), 02755) != 0 || stat(exe.c_str(), &st) != 0 || !(st.st_mode & S_ISGID))
     HRR_SKIP("cannot set the set-group-ID bit on the copy");
@@ -142,6 +194,14 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
   const int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
   const std::string out = proc.getOutput();
   INFO("Set-group-ID output:\n" << out);
+  std::string probe_sgid;
+  {
+    hrr::test::SpawnProc pp(exe.string(), true, true);
+    pp.setEnv("LD_LIBRARY_PATH", "");
+    probe_sgid = (pp.run("\"Unit_HRR_SecureExecProbe_Direct\""), pp.getOutput());
+  }
+  INFO("Probe setgid (mode " << std::oct << st.st_mode << std::dec << " gid " << st.st_gid << "):\n" << probe_sgid);
+  CHECK(false);
   if (loader_failed(out)) HRR_SKIP("the loader refused the set-group-ID copy");
   REQUIRE(ret == 0);
   CHECK(hrr_process_archives(cap).empty());
