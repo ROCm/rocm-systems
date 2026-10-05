@@ -39,14 +39,24 @@ mark these as "(advanced)" in their help.
 
 ## Renaming and Deprecation
 
-A renamed option must keep its old name working for now. The old name:
+A renamed option must keep its old name working for now. Add the old name as an
+extra option string of the new option, and note it at the end of the help:
 
-- works the same as the new name, so keep the same `dest`
-- is listed in the help as a deprecated alias of the new name
-- prints a warning that names the new option whenever it is used
+```python
+group.add_argument(
+    "--roofline-device",
+    "--device",
+    dest="device",
+    help="... (Default: 0).\nDeprecated alias: --device.",
+)
+```
 
-An option deprecated without a rename starts its help with `DEPRECATED:` and what
-to do instead, and also prints a warning when used.
+Keep the same `dest` as before, so the rest of the code does not need to change.
+
+Add every deprecated option, renamed or not, to `DEPRECATED_OPTIONS` in
+[`src/argparser.py`](../../src/argparser.py) with what to use instead. A warning
+is then printed whenever it is used. An option deprecated without a rename
+starts its help with `DEPRECATED:` and what to do instead.
 
 Every rename also needs these updates:
 
