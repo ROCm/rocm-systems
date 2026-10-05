@@ -1,7 +1,9 @@
 # AIPROFCOMP-865 — Single-pass packable and collectables
 
 **JIRA:** AIPROFCOMP-865 (parent AIPROFCOMP-864)
+
 **Scope:** Fix multi-pass ratio errors on the legacy analysis YAML path.
+
 **Out of scope:** Full metric-library LLD (MetricLibrary, `!inherit`, Stage 4 migration, SDK collectables registry).
 
 Full historical plan drafts are preserved on branch
