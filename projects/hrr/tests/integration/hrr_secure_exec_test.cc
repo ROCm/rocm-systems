@@ -28,6 +28,10 @@
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+// Cross-check only: make every skip visible in the job log.
+#undef HRR_SKIP
+#define HRR_SKIP(m) FAIL("SKIP: " << m)
+
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
