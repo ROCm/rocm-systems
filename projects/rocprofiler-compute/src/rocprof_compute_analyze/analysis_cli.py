@@ -292,7 +292,8 @@ class cli_analysis(OmniAnalyze_Base):
                     "for metric analysis.",
                 )
             else:
-                workload.raw_pmc = file_io.create_df_pmc(
+                # create 'mega dataframe' (+ PassLayout for same-pass binding)
+                workload.raw_pmc, workload.pmc_pass_layout = file_io.load_df_pmc(
                     path_info[0],
                     args.verbose,
                 )
@@ -303,6 +304,8 @@ class cli_analysis(OmniAnalyze_Base):
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(path_info[0]),
                 )
+                # IM pass assignment is not wired yet; skip same-pass bind.
+                workload.pmc_pass_layout = None
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
