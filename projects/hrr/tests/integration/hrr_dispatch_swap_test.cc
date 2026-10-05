@@ -22,6 +22,14 @@
  *     A blob that cannot be written leaves an event naming a missing file, so
  *     the archive must not claim to be complete.
  *
+ *   Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete:
+ *     The same, when the blob is small enough to sit in the stdio buffer and
+ *     its write fails only when the file is closed.
+ *
+ *   Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer:
+ *     A shim reached after the trailer, whose event is dropped, must not list
+ *     its API under manifest.unreplayable_apis; one reached before must.
+ *
  *   Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure:
  *     The failure above marks the parent's archive only. A child forked
  *     afterwards writes its own archive and must still get its trailer, and
@@ -29,6 +37,8 @@
  *
  * The live dispatch table is reached through rocprofiler-register, the way a
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
+ * Preloading the same library lets a workload act as the capture opens its
+ * manifest, after the trailer is written.
  * Linux only, like the rocprofiler-register integration in libamdhip64.
  */
 
@@ -47,6 +57,7 @@
 #include <dlfcn.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -56,6 +67,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -65,16 +77,31 @@ namespace {
 
 #define HRR_SWAP_MARKER "HRR_DISPATCH_SWAP"
 #define HRR_FORK_MARKER "HRR_FORK_CHILD"
+#define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
+#define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
 
 // Big enough that the failing write is cut off by the file size limit, which
 // is set well below it and well above anything else the capture writes then.
 constexpr size_t kBigBlob = 8u << 20;
 constexpr rlim_t kFileSizeLimit = 2u << 20;
 
+// Small enough that fwrite() only fills the stdio buffer, which is the file
+// system's block size up to BUFSIZ, so the write that fails is fclose()'s.
+constexpr size_t kSmallBlob = 2048;
+constexpr rlim_t kSmallFileSizeLimit = 1024;
+
 HipDispatchTable* tool_hip_table() {
   using Fn = void* (*)();
   auto fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_hip_table"));
   return fn ? static_cast<HipDispatchTable*>(fn()) : nullptr;
+}
+
+bool tool_set_fopen_hook(void (*hook)(const char*)) {
+  using Fn = void (*)(void (*)(const char*));
+  auto fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_set_fopen_hook"));
+  if (!fn) return false;
+  fn(hook);
+  return true;
 }
 
 bool tool_set_late_hook(void (*hook)()) {
@@ -85,16 +112,17 @@ bool tool_set_late_hook(void (*hook)()) {
   return true;
 }
 
-// Makes one H2D hipMemcpy whose blob cannot be written: the file size limit
-// cuts the write short. Unlike a permission, the limit also applies to root,
-// which is what the container runners use.
-hipError_t memcpy_with_failing_blob(void* dev) {
-  std::vector<unsigned char> host(kBigBlob, 0xb5);
+// Makes one H2D hipMemcpy of `bytes` whose blob cannot be written: the file
+// size limit cuts the write short. Unlike a permission, the limit also applies
+// to root, which is what the container runners use.
+hipError_t memcpy_with_failing_blob(void* dev, size_t bytes = kBigBlob,
+                                    rlim_t limit = kFileSizeLimit) {
+  std::vector<unsigned char> host(bytes, 0xb5);
   struct rlimit old {};
   if (getrlimit(RLIMIT_FSIZE, &old) != 0) return hipErrorUnknown;
   struct rlimit lim = old;
-  if (lim.rlim_max != RLIM_INFINITY && lim.rlim_max < kFileSizeLimit) return hipErrorUnknown;
-  lim.rlim_cur = kFileSizeLimit;
+  if (lim.rlim_max != RLIM_INFINITY && lim.rlim_max < limit) return hipErrorUnknown;
+  lim.rlim_cur = limit;
   // Past the limit write() fails with EFBIG once SIGXFSZ is ignored.
   void (*old_handler)(int) = signal(SIGXFSZ, SIG_IGN);
   if (setrlimit(RLIMIT_FSIZE, &lim) != 0) return hipErrorUnknown;
@@ -204,6 +232,73 @@ TEST_CASE("Unit_HRR_FailedBlobWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
+// Reports the block size and the copy's result for the driver to check: the
+// blob is buffered whole only if the stdio buffer is larger than it.
+TEST_CASE("Unit_HRR_FailedBlobClose_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const char* out = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  struct stat st {};
+  const long long blksize =
+      out && stat(out, &st) == 0 ? static_cast<long long>(st.st_blksize) : -1;
+
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kSmallBlob));
+  // Under the limit no other file may grow past it, so the runtime loads
+  // whatever a small copy needs first, with a copy of another size.
+  std::vector<unsigned char> warm(kSmallBlob - 512, 0x4b);
+  HRR_HIP_CHECK(hipMemcpy(dev, warm.data(), warm.size(), hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  const hipError_t err = memcpy_with_failing_blob(dev, kSmallBlob, kSmallFileSizeLimit);
+  printf(HRR_CLOSE_MARKER " blksize=%lld err=%d\n", blksize, static_cast<int>(err));
+  fflush(stdout);
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+// ---------------------------------------------------------------------------
+// Unreplayable call after the trailer
+// ---------------------------------------------------------------------------
+
+using UserObjectCreateFn = decltype(HipDispatchTable::hipUserObjectCreate_fn);
+std::atomic<UserObjectCreateFn> g_late_shim{nullptr};
+std::string g_own_manifest;
+
+void noop_host_fn(void*) {}
+
+// Runs when flush() opens this process's manifest: the trailer is written and
+// the manifest is not. Calls the hipUserObjectCreate shim, as a wrapper that
+// kept it would, for the first time in this process.
+void before_own_manifest(const char* path) {
+  if (!path) return;
+  const size_t n = std::strlen(path);
+  if (n < g_own_manifest.size() ||
+      g_own_manifest.compare(0, std::string::npos, path + n - g_own_manifest.size()) != 0)
+    return;
+  const UserObjectCreateFn shim = g_late_shim.exchange(nullptr);
+  if (!shim) return;
+  static int payload = 0;
+  hipUserObject_t obj = nullptr;
+  const hipError_t err = shim(&obj, &payload, noop_host_fn, 1, hipUserObjectNoDestructorSync);
+  printf(HRR_LATE_MARKER " err=%d\n", static_cast<int>(err));
+  fflush(stdout);
+}
+
+TEST_CASE("Unit_HRR_DispatchSwap_Unreplayable_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the shims
+  HipDispatchTable* t = tool_hip_table();
+  INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
+  REQUIRE(t != nullptr);
+  REQUIRE(t->size >= offsetof(HipDispatchTable, hipUserObjectCreate_fn) + sizeof(void*));
+
+  // Recorded while capture runs, so listed with its event.
+  HRR_HIP_CHECK(hipLaunchHostFunc(nullptr, noop_host_fn, nullptr));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  g_own_manifest = "/pid-" + std::to_string(getpid()) + "/manifest.json";
+  g_late_shim.store(t->hipUserObjectCreate_fn);
+  INFO("the dispatch tool was not preloaded");
+  REQUIRE(tool_set_fopen_hook(before_own_manifest));
+}
+
 // ---------------------------------------------------------------------------
 // fork() after a failure
 // ---------------------------------------------------------------------------
@@ -271,10 +366,12 @@ std::string dispatch_tool_path() {
   return (self.parent_path() / fs::path(HRR_DISPATCH_TOOL).filename()).string();
 }
 
-std::string capture_workload(const fs::path& cap, const char* direct_case, bool with_tool) {
+std::string capture_workload(const fs::path& cap, const char* direct_case, bool with_tool,
+                             bool preload_tool = false) {
   hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   if (with_tool) proc.setEnv("ROCPROFILER_REGISTER_LIBRARY", dispatch_tool_path());
+  if (preload_tool) proc.setEnv("LD_PRELOAD", dispatch_tool_path());
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(std::string("\"") + direct_case + "\"", 600);
   std::string out = proc.getOutput();
@@ -392,6 +489,72 @@ HRR_TEST_CASE(Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete) {
   REQUIRE(hrr::load_archive(archive.string(), ar));
   CHECK_FALSE(ar.complete);
   CHECK(manifest_value(archive, "complete") == "false");
+}
+
+// Before, fclose()'s result was ignored and the truncated blob was published.
+HRR_TEST_CASE(Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_failed_blob_close.hrr");
+  const std::string out = capture_workload(cap.path, "Unit_HRR_FailedBlobClose_Direct", false);
+  INFO("Workload output:\n" << out);
+
+  const size_t at = out.find(HRR_CLOSE_MARKER " blksize=");
+  REQUIRE(at != std::string::npos);
+  long long blksize = 0;
+  int err = -1;
+  REQUIRE(sscanf(out.c_str() + at, HRR_CLOSE_MARKER " blksize=%lld err=%d", &blksize, &err) == 2);
+  REQUIRE(err == hipSuccess);
+  {
+    INFO("this block size makes fwrite() fail, not fclose()");
+    REQUIRE((blksize <= 0 || static_cast<unsigned long long>(blksize) > kSmallBlob));
+  }
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  {
+    INFO("a blob cut short at the file size limit was published");
+    CHECK(count_files(archive / "blobs", ".blob", kSmallFileSizeLimit).second == 0);
+  }
+  {
+    INFO("the blob write was meant to fail, but the blob is on disk");
+    REQUIRE(count_files(archive / "blobs", ".blob", kSmallBlob).second == 0);
+  }
+
+  hrr::Archive ar;
+  REQUIRE(hrr::load_archive(archive.string(), ar));
+  CHECK_FALSE(ar.complete);
+  CHECK(manifest_value(archive, "complete") == "false");
+}
+
+// Before, the shim listed its API before the cut-off dropped its event.
+HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_late_unreplayable.hrr");
+  const std::string out =
+      capture_workload(cap.path, "Unit_HRR_DispatchSwap_Unreplayable_Direct", true, true);
+  INFO("Workload output:\n" << out);
+
+  // The shim ran between the trailer and the manifest, and the call succeeded.
+  const size_t at = out.find(HRR_LATE_MARKER " err=");
+  REQUIRE(at != std::string::npos);
+  int err = -1;
+  REQUIRE(sscanf(out.c_str() + at, HRR_LATE_MARKER " err=%d", &err) == 1);
+  REQUIRE(err == hipSuccess);
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  hrr::Archive ar;
+  REQUIRE(hrr::load_archive(archive.string(), ar));
+  CHECK(ar.complete);
+  CHECK(scan_events(archive).after == 0);
+  size_t host_funcs = 0, user_objects = 0;
+  for (const auto& ev : ar.events) {
+    if (ev.header().event_type == HRR_API_HIPLAUNCHHOSTFUNC) ++host_funcs;
+    if (ev.header().event_type == HRR_API_HIPUSEROBJECTCREATE) ++user_objects;
+  }
+  CHECK(host_funcs == 1);
+  CHECK(user_objects == 0);
+
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("manifest.json:\n" << manifest);
+  CHECK(manifest.find("\"hipLaunchHostFunc\"") != std::string::npos);
+  CHECK(manifest.find("\"hipUserObjectCreate\"") == std::string::npos);
 }
 
 // Before, the child inherited the parent's incomplete flag and lost its trailer.

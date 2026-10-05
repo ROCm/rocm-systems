@@ -238,6 +238,18 @@ static std::mutex                      g_unreplayable_mu;
 // and each is worth reporting.
 static std::map<std::string, std::set<std::string>> g_unreplayable_apis;
 
+// Notes from note_unreplayable() that wait for the event the calling thread
+// writes next. Plain pointers and a count, so nothing here has a destructor: a
+// shim can still run on the main thread once its thread_local objects are gone.
+// A generated shim stages at most five.
+static constexpr size_t kMaxStagedNotes = 8;
+struct StagedNote {
+  const char* api;
+  const char* reason;
+};
+static thread_local StagedNote t_staged_notes[kMaxStagedNotes];
+static thread_local size_t     t_staged_count = 0;
+
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
 // ---------------------------------------------------------------------------
@@ -829,13 +841,12 @@ void mark_incomplete(const char* reason) {
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
 
-void note_unreplayable(const char* api, const char* reason) {
-  if (!api) return;
-  if (!reason) reason = "(unspecified)";
-  {
-    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
-    if (!g_unreplayable_apis[api].insert(reason).second) return;
-  }
+// Caller holds g_unreplayable_mu. True the first time (api, reason) is listed.
+static bool list_unreplayable_locked(const char* api, const char* reason) {
+  return g_unreplayable_apis[api].insert(reason).second;
+}
+
+static void warn_unreplayable(const char* api, const char* reason) {
   // Warning, not Error: unlike mark_incomplete() the archive is well-formed and
   // every event is present — only the ability to re-execute this one call is
   // lost. That is a degradation, not a failure.
@@ -844,6 +855,24 @@ void note_unreplayable(const char* api, const char* reason) {
       "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
       "replay will report it as unreplayable rather than reproduce it",
       api, reason);
+}
+
+// Staged, not listed: write_event_raw() lists the note under the same lock that
+// accepts the event, so a shim still reached through a wrapped slot after
+// flush() cannot name an API whose event the cut-off drops.
+void note_unreplayable(const char* api, const char* reason) {
+  if (!api) return;
+  if (!reason) reason = "(unspecified)";
+  if (t_staged_count < kMaxStagedNotes) {
+    t_staged_notes[t_staged_count++] = {api, reason};
+    return;
+  }
+  bool fresh;
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    fresh = list_unreplayable_locked(api, reason);
+  }
+  if (fresh) warn_unreplayable(api, reason);
 }
 
 void flush(const char* /*output_dir*/) {
@@ -996,6 +1025,11 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   hdr->payload_length = payload_len;
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
+  // The notes staged for this event share its fate.
+  const size_t staged = t_staged_count;
+  t_staged_count = 0;
+  bool fresh[kMaxStagedNotes] = {};
+
   // Acquire once: assign sequence_id and buffer the record atomically so IDs are
   // only consumed for events that are actually written. A full record is always
   // appended under the lock, so the buffer never holds a torn record — which is
@@ -1015,12 +1049,19 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
     hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
     buffer_append_locked(hdr, payload_len);
     g_event_count.fetch_add(1, std::memory_order_relaxed);
+    if (staged > 0) {
+      std::lock_guard<std::mutex> ulk(g_unreplayable_mu);
+      for (size_t i = 0; i < staged; ++i)
+        fresh[i] = list_unreplayable_locked(t_staged_notes[i].api, t_staged_notes[i].reason);
+    }
     if (++g_events_since_ckpt >= kCheckpointEvents) {
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
       g_events_since_ckpt = 0;
     }
   }
+  for (size_t i = 0; i < staged; ++i)
+    if (fresh[i]) warn_unreplayable(t_staged_notes[i].api, t_staged_notes[i].reason);
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,7 +1082,9 @@ static bool atomic_write_file(const std::string& path,
   FILE* f = fopen(tmp.c_str(), "wb");
   if (!f) return false;
   bool ok = (fwrite(data, 1, len, f) == len);
-  fclose(f);
+  // fwrite() can leave the data in the stdio buffer, so the write that fails
+  // may be the one fclose() makes.
+  if (fclose(f) != 0) ok = false;
   if (!ok) { remove(tmp.c_str()); return false; }
 #ifdef _WIN32
   ok = MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
