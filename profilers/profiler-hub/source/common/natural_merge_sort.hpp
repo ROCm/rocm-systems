@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <iterator>
 #include <utility>
@@ -12,7 +13,8 @@
 namespace profiler_hub::common
 {
 
-template <typename RandomIt, typename Compare>
+template <std::random_access_iterator RandomIt, typename Compare>
+    requires std::sortable<RandomIt, Compare>
 void
 natural_merge_sort(RandomIt first, RandomIt last, Compare comp)
 {

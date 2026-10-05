@@ -129,9 +129,7 @@ cached_track_reader::cached(cache_t<Item>&                        cache,
     cache_entry<Item>* entry = nullptr;
     {
         const std::scoped_lock lock{ m_cache_mutex };
-        auto&                  slot = cache[static_cast<size_t>(track->id)];
-        if(!slot) slot = std::make_unique<cache_entry<Item>>();
-        entry = slot.get();
+        entry = &cache.try_emplace(static_cast<size_t>(track->id)).first->second;
     }
 
     std::call_once(entry->once, [&] { entry->items = std::forward<Build>(build)(); });

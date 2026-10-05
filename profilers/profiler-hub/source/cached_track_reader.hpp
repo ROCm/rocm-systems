@@ -52,7 +52,7 @@ private:
     };
 
     template <typename Item>
-    using cache_t = std::unordered_map<size_t, std::unique_ptr<cache_entry<Item>>>;
+    using cache_t = std::unordered_map<size_t, cache_entry<Item>>;
 
     template <typename Item, typename Build>
     std::vector<Item>& cached(cache_t<Item>&                        cache,
