@@ -57,6 +57,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
+* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
+
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
 * Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
