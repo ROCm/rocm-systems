@@ -58,7 +58,11 @@ void EngineState::reset() {
   wave_index.clear();
   wave_to_workgroup.clear();
   reported_lds_races.clear();
-  global_shadow.clear();
+  lds_race_folds.clear();
+  for (auto &shard : global_shadow) {
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    shard.entries.clear();
+  }
   warnings.clear();
   wave_cache_generation.fetch_add(1, std::memory_order_release);
 }

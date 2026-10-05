@@ -271,7 +271,8 @@ uint8_t entry_byte_mask(uint64_t entry_address, uint64_t start, uint64_t end) {
 /// every overlapping access belongs to the accessing workgroup. @p writers_only
 /// narrows the search to accesses that wrote, which is all a read conflicts
 /// with; slots holding a single kind of access pass it as false.
-const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSlots &slots,
+const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalShadowEntry &entry,
+                                                      const EngineGlobalAccessSlots &slots,
                                                       const EngineInstructionContext &ctx,
                                                       uint8_t byte_mask, bool writers_only) {
   // Retention is partitioned by byte, so only the buckets of the bytes this
@@ -280,9 +281,12 @@ const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSl
   for (size_t byte = 0; byte < slots.size(); ++byte) {
     if ((byte_mask & (1u << byte)) == 0)
       continue;
-    for (const auto &slot : slots[byte]) {
-      if (slot.valid && !same_workgroup(slot, ctx) && (!writers_only || slot.is_write))
-        return &slot;
+    for (const EngineGlobalSlot slot : slots[byte]) {
+      if (slot == 0)
+        continue;
+      const EngineGlobalAccessInfo &access = entry.records[slot - 1];
+      if (!same_workgroup(access, ctx) && (!writers_only || access.is_write))
+        return &access;
     }
   }
   return nullptr;
@@ -291,14 +295,15 @@ const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSl
 /// Which of @p byte_mask the accessing workgroup itself already covered. Bytes
 /// outside the returned mask remain the caller's to retain, since a workgroup
 /// that covered part of an access says nothing about the rest of it.
-uint8_t coverage_by_same_workgroup(const EngineGlobalAccessSlots &slots,
+uint8_t coverage_by_same_workgroup(const EngineGlobalShadowEntry &entry,
+                                   const EngineGlobalAccessSlots &slots,
                                    const EngineInstructionContext &ctx, uint8_t byte_mask) {
   uint8_t covered = 0;
   for (size_t byte = 0; byte < slots.size(); ++byte) {
     if ((byte_mask & (1u << byte)) == 0)
       continue;
-    for (const auto &slot : slots[byte]) {
-      if (slot.valid && same_workgroup(slot, ctx)) {
+    for (const EngineGlobalSlot slot : slots[byte]) {
+      if (slot != 0 && same_workgroup(entry.records[slot - 1], ctx)) {
         covered = static_cast<uint8_t>(covered | (1u << byte));
         break;
       }
@@ -315,17 +320,43 @@ uint8_t coverage_by_same_workgroup(const EngineGlobalAccessSlots &slots,
 /// the newcomer -- so the byte always retains two distinct foreign workgroups a
 /// later conflict can find. Eviction is confined to the contended byte, so a
 /// flood of accesses on one byte never displaces another byte's partner.
-void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContext &ctx,
-                   const EngineGlobalAccessInfo &current) {
+/// Drops the records no slot of @p entry names, renumbering the slots.
+void compact_records(EngineGlobalShadowEntry &entry) {
+  std::array<EngineGlobalSlot, 256> remap{};
+  std::vector<EngineGlobalAccessInfo> kept;
+  for (EngineGlobalAccessSlots *slots : {&entry.writers, &entry.readers, &entry.atomics}) {
+    for (auto &partners : *slots) {
+      for (EngineGlobalSlot &slot : partners) {
+        if (slot == 0)
+          continue;
+        if (remap[slot] == 0) {
+          kept.push_back(entry.records[slot - 1]);
+          remap[slot] = static_cast<EngineGlobalSlot>(kept.size());
+        }
+        slot = remap[slot];
+      }
+    }
+  }
+  entry.records = std::move(kept);
+}
+
+void record_access(EngineGlobalShadowEntry &entry, EngineGlobalAccessSlots &slots,
+                   const EngineInstructionContext &ctx, const EngineGlobalAccessInfo &current) {
+  if (entry.records.size() >= kGlobalShadowRecordCompactAt)
+    compact_records(entry);
+  // The access is stored once; every byte slot it takes names it.
+  entry.records.push_back(current);
+  const auto recorded = static_cast<EngineGlobalSlot>(entry.records.size());
+
   for (size_t byte = 0; byte < slots.size(); ++byte) {
     if ((current.byte_mask & (1u << byte)) == 0)
       continue;
     auto &partners = slots[byte];
 
     bool placed = false;
-    for (auto &slot : partners) {
-      if (slot.valid && same_workgroup(slot, ctx)) {
-        slot = current;
+    for (EngineGlobalSlot &slot : partners) {
+      if (slot != 0 && same_workgroup(entry.records[slot - 1], ctx)) {
+        slot = recorded;
         placed = true;
         break;
       }
@@ -333,9 +364,9 @@ void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContex
     if (placed)
       continue;
 
-    for (auto &slot : partners) {
-      if (!slot.valid) {
-        slot = current;
+    for (EngineGlobalSlot &slot : partners) {
+      if (slot == 0) {
+        slot = recorded;
         placed = true;
         break;
       }
@@ -349,7 +380,7 @@ void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContex
     // distinct from each other and from the newcomer.
     for (size_t i = 1; i < partners.size(); ++i)
       partners[i - 1] = partners[i];
-    partners.back() = current;
+    partners.back() = recorded;
   }
 }
 
@@ -420,6 +451,14 @@ void DataHazardEngine::set_global_memory_races(bool enabled) {
 
 bool DataHazardEngine::global_memory_races() const {
   return global_memory_races_.load(std::memory_order_relaxed);
+}
+
+void DataHazardEngine::set_fold_repeated_lds_races(bool enabled) {
+  fold_repeated_lds_races_.store(enabled, std::memory_order_relaxed);
+}
+
+bool DataHazardEngine::fold_repeated_lds_races() const {
+  return fold_repeated_lds_races_.load(std::memory_order_relaxed);
 }
 
 uint64_t DataHazardEngine::rejected_event_count() const {
@@ -542,23 +581,42 @@ void DataHazardEngine::on_wave_end(const ExecutionKey &wave_key) {
                                      wave_key.workgroup_id, wave_key.wave_id});
 }
 
+namespace {
+
+EngineWorkgroupKey workgroup_key_of(const ExecutionKey &wave) {
+  return EngineWorkgroupKey{wave.dispatch_id, wave.cluster_id, wave.workgroup_id};
+}
+
+EngineWaveKey wave_key_of(const ExecutionKey &wave) {
+  return EngineWaveKey{wave.dispatch_id, wave.cluster_id, wave.workgroup_id, wave.wave_id};
+}
+
+} // namespace
+
+DataHazardEngine::WaveHandle DataHazardEngine::wave_handle(const ExecutionKey &wave) {
+  return get_or_create_wave(wave, workgroup_key_of(wave), wave_key_of(wave));
+}
+
 void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
   const ExecutionKey wave_key = instruction.instruction.execution;
-  auto wave = get_or_create_wave(
-      wave_key,
-      EngineWorkgroupKey{wave_key.dispatch_id, wave_key.cluster_id, wave_key.workgroup_id},
-      EngineWaveKey{wave_key.dispatch_id, wave_key.cluster_id, wave_key.workgroup_id,
-                    wave_key.wave_id});
+  auto wave = get_or_create_wave(wave_key, workgroup_key_of(wave_key), wave_key_of(wave_key));
   if (!wave)
     return;
+  on_instruction(*wave, instruction);
+}
 
+void DataHazardEngine::on_instruction(EngineWaveState &wave_state,
+                                      const InstructionEvent &instruction) {
+  EngineWaveState *wave = &wave_state;
   std::vector<EngineLdsAccessRecord> epoch_to_check;
   EngineWorkgroupKey epoch_key{};
   {
     std::lock_guard<util::Spinlock> lock(wave->mutex);
     track_instruction_context(*wave, instruction);
 
-    const EngineInstructionContext ctx =
+    // By reference: the context of the instruction now issuing survives the
+    // prune below, which keeps it.
+    const EngineInstructionContext &ctx =
         get_instruction_context(*wave, instruction.instruction.instruction_id);
 
     // Ahead of the wait handling below, which a plain store returns before
@@ -594,18 +652,27 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
 
 void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
   const ExecutionKey wave_key = event.instruction.execution;
-  auto wave = get_or_create_wave(
-      wave_key,
-      EngineWorkgroupKey{wave_key.dispatch_id, wave_key.cluster_id, wave_key.workgroup_id},
-      EngineWaveKey{wave_key.dispatch_id, wave_key.cluster_id, wave_key.workgroup_id,
-                    wave_key.wave_id});
+  auto wave = get_or_create_wave(wave_key, workgroup_key_of(wave_key), wave_key_of(wave_key));
   if (!wave)
     return;
+  on_resource_access(*wave, event);
+}
 
+void DataHazardEngine::on_resource_access(EngineWaveState &wave_state,
+                                          const ResourceAccessEvent &event) {
+  EngineWaveState *wave = &wave_state;
   std::unique_lock<util::Spinlock> lock(wave->mutex);
-  EngineInstructionContext ctx = get_instruction_context(*wave, event.instruction.instruction_id);
-  if (ctx.instruction_id == 0 && event.instruction.instruction_id != 0)
-    ctx = make_engine_instruction_context(event.instruction);
+  // By reference while the wave lock is held: only the wave's own events add or
+  // prune contexts under it. An event naming an instruction the wave has no
+  // context for gets one built from the event itself.
+  EngineInstructionContext fallback;
+  const EngineInstructionContext *context =
+      &get_instruction_context(*wave, event.instruction.instruction_id);
+  if (context->instruction_id == 0 && event.instruction.instruction_id != 0) {
+    fallback = make_engine_instruction_context(event.instruction);
+    context = &fallback;
+  }
+  const EngineInstructionContext &ctx = *context;
 
   InstructionHazardSemantics hazards = merge_resource_semantics(ctx.hazards, event);
   if (event.hazards.memory_op_wait != WaitCntType::NONE) {
@@ -629,9 +696,13 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
     handle_lds_access(*wave, ctx, event, hazards.local_write_wait);
     break;
   case ResourceKind::GlobalMemory: {
+    if (!global_memory_races())
+      return;
+    // The check runs without the wave lock, where a barrier on another thread
+    // can prune this wave's contexts, so it works from a copy.
+    const EngineInstructionContext global_ctx = ctx;
     lock.unlock();
-    if (global_memory_races())
-      check_global_access_for_races(ctx, event);
+    check_global_access_for_races(global_ctx, event);
     return;
   }
   case ResourceKind::ScratchMemory:
@@ -852,11 +923,21 @@ void DataHazardEngine::reset_dispatch(EntityId dispatch_id, bool flush_epochs) {
     }
   }
 
-  for (auto it = state_.global_shadow.begin(); it != state_.global_shadow.end();) {
+  for (auto it = state_.lds_race_folds.begin(); it != state_.lds_race_folds.end();) {
     if (it->first.dispatch_id == dispatch_id) {
-      it = state_.global_shadow.erase(it);
+      it = state_.lds_race_folds.erase(it);
     } else {
       ++it;
+    }
+  }
+
+  for (auto &shard : state_.global_shadow) {
+    std::lock_guard<std::mutex> shard_lock(shard.mutex);
+    for (auto it = shard.entries.begin(); it != shard.entries.end();) {
+      if (it->first.dispatch_id == dispatch_id)
+        it = shard.entries.erase(it);
+      else
+        ++it;
     }
   }
   state_.wave_cache_generation.fetch_add(1, std::memory_order_release);
@@ -1373,18 +1454,30 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
     return;
 
   constexpr uint64_t max_address = std::numeric_limits<uint64_t>::max();
-  const uint64_t aligned_start = event.address & kGlobalShadowAlignMask;
-  const uint64_t end = event.address > max_address - event.size_bytes
-                           ? max_address
-                           : event.address + event.size_bytes;
   auto current = make_global_access_info(ctx, event);
 
   std::vector<EngineWarning> warnings_to_emit;
   {
-    std::lock_guard<std::shared_mutex> lock(state_.mutex);
+    // One shard lock at a time: an access spanning two shards releases the
+    // first before taking the second, so no two threads can wait on each
+    // other's shard.
+    const EngineGlobalShadowShard *locked_shard = nullptr;
+    std::unique_lock<std::mutex> shard_lock;
+    const uint64_t address = event.address;
+    const uint64_t aligned_start = address & kGlobalShadowAlignMask;
+    const uint64_t end =
+        address > max_address - event.size_bytes ? max_address : address + event.size_bytes;
     for (uint64_t addr = aligned_start; addr < end;) {
-      auto &entry = state_.global_shadow[EngineGlobalShadowKey{ctx.dispatch_id, addr}];
-      const uint8_t byte_mask = entry_byte_mask(addr, event.address, end);
+      const EngineGlobalShadowKey key{ctx.dispatch_id, addr};
+      auto &shard = state_.global_shadow[global_shadow_shard(key)];
+      const uint8_t byte_mask = entry_byte_mask(addr, address, end);
+      if (&shard != locked_shard) {
+        if (shard_lock.owns_lock())
+          shard_lock.unlock();
+        shard_lock = std::unique_lock<std::mutex>(shard.mutex);
+        locked_shard = &shard;
+      }
+      auto &entry = shard.entries[key];
       current.byte_mask = byte_mask;
 
       if (!entry.race_reported) {
@@ -1403,35 +1496,36 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
         // writer is WAW or RAW, and only a write conflicts with an earlier
         // reader, which makes that one WAR.
         const char *const against_writer = event.is_write ? "WAW" : "RAW";
-        take(find_conflicting_access(entry.writers, ctx, byte_mask, /*writers_only=*/false),
+        take(find_conflicting_access(entry, entry.writers, ctx, byte_mask, /*writers_only=*/false),
              against_writer);
         // Atomics order themselves against each other, so an atomic weighs only
         // the ordinary history while an ordinary access also weighs the atomics.
         if (!event.is_atomic)
-          take(find_conflicting_access(entry.atomics, ctx, byte_mask, /*writers_only=*/true),
+          take(find_conflicting_access(entry, entry.atomics, ctx, byte_mask,
+                                       /*writers_only=*/true),
                against_writer);
         if (event.is_write) {
-          take(find_conflicting_access(entry.readers, ctx, byte_mask, /*writers_only=*/false),
+          take(find_conflicting_access(entry, entry.readers, ctx, byte_mask,
+                                       /*writers_only=*/false),
                "WAR");
           if (!event.is_atomic)
-            take(find_conflicting_access(entry.atomics, ctx, byte_mask, /*writers_only=*/false),
+            take(find_conflicting_access(entry, entry.atomics, ctx, byte_mask,
+                                         /*writers_only=*/false),
                  "WAR");
         }
 
         if (conflicting_access) {
           entry.race_reported = true;
-          EngineWarning warning =
-              make_global_race_warning(ctx, event, addr, *conflicting_access, conflict_type);
-          state_.warnings.push_back(warning);
-          warnings_to_emit.push_back(std::move(warning));
+          warnings_to_emit.push_back(
+              make_global_race_warning(ctx, event, addr, *conflicting_access, conflict_type));
         }
       }
 
       if (event.is_atomic) {
-        record_access(entry.atomics, ctx, current);
+        record_access(entry, entry.atomics, ctx, current);
       } else {
         if (event.is_write)
-          record_access(entry.writers, ctx, current);
+          record_access(entry, entry.writers, ctx, current);
         if (event.is_read) {
           // Bytes this workgroup wrote itself are already spoken for by the
           // retained writer, which a later foreign access conflicts with just as
@@ -1439,9 +1533,9 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
           // reader of their own, or a foreign write to them finds nothing.
           EngineGlobalAccessInfo read_access = current;
           read_access.byte_mask = static_cast<uint8_t>(
-              byte_mask & ~coverage_by_same_workgroup(entry.writers, ctx, byte_mask));
+              byte_mask & ~coverage_by_same_workgroup(entry, entry.writers, ctx, byte_mask));
           if (read_access.byte_mask != 0)
-            record_access(entry.readers, ctx, read_access);
+            record_access(entry, entry.readers, ctx, read_access);
         }
       }
 
@@ -1451,6 +1545,12 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
     }
   }
 
+  if (warnings_to_emit.empty())
+    return;
+  {
+    std::lock_guard<std::shared_mutex> lock(state_.mutex);
+    state_.warnings.insert(state_.warnings.end(), warnings_to_emit.begin(), warnings_to_emit.end());
+  }
   for (const auto &warning : warnings_to_emit)
     emit_warning(warning);
 }
@@ -1482,7 +1582,16 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
 // epoch and compared there, until a barrier finds them drained.
 void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
                                        std::vector<EngineLdsAccessRecord> epoch) {
-  check_lds_epoch_for_races(key, epoch);
+  // A resolved barrier closes the epoch once per wave. After the first close
+  // the epoch holds only what it carried, and two carried records are never
+  // compared, so the check has nothing to do until a new access arrives. The
+  // carry below still runs: a wave can have drained a carried access since.
+  const bool has_new_access =
+      std::any_of(epoch.begin(), epoch.end(), [](const EngineLdsAccessRecord &record) {
+        return record.pending_at_barrier == WaitCntType::NONE;
+      });
+  if (has_new_access)
+    check_lds_epoch_for_races(key, epoch);
 
   // Each wave's lock is taken on its own, never under the workgroup's:
   // on_instruction takes them in the opposite order.
@@ -1530,6 +1639,7 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
 
   if (epoch.size() < 2)
     return;
+  const bool fold = fold_repeated_lds_races();
 
   std::vector<size_t> indices(epoch.size());
   std::iota(indices.begin(), indices.end(), 0);
@@ -1575,6 +1685,8 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
                                                  ? &second
                                                  : nullptr;
 
+      uint64_t fold_id = 0;
+      bool is_repeat = false;
       {
         const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
                                         overlap_addr,    wave_lo,        wave_hi,
@@ -1582,6 +1694,30 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
         std::lock_guard<std::shared_mutex> lock(state_.mutex);
         if (!state_.reported_lds_races.insert(race_key).second)
           continue;
+        if (fold) {
+          const EngineLdsRaceShapeKey shape{key.dispatch_id,
+                                            writer.pc,
+                                            other.pc,
+                                            writer.size,
+                                            other.size,
+                                            other.is_write,
+                                            carried ? carried->pending_at_barrier
+                                                    : WaitCntType::NONE,
+                                            carried ? carried->wave_id : EntityId{0},
+                                            carried ? carried->is_write : false};
+          auto [it, inserted] = state_.lds_race_folds.try_emplace(shape, 0);
+          if (inserted)
+            it->second = next_lds_race_fold_id_++;
+          fold_id = it->second;
+          is_repeat = !inserted;
+        }
+      }
+      // A repeat says nothing the first occurrence's warning does not, once the
+      // report has folded it, so it is counted rather than formatted.
+      if (is_repeat) {
+        if (warning_sink_)
+          warning_sink_->emit_repeat(fold_id);
+        continue;
       }
 
       std::ostringstream msg;
@@ -1630,6 +1766,7 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       warning.source_raw_isa = writer.raw_isa;
       warning.source_pc = writer.pc;
       warning.has_source = true;
+      warning.fold_id = fold_id;
       {
         std::lock_guard<std::shared_mutex> lock(state_.mutex);
         state_.warnings.push_back(warning);

@@ -72,7 +72,12 @@ public:
   /// @param verbose Retain every occurrence instead of deduplicating.
   explicit WarningCollector(bool verbose = false) : verbose_(verbose) {}
 
-  void add(const HazardWarning &warning);
+  /// @param fold_id Nonzero when later occurrences of @p warning may arrive
+  ///        through add_repeat() under this id.
+  void add(const HazardWarning &warning, uint64_t fold_id = 0);
+  /// @brief Counts one more occurrence of the hazard added under @p fold_id,
+  /// which may not have arrived yet.
+  void add_repeat(uint64_t fold_id);
   void clear();
 
   /// @brief Installs a callback invoked once per distinct hazard, as it is
@@ -124,6 +129,10 @@ private:
   std::vector<HazardWarning> warnings_;
   std::unordered_map<DedupKey, size_t, DedupKeyHash> dedup_index_;
   std::function<void(const HazardWarning &)> on_new_warning_;
+  /// The entry each fold id's hazard was folded into, and repeats counted
+  /// under an id whose hazard has not arrived yet.
+  std::unordered_map<uint64_t, size_t> fold_index_;
+  std::unordered_map<uint64_t, uint64_t> early_repeats_;
 };
 
 /// @brief Adapts engine findings into HazardWarning entries.
@@ -138,6 +147,7 @@ public:
       : collector_(collector), formatter_(formatter) {}
 
   void emit_warning(const hazard_core::EngineWarning &warning) const override;
+  void emit_repeat(uint64_t fold_id) const override;
 
 private:
   WarningCollector &collector_;

@@ -4247,3 +4247,212 @@ TEST(GenericDataHazardEngineTest, VgprAccessWithoutLanesConflictsWithEveryLane) 
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
   EXPECT_EQ(warnings[1].finding.kind, HazardKind::RAW);
 }
+
+// A frontend that keeps the wave's handle gets the same findings as one that
+// names the wave by key on every event.
+TEST(GenericDataHazardEngineTest, WaveHandleEventsMatchKeyedEvents) {
+  FakeFormatter formatter;
+  auto &engine = begin_lane_test(formatter);
+  const ExecutionKey wave{1, 0, 0, 0};
+  const DataHazardEngine::WaveHandle handle = engine.wave_handle(wave);
+  ASSERT_TRUE(handle);
+  EXPECT_EQ(handle, engine.wave_handle(wave));
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(*handle, load);
+
+  ResourceAccessEvent dest;
+  dest.instruction = load.instruction;
+  dest.resource_kind = ResourceKind::VectorRegister;
+  dest.register_kind = RegisterKind::Vector;
+  dest.resource_index = 4;
+  dest.size_bytes = 4;
+  dest.is_write = true;
+  engine.on_resource_access(*handle, dest);
+
+  // The read arrives by key: both paths reach the same wave state.
+  InstructionEvent use;
+  use.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(use);
+
+  ResourceAccessEvent read = dest;
+  read.instruction = use.instruction;
+  read.is_write = false;
+  read.is_read = true;
+  engine.on_resource_access(read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+namespace {
+
+/// One global access by @p wave's instruction @p id, one event per active lane,
+/// delivered through the wave's handle as the plugin does.
+void global_batch(DataHazardEngine &engine, const ExecutionKey &wave, EntityId id, uint64_t pc,
+                  std::initializer_list<uint64_t> addresses, uint32_t size, bool is_write) {
+  const DataHazardEngine::WaveHandle handle = engine.wave_handle(wave);
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(id, pc);
+  instruction.instruction.execution = wave;
+  engine.on_instruction(*handle, instruction);
+
+  ResourceAccessEvent access;
+  access.instruction = instruction.instruction;
+  access.resource_kind = ResourceKind::GlobalMemory;
+  access.size_bytes = size;
+  access.is_read = !is_write;
+  access.is_write = is_write;
+  for (const uint64_t address : addresses) {
+    access.address = address;
+    engine.on_resource_access(*handle, access);
+  }
+}
+
+DataHazardEngine &begin_two_workgroups(FakeFormatter &formatter, const ExecutionKey &first,
+                                       const ExecutionKey &second) {
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, first.workgroup_id);
+  engine.on_workgroup_begin(1, 0, second.workgroup_id);
+  engine.on_wave_begin(first);
+  engine.on_wave_begin(second);
+  return engine;
+}
+
+} // namespace
+
+// Of several lanes, the one another workgroup reads is the one reported.
+TEST(GenericDataHazardEngineTest, GlobalLaneReadByAnotherWorkgroupIsTheOneReported) {
+  FakeFormatter formatter;
+  const ExecutionKey writer{1, 0, 0, 0};
+  const ExecutionKey reader{1, 0, 1, 0};
+  auto &engine = begin_two_workgroups(formatter, writer, reader);
+
+  global_batch(engine, writer, 1, 0x100, {0x1000, 0x1004, 0x1008, 0x100c}, 4, /*is_write=*/true);
+  global_batch(engine, reader, 2, 0x200, {0x2000, 0x1008}, 4, /*is_write=*/false);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x1008"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+// The shadow is split by address into 128-byte shards. An access straddling a
+// shard boundary still meets a later access on either side of it.
+TEST(GenericDataHazardEngineTest, GlobalAccessAcrossAShardBoundaryRacesOnBothSides) {
+  FakeFormatter formatter;
+  const ExecutionKey writer{1, 0, 0, 0};
+  const ExecutionKey reader{1, 0, 1, 0};
+  auto &engine = begin_two_workgroups(formatter, writer, reader);
+
+  // 0x107c..0x1083 crosses the 0x1080 boundary between two shards.
+  global_batch(engine, writer, 1, 0x100, {0x107c}, 8, /*is_write=*/true);
+  global_batch(engine, reader, 2, 0x200, {0x1080}, 4, /*is_write=*/false);
+  global_batch(engine, reader, 3, 0x204, {0x107c}, 4, /*is_write=*/false);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_NE(warnings[0].message.find("at address 0x1080"), std::string::npos);
+  EXPECT_NE(warnings[1].message.find("at address 0x107c"), std::string::npos);
+}
+
+// Lanes of one instruction belong to one workgroup and never race each other,
+// however many of them hit the same bytes.
+TEST(GenericDataHazardEngineTest, GlobalLanesOfOneWorkgroupDoNotRace) {
+  FakeFormatter formatter;
+  const ExecutionKey writer{1, 0, 0, 0};
+  const ExecutionKey other{1, 0, 1, 0};
+  auto &engine = begin_two_workgroups(formatter, writer, other);
+
+  global_batch(engine, writer, 1, 0x100, {0x3000, 0x3000, 0x3004, 0x3000}, 4, /*is_write=*/true);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A byte keeps readers from two workgroups, and a read from a third displaces
+// the older of them. A later write from any of the three still races, because
+// each differs from at least one retained reader.
+TEST(GenericDataHazardEngineTest, ReadsFromThreeWorkgroupsLeaveEveryLaterWriterARace) {
+  for (EntityId writer_workgroup : {EntityId{0}, EntityId{1}, EntityId{2}}) {
+    FakeFormatter formatter;
+    auto &engine = reset_generic_engine(formatter);
+    std::vector<ExecutionKey> waves;
+    for (EntityId wg = 0; wg < 3; ++wg) {
+      engine.on_workgroup_begin(1, 0, wg);
+      waves.push_back(ExecutionKey{1, 0, wg, 0});
+      engine.on_wave_begin(waves.back());
+    }
+
+    global_batch(engine, waves[0], 1, 0x100, {0x6000}, 4, /*is_write=*/false);
+    global_batch(engine, waves[1], 2, 0x100, {0x6000}, 4, /*is_write=*/false);
+    global_batch(engine, waves[2], 3, 0x100, {0x6000}, 4, /*is_write=*/false);
+    ASSERT_TRUE(engine.warning_snapshot().empty());
+
+    global_batch(engine, waves[writer_workgroup], 4, 0x200, {0x6000}, 4, /*is_write=*/true);
+    const auto warnings = engine.warning_snapshot();
+    ASSERT_EQ(warnings.size(), 1u) << "writer workgroup " << writer_workgroup;
+    EXPECT_NE(warnings[0].message.find("Global memory WAR data race"), std::string::npos);
+    EXPECT_NE(warnings[0].finding.source_instruction.execution.workgroup_id, writer_workgroup);
+  }
+}
+
+// An entry stores each recorded access once and compacts the records its slots
+// no longer name. Hundreds of accesses to one address cycle it through many
+// compactions without losing what the slots retain.
+TEST(GenericDataHazardEngineTest, GlobalShadowEntryKeepsItsPartnersThroughCompaction) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  std::vector<ExecutionKey> waves;
+  for (EntityId wg = 0; wg < 4; ++wg) {
+    engine.on_workgroup_begin(1, 0, wg);
+    waves.push_back(ExecutionKey{1, 0, wg, 0});
+    engine.on_wave_begin(waves.back());
+  }
+
+  // Workgroup 3 keeps rewriting a byte the others never touch, and workgroups
+  // 0-2 keep reading the next byte: hundreds of records through one entry.
+  EntityId id = 1;
+  for (int round = 0; round < 200; ++round) {
+    global_batch(engine, waves[3], id++, 0x300, {0x7000}, 1, /*is_write=*/true);
+    global_batch(engine, waves[round % 3], id++, 0x100, {0x7001}, 1, /*is_write=*/false);
+  }
+  ASSERT_TRUE(engine.warning_snapshot().empty());
+
+  // Byte 1 retains the most recent read of each of its two workgroups: rounds
+  // 198 and 199, workgroups 0 and 1. A write by workgroup 0 races workgroup 1's
+  // read of round 199, instruction 2 * 199 + 2. The message names the entry,
+  // the aligned dword.
+  global_batch(engine, waves[0], id++, 0x200, {0x7001}, 1, /*is_write=*/true);
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x7000"),
+            std::string::npos)
+      << warnings[0].message;
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 400u);
+}
+
+// A foreign read of the byte one workgroup kept rewriting finds that writer
+// after compaction, naming its most recent write.
+TEST(GenericDataHazardEngineTest, GlobalShadowCompactionKeepsTheLatestWriter) {
+  FakeFormatter formatter;
+  const ExecutionKey writer{1, 0, 0, 0};
+  const ExecutionKey reader{1, 0, 1, 0};
+  auto &engine = begin_two_workgroups(formatter, writer, reader);
+
+  EntityId id = 1;
+  for (int round = 0; round < 300; ++round)
+    global_batch(engine, writer, id++, 0x100 + 4 * (round % 7), {0x8000}, 4, /*is_write=*/true);
+  const EntityId last_write = id - 1;
+
+  global_batch(engine, reader, id++, 0x200, {0x8000}, 4, /*is_write=*/false);
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, last_write);
+}

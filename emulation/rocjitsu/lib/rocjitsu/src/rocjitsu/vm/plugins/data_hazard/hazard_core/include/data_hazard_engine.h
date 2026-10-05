@@ -35,6 +35,16 @@ public:
   void set_global_memory_races(bool enabled);
   bool global_memory_races() const;
 
+  /// Whether a repeat of an LDS race already reported is passed to the sink as
+  /// a count (HazardWarningSink::emit_repeat) instead of a formatted warning.
+  /// Off by default, and kept across reset(). A cross-wave LDS race recurs once
+  /// per wave pair and address; formatting every occurrence is most of the
+  /// engine's cost on a kernel that races LDS throughout. With it on, only the
+  /// first occurrence of each race reaches warning_snapshot(), so turn it on
+  /// only with a sink that counts repeats.
+  void set_fold_repeated_lds_races(bool enabled);
+  bool fold_repeated_lds_races() const;
+
   /// Number of events dropped as malformed since the last reset().
   uint64_t rejected_event_count() const;
 
@@ -52,6 +62,18 @@ public:
   void on_wave_end(const ExecutionKey &wave) override;
   void on_instruction(const InstructionEvent &instruction) override;
   void on_resource_access(const ResourceAccessEvent &event) override;
+
+  /// A wave's engine state, for a frontend that keeps one pointer per wave
+  /// rather than naming the wave by key on every event. Fetch it after
+  /// on_wave_begin and pass it to the overloads below until on_wave_end. Holding
+  /// it keeps the state alive, so a late event cannot reach freed memory.
+  using WaveHandle = std::shared_ptr<EngineWaveState>;
+  WaveHandle wave_handle(const ExecutionKey &wave);
+
+  /// The keyed events, delivered to a wave from wave_handle(). Same behaviour,
+  /// without hashing the key or touching the engine-wide wave map.
+  void on_instruction(EngineWaveState &wave, const InstructionEvent &instruction);
+  void on_resource_access(EngineWaveState &wave, const ResourceAccessEvent &event);
   void on_barrier(const BarrierEvent &barrier) override;
   void on_shutdown() override;
 
@@ -109,6 +131,10 @@ private:
   EngineDiagnosticHandler diagnostic_handler_;
   mutable std::atomic<uint64_t> rejected_events_{0};
   std::atomic<bool> global_memory_races_{true};
+  std::atomic<bool> fold_repeated_lds_races_{false};
+  /// Guarded by state_.mutex. Not reset, so an id is never reused for a sink
+  /// that outlives a reset().
+  uint64_t next_lds_race_fold_id_ = 1;
   EngineState state_;
 };
 

@@ -181,7 +181,7 @@ size_t WarningCollector::DedupKeyHash::operator()(const DedupKey &key) const noe
   return seed;
 }
 
-void WarningCollector::add(const HazardWarning &warning) {
+void WarningCollector::add(const HazardWarning &warning, uint64_t fold_id) {
   bool is_new = true;
   std::function<void(const HazardWarning &)> callback;
   {
@@ -192,12 +192,22 @@ void WarningCollector::add(const HazardWarning &warning) {
       DedupKey key{warning.dispatch_id, warning.pc, warning.source_pc,
                    dedup_message_key(warning.message), warning.suggestion};
       auto it = dedup_index_.find(key);
+      size_t index = warnings_.size();
       if (it == dedup_index_.end()) {
-        dedup_index_.emplace(std::move(key), warnings_.size());
+        dedup_index_.emplace(std::move(key), index);
         warnings_.push_back(warning);
       } else {
-        warnings_[it->second].suppressed_occurrences++;
+        index = it->second;
+        warnings_[index].suppressed_occurrences++;
         is_new = false;
+      }
+      if (fold_id != 0) {
+        fold_index_[fold_id] = index;
+        auto early = early_repeats_.find(fold_id);
+        if (early != early_repeats_.end()) {
+          warnings_[index].suppressed_occurrences += early->second;
+          early_repeats_.erase(early);
+        }
       }
     }
     callback = on_new_warning_;
@@ -209,6 +219,15 @@ void WarningCollector::add(const HazardWarning &warning) {
     callback(warning);
 }
 
+void WarningCollector::add_repeat(uint64_t fold_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = fold_index_.find(fold_id);
+  if (it != fold_index_.end())
+    warnings_[it->second].suppressed_occurrences++;
+  else
+    early_repeats_[fold_id]++;
+}
+
 void WarningCollector::set_on_new_warning(std::function<void(const HazardWarning &)> callback) {
   std::lock_guard<std::mutex> lock(mutex_);
   on_new_warning_ = std::move(callback);
@@ -218,6 +237,8 @@ void WarningCollector::clear() {
   std::lock_guard<std::mutex> lock(mutex_);
   warnings_.clear();
   dedup_index_.clear();
+  fold_index_.clear();
+  early_repeats_.clear();
 }
 
 std::vector<HazardWarning> WarningCollector::snapshot() const {
@@ -367,7 +388,9 @@ void CollectingWarningSink::emit_warning(const hazard_core::EngineWarning &warni
     }
   }
 
-  collector_.add(out);
+  collector_.add(out, warning.fold_id);
 }
+
+void CollectingWarningSink::emit_repeat(uint64_t fold_id) const { collector_.add_repeat(fold_id); }
 
 } // namespace rocjitsu::plugins::data_hazard

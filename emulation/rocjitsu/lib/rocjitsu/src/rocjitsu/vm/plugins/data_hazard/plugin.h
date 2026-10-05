@@ -38,6 +38,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -83,7 +84,10 @@ tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc, bo
 /// metadata is appended at format time.
 class InstructionFormatter final : public hazard_core::SimulatorInstructionFormatter {
 public:
-  void remember(const InstructionView &view, const Instruction &inst);
+  /// The disassembly cache of @p dispatch_id, created on first use. Callers on
+  /// the execution path fetch it once per wave and record into it directly, so
+  /// the formatter's own lock is not taken per instruction.
+  std::shared_ptr<DisasmCache> cache_for(hazard_core::EntityId dispatch_id);
 
   /// Names the architecture the suggestions must be assemblable on. Until this
   /// is called the wording defaults to the split-counter waits.
@@ -112,13 +116,9 @@ public:
   void clear();
 
 private:
-  /// Bounds retention so long-running dispatches do not grow without limit.
-  static constexpr size_t kMaxCachedInstructions = 4096;
+  static std::string format(const hazard_core::InstructionDescriptor &instruction,
+                            const std::string &disassembly);
 
-  static std::string format(const InstructionView &view, const std::string &disassembly);
-  static std::string format_fallback(const hazard_core::InstructionDescriptor &instruction);
-
-  std::shared_ptr<DisasmCache> cache_for(hazard_core::EntityId dispatch_id);
   std::shared_ptr<const DisasmCache> find_cache(hazard_core::EntityId dispatch_id) const;
 
   std::atomic<rj_code_arch_t> arch_{ROCJITSU_CODE_ARCH_INVALID};
@@ -128,8 +128,6 @@ private:
   /// address, and a PC-keyed entry outliving its code object would quote that
   /// later dispatch the instruction it replaced.
   std::unordered_map<hazard_core::EntityId, std::shared_ptr<DisasmCache>> disassembly_;
-  std::unordered_map<uint64_t, InstructionView> instructions_;
-  std::deque<uint64_t> insertion_order_;
 };
 
 /// @brief Tracks the instruction currently executing on one wavefront.
@@ -140,9 +138,32 @@ struct DataHazardWavefrontState : WavefrontState {
   InstructionView current;
   bool is_memory_op = false;
 
+  /// Instruction ids are this wave's serial in the high 32 bits and a per-wave
+  /// count in the low 32: unique across waves and in program order within one,
+  /// with no counter shared between threads.
+  hazard_core::EntityId id_base = 0;
+  uint32_t id_count = 0;
+
+  /// The dispatch's disassembly cache and the PCs this wave has already put in
+  /// it, so the cache's lock is taken once per wave per PC rather than once per
+  /// executed instruction.
+  std::shared_ptr<DisasmCache> disassembly;
+  hazard_core::EntityId disassembly_dispatch = 0;
+  std::unordered_set<uint64_t> recorded_pcs;
+
+  /// The wave's engine state, fetched once at wave dispatch, so its events are
+  /// delivered by pointer rather than looked up by key.
+  hazard_core::DataHazardEngine::WaveHandle engine_wave;
+
   void reset() {
     current = InstructionView{};
     is_memory_op = false;
+    id_base = 0;
+    id_count = 0;
+    disassembly.reset();
+    disassembly_dispatch = 0;
+    recorded_pcs.clear();
+    engine_wave.reset();
   }
 };
 
@@ -209,7 +230,13 @@ private:
   DataHazardWavefrontState *wave_state(amdgpu::Wavefront &wf) const;
   const DataHazardWavefrontState *wave_state(const amdgpu::Wavefront *wf) const;
 
-  uint64_t next_instruction_id() { return next_instruction_id_.fetch_add(1) + 1; }
+  /// The next instruction id for @p state's wave; see DataHazardWavefrontState.
+  /// Waves without plugin state draw from a plugin-wide counter instead.
+  uint64_t next_instruction_id(DataHazardWavefrontState *state);
+  /// Records @p inst's disassembly for its dispatch the first time its wave
+  /// executes @p view.pc.
+  void record_disassembly(DataHazardWavefrontState *state, const InstructionView &view,
+                          const Instruction &inst);
 
   /// Writes one line to the plugin sink. Detection runs on several partition
   /// threads and the file sink does no locking of its own, so every write of
@@ -246,6 +273,8 @@ private:
   DataHazardAdapter adapter_;
 
   std::atomic<uint64_t> next_instruction_id_{0};
+  /// Source of each wave's id_base. Taken once per wave.
+  std::atomic<uint32_t> next_wave_serial_{0};
   std::atomic<bool> shutting_down_{false};
   mutable std::mutex sink_mutex_;
   std::once_flag report_once_;

@@ -165,6 +165,46 @@ struct EngineLdsRaceKeyHash {
   }
 };
 
+/// What an LDS race's message and suggestion say once the waves and addresses
+/// are taken out, which is what the report folds occurrences on. The wave a
+/// carried access came from stays: the suggestion names it.
+struct EngineLdsRaceShapeKey {
+  EntityId dispatch_id;
+  uint64_t producer_pc;
+  uint64_t consumer_pc;
+  uint32_t producer_size;
+  uint32_t consumer_size;
+  bool consumer_is_write;
+  /// NONE when neither access was carried across a barrier.
+  WaitCntType carried_pending;
+  EntityId carried_wave;
+  bool carried_is_write;
+
+  bool operator==(const EngineLdsRaceShapeKey &other) const noexcept {
+    return dispatch_id == other.dispatch_id && producer_pc == other.producer_pc &&
+           consumer_pc == other.consumer_pc && producer_size == other.producer_size &&
+           consumer_size == other.consumer_size && consumer_is_write == other.consumer_is_write &&
+           carried_pending == other.carried_pending && carried_wave == other.carried_wave &&
+           carried_is_write == other.carried_is_write;
+  }
+};
+
+struct EngineLdsRaceShapeKeyHash {
+  size_t operator()(const EngineLdsRaceShapeKey &key) const noexcept {
+    size_t seed = 0;
+    hash_combine(seed, key.dispatch_id);
+    hash_combine(seed, key.producer_pc);
+    hash_combine(seed, key.consumer_pc);
+    hash_combine(seed, key.producer_size);
+    hash_combine(seed, key.consumer_size);
+    hash_combine(seed, key.consumer_is_write);
+    hash_combine(seed, static_cast<int>(key.carried_pending));
+    hash_combine(seed, key.carried_wave);
+    hash_combine(seed, key.carried_is_write);
+    return seed;
+  }
+};
+
 struct EngineGlobalAccessInfo {
   EntityId dispatch_id = 0;
   EntityId cluster_id = 0;
@@ -210,12 +250,27 @@ inline constexpr size_t kGlobalBytePartners = 2;
 /// partner however the accesses interleave. A flat pool of the same eight would
 /// be order-dependent: seven readers of one byte could consume the slots a later
 /// byte's reader needs, and its WAR race would be missed.
-using EngineGlobalBytePartners = std::array<EngineGlobalAccessInfo, kGlobalBytePartners>;
+///
+/// A slot names a record of the entry by index rather than holding the access
+/// itself: an access covering several bytes, or retained as both reader and
+/// writer, is then stored once instead of once per slot. 0 is an empty slot;
+/// any other value is one past the record's index in
+/// EngineGlobalShadowEntry::records.
+using EngineGlobalSlot = uint8_t;
+using EngineGlobalBytePartners = std::array<EngineGlobalSlot, kGlobalBytePartners>;
 using EngineGlobalAccessSlots = std::array<EngineGlobalBytePartners, kGlobalShadowEntryBytes>;
 
+/// The entry compacts its records to the ones its slots still name once it holds
+/// this many. Slots can name at most 3 * 4 * 2 = 24 records, so a compacted
+/// entry stays far below the 255 a slot can index.
+inline constexpr size_t kGlobalShadowRecordCompactAt = 64;
+
 struct EngineGlobalShadowEntry {
-  EngineGlobalAccessSlots writers;
-  EngineGlobalAccessSlots readers;
+  /// Every access recorded in the entry, each once. Records no slot names any
+  /// more are dropped when the entry compacts.
+  std::vector<EngineGlobalAccessInfo> records;
+  EngineGlobalAccessSlots writers{};
+  EngineGlobalAccessSlots readers{};
   /// Atomic accesses, kept in slots of their own. They have to be retained or
   /// an ordinary access arriving after one has nothing to conflict with, and
   /// they have to stay apart from the ordinary history or an atomic would
@@ -243,6 +298,28 @@ struct EngineGlobalShadowKeyHash {
   }
 };
 
+/// The global shadow is split by address into shards, each with its own lock,
+/// so accesses to unrelated memory from different threads do not serialise on
+/// one lock. An entry lives in exactly one shard and is read and updated only
+/// under that shard's lock, so splitting changes nothing about what is found.
+inline constexpr size_t kGlobalShadowShards = 256;
+/// Addresses within one 128-byte span share a shard, so a lane's access, and
+/// usually a whole coalesced row of them, takes one lock.
+inline constexpr unsigned kGlobalShadowShardShift = 7;
+
+struct EngineGlobalShadowShard {
+  std::mutex mutex;
+  std::unordered_map<EngineGlobalShadowKey, EngineGlobalShadowEntry, EngineGlobalShadowKeyHash>
+      entries;
+};
+
+inline size_t global_shadow_shard(const EngineGlobalShadowKey &key) {
+  size_t seed = 0;
+  hash_combine(seed, key.dispatch_id);
+  hash_combine(seed, key.address >> kGlobalShadowShardShift);
+  return seed % kGlobalShadowShards;
+}
+
 struct EngineWarning {
   HazardFinding finding;
   std::array<uint32_t, 4> source_raw_isa{};
@@ -250,12 +327,19 @@ struct EngineWarning {
   bool has_source = false;
   std::string message;
   std::string suggestion;
+  /// Nonzero when later occurrences of this finding may arrive through
+  /// HazardWarningSink::emit_repeat under the same id instead of as warnings.
+  uint64_t fold_id = 0;
 };
 
 class HazardWarningSink {
 public:
   virtual ~HazardWarningSink() = default;
   virtual void emit_warning(const EngineWarning &warning) const = 0;
+  /// One more occurrence of the finding emitted with this fold_id. It can
+  /// arrive before that warning does when another thread is still formatting
+  /// it. Only called with DataHazardEngine::set_fold_repeated_lds_races on.
+  virtual void emit_repeat(uint64_t fold_id) const { (void)fold_id; }
 };
 
 struct EngineState {
@@ -268,8 +352,11 @@ struct EngineState {
   std::unordered_map<EngineWaveKey, ExecutionKey, EngineWaveKeyHash> wave_index;
   std::unordered_map<ExecutionKey, EngineWorkgroupKey, ExecutionKeyHash> wave_to_workgroup;
   std::unordered_set<EngineLdsRaceKey, EngineLdsRaceKeyHash> reported_lds_races;
-  std::unordered_map<EngineGlobalShadowKey, EngineGlobalShadowEntry, EngineGlobalShadowKeyHash>
-      global_shadow;
+  /// The fold id each LDS race shape was first reported under, when repeated
+  /// LDS races are folded.
+  std::unordered_map<EngineLdsRaceShapeKey, uint64_t, EngineLdsRaceShapeKeyHash> lds_race_folds;
+  /// Guarded by each shard's own lock, not by mutex above.
+  std::array<EngineGlobalShadowShard, kGlobalShadowShards> global_shadow;
   std::vector<EngineWarning> warnings;
 
   void reset();

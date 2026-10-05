@@ -251,34 +251,13 @@ InstructionFormatter::find_cache(hazard_core::EntityId dispatch_id) const {
   return it != disassembly_.end() ? it->second : nullptr;
 }
 
-void InstructionFormatter::remember(const InstructionView &view, const Instruction &inst) {
-  // Held by value so a dispatch ending on another thread cannot drop the cache
-  // out from under this record.
-  cache_for(view.execution.dispatch_id)->record(view.pc, inst);
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  const auto [it, inserted] = instructions_.try_emplace(view.instruction_id);
-  if (inserted)
-    insertion_order_.push_back(view.instruction_id);
-  it->second = view;
-  while (insertion_order_.size() > kMaxCachedInstructions) {
-    instructions_.erase(insertion_order_.front());
-    insertion_order_.pop_front();
-  }
-}
-
+// The descriptor carries everything a report names (dispatch, PC, raw ISA, id),
+// and disassembly is per PC within a dispatch, so nothing per execution needs
+// remembering.
 std::string InstructionFormatter::format_instruction(
     const hazard_core::InstructionDescriptor &instruction) const {
-  InstructionView view;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = instructions_.find(instruction.instruction_id);
-    if (it == instructions_.end())
-      return format_fallback(instruction);
-    view = it->second;
-  }
-  const std::shared_ptr<const DisasmCache> cache = find_cache(view.execution.dispatch_id);
-  return format(view, cache ? cache->lookup(view.pc) : std::string{});
+  const std::shared_ptr<const DisasmCache> cache = find_cache(instruction.execution.dispatch_id);
+  return format(instruction, cache ? cache->lookup(instruction.pc) : std::string{});
 }
 
 void InstructionFormatter::set_architecture(rj_code_arch_t arch) {
@@ -368,23 +347,13 @@ void InstructionFormatter::forget_dispatch(hazard_core::EntityId dispatch_id) {
 void InstructionFormatter::clear() {
   std::lock_guard<std::mutex> lock(mutex_);
   disassembly_.clear();
-  instructions_.clear();
-  insertion_order_.clear();
 }
 
-std::string InstructionFormatter::format(const InstructionView &view,
+std::string InstructionFormatter::format(const hazard_core::InstructionDescriptor &instruction,
                                          const std::string &disassembly) {
   std::ostringstream out;
   if (!disassembly.empty())
     out << disassembly << "  // ";
-  out << "pc=0x" << std::hex << view.pc << std::dec << ", id=" << view.instruction_id << ", raw=["
-      << format_raw_isa_hex(view.raw_isa) << "]";
-  return out.str();
-}
-
-std::string
-InstructionFormatter::format_fallback(const hazard_core::InstructionDescriptor &instruction) {
-  std::ostringstream out;
   out << "pc=0x" << std::hex << instruction.pc << std::dec << ", id=" << instruction.instruction_id
       << ", raw=[" << format_raw_isa_hex(instruction.raw_isa) << "]";
   return out.str();
@@ -478,6 +447,15 @@ DataHazardPlugin::DataHazardPlugin(const char *config_json)
   engine_.set_warning_sink(&warning_sink_);
   engine_.set_global_memory_races(config_.global_memory_races);
   adapter_.set_global_memory_races(config_.global_memory_races);
+  // The collector folds repeats of a race into its first occurrence, so the
+  // engine need not format them. A verbose report keeps every occurrence.
+  engine_.set_fold_repeated_lds_races(!config_.verbose);
+  // Every view the plugin hands the adapter names its instruction, so the
+  // adapter's per-wave current-instruction map (and its lock) is not needed.
+  adapter_.set_track_current_instruction(false);
+  // Views carry their wave's engine state, so the adapter can deliver to it
+  // directly.
+  adapter_.set_engine(&engine_);
   engine_.set_diagnostic_handler(
       [](const std::string &message) { util::Logger::warn("data_hazard: ", message); });
   // Stream findings as they are made. The JSON report and the summary are only
@@ -540,6 +518,36 @@ void DataHazardPlugin::seed_wave_state(amdgpu::Wavefront &wf) {
   wf.set_plugin_state(slot_index(), std::make_unique<DataHazardWavefrontState>());
 }
 
+uint64_t DataHazardPlugin::next_instruction_id(DataHazardWavefrontState *state) {
+  if (state == nullptr)
+    return next_instruction_id_.fetch_add(1) + 1;
+  // A fresh serial on the wave's first instruction, and again in the unlikely
+  // event its 32-bit count runs out.
+  if (state->id_base == 0 || state->id_count == UINT32_MAX) {
+    state->id_base = static_cast<uint64_t>(next_wave_serial_.fetch_add(1) + 1) << 32;
+    state->id_count = 0;
+  }
+  return state->id_base | ++state->id_count;
+}
+
+void DataHazardPlugin::record_disassembly(DataHazardWavefrontState *state,
+                                          const InstructionView &view, const Instruction &inst) {
+  const hazard_core::EntityId dispatch_id = view.execution.dispatch_id;
+  if (state == nullptr) {
+    formatter_.cache_for(dispatch_id)->record(view.pc, inst);
+    return;
+  }
+  // Held by value, so a dispatch ending on another thread cannot drop the cache
+  // out from under this wave.
+  if (!state->disassembly || state->disassembly_dispatch != dispatch_id) {
+    state->disassembly = formatter_.cache_for(dispatch_id);
+    state->disassembly_dispatch = dispatch_id;
+    state->recorded_pcs.clear();
+  }
+  if (state->recorded_pcs.insert(view.pc).second)
+    state->disassembly->record(view.pc, inst);
+}
+
 DataHazardWavefrontState *DataHazardPlugin::wave_state(amdgpu::Wavefront &wf) const {
   return static_cast<DataHazardWavefrontState *>(wf.plugin_state(slot_index()));
 }
@@ -591,9 +599,13 @@ void DataHazardPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   if (shutting_down())
     return;
   // Wavefront slots are recycled, so clear any state left by a prior wave.
-  if (DataHazardWavefrontState *state = wave_state(wf))
+  DataHazardWavefrontState *state = wave_state(wf);
+  if (state)
     state->reset();
-  adapter_.on_wave_begin(make_wave_key(wf));
+  const hazard_core::ExecutionKey key = make_wave_key(wf);
+  adapter_.on_wave_begin(key);
+  if (state)
+    state->engine_wave = engine_.wave_handle(key);
 }
 
 void DataHazardPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
@@ -608,19 +620,21 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
                                                         amdgpu::Wavefront &wf) {
   if (shutting_down())
     return;
+  DataHazardWavefrontState *state = wave_state(wf);
   InstructionView view;
   view.execution = make_wave_key(wf);
-  view.instruction_id = next_instruction_id();
+  view.instruction_id = next_instruction_id(state);
   view.pc = pc;
   view.raw_isa = copy_raw_isa(inst);
   view.wait = parse_wait(inst);
+  view.engine_wave = state ? state->engine_wave.get() : nullptr;
 
   const bool is_memory_op = inst.is_memory_op() || has_routed_memory_state(inst);
 
-  formatter_.remember(view, inst);
+  record_disassembly(state, view, inst);
   adapter_.on_instruction(view);
 
-  if (DataHazardWavefrontState *state = wave_state(wf)) {
+  if (state) {
     state->current = view;
     state->is_memory_op = is_memory_op;
   }

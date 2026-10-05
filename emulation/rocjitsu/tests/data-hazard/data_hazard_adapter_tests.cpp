@@ -6,6 +6,7 @@
 #include "data_hazard_engine.h"
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 #include "rocjitsu/vm/plugins/data_hazard/plugin.h"
+#include "rocjitsu/vm/plugins/data_hazard/report.h"
 
 #include <cstddef>
 #include <string>
@@ -422,6 +423,95 @@ TEST(DataHazardAdapterTest, RegisterWriteLanesReachTheEngine) {
   const auto warnings = h.engine.warning_snapshot();
   ASSERT_EQ(warnings.size(), 1u);
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+}
+
+// With the engine set, a view carrying its wave's handle is delivered straight
+// to that wave and still finds the hazard.
+TEST(DataHazardAdapterTest, ViewsWithAWaveHandleGoStraightToTheEngine) {
+  AdapterHarness h;
+  h.adapter.set_engine(&h.engine);
+  h.adapter.set_track_current_instruction(false);
+  const DataHazardEngine::WaveHandle handle = h.engine.wave_handle(h.wave);
+
+  dh::InstructionView load_inst = h.instruction(1, 0x100);
+  load_inst.engine_wave = handle.get();
+  h.adapter.on_instruction(load_inst);
+
+  dh::MemoryRouteView load;
+  load.instruction = load_inst;
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 6;
+  load.address = 0x2000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  h.adapter.on_memory_route(load);
+
+  dh::InstructionView use_inst = h.instruction(2, 0x104);
+  use_inst.engine_wave = handle.get();
+  h.adapter.on_instruction(use_inst);
+
+  dh::RegisterAccessView read;
+  read.instruction = use_inst;
+  read.register_class = dh::RegisterClass::Vector;
+  read.physical_reg = 6;
+  read.size_bytes = 4;
+  read.is_read = true;
+  h.adapter.on_register_access(read);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+// With the engine set, a global route's lanes go straight to the wave and still
+// race another workgroup's access to one of them.
+TEST(DataHazardAdapterTest, GlobalRouteThroughAWaveHandleStillRaces) {
+  AdapterHarness h;
+  h.adapter.set_engine(&h.engine);
+  h.adapter.set_track_current_instruction(false);
+  ExecutionKey other = h.wave;
+  other.workgroup_id = 1;
+  h.adapter.on_workgroup_begin(other);
+  h.adapter.on_wave_begin(other);
+  const DataHazardEngine::WaveHandle writer_handle = h.engine.wave_handle(h.wave);
+  const DataHazardEngine::WaveHandle reader_handle = h.engine.wave_handle(other);
+
+  dh::InstructionView store_inst = h.instruction(1, 0x100);
+  store_inst.engine_wave = writer_handle.get();
+  h.adapter.on_instruction(store_inst);
+  dh::MemoryRouteView store;
+  store.instruction = store_inst;
+  store.resource_kind = ResourceKind::GlobalMemory;
+  store.register_class = dh::RegisterClass::Vector;
+  store.per_lane_addresses = {0x4000, 0x4004, 0x4008, 0x400c};
+  store.exec_mask = 0xF;
+  store.size_bytes = 4;
+  store.is_store = true;
+  h.adapter.on_memory_route(store);
+
+  dh::InstructionView load_inst;
+  load_inst.execution = other;
+  load_inst.instruction_id = 2;
+  load_inst.pc = 0x200;
+  load_inst.engine_wave = reader_handle.get();
+  h.adapter.on_instruction(load_inst);
+  dh::MemoryRouteView load;
+  load.instruction = load_inst;
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 3;
+  load.per_lane_addresses = {0x5000, 0x4008};
+  load.exec_mask = 0x3;
+  load.size_bytes = 4;
+  load.is_load = true;
+  h.adapter.on_memory_route(load);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, 0x4008u);
 }
 
 TEST(DataHazardAdapterTest, GlobalStoreRouteDoesNotTrackVectorSourceForWarHazards) {
@@ -2848,4 +2938,198 @@ TEST(DataHazardFormatterTest, WordsTheFlatLoadWaitForTheRunningTarget) {
   // gfx12-era targets have the combined wait the shared wording names.
   formatter.set_architecture(ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_TRUE(formatter.format_flat_load_wait_suggestion().empty());
+}
+
+// Folding repeated LDS races in the engine. A kernel that races LDS in every
+// wave reports the same shader-level race once per wave pair and address, and
+// the report folds all of those into one entry. Formatting each occurrence only
+// for the report to throw it away was most of data_hazard's cost on such a
+// kernel, so with folding on the engine formats the first occurrence of a race
+// and passes later ones to the sink as a count. The JSON report must not change.
+namespace {
+
+/// A DS access of @p size bytes at LDS @p address from @p wave, reported the
+/// way the adapter reports ds_read and ds_write: the read's VGPR destination
+/// and the write's LDS data are both outstanding on DScnt.
+void lds_access(DataHazardEngine &engine, hazard_core::EntityId id, uint64_t pc,
+                const ExecutionKey &wave, uint32_t address, uint32_t size, bool is_write) {
+  InstructionEvent instruction;
+  instruction.instruction.instruction_id = id;
+  instruction.instruction.pc = pc;
+  instruction.instruction.execution = wave;
+  instruction.instruction.raw_isa[0] = static_cast<uint32_t>(pc);
+  if (is_write)
+    instruction.hazards.local_write_wait = WaitCntType::LDS;
+  else
+    instruction.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(instruction);
+
+  ResourceAccessEvent event;
+  event.instruction = instruction.instruction;
+  event.resource_kind = ResourceKind::LocalMemory;
+  event.address = address;
+  event.size_bytes = size;
+  event.is_read = !is_write;
+  event.is_write = is_write;
+  engine.on_resource_access(event);
+}
+
+void resolve_workgroup_barrier(DataHazardEngine &engine, const std::vector<ExecutionKey> &waves) {
+  for (const ExecutionKey &wave : waves) {
+    BarrierEvent barrier;
+    barrier.wave = wave;
+    barrier.kind = BarrierKind::Workgroup;
+    engine.on_barrier(barrier);
+  }
+}
+
+struct LdsRaceScenarioResult {
+  std::string json;
+  std::vector<dh::HazardWarning> report;
+  size_t engine_warnings = 0;
+};
+
+/// Races LDS every way the race message varies: write-write and write-read,
+/// differing access sizes, and accesses carried across a barrier from each of
+/// several waves, each repeated across waves and addresses.
+LdsRaceScenarioResult run_lds_race_scenario(bool fold) {
+  FakeFormatter formatter;
+  DataHazardEngine &engine = data_hazard_engine();
+  engine.reset();
+  dh::WarningCollector collector;
+  dh::CollectingWarningSink sink(collector, &formatter);
+  engine.set_instruction_formatter(&formatter);
+  engine.set_warning_sink(&sink);
+  engine.set_global_memory_races(true);
+  engine.set_fold_repeated_lds_races(fold);
+
+  engine.on_dispatch_begin(1);
+  engine.on_workgroup_begin(1, 0, 0);
+  std::vector<ExecutionKey> waves;
+  for (hazard_core::EntityId wave_id = 0; wave_id < 4; ++wave_id) {
+    waves.push_back(ExecutionKey{1, 0, 0, wave_id});
+    engine.on_wave_begin(waves.back());
+  }
+
+  hazard_core::EntityId id = 1;
+  for (const ExecutionKey &wave : waves) {
+    for (uint32_t address = 0; address < 0x40; address += 4) {
+      lds_access(engine, id++, 0x300, wave, address, 4, /*is_write=*/true);
+      lds_access(engine, id++, 0x340, wave, address, 4, /*is_write=*/false);
+    }
+    lds_access(engine, id++, 0x360, wave, 0x100, 2, /*is_write=*/true);
+    lds_access(engine, id++, 0x368, wave, 0x100, 4, /*is_write=*/false);
+  }
+  // No s_wait_dscnt first, so each wave's accesses are still outstanding when
+  // the barrier resolves and race the next epoch's.
+  resolve_workgroup_barrier(engine, waves);
+
+  for (uint32_t address = 0; address < 0x40; address += 4) {
+    lds_access(engine, id++, 0x380, waves[1], address, 4, /*is_write=*/false);
+    lds_access(engine, id++, 0x3c0, waves[3], address, 4, /*is_write=*/true);
+  }
+  resolve_workgroup_barrier(engine, waves);
+
+  LdsRaceScenarioResult result;
+  result.json = collector.to_json();
+  result.report = collector.snapshot();
+  result.engine_warnings = engine.warning_snapshot().size();
+  engine.set_warning_sink(nullptr);
+  engine.set_fold_repeated_lds_races(false);
+  engine.reset();
+  return result;
+}
+
+dh::HazardWarning lds_race_warning(hazard_core::EntityId first_wave,
+                                   hazard_core::EntityId second_wave, uint32_t address) {
+  dh::HazardWarning warning;
+  warning.dispatch_id = 1;
+  warning.pc = 0x340;
+  warning.source_pc = 0x300;
+  warning.has_source_instruction = true;
+  warning.message = "LDS data race: Wave " + std::to_string(first_wave) + " writes LDS address 0x" +
+                    std::to_string(address) + " (size 4) and Wave " + std::to_string(second_wave) +
+                    " reads LDS address 0x" + std::to_string(address) +
+                    " (size 4) without workgroup barrier";
+  warning.suggestion = "Add s_barrier_signal / s_barrier_wait between conflicting LDS accesses";
+  return warning;
+}
+
+} // namespace
+
+TEST(DataHazardRaceFoldTest, FoldingRepeatedLdsRacesLeavesTheReportUnchanged) {
+  const LdsRaceScenarioResult unfolded = run_lds_race_scenario(/*fold=*/false);
+  const LdsRaceScenarioResult folded = run_lds_race_scenario(/*fold=*/true);
+
+  // The scenario has to produce what folding acts on: repeats of one race, and
+  // the carried-across-a-barrier wording, which names the carried wave.
+  uint64_t repeats = 0;
+  bool has_carried = false;
+  for (const dh::HazardWarning &warning : unfolded.report) {
+    repeats += warning.suppressed_occurrences;
+    has_carried |= warning.message.find("across a workgroup barrier") != std::string::npos;
+  }
+  ASSERT_GT(repeats, 0u);
+  ASSERT_TRUE(has_carried);
+  ASSERT_GT(unfolded.report.size(), 3u);
+
+  EXPECT_EQ(folded.json, unfolded.json);
+}
+
+TEST(DataHazardRaceFoldTest, FoldingFormatsEachLdsRaceOnce) {
+  const LdsRaceScenarioResult unfolded = run_lds_race_scenario(/*fold=*/false);
+  const LdsRaceScenarioResult folded = run_lds_race_scenario(/*fold=*/true);
+
+  // Off by default, the engine keeps every occurrence for frontends that read
+  // warning_snapshot() rather than a sink.
+  uint64_t occurrences = 0;
+  for (const dh::HazardWarning &warning : unfolded.report)
+    occurrences += 1 + warning.suppressed_occurrences;
+  EXPECT_EQ(unfolded.engine_warnings, occurrences);
+  EXPECT_EQ(folded.engine_warnings, folded.report.size());
+}
+
+TEST(DataHazardRaceFoldTest, RepeatArrivingBeforeItsFirstOccurrenceIsCounted) {
+  // Another thread can count a repeat while the first occurrence is still
+  // being formatted.
+  dh::WarningCollector collector;
+  collector.add_repeat(7);
+  collector.add_repeat(7);
+  collector.add(lds_race_warning(0, 1, 0x80), /*fold_id=*/7);
+  collector.add_repeat(7);
+
+  const auto report = collector.snapshot();
+  ASSERT_EQ(report.size(), 1u);
+  EXPECT_EQ(report[0].suppressed_occurrences, 3u);
+}
+
+TEST(DataHazardRaceFoldTest, FoldsThatNormaliseToOneEntryShareIt) {
+  dh::WarningCollector collector;
+  collector.add(lds_race_warning(0, 1, 0x80), /*fold_id=*/1);
+  collector.add(lds_race_warning(2, 3, 0x84), /*fold_id=*/2);
+  collector.add_repeat(1);
+  collector.add_repeat(2);
+
+  const auto report = collector.snapshot();
+  ASSERT_EQ(report.size(), 1u);
+  EXPECT_EQ(report[0].suppressed_occurrences, 3u);
+  EXPECT_NE(report[0].message.find("Wave 0 writes"), std::string::npos);
+}
+
+TEST(DataHazardRaceFoldTest, SinkPassesRepeatsToTheCollector) {
+  dh::WarningCollector collector;
+  FakeFormatter formatter;
+  dh::CollectingWarningSink sink(collector, &formatter);
+
+  EngineWarning warning;
+  warning.finding.instruction.pc = 0x340;
+  warning.finding.instruction.execution.dispatch_id = 1;
+  warning.message = lds_race_warning(0, 1, 0x80).message;
+  warning.fold_id = 5;
+  sink.emit_warning(warning);
+  sink.emit_repeat(5);
+
+  const auto report = collector.snapshot();
+  ASSERT_EQ(report.size(), 1u);
+  EXPECT_EQ(report[0].suppressed_occurrences, 1u);
 }

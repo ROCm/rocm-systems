@@ -132,6 +132,18 @@ those threads, so they must be thread-safe too.
 together by the frontend, not the engine — the engine emits every finding. If
 you want folding, do it in your sink.
 
+**Repeated LDS races can be counted instead of formatted.** A cross-wave LDS
+race recurs once per wave pair and address, and formatting each occurrence is
+most of the engine's cost on a kernel that races LDS throughout.
+`set_fold_repeated_lds_races(true)` formats the first occurrence of each race,
+tagged with an `EngineWarning::fold_id`, and passes later occurrences to
+`HazardWarningSink::emit_repeat` with that id. Occurrences share an id when
+their message and suggestion differ only in wave ids and LDS addresses. A
+repeat can arrive before its first occurrence when another thread is still
+formatting that occurrence. With this on, `warning_snapshot()` holds only first
+occurrences, so turn it on only with a sink that counts repeats. The setting is
+off by default and survives `reset()`.
+
 **Global memory races can be turned off.** `set_global_memory_races(false)`
 stops `GlobalMemory` accesses from being checked for cross-workgroup races. The
 counter slot a store reports through `memory_op_wait` is still tracked, so

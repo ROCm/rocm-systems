@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 
+#include "data_hazard_engine.h"
+
 #include "detail/waitcnt_decode.h"
 #include "hash_utils.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -17,6 +19,7 @@ namespace rocjitsu::plugins::data_hazard {
 using hazard_core::BarrierEvent;
 using hazard_core::BarrierKind;
 using hazard_core::DataHazardSimulatorApi;
+using hazard_core::EngineWaveState;
 using hazard_core::EntityId;
 using hazard_core::ExecutionKey;
 using hazard_core::InstructionDescriptor;
@@ -355,7 +358,7 @@ void DataHazardAdapter::on_workgroup_end(const ExecutionKey &workgroup) {
 void DataHazardAdapter::on_wave_begin(const ExecutionKey &wave) { api_.on_wave_begin(wave); }
 
 void DataHazardAdapter::on_wave_end(const ExecutionKey &wave) {
-  {
+  if (track_current_instruction_) {
     std::lock_guard<std::mutex> lock(mutex_);
     current_instruction_.erase(wave);
   }
@@ -366,7 +369,7 @@ void DataHazardAdapter::on_instruction(const InstructionView &instruction) {
   InstructionEvent event;
   event.instruction = resolve_instruction(instruction, true);
   event.wait_action = make_wait_action(instruction.wait);
-  api_.on_instruction(event);
+  deliver(instruction.engine_wave, event);
 }
 
 void DataHazardAdapter::on_register_access(const RegisterAccessView &access) {
@@ -389,7 +392,7 @@ void DataHazardAdapter::on_register_access(const RegisterAccessView &access) {
     return;
   }
 
-  api_.on_resource_access(event);
+  deliver(access.instruction.engine_wave, event);
 }
 
 void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
@@ -415,20 +418,21 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
           make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
       slot.resource_kind = route.resource_kind;
       slot.hazards.memory_op_wait = route.store_wait;
-      api_.on_resource_access(slot);
+      deliver(route.instruction.engine_wave, slot);
     }
 
     if (route.resource_kind == ResourceKind::ScratchMemory || global_memory_races_) {
-      emit_per_lane_or_scalar(
-          route.per_lane_addresses, route.address, route.exec_mask, [&](uint64_t address) {
-            ResourceAccessEvent memory =
-                make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
-            memory.resource_kind = route.resource_kind;
-            memory.address = address;
-            memory.is_read = route.is_load || route.is_atomic;
-            memory.is_write = route.is_store || route.is_atomic;
-            api_.on_resource_access(memory);
-          });
+      ResourceAccessEvent memory =
+          make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
+      memory.resource_kind = route.resource_kind;
+      memory.is_read = route.is_load || route.is_atomic;
+      memory.is_write = route.is_store || route.is_atomic;
+
+      emit_per_lane_or_scalar(route.per_lane_addresses, route.address, route.exec_mask,
+                              [&](uint64_t address) {
+                                memory.address = address;
+                                deliver(route.instruction.engine_wave, memory);
+                              });
     }
   }
 
@@ -443,7 +447,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
           memory.is_write = route.is_store || route.is_tensor || route.is_atomic;
           if (memory.is_write)
             memory.hazards.write_wait = route.is_tensor ? WaitCntType::TENSOR : WaitCntType::LDS;
-          api_.on_resource_access(memory);
+          deliver(route.instruction.engine_wave, memory);
         });
   }
 
@@ -458,7 +462,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
                               local.hazards.write_wait = route.local_write_wait != WaitCntType::NONE
                                                              ? route.local_write_wait
                                                              : WaitCntType::VMEM;
-                              api_.on_resource_access(local);
+                              deliver(route.instruction.engine_wave, local);
                             });
   }
 
@@ -473,7 +477,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
                               local.hazards.read_wait = route.local_read_wait != WaitCntType::NONE
                                                             ? route.local_read_wait
                                                             : WaitCntType::LDS;
-                              api_.on_resource_access(local);
+                              deliver(route.instruction.engine_wave, local);
                             });
   }
 
@@ -506,7 +510,7 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     }
 
     if (dest.resource_kind != ResourceKind::Unknown)
-      api_.on_resource_access(dest);
+      deliver(route.instruction.engine_wave, dest);
   }
 
   // VMEM store data sources are captured when the store issues. Unlike
@@ -566,8 +570,27 @@ void DataHazardAdapter::on_local_memory_atomic_barrier(const ExecutionKey &wave,
 
 void DataHazardAdapter::on_shutdown() { api_.on_shutdown(); }
 
+void DataHazardAdapter::deliver(EngineWaveState *wave, const InstructionEvent &event) {
+  if (engine_ && wave)
+    engine_->on_instruction(*wave, event);
+  else
+    api_.on_instruction(event);
+}
+
+void DataHazardAdapter::deliver(EngineWaveState *wave, const ResourceAccessEvent &event) {
+  if (engine_ && wave)
+    engine_->on_resource_access(*wave, event);
+  else
+    api_.on_resource_access(event);
+}
+
 InstructionDescriptor DataHazardAdapter::resolve_instruction(const InstructionView &instruction,
                                                              bool make_current) {
+  // A named instruction needs no lookup, and with tracking off there is nothing
+  // to record.
+  if (!track_current_instruction_ && instruction.instruction_id != 0)
+    return make_instruction_descriptor(instruction, instruction.instruction_id);
+
   std::lock_guard<std::mutex> lock(mutex_);
 
   const ExecutionKey &key = instruction.execution;
@@ -583,6 +606,9 @@ InstructionDescriptor DataHazardAdapter::resolve_instruction(const InstructionVi
 
 InstructionDescriptor
 DataHazardAdapter::current_or_resolved_instruction(const InstructionView &instruction) {
+  if (!track_current_instruction_ && instruction.instruction_id != 0)
+    return make_instruction_descriptor(instruction, instruction.instruction_id);
+
   std::lock_guard<std::mutex> lock(mutex_);
 
   const ExecutionKey &key = instruction.execution;

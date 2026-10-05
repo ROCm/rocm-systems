@@ -24,6 +24,11 @@
 #include <optional>
 #include <string_view>
 #include <unordered_map>
+
+namespace hazard_core {
+class DataHazardEngine;
+struct EngineWaveState;
+} // namespace hazard_core
 #include <vector>
 
 namespace rocjitsu::plugins::data_hazard {
@@ -79,6 +84,10 @@ struct InstructionView {
   uint64_t pc = 0;
   std::array<uint32_t, 4> raw_isa{};
   WaitInfo wait;
+  /// The wave's engine state (DataHazardEngine::wave_handle), when the frontend
+  /// keeps one. Events for this instruction then go straight to the wave rather
+  /// than being looked up by key. Null means look it up.
+  hazard_core::EngineWaveState *engine_wave = nullptr;
 };
 
 struct RegisterAccessView {
@@ -149,6 +158,18 @@ public:
   /// adapter skips building them. Set before the first event; kept across reset().
   void set_global_memory_races(bool enabled) { global_memory_races_ = enabled; }
 
+  /// Whether to remember each wave's current instruction, so a later callback
+  /// that names no instruction (instruction_id 0) is attributed to it. On by
+  /// default. A frontend that always names the instruction turns it off, which
+  /// takes the map and its lock off the per-instruction path. Set before the
+  /// first event.
+  void set_track_current_instruction(bool enabled) { track_current_instruction_ = enabled; }
+
+  /// The engine behind the API this adapter was built on, if it is a
+  /// DataHazardEngine. Views that carry an engine_wave are then delivered to
+  /// that wave directly; everything else still goes through the API.
+  void set_engine(hazard_core::DataHazardEngine *engine) { engine_ = engine; }
+
   void on_dispatch_begin(hazard_core::EntityId dispatch_id);
   void on_dispatch_end(hazard_core::EntityId dispatch_id);
   void on_workgroup_begin(const hazard_core::ExecutionKey &workgroup);
@@ -174,6 +195,11 @@ private:
 
   hazard_core::DataHazardSimulatorApi &api_;
   bool global_memory_races_ = true;
+  bool track_current_instruction_ = true;
+  hazard_core::DataHazardEngine *engine_ = nullptr;
+
+  void deliver(hazard_core::EngineWaveState *wave, const hazard_core::InstructionEvent &event);
+  void deliver(hazard_core::EngineWaveState *wave, const hazard_core::ResourceAccessEvent &event);
   std::mutex mutex_;
   hazard_core::EntityId next_instruction_id_ = 1ull << 63;
   std::unordered_map<hazard_core::ExecutionKey, hazard_core::InstructionDescriptor,
