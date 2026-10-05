@@ -361,14 +361,7 @@ jobs:
           # so gfx950 takes an 8-GPU machine; every other family skips T3.
           # Do not pin HIP_VISIBLE_DEVICES: on the CCS pool fixed indices can
           # be empty even though the job has GPUs.
-          - { family: gfx950, container: true, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
-          - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
-          - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
-          - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }
-          - { family: gfx1151, runner: "${{ needs.ci_config.outputs.gfx1151_runner }}" }
           # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
-          - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
-          - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
           # gfx1250 (MI455) is withheld until linux-mi455-gpu-rocm is healthy.
           # If it is wanted sooner, add it as a separate non-blocking job, as
           # therock-ci.yml does, so the report job never waits on that queue:
