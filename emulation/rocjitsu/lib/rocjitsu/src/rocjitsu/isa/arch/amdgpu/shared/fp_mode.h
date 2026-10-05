@@ -8,6 +8,8 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
 
@@ -35,16 +37,10 @@ inline uint16_t modify_f16(uint16_t value, bool absolute, bool negate) {
   return value;
 }
 
+/// @brief Flush a raw F16 source under MODE input-denormal control.
 inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
-  if ((denorm_mode & 1u) == 0 && (value & 0x7c00u) == 0 && (value & 0x03ffu) != 0)
-    return value & 0x8000u;
-  return value;
-}
-
-inline uint64_t flush_f64(uint64_t value) {
-  if ((value & 0x7ff0000000000000ULL) == 0 && (value & 0x000fffffffffffffULL) != 0)
-    return value & 0x8000000000000000ULL;
-  return value;
+  return static_cast<uint16_t>(input_denormal::flush_input<fp_format::F16>(
+      uint32_t{value}, input_denormal::Policy::make(denorm_mode)));
 }
 
 inline int host_round_mode(uint32_t round_mode) {
@@ -802,7 +798,7 @@ inline float apply_omod_f16(float value, uint32_t omod, bool fp16_ovfl) {
 inline double finalize_omod_f64(double value, uint32_t omod) {
   if (omod == 0)
     return value;
-  uint64_t bits = detail::flush_f64(std::bit_cast<uint64_t>(value));
+  uint64_t bits = denormal::flush<fp_format::F64>(std::bit_cast<uint64_t>(value));
   if ((bits & 0x7fffffffffffffffULL) == 0)
     bits = 0;
   return std::bit_cast<double>(bits);
@@ -815,7 +811,7 @@ namespace detail {
 
 template <typename Float> inline Float flush_denormal(Float value) {
   if constexpr (sizeof(Float) == 8)
-    return std::bit_cast<double>(flush_f64(std::bit_cast<uint64_t>(value)));
+    return std::bit_cast<double>(denormal::flush<fp_format::F64>(std::bit_cast<uint64_t>(value)));
   else
     return pseudo_scalar::detail::flush_input_f32(value, 0);
 }
@@ -1038,11 +1034,10 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
 /// @brief Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
 inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
                         uint32_t denorm_mode) {
-  if ((denorm_mode & 1u) == 0) {
-    src0 = detail::flush_f64(src0);
-    src1 = detail::flush_f64(src1);
-    src2 = detail::flush_f64(src2);
-  }
+  const auto input = input_denormal::Policy::make(denorm_mode);
+  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
+  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
+  src2 = input_denormal::flush_input<fp_format::F64>(src2, input);
 
   uint64_t result;
   {
@@ -1052,9 +1047,8 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
         std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2));
     result = std::bit_cast<uint64_t>(value);
   }
-  if ((denorm_mode & 2u) == 0)
-    result = detail::flush_f64(result);
-  return result;
+  return output_denormal::flush_output<fp_format::F64>(result,
+                                                       output_denormal::Policy::make(denorm_mode));
 }
 
 /// @brief Binary F64 operations implemented by the shared MODE-aware helper.
@@ -1065,10 +1059,9 @@ enum class BinaryF64Op { Add, Multiply, MaximumNumber, MinimumNumber };
 /// one-NaN input and explicitly select +0/-0 for signed-zero ties respectively.
 inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, uint32_t round_mode,
                            uint32_t denorm_mode) {
-  if ((denorm_mode & 1u) == 0) {
-    src0 = detail::flush_f64(src0);
-    src1 = detail::flush_f64(src1);
-  }
+  const auto input = input_denormal::Policy::make(denorm_mode);
+  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
+  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
 
   uint64_t result;
   {
@@ -1103,9 +1096,8 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
     }();
     result = std::bit_cast<uint64_t>(value);
   }
-  if ((denorm_mode & 2u) == 0)
-    result = detail::flush_f64(result);
-  return result;
+  return output_denormal::flush_output<fp_format::F64>(result,
+                                                       output_denormal::Policy::make(denorm_mode));
 }
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
