@@ -1299,6 +1299,12 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
         auto it = va_contexts_[va_ctx_id].profile_caps.find(va_profile);
         if (it == va_contexts_[va_ctx_id].profile_caps.end()) {
             dec_cap->is_supported = 0;
+            dec_cap->num_decoders = 0;
+            dec_cap->output_format_mask = 0;
+            dec_cap->max_width = 0;
+            dec_cap->max_height = 0;
+            dec_cap->min_width = 0;
+            dec_cap->min_height = 0;
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_SUCCESS;
         }
