@@ -126,7 +126,7 @@ main(int argc, char** argv)
 
     std::set<std::string> _category_options = component_categories{}();
     {
-        auto _settings = tim::settings::shared_instance();
+        auto const _settings = tim::settings::shared_instance();
         for(const auto& setting : *_settings)
         {
             if(exclude_setting(setting.second->get_env_name()))
@@ -134,7 +134,7 @@ main(int argc, char** argv)
                 continue;
             }
             auto _categories = setting.second->get_categories();
-            if(_categories.find("native") != _categories.end())
+            if(_categories.contains("native"))
             {
                 _categories.erase("native");
                 _categories.emplace("timemory");
@@ -188,7 +188,7 @@ main(int argc, char** argv)
     parser_t parser("rocprof-sys-avail");
 
     parser.set_help_width(40);
-    auto _cols = std::get<0>(tim::utility::console::get_columns());
+    auto const _cols = std::get<0>(tim::utility::console::get_columns());
     if(_cols > parser.get_help_width() + 8)
     {
         parser.set_description_width(
@@ -204,7 +204,7 @@ main(int argc, char** argv)
         .max_count(1)
         .dtype("bool")
         .action([&](parser_t& p) {
-            auto _monochrome       = p.get<bool>("monochrome");
+            auto const _monochrome = p.get<bool>("monochrome");
             tim::log::monochrome() = _monochrome;
             p.set_use_color(!_monochrome);
         });
@@ -290,7 +290,7 @@ main(int argc, char** argv)
                       "List the available ROCm domains that have operations")
         .count(0)
         .action([](parser_t&) {
-            auto _settings = tim::settings::shared_instance();
+            auto const _settings = tim::settings::shared_instance();
 
             std::set<std::string> _domains;
             for(const auto& itr : *_settings)
@@ -325,12 +325,12 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto domain = rocprofsys::utility::string::to_lower(
+            auto const domain = rocprofsys::utility::string::to_lower(
                 p.get<std::string>("list-operations"));
 
-            auto settings_ptr = tim::settings::shared_instance();
-            auto setting_name = rocm_setting_name_for_domain(domain);
-            auto sitr         = settings_ptr->find(setting_name);
+            auto const settings_ptr = tim::settings::shared_instance();
+            auto const setting_name = rocm_setting_name_for_domain(domain);
+            auto const sitr         = settings_ptr->find(setting_name);
 
             if(sitr == settings_ptr->end())
             {
@@ -358,11 +358,11 @@ main(int argc, char** argv)
     parser.add_argument({ "--list-keys" }, "List the output keys")
         .max_count(1)
         .action([&fmt_opts](parser_t& p) {
-            auto _list = p.get<bool>("list-keys");
-            auto _show = p.get<bool>("expand-keys");
+            auto const _list = p.get<bool>("list-keys");
+            auto const _show = p.get<bool>("expand-keys");
             if(_list)
             {
-                auto _keys = tim::settings::output_keys(
+                auto const _keys = tim::settings::output_keys(
                     tim::settings::shared_instance()->get_tag());
                 std::tuple<size_t, size_t, size_t> _w = { 0, 0, 0 };
                 for(const auto& itr : _keys)
@@ -391,7 +391,7 @@ main(int argc, char** argv)
                     }
                     _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding" << " |\n";
 
-                    auto _dashes = [](std::int64_t _n) {
+                    auto const _dashes = [](std::int64_t _n) {
                         std::stringstream _dss{};
                         _dss.fill('-');
                         _dss << std::setw(_n + 2) << "";
@@ -568,8 +568,8 @@ main(int argc, char** argv)
         .dtype("filename")
         .set_default(std::string{ "rocprof-sys-config" })
         .action([&_config_file](parser_t& _p) {
-            auto _out =
-                (_p.exists("output")) ? _p.get<std::string>("output") : std::string{};
+            auto const _out =
+                _p.exists("output") ? _p.get<std::string>("output") : std::string{};
             if(_p.get_count("generate-config") == 0 && !_out.empty())
             {
                 _config_file = _out;
@@ -666,7 +666,7 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
+    auto const _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
         if(parser.exists(_opt))
         {
@@ -766,8 +766,7 @@ main(int argc, char** argv)
         category_regex_keys.emplace_back(_pos_regex);
     }
 
-    if(category_view.count("advanced") > 0 ||
-       category_view.count("settings::advanced") > 0)
+    if(category_view.contains("advanced") || category_view.contains("settings::advanced"))
     {
         fmt_opts.print_advanced = true;
     }
@@ -893,7 +892,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    auto const _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
     width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
     width_bool _wusing           = width_bool{ true, _available_column };
     const std::int64_t pad       = fmt_opts.padding;
@@ -944,13 +943,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         {
             int               _selected = 0;
             std::stringstream ss;
-            _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
+            _selected += is_selected(std::get<0>(itr)) ? 1 : 0;
             write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
             if(_available_column)
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << std::get<1>(itr);
-                _selected += (is_selected(_avss.str())) ? 1 : 0;
+                _selected += is_selected(_avss.str()) ? 1 : 0;
             }
             write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
@@ -959,16 +958,15 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                 {
                     continue;
                 }
-                const bool center = (i > 0) ? false : true;
-                _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
+                const bool center = i <= 0;
+                _selected += is_selected(std::get<2>(itr).at(i)) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
             }
 
             if(!category_regex_keys.empty())
             {
-                _selected +=
-                    (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+                _selected += is_category_selected(std::get<2>(itr).at(CATEGORY)) ? 1 : 0;
             }
 
             if(_selected == 0)
@@ -1036,13 +1034,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     {
         int               _selected = 0;
         std::stringstream ss;
-        _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
+        _selected += is_selected(std::get<0>(itr)) ? 1 : 0;
         write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
         if(_available_column)
         {
             std::stringstream _avss{};
             _avss << std::boolalpha << std::get<1>(itr);
-            _selected += (is_selected(_avss.str())) ? 1 : 0;
+            _selected += is_selected(_avss.str()) ? 1 : 0;
             write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
         }
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
@@ -1051,8 +1049,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             {
                 continue;
             }
-            const bool center = (i > 0) ? false : true;
-            _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
+            const bool center = i <= 0;
+            _selected += is_selected(std::get<2>(itr).at(i)) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
             {
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -1067,7 +1065,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
         if(!category_regex_keys.empty())
         {
-            _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+            _selected += is_category_selected(std::get<2>(itr).at(CATEGORY)) ? 1 : 0;
         }
 
         if(_selected > 0)
@@ -1134,8 +1132,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     auto _not_in_category_view = str_set_t{};
     for(auto& itr : _setting_output)
     {
-        auto _name = itr.find("environ")->second;
-        auto sitr  = _settings->find(_name);
+        auto const _name = itr.find("environ")->second;
+        auto const sitr  = _settings->find(_name);
         if(sitr != _settings->end())
         {
             str_set_t _categories{};
@@ -1146,12 +1144,12 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             bool _found = false;
             for(const auto& category : _categories)
             {
-                if(category_view.count(category) > 0)
+                if(category_view.contains(category))
                 {
                     _found = true;
                 }
             }
-            if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
+            if(!fmt_opts.print_advanced && _categories.contains("settings::advanced"))
             {
                 if(!sitr->second->get_config_updated() &&
                    !sitr->second->get_environ_updated())
@@ -1198,10 +1196,11 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         _setting_output.erase(
             std::remove_if(_setting_output.begin(), _setting_output.end(),
                            [&_settings](const auto& itr) {
-                               auto iitr = _settings->find(itr.at("environ"));
+                               auto const iitr = _settings->find(itr.at("environ"));
                                if(iitr != _settings->end())
                                {
-                                   return (iitr->second->get_enabled() == false);
+                                   return (
+                                       !static_cast<bool>(iitr->second->get_enabled()));
                                }
                                return true;
                            }),
@@ -1247,7 +1246,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         array_t<string_t, size> _tmp{};
         for(size_t j = 0; j < _keys.size(); ++j)
         {
-            auto eitr = itr.find(_keys.at(j));
+            auto const eitr = itr.find(_keys.at(j));
             if(eitr != itr.end())
             {
                 _tmp.at(j) = eitr->second;
@@ -1262,7 +1261,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     for(const auto& itr : _results)
     {
         // save the widths in case this gets filtered
-        auto              _last_widths = _widths;
+        auto const        _last_widths = _widths;
         std::stringstream ss{};
         int               _selected = 0;
         for(size_t i = 0; i < itr.size(); ++i)
@@ -1273,7 +1272,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             }
             _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() +
                                                                        fmt_opts.padding);
-            _selected += (is_selected(itr.at(i))) ? 1 : 0;
+            _selected += is_selected(itr.at(i)) ? 1 : 0;
             write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                         fmt_opts);
         }
@@ -1318,7 +1317,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             {
                 continue;
             }
-            _selected += (is_selected(itr.at(i))) ? 1 : 0;
+            _selected += is_selected(itr.at(i)) ? 1 : 0;
             if(_labels.at(i) == "DESCRIPTION")
             {
                 write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
@@ -1376,7 +1375,7 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     // Tag overflow events by modifying both short and long descriptions upfront
     {
         namespace regex_const = ::std::regex_constants;
-        auto _regex =
+        auto const _regex =
             std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
                         regex_const::optimize };
         for(auto& itr : _papi_events)
@@ -1390,13 +1389,13 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     }
 
     // sort the events alphabetically
-    auto _sorter = [](const auto& lhs, const auto& rhs) {
+    auto const _sorter = [](const auto& lhs, const auto& rhs) {
         return (lhs.symbol() < rhs.symbol());
     };
     std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
     std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
 
-    auto _process_counters = [](auto& _events_v, std::int32_t _offset_v) {
+    auto const _process_counters = [](auto& _events_v, std::int32_t _offset_v) {
         for(auto& iitr : _events_v)
         {
             iitr.offset() += _offset_v;
@@ -1418,8 +1417,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     auto _valid_symbols = std::set<std::string>{};
     for(auto& fitr : fields)
     {
-        if(!category_view.empty() && category_view.count(fitr.first) == 0 &&
-           category_view.count(std::string{ "hw_counters::" } + fitr.first) == 0)
+        if(!category_view.empty() && !category_view.contains(fitr.first) &&
+           !category_view.contains(std::string{ "hw_counters::" } + fitr.first))
         {
             fitr.second.clear();
         }
@@ -1440,14 +1439,14 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
             int                     _selected = 0;
             if(options[0])
             {
-                _selected += (is_selected(itr.symbol())) ? 1 : 0;
+                _selected += is_selected(itr.symbol()) ? 1 : 0;
             }
 
             if(options[2])
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << itr.available();
-                _selected += (is_selected(_avss.str())) ? 1 : 0;
+                _selected += is_selected(_avss.str()) ? 1 : 0;
             }
 
             for(size_t i = 3; i < N; ++i)
@@ -1613,7 +1612,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         return _widths;
     }
 
-    auto _get_sum = [&]() {
+    auto const _get_sum = [&]() {
         value_type _sumv = 0;
         for(size_t i = 0; i < _widths.size(); ++i)
         {
@@ -1643,8 +1642,8 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         }
         return std::make_pair(_midx, _maxv);
     };
-    auto _decrement_max = [&]() {
-        auto _midx = _get_max().first;
+    auto const _decrement_max = [&]() {
+        auto const _midx = _get_max().first;
         if(_midx < _widths.size())
         {
             _widths.at(_midx) -= 1;
@@ -1661,7 +1660,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
             std::stringstream _msg;
             for(size_t i = 0; i < _widths.size(); ++i)
             {
-                _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+                _msg << ", " << (_using.at(i) ? _widths.at(i) : 0);
             }
             std::cerr << "[ temp]> sum_width = " << _get_sum()
                       << ", max_width = " << _max_width
@@ -1686,7 +1685,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         std::stringstream _msg;
         for(size_t i = 0; i < _widths.size(); ++i)
         {
-            _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+            _msg << ", " << (_using.at(i) ? _widths.at(i) : 0);
         }
         std::cerr << "[final]> sum_width = " << _get_sum()
                   << ", max_width = " << _max_width
@@ -1722,7 +1721,7 @@ write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bo
     }
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
-    auto _decr = (mark && fmt_opts.markdown) ? 6 : 5;
+    auto const _decr = (mark && fmt_opts.markdown) ? 6 : 5;
     if(!fmt_opts.csv && _w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
     {
         _sentry = _sentry.substr(0, _w - _decr) + "...";
@@ -1810,8 +1809,8 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool cente
 
     if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
     {
-        auto _decr   = (mark && fmt_opts.markdown) ? 4 : 3;
-        auto _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
+        auto const _decr   = (mark && fmt_opts.markdown) ? 4 : 3;
+        auto       _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
         if(_lspace == std::string::npos || _lspace < static_cast<std::uint64_t>(_w / 2))
         {
             _lspace = _w - _decr;
@@ -1967,8 +1966,8 @@ wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fm
 
     for(size_t i = 1; i < _breaks.size(); ++i)
     {
-        auto j = i + idx;
-        auto k = j % _breaks.size();
+        auto const j = i + idx;
+        auto const k = j % _breaks.size();
         if(k == 0)
         {
             ss << "\n" << delim;

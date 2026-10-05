@@ -68,7 +68,7 @@ function_signature::get(bool _all, bool _save) const
     }
     if(m_loop)
     {
-        auto _row_col_str = [](unsigned long _row, unsigned long _col) {
+        auto const _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0)
             {
@@ -85,8 +85,8 @@ function_signature::get(bool _all, bool _save) const
             return _ss.str();
         };
 
-        auto _rc1 = _row_col_str(m_row.first, m_col.first);
-        auto _rc2 = _row_col_str(m_row.second, m_col.second);
+        auto const _rc1 = _row_col_str(m_row.first, m_col.first);
+        auto const _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
         {
             ss << " [" << _rc1 << "-" << _rc2 << "]";
@@ -111,7 +111,7 @@ function_signature::get(bool _all, bool _save) const
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),
                       _rc1.c_str(), _rc2.c_str());
     }
-    if((_all || use_file_info) && m_file.length() > 0)
+    if((_all || use_file_info) && !m_file.empty())
     {
         ss << " [" << m_file;
     }
@@ -119,7 +119,7 @@ function_signature::get(bool _all, bool _save) const
     {
         ss << ":" << m_row.first;
     }
-    if((_all || use_file_info) && m_file.length() > 0)
+    if((_all || use_file_info) && !m_file.empty())
     {
         ss << "]";
     }
@@ -142,11 +142,11 @@ function_signature::get_coverage(bool _basic_block) const
     ss << m_name << m_params;
     if(_basic_block && m_loop && m_info_beg)
     {
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << " [" << m_file << "]";
         }
-        auto _row_col_str = [](unsigned long _row, unsigned long _col) {
+        auto const _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0)
             {
@@ -163,8 +163,8 @@ function_signature::get_coverage(bool _basic_block) const
             return _ss.str();
         };
 
-        auto _rc1 = _row_col_str(m_row.first, m_col.first);
-        auto _rc2 = _row_col_str(m_row.second, m_col.second);
+        auto const _rc1 = _row_col_str(m_row.first, m_col.first);
+        auto const _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
         {
             ss << " [" << _rc1 << "-" << _rc2 << "]";
@@ -186,7 +186,7 @@ function_signature::get_coverage(bool _basic_block) const
     }
     else
     {
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << " [" << m_file;
         }
@@ -194,7 +194,7 @@ function_signature::get_coverage(bool _basic_block) const
         {
             ss << ":" << m_row.first;
         }
-        if(m_file.length() > 0)
+        if(!m_file.empty())
         {
             ss << "]";
         }

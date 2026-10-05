@@ -7,7 +7,9 @@
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -16,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -27,9 +30,12 @@ class output_file_sink_view
 public:
     using register_file_fn_t = void (*)(void*, std::string, output_format);
 
-    template <typename SinkT>
     // Non-owning sink view. The referenced sink object must outlive any
-    // unified_memory_processor_t storing this view.
+    // unified_memory_processor_t storing this view. Excludes output_file_sink_view
+    // itself so this doesn't shadow the copy/move constructors below and wrap
+    // a soon-to-be-destroyed view instead of the real sink.
+    template <typename SinkT>
+        requires(!std::is_same_v<std::decay_t<SinkT>, output_file_sink_view>)
     explicit output_file_sink_view(SinkT& sink) noexcept
     : m_object{ std::addressof(sink) }
     , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
@@ -65,14 +71,8 @@ struct migration_stats
         count++;
         total_size_bytes += size_bytes;
         total_time_ns += duration_ns;
-        if(size_bytes < min_size_bytes)
-        {
-            min_size_bytes = size_bytes;
-        }
-        if(size_bytes > max_size_bytes)
-        {
-            max_size_bytes = size_bytes;
-        }
+        min_size_bytes = std::min(size_bytes, min_size_bytes);
+        max_size_bytes = std::max(size_bytes, max_size_bytes);
     }
 
     [[nodiscard]] double avg_size_bytes() const noexcept
@@ -130,15 +130,26 @@ struct trigger_entry
 };
 
 inline constexpr std::array<trigger_entry, 5> kTriggerTable = { {
-    { "PAGE_MIGRATE_PAGEFAULT_GPU", "gpu_page_fault", "GPU page fault",
-      &migration_trigger_stats::gpu_page_fault },
-    { "PAGE_MIGRATE_PAGEFAULT_CPU", "cpu_page_fault", "CPU page fault",
-      &migration_trigger_stats::cpu_page_fault },
-    { "PAGE_MIGRATE_PREFETCH", "prefetch", "Prefetch",
-      &migration_trigger_stats::prefetch },
-    { "PAGE_MIGRATE_TTM_EVICTION", "ttm_eviction", "TTM eviction",
-      &migration_trigger_stats::ttm_eviction },
-    { nullptr, "unknown", "Unknown", &migration_trigger_stats::unknown },
+    { .kfd_name   = "PAGE_MIGRATE_PAGEFAULT_GPU",
+      .json_key   = "gpu_page_fault",
+      .text_label = "GPU page fault",
+      .member     = &migration_trigger_stats::gpu_page_fault },
+    { .kfd_name   = "PAGE_MIGRATE_PAGEFAULT_CPU",
+      .json_key   = "cpu_page_fault",
+      .text_label = "CPU page fault",
+      .member     = &migration_trigger_stats::cpu_page_fault },
+    { .kfd_name   = "PAGE_MIGRATE_PREFETCH",
+      .json_key   = "prefetch",
+      .text_label = "Prefetch",
+      .member     = &migration_trigger_stats::prefetch },
+    { .kfd_name   = "PAGE_MIGRATE_TTM_EVICTION",
+      .json_key   = "ttm_eviction",
+      .text_label = "TTM eviction",
+      .member     = &migration_trigger_stats::ttm_eviction },
+    { .kfd_name   = nullptr,
+      .json_key   = "unknown",
+      .text_label = "Unknown",
+      .member     = &migration_trigger_stats::unknown },
 } };
 
 static_assert(kTriggerTable.back().kfd_name == nullptr,
@@ -176,6 +187,7 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
+    void handle(const hipfile_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 
 private:

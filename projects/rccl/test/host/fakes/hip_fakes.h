@@ -21,6 +21,7 @@
 #define RCCL_TEST_HOST_HIP_FAKES_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <functional>
 
@@ -77,6 +78,9 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
     g_hipHostMalloc;
 // Defaults to hipErrorInvalidValue with *ptr = nullptr, the fail-loud floor's behaviour.
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/)> g_hipMalloc;
+// Same floor as g_hipMalloc.
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /*flags*/)>
+    g_hipMallocManaged;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipHostFree;
 extern int g_deviceCount;
@@ -108,6 +112,7 @@ extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 // Backs hipDeviceGetAttribute(hipDeviceAttributeDirectManagedMemAccessFromHost); 1 is the MI300A answer.
 extern int g_hipDirectManagedMemAccess;
+extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSupported (default 1)
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
@@ -198,6 +203,17 @@ extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
 extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
+
+extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
+                                hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
+    g_hipStreamBatchMemOp;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/)>
+    g_hipStreamWriteValue64;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/,
+                                std::uint64_t /*mask*/)>
+    g_hipStreamWaitValue64;
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

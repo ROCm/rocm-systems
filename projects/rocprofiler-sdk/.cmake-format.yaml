@@ -377,6 +377,8 @@ parse:
         LABELS: '*'
         FIXTURES_SETUP: '*'
     add_signal_handler_test:
+      flags:
+        - NO_TIMEOUT_SIGNAL
       kwargs:
         PROCESS_TYPE: '*'
         VALIDATE_EXPECT: '*'

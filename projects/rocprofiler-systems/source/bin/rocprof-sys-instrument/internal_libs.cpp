@@ -48,8 +48,8 @@ get_symtab_file_cache()
 symtab_t*
 get_symtab_file(const std::string& _name)
 {
-    auto& _cache = get_symtab_file_cache();
-    auto  itr    = _cache.find(_name);
+    auto&      _cache = get_symtab_file_cache();
+    auto const itr    = _cache.find(_name);
     if(itr == _cache.end())
     {
         symtab_t*  _v        = SymTab::Symtab::findOpenSymtab(_name);
@@ -71,8 +71,8 @@ get_symtab_file(const std::string& _name)
 bool
 close_symtab_file(const std::string& _name)
 {
-    auto& _cache = get_symtab_file_cache();
-    auto  itr    = _cache.find(_name);
+    auto&      _cache = get_symtab_file_cache();
+    auto const itr    = _cache.find(_name);
     if(itr != _cache.end())
     {
         symtab_t*  _symtab   = itr->second.first;
@@ -112,7 +112,7 @@ get_linked_path(const char*        _name,
     void* _handle = nullptr;
     // NOLINTNEXTLINE(misc-const-correctness)
     bool _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -123,7 +123,7 @@ get_linked_path(const char*        _name,
     }
 
     const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -148,7 +148,7 @@ get_link_map(const std::string& _lib,
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_lib.c_str(), _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -163,7 +163,7 @@ get_link_map(const std::string& _lib,
     {
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        struct link_map* _next = _link_map;
+        struct link_map const* _next = _link_map;
         while(_next)
         {
             if(!std::string_view{ _next->l_name }.empty() &&
@@ -174,7 +174,7 @@ get_link_map(const std::string& _lib,
             _next = _next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -187,12 +187,13 @@ get_library_search_paths_impl()
 {
     auto _paths = std::vector<std::string>{};
 
-    auto _path_exists = [](const std::string& _filename) {
+    auto const _path_exists = [](const std::string& _filename) {
         struct stat dummy;
-        return (_filename.empty()) ? false : (stat(_filename.c_str(), &dummy) == 0);
+        return _filename.empty() ? false : (stat(_filename.c_str(), &dummy) == 0);
     };
 
-    auto _emplace_if_exists = [&_paths, _path_exists](const std::string& _directory) {
+    auto const _emplace_if_exists = [&_paths,
+                                     _path_exists](const std::string& _directory) {
         if(_path_exists(_directory))
         {
             _paths.emplace_back(_directory);
@@ -235,16 +236,16 @@ get_library_search_paths_impl()
             //      <LIBRARY_BASENAME> (...) => <RESOLVED_ABSOLUTE_PATH>
             // example:
             //      libz.so (libc6,x86-64) => /lib/x86_64-linux-gnu/libz.so
-            auto _get_entry = [](const std::string& _inp) {
-                auto _paren_pos = _inp.find('(');
-                auto _arrow_pos = _inp.find("=>", _paren_pos);
+            auto const _get_entry = [](const std::string& _inp) {
+                auto const _paren_pos = _inp.find('(');
+                auto const _arrow_pos = _inp.find("=>", _paren_pos);
                 if(_arrow_pos == std::string::npos || _paren_pos == std::string::npos)
                 {
                     return std::string{};
                 }
                 if(_arrow_pos + 2 < _inp.length())
                 {
-                    auto _pos = _inp.find_first_not_of(" \t", _arrow_pos + 2);
+                    auto const _pos = _inp.find_first_not_of(" \t", _arrow_pos + 2);
                     if(_pos < _inp.length())
                     {
                         return _inp.substr(_pos);
@@ -257,7 +258,7 @@ get_library_search_paths_impl()
             while(fgets(buffer, buffer_size, ldconfig) != nullptr)
             {
                 _data << buffer;
-                auto _len = strnlen(buffer, buffer_size);
+                auto const _len = strnlen(buffer, buffer_size);
                 if(_len > 0 && buffer[_len - 1] == '\n')
                 {
                     auto _v = _data.str();
@@ -266,7 +267,7 @@ get_library_search_paths_impl()
                         _v = _v.substr(_v.find_first_not_of(" \t"));
                         if(_v.length() > 1)
                         {
-                            auto _entry = _get_entry(_v.substr(0, _v.length() - 1));
+                            auto const _entry = _get_entry(_v.substr(0, _v.length() - 1));
                             if(!_entry.empty())
                             {
                                 _emplace_if_exists(_entry);
@@ -313,19 +314,10 @@ get_internal_basic_libs_impl()
                                            LIBTHREAD_DB_SO,    LIBUTIL_SO };
 
     // shared libraries used by or provided by dyninst
-    const auto _dyn_libs = strview_init_t{ "libdyninstAPI_RT.so",
-                                           "libcommon.so",
-                                           "libbfd.so",
-                                           "libelf.so",
-                                           "libdwarf.so",
-                                           "libdw.so",
-                                           "libtbb.so",
-                                           "libtbbmalloc.so",
-                                           "libtbbmalloc_proxy.so",
-                                           "libz.so",
-                                           "libzstd.so",
-                                           "libbz2.so",
-                                           "liblzma.so" };
+    const auto dyn_libs =
+        strview_init_t{ "libdyninstAPI_RT.so", "libcommon.so", "libbfd.so", "libelf.so",
+                        "libdwarf.so",         "libdw.so",     "libz.so",   "libzstd.so",
+                        "libbz2.so",           "liblzma.so" };
 
     // shared libraries used by rocprof-sys
     const auto _rocprof_sys_libs = strview_init_t{ "libstdc++.so.6",
@@ -362,11 +354,11 @@ get_internal_basic_libs_impl()
         "libtcmalloc_minimal_debug.so",
     };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
+    for(const auto& gitr : { _gnu_libs, dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {
-        for(auto itr : gitr)
+        for(auto const itr : gitr)
         {
-            if(!itr.empty() && _exclude.count(itr) == 0)
+            if(!itr.empty() && !_exclude.contains(itr))
             {
                 _libs.emplace(itr);
             }
@@ -390,7 +382,7 @@ get_internal_libs_impl()
         {
             if(exclude_internal_lib_paths)
             {
-                auto _lib_v = find_libraries(itr);
+                auto const _lib_v = find_libraries(itr);
                 if(!_lib_v.empty())
                 {
                     for(const auto& litr : _lib_v)
@@ -442,8 +434,8 @@ get_internal_libs_data_impl()
     _wc.start();
     _pr.start();
 
-    auto _libs_v = get_internal_libs();
-    auto _libs   = std::vector<std::string>{};
+    auto const _libs_v = get_internal_libs();
+    auto       _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
     auto rocprofsys_root = rocprofsys::path::get_rocprofsys_root();
@@ -453,7 +445,8 @@ get_internal_libs_data_impl()
             { "librocprof-sys-dl.so", "librocprof-sys-causal-api.so",
               "librocprof-sys-rt.so" })
         {
-            auto libpath = fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
+            auto const libpath =
+                fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
             if(rocprofsys::path::is_regular_file(libpath))
             {
                 _libs.emplace_back(rocprofsys::path::realpath(libpath));
@@ -468,7 +461,7 @@ get_internal_libs_data_impl()
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = rocprofsys::path::realpath(itr);
+        auto const _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
         {
@@ -478,7 +471,7 @@ get_internal_libs_data_impl()
         _data.emplace(_fpath, module_func_map_t{});
     }
 
-    auto _odata = ordered(_data);
+    auto const _odata = ordered(_data);
     for(const auto& itr : _odata)
     {
         symtab_t* _symtab = get_symtab_file(itr.first);
@@ -514,12 +507,12 @@ get_internal_libs_data_impl()
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
 
-            auto _funcs = mitr->getAllFunctions();
+            auto const _funcs = mitr->getAllFunctions();
 
             for(const auto& fitr : _funcs)
             {
-                auto _fname = fitr->getName();
-                auto _dname = rocprofsys::utility::demangle(_fname);
+                auto const _fname = fitr->getName();
+                auto const _dname = rocprofsys::utility::demangle(_fname);
 
                 _data[itr.first][_mpath].emplace(_fname);
                 _data[itr.first][_mpath].emplace(_dname);
@@ -603,7 +596,7 @@ find_libraries(std::string_view _lib_v)
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = fmt::format("{}/{}", itr, _lib_v);
+        auto const _path = fmt::format("{}/{}", itr, _lib_v);
         if(rocprofsys::path::is_regular_file(_path))
         {
             _libs.emplace_back(_path);
@@ -616,7 +609,7 @@ find_libraries(std::string_view _lib_v)
 const std::vector<std::string>&
 get_library_search_paths()
 {
-    static auto _v = get_library_search_paths_impl();
+    static auto const _v = get_library_search_paths_impl();
     return _v;
 }
 
@@ -637,7 +630,7 @@ get_internal_libs()
 const library_module_map_t&
 get_internal_libs_data()
 {
-    static auto _v = get_internal_libs_data_impl();
+    static auto const _v = get_internal_libs_data_impl();
     return _v;
 }
 
