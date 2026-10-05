@@ -1805,7 +1805,7 @@ write_rocpd(
             const auto* description        = base_info ? base_info->description : "";
             const auto* block              = base_info ? base_info->block : "";
             const auto* expression         = base_info ? base_info->expression : "";
-            auto nullable_dimension = [](std::string_view name,
+            auto        nullable_dimension = [](std::string_view              name,
                                          const std::optional<int64_t>& value) {
                 return value ? insert_value(name, *value) : sql_insert_value{name, nullptr};
             };
