@@ -59,8 +59,6 @@ public:
          */
         [[nodiscard]] bool cancel() const;
 
-        [[nodiscard]] task_state state() const;
-
     private:
         friend class thread_pool;
         explicit task_handle(std::shared_ptr<detail::task_control_block> block);
@@ -68,18 +66,8 @@ public:
         std::shared_ptr<detail::task_control_block> m_block;
     };
 
-    /**
-     * @param num_threads Number of worker threads to start. Must be > 0.
-     * @param on_thread_start If set, invoked once on each worker thread
-     *        before it starts pulling tasks -- for per-thread setup
-     *        (e.g. a dedicated resource handle stored in thread_local
-     *        storage) that task bodies can then assume is ready.
-     * @param on_thread_stop If set, invoked once on each worker thread
-     *        after it stops pulling tasks, for matching teardown.
-     */
-    explicit thread_pool(size_t                num_threads,
-                         std::function<void()> on_thread_start = nullptr,
-                         std::function<void()> on_thread_stop  = nullptr);
+    /** @param num_threads Number of worker threads to start. Must be > 0. */
+    explicit thread_pool(size_t num_threads);
     ~thread_pool();
 
     thread_pool(const thread_pool&)            = delete;
@@ -90,13 +78,8 @@ public:
     /** @brief Queues @p task for execution on the next available worker. */
     [[nodiscard]] task_handle submit(task_fn task);
 
-    [[nodiscard]] size_t size() const noexcept { return m_workers.size(); }
-
 private:
     void worker_loop(const std::stop_token& pool_stop_token);
-
-    std::function<void()> m_on_thread_start;
-    std::function<void()> m_on_thread_stop;
 
     std::vector<std::jthread>                               m_workers;
     std::deque<std::shared_ptr<detail::task_control_block>> m_queue;

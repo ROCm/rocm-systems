@@ -11,12 +11,19 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     writer_test.cpp
     reader_test.cpp
+    reader_id_range_test.cpp
     sqlite_backend_impl_test.cpp
     ph_ctx_test.cpp
+    populate_reader_catalog_test.cpp
     c_api_test.cpp
+    c_api_track_test.cpp
+    c_api_future_test.cpp
     cached_track_reader_test.cpp
+    connection_pool_test.cpp
     connection_source_test.cpp
     event_partitions_test.cpp
+    natural_merge_sort_test.cpp
+    thread_pool_test.cpp
     track_read_options_test.cpp
     track_window_test.cpp
 )
@@ -34,6 +41,7 @@ target_link_libraries(
     PRIVATE
         profiler-hub
         profiler-hub_queries
+        profiler-hub-sqlite3
         GTest::gtest
         GTest::gtest_main
         GTest::gmock

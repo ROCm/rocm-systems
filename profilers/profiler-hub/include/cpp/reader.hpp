@@ -149,7 +149,7 @@ struct reader_t
 
     /**
      * @brief Get PMC/counter samples for a track within an optional time window
-     * @param track Track to query samples for (must have a non-zero agent_id)
+     * @param track Track to query samples for (must be a PMC track)
      * @param filter Optional filter for time window
      * @return List of lightweight counter events for display
      */

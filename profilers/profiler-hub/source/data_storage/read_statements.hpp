@@ -181,14 +181,6 @@ struct timeline_event_result
     std::optional<size_t> track_id;
 };
 
-struct sample_timeline_event_result
-{
-    size_t                id{};
-    size_t                timestamp{};
-    std::optional<size_t> category_id;
-    size_t                track_id{};
-};
-
 // ----- Event detail result structs -----
 
 struct region_detail_result
@@ -260,18 +252,6 @@ struct memory_alloc_detail_result
     std::optional<size_t>      pid;
     std::optional<size_t>      tid;
     std::string                extdata;
-};
-
-struct event_detail_result
-{
-    size_t                id{};
-    std::optional<size_t> category_id;
-    std::optional<size_t> stack_id;
-    std::optional<size_t> parent_stack_id;
-    std::optional<size_t> correlation_id;
-    std::string           call_stack;
-    std::string           line_info;
-    std::string           extdata;
 };
 
 struct arg_detail_result
@@ -518,8 +498,6 @@ struct read_statements
         std::function<sqlite_backend::result_set<memory_copy_detail_result>(size_t)>;
     using memory_alloc_detail_func_t =
         std::function<sqlite_backend::result_set<memory_alloc_detail_result>(size_t)>;
-    using event_detail_func_t =
-        std::function<sqlite_backend::result_set<event_detail_result>(size_t)>;
     using arg_detail_func_t =
         std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
     using event_id_func_t =
@@ -682,10 +660,6 @@ struct read_statements
     [[nodiscard]] const memory_alloc_detail_func_t& memory_alloc_detail() const
     {
         return m_memory_alloc_detail;
-    }
-    [[nodiscard]] const event_detail_func_t& event_detail() const
-    {
-        return m_event_detail;
     }
     [[nodiscard]] const arg_detail_func_t& arg_detail() const { return m_arg_detail; }
 
@@ -1732,33 +1706,6 @@ private:
                 &memory_alloc_detail_result::tid,
                 &memory_alloc_detail_result::extdata);
 
-        // Event detail by id (from rocpd_event)
-        auto ev_q = queries::select::table_select_query{}
-                        .select("id",
-                                "category_id",
-                                "stack_id",
-                                "parent_stack_id",
-                                "correlation_id",
-                                "call_stack",
-                                "line_info",
-                                "extdata")
-                        .from(fmt::format("rocpd_event_{}", m_uuid))
-                        .where("id = ?")
-                        .get_query_string();
-
-        m_event_detail =
-            m_backend
-                ->create_read_statement_executor<event_detail_result, bind_types<size_t>>(
-                    ev_q,
-                    &event_detail_result::id,
-                    &event_detail_result::category_id,
-                    &event_detail_result::stack_id,
-                    &event_detail_result::parent_stack_id,
-                    &event_detail_result::correlation_id,
-                    &event_detail_result::call_stack,
-                    &event_detail_result::line_info,
-                    &event_detail_result::extdata);
-
         // Arg detail by event_id
         auto arg_q = queries::select::table_select_query{}
                          .select("position", "type", "name", "value", "extdata")
@@ -1918,7 +1865,6 @@ private:
     kernel_dispatch_detail_func_t m_kernel_dispatch_detail;
     memory_copy_detail_func_t     m_memory_copy_detail;
     memory_alloc_detail_func_t    m_memory_alloc_detail;
-    event_detail_func_t           m_event_detail;
     arg_detail_func_t             m_arg_detail;
 
     // Event ID resolution (per event type)

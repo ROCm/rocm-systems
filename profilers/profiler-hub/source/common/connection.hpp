@@ -24,8 +24,6 @@ namespace profiler_hub::common
 class connection
 {
 public:
-    explicit connection(std::string_view file_path);
-
     // Pooled/shared-catalog construction: `catalog` (non-null) is shared
     // with sibling connections in the same pool; see connection_pool.
     connection(std::string_view                                file_path,

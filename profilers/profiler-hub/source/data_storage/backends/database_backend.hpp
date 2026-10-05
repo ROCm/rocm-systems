@@ -464,7 +464,7 @@ private:
                 using inner_type_t = typename decayed_t::value_type;
                 inner_type_t inner_value;
                 extract_column(stmt, position, inner_value);
-                value = inner_value;
+                value = std::move(inner_value);
             }
         }
         else if constexpr(std::is_same_v<decayed_t, std::string>)

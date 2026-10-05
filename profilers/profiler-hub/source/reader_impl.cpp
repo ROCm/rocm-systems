@@ -11,10 +11,8 @@
 
 #include <algorithm>
 #include <limits>
-#include <map>
 #include <memory>
 #include <stdexcept>
-#include <tuple>
 #include <utility>
 
 namespace profiler_hub
@@ -353,6 +351,7 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
         case reader_types::track_kind_t::stream:
             return get_category_track_events(track, filter);
         case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::thread_sample:
         case reader_types::track_kind_t::pmc_agent: break;
     }
 
@@ -616,6 +615,7 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
             }
             break;
         case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::thread_sample:
         case reader_types::track_kind_t::pmc_agent: break;
     }
 
@@ -658,8 +658,11 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
     events.reserve(results.size());
     for(const auto& result : results)
     {
-        events.push_back(reader_types::counter_timeline_event_t{
-            .timestamp = result.timestamp, .value = result.value, .track = track });
+        events.push_back(
+            reader_types::counter_timeline_event_t{ .unique_identifier = {},
+                                                    .timestamp         = result.timestamp,
+                                                    .value             = result.value,
+                                                    .track             = track });
     }
 
     return events;

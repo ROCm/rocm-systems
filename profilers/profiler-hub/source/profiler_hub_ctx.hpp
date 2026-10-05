@@ -27,16 +27,16 @@ struct ph_ctx
     ph_ctx(ph_ctx&&)                 = delete;
     ph_ctx& operator=(ph_ctx&&)      = delete;
 
-    ph_schema_version_t get_storage_version();
-    ph_track_list_t     get_track_list();
-    ph_node_t           get_node();
+    [[nodiscard]] ph_schema_version_t get_storage_version();
+    [[nodiscard]] ph_track_list_t     get_track_list();
+    [[nodiscard]] ph_node_t           get_node();
     bool has_track(uint32_t track_id) const { return m_track_by_id.contains(track_id); }
-    ph_event_list_t  get_track_events(uint32_t track_id,
-                                      uint64_t start_ts,
-                                      uint64_t end_ts);
-    ph_sample_list_t get_track_samples(uint32_t track_id,
-                                       uint64_t start_ts,
-                                       uint64_t end_ts);
+    [[nodiscard]] ph_event_list_t  get_track_events(uint32_t track_id,
+                                                    uint64_t start_ts,
+                                                    uint64_t end_ts);
+    [[nodiscard]] ph_sample_list_t get_track_samples(uint32_t track_id,
+                                                     uint64_t start_ts,
+                                                     uint64_t end_ts);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 
@@ -74,8 +74,7 @@ private:
                                                              m_catalog };
     profiler_hub::pooled_connection_source m_connection_source{ m_connection_pool };
 
-    profiler_hub::reader_types::track_info_list_t m_tracks;
-    std::vector<ph_track_t>                       m_c_tracks;
+    std::vector<ph_track_t> m_c_tracks;
     std::unordered_map<uint32_t, profiler_hub::reader_types::track_info_ptr_t>
         m_track_by_id;
 
