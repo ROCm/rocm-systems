@@ -139,8 +139,12 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option
-        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
+        # Not all ASICs support setting all modes, which is an invalid set option.
+        # A profile the ASIC does not list is out of bounds for it.
+        "set": {
+            "--memory-partition": amdsmi.AmdSmiStatus.INVAL,
+            "--profile": amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,
+        },
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
