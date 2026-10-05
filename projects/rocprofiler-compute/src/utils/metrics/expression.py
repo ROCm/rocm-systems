@@ -66,6 +66,88 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Or,
 })
 
+_WEIGHTED_AVG_CALL_RE = re.compile(
+    r"^WEIGHTED_AVG\s*\(\s*([^)]+)\s*\)$",
+    re.IGNORECASE,
+)
+_COLLECT_SUM_CALL_RE = re.compile(
+    r"^COLLECT_SUM\s*\(\s*([^)]+)\s*\)$",
+    re.IGNORECASE,
+)
+
+
+def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
+    """Return submetric names from WEIGHTED_AVG(a, b, ...) or None if not a match."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _WEIGHTED_AVG_CALL_RE.match(formula.strip())
+    if not match:
+        return None
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
+    """Return collectable refs from COLLECT_SUM(a, b, ...) or None."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_SUM_CALL_RE.match(formula.strip())
+    if not match:
+        return None
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+_COLLECT_RATIO_CALL_RE = re.compile(
+    r"^COLLECT_RATIO\s*\(\s*(.+)\s*\)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | None:
+    """Parse COLLECT_RATIO(n1 + n2, d1 + d2) into (numerator_refs, denominator_refs)."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_RATIO_CALL_RE.match(formula.strip())
+    if not match:
+        return None
+    inner = match.group(1).strip()
+    # Split on top-level comma (only one separator between num and den groups).
+    depth = 0
+    split_at = -1
+    for i, ch in enumerate(inner):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            split_at = i
+            break
+    if split_at < 0:
+        return None
+    num_part = inner[:split_at].strip()
+    den_part = inner[split_at + 1 :].strip()
+    if not num_part or not den_part:
+        return None
+
+    def _refs(part: str) -> list[str]:
+        return [p.strip() for p in part.split("+") if p.strip()]
+
+    nums, dens = _refs(num_part), _refs(den_part)
+    if not nums or not dens:
+        return None
+    return nums, dens
+
+
+def is_composite_avg_formula(formula: str) -> bool:
+    if not formula or not isinstance(formula, str):
+        return False
+    text = formula.strip()
+    return (
+        parse_weighted_avg_submetrics(text) is not None
+        or parse_collect_sum_submetrics(text) is not None
+        or parse_collect_ratio_parts(text) is not None
+    )
+
+
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
     # in which case it turns into a pandas function.
@@ -212,6 +294,8 @@ def build_eval_string(equation: str) -> str:
         return ""
 
     equation_string = str(equation)
+    if is_composite_avg_formula(equation_string):
+        return ""
 
     # build-in variable starts with '$', python can not handle it.
     # replace '$' with 'ammolite__'.
@@ -302,6 +386,8 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     counters: list[str] = []
     if not isinstance(formula, str):
         return visited, counters
+    if is_composite_avg_formula(formula):
+        return True, []
     try:
         tree = ast.parse(
             formula
