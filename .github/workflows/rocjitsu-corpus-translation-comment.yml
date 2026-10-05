@@ -29,6 +29,21 @@ jobs:
             .github/scripts
             emulation/rocjitsu/tests/corpus
 
+      - name: Authorize writes for the canonical repository
+        id: authorize_writes
+        shell: bash
+        run: |
+          REMOTE_URL="$(git remote get-url origin)"
+          case "${REMOTE_URL}" in
+            https://github.com/ROCm/rocm-systems.git|git@github.com:ROCm/rocm-systems.git)
+              echo "allowed=true" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "allowed=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::PR comment writes disabled for non-canonical origin: ${REMOTE_URL}"
+              ;;
+          esac
+
       - name: Resolve comparison inputs
         id: plan
         env:
@@ -59,7 +74,7 @@ jobs:
           run-id: ${{ steps.plan.outputs.baseline-run-id }}
 
       - name: Update PR translation comment
-        if: steps.plan.outputs.ready == 'true'
+        if: steps.plan.outputs.ready == 'true' && steps.authorize_writes.outputs.allowed == 'true'
         env:
           BASELINE_FOUND: ${{ steps.plan.outputs.baseline-found }}
           CANDIDATE_HEAD_SHA: ${{ steps.plan.outputs.candidate-head-sha }}

@@ -32,7 +32,23 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Authorize uploads for the canonical repository
+        id: authorize_uploads
+        shell: bash
+        run: |
+          REMOTE_URL="$(git remote get-url origin)"
+          case "${REMOTE_URL}" in
+            https://github.com/ROCm/rocm-systems.git|git@github.com:ROCm/rocm-systems.git)
+              echo "allowed=true" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "allowed=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::Uploads disabled for non-canonical origin: ${REMOTE_URL}"
+              ;;
+          esac
+
       - name: Set up Node.js
+        if: steps.authorize_uploads.outputs.allowed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22.13.0"
@@ -64,7 +80,7 @@ jobs:
         run: npm run test:e2e:chart-race
 
       - name: Upload Playwright diagnostics
-        if: ${{ !cancelled() && failure() }}
+        if: ${{ !cancelled() && failure() && steps.authorize_uploads.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: rocjitsu-website-playwright-results

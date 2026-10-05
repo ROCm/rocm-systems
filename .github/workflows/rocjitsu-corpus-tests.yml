@@ -195,6 +195,22 @@ jobs:
             .github
             shared/machine-readable-isa/isa
 
+      - name: Authorize uploads for the canonical repository
+        id: authorize_uploads
+        working-directory: ${{ github.workspace }}/rocm-systems
+        shell: bash
+        run: |
+          REMOTE_URL="$(git remote get-url origin)"
+          case "${REMOTE_URL}" in
+            https://github.com/ROCm/rocm-systems.git|git@github.com:ROCm/rocm-systems.git)
+              echo "allowed=true" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "allowed=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::Uploads disabled for non-canonical origin: ${REMOTE_URL}"
+              ;;
+          esac
+
       - name: Checkout corpus
         if: matrix.run_simulator_corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -507,7 +523,7 @@ jobs:
           exit "${corpus_test_status}"
 
       - name: Upload simulator corpus diagnostics
-        if: ${{ always() && matrix.run_simulator_corpus }}
+        if: ${{ always() && matrix.run_simulator_corpus && steps.authorize_uploads.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rocjitsu-corpus-diagnostics-${{ matrix.name }}
@@ -566,7 +582,7 @@ jobs:
             --expected-runtime-translations 2
 
       - name: Upload gfx1250 semantic qualification logs
-        if: ${{ always() && matrix.name == 'release' }}
+        if: ${{ always() && matrix.name == 'release' && steps.authorize_uploads.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gfx1250-semantic-qualification-${{ matrix.name }}
@@ -695,7 +711,8 @@ jobs:
         if: >-
           matrix.name == 'release' &&
           steps.finalize_dbt_sha_pairs.outcome == 'success' &&
-          github.event_name != 'pull_request'
+          github.event_name != 'pull_request' &&
+          steps.authorize_uploads.outputs.allowed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gfx1250-b0-a0-sha-pairs
@@ -709,7 +726,8 @@ jobs:
         if: >-
           matrix.name == 'release' &&
           steps.finalize_dbt_sha_pairs.outcome == 'success' &&
-          github.event_name == 'pull_request'
+          github.event_name == 'pull_request' &&
+          steps.authorize_uploads.outputs.allowed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gfx1250-b0-a0-sha-pairs-candidate
@@ -720,7 +738,7 @@ jobs:
       # Debugging aid only. The pinned extraction is reproducible, so retain
       # translator logs but never upload the extracted HSACOs.
       - name: Upload gfx1250 DBT diagnostic logs
-        if: always() && matrix.run_simulator_corpus
+        if: always() && matrix.run_simulator_corpus && steps.authorize_uploads.outputs.allowed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gfx1250-dbt-logs-${{ matrix.name }}
@@ -786,7 +804,7 @@ jobs:
         run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1201 --case ci
 
       - name: Upload Vulkan CTS diagnostics
-        if: ${{ always() && matrix.name == 'release' }}
+        if: ${{ always() && matrix.name == 'release' && steps.authorize_uploads.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rocjitsu-vulkan-cts-release
