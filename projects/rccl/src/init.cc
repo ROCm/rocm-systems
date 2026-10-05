@@ -145,6 +145,10 @@ NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 // Opt-in: enables GPU-resident NCCL progress counters when RAS is enabled. When disabled,
 // counter buffers remain null and profiler() skips progress-counter updates.
 NCCL_PARAM(ProgressCountersEnable, "PROGRESS_COUNTERS", 0);
+// A partition reaches the network, and xGMI, over the physical device's paths, so GIN is as
+// available to a partition as it is to the whole GPU. This mirrors NCCL_NET_GDR_MLOPART, which
+// already lets partitions keep GDR. Set to 0 to opt every partition out of GIN again.
+NCCL_PARAM(GinMloPart, "GIN_MLOPART", 1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -152,6 +156,16 @@ extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
+
+// Whether this communicator may use GIN at all. A partitioned communicator opts out unless
+// NCCL_GIN_MLOPART allows it: MI300X CPX stamps mloPart on every partition, so without the
+// parameter every CPX rank turns GIN off and falls back to a path that cannot export its buffers,
+// which is the AICOMRCCL-2387 failure. Named and lifted out of initTransportsRank so it can be
+// asserted on its own -- the host tests terminate several hundred lines before the call site, so a
+// change to the condition there is otherwise undetectable.
+static bool ginGateAllows(uint64_t ginTypeBitMask, bool cuMemGdrSupport, bool hasMloPart) {
+  return ginTypeBitMask != 0 && cuMemGdrSupport && (!hasMloPart || ncclParamGinMloPart() != 0);
+}
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -2759,7 +2773,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (globalGinTypeBitMask && comm->cuMemGdrSupport && !comm->hasMloPart) {
+  if (ginGateAllows(globalGinTypeBitMask, comm->cuMemGdrSupport, comm->hasMloPart)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;

@@ -2689,6 +2689,46 @@ TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartU
 }
 #endif
 
+// The GIN gate itself (:2593). initTransportsRank cannot be driven to that line from any rung here
+// -- it is ~380 lines past the rung-4 terminator, with ncclTopoComputeP2pChannels,
+// rcclCommSetP2pShiftSize, ncclProfilerPluginInit, ncclTransportCheckP2pType and ncclProxyCreate
+// still fail-loud in between -- so the condition is lifted into ginGateAllows() and asserted
+// directly. These are what make NCCL_GIN_MLOPART's effect detectable: without them, flipping the
+// parameter's meaning or dropping the hasMloPart term leaves the whole suite green.
+
+// The AICOMRCCL-2387 regression itself: a CPX partition carries mloPart, so with the parameter off
+// every partitioned rank loses GIN.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartDisabled_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 0}});
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, /*cuMemGdrSupport=*/true,
+                             /*hasMloPart=*/true));
+}
+
+// The fix: the parameter readmits them.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartEnabled_AllowsGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, /*cuMemGdrSupport=*/true, /*hasMloPart=*/true));
+}
+
+// The parameter governs partitioned communicators only. An unpartitioned one keeps GIN even with
+// the parameter off, so a regression that widened the carve-out would show up here.
+TEST_F(InitMicrotest, GinGate_UnpartitionedCommIgnoresMloPartParam) {
+  SetParams({{"GIN_MLOPART", 0}});
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, /*cuMemGdrSupport=*/true, /*hasMloPart=*/false));
+}
+
+// Pins the default to 1: no override installed, so the gate must admit a partition.
+TEST_F(InitMicrotest, GinGate_MloPartParamDefaultsToAllowingPartitions) {
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, /*cuMemGdrSupport=*/true, /*hasMloPart=*/true));
+}
+
+// The other two terms still veto, with the parameter on, so the carve-out did not swallow them.
+TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, /*cuMemGdrSupport=*/true, /*hasMloPart=*/false));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, /*cuMemGdrSupport=*/false, /*hasMloPart=*/false));
+}
+
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
 // as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.
