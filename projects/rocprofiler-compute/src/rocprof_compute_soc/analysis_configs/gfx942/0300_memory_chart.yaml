@@ -9,6 +9,7 @@ Panel Config:
       header:
         metric: Metric
         value: Value
+        unit: Unit
       metric:
         Wavefront Occupancy:
           value: ROUND(100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu), 1)
