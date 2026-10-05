@@ -21,11 +21,13 @@ THE SOFTWARE.
 */
 
 #include "rccl_common.h"
+#include "bootstrap.h"
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
@@ -1076,13 +1078,51 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
-bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+// Per rank, so that fixed-size startup AllGathers (PyTorch DDP gathers one int64)
+// stay off the hierarchical path at any job size. 0 removes the floor.
+RCCL_PARAM(HierarchicalAllGatherMinBytesPerRank, "HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", 16);
+RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 0);
+
+// msgSize is the total gathered size.
+static bool rcclHierarchicalAllGatherEligible(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
-  if (!comm->hierarchicalCommsInitialized) return false;
+
+  const int64_t minBytesPerRank = rcclParamHierarchicalAllGatherMinBytesPerRank();
+  if (minBytesPerRank > 0 && comm->nRanks > 0 && msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
+}
+
+bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+  return comm->hierarchicalCommsInitialized && rcclHierarchicalAllGatherEligible(comm, msgSize);
+}
+
+// Collective: every rank reaches this on the same eligible AllGathers. The splits
+// run only once every rank is ready, and the readiness handshake runs only on the
+// 1st, 2nd, 4th, 8th... call, so a rank that stays not ready costs its peers
+// O(log n) bootstrap AllGathers.
+static ncclResult_t rcclLazyInitHierarchicalComms(struct ncclComm* comm, bool capturing) {
+  const uint64_t call = ++comm->hierarchicalLazyCalls;
+  if ((call & (call - 1)) != 0) return ncclSuccess;
+
+  // Ready means not capturing and holding the temp buffer. Allocating it before the
+  // vote keeps a one-rank allocation failure from landing after the peers split.
+  bool localReady = !capturing;
+  if (localReady && rcclReserveHierarchicalTempBuffer(comm) != ncclSuccess) {
+    (void)hipGetLastError();  // tolerated, so keep it out of the application's next error check
+    WARN("Hierarchical collectives: cannot allocate the temp buffer yet, deferring sub-communicator setup");
+    localReady = false;
+  }
+  std::vector<uint8_t> ready(comm->nRanks);
+  ready[comm->rank] = localReady;
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t)));
+  if (std::find(ready.begin(), ready.end(), 0) != ready.end()) return ncclSuccess;
+
+  const ncclResult_t res = rcclEnsureHierarchicalComms(comm);
+  if (res != ncclSuccess) WARN("Hierarchical collectives: sub-communicator setup failed (%s)", ncclGetErrorString(res));
+  return res;
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
@@ -1593,7 +1633,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     if (!query && symEligible) INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible");
     // (2) Hierarchical AllGather. Live dispatch requires being outside a group
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
-    // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
+    // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting. Only live
+    // dispatch builds sub-communicators that RCCL_HIERARCHICAL_LAZY_INIT deferred.
+    if (!query && ncclGroupDepth == 0 && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized &&
+        rcclHierarchicalAllGatherEligible(comm, msgSize)) {
+      NCCLCHECK(rcclLazyInitHierarchicalComms(comm, ceCapturing));
+    }
     if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
       decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
       if (query) {
@@ -2080,10 +2125,17 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
 
+// Per rank, as for AllGather. 0 removes the floor.
+RCCL_PARAM(HierarchicalReduceScatterMinBytesPerRank, "HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES_PER_RANK", 16);
+
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8 || rcclParamHierarchicalReduceScatter() != 1 || !comm->hierarchicalCommsInitialized) {
     return false;
   }
+
+  // msgSize is the total size.
+  const int64_t minBytesPerRank = rcclParamHierarchicalReduceScatterMinBytesPerRank();
+  if (minBytesPerRank > 0 && comm->nRanks > 0 && msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, /*reduceScatter=*/true);
   return threshold > 0 && msgSize <= threshold;

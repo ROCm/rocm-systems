@@ -46,6 +46,9 @@ NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
 NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
+// Defined in enqueue.cc. topo_expl also compiles hipify_rccl/enqueue.cc, so a
+// second NCCL_PARAM here is a duplicate-symbol link error (extra gfx90a CI).
+extern int64_t ncclParamP2pLL128Enable();
 
 thread_local int ncclDebugNoWarn = 0;
 // Flag to suppress verbose rank/host output (used by test suite)
@@ -914,8 +917,17 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
       allXgmi &= isXGMI;
     }
   }
-  // Initialize num P2P LL buffers for this communicator
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1;
+  // Initialize num P2P LL buffers for this communicator. topo_expl never runs
+  // ncclCommInitRankFunc, so cudaArch is still 0 unless set from the XML GCN name.
+  if (comm->topo && comm->topo->nodes[GPU].count > 0) {
+    const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+    if (IsArchMatch(gcn, "gfx1250")) comm->cudaArch = 1250;
+    else if (IsArchMatch(gcn, "gfx950")) comm->cudaArch = 950;
+    else if (IsArchMatch(gcn, "gfx942")) comm->cudaArch = 942;
+  }
+  comm->allocP2pNetLLBuffers =
+    rcclAllocP2pNetLLBuffers(comm->cudaArch, /*nNodes=*/1, nranks, ncclParamP2pLL128Enable(),
+                             ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[4] = { &ringGraph, &treeGraph, &collNetGraph, &nvlsGraph };
