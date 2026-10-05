@@ -30,14 +30,20 @@ class SmiNicSubsystemPensando : public SmiNicSubsystem {
  private:
   static constexpr uint16_t VENDOR_ID = 0x1dd8;
   // The PCIe bridge above the ionic ports, not an ionic function itself; it
-  // reports one of two device ids depending on the card.
-  static constexpr std::array<uint16_t, 2> BRIDGE_DEVICE_IDS = {0x0008, 0x1008};
+  // reports a different device id depending on the card.
+  static constexpr std::array<uint16_t, 3> BRIDGE_DEVICE_IDS = {0x0008, 0x1008, 0x1478};
   static constexpr uint16_t PORT_ID = 0x1002;
+  // The card's internal virtual downstream port: a bridge on every card, so the
+  // unlisted-bridge log must skip it.
+  static constexpr uint16_t MID_BRIDGE_ID = 0x1001;
+  static constexpr uint32_t PCI_CLASS_PCI_BRIDGE = 0x0604;
+  static constexpr uint32_t PCI_CLASS_SHIFT = 8;  // sysfs class is base|sub|prog-if
   // pds_core: the card's management function, and the only one on the card that
   // registers a devlink health reporter.
   static constexpr uint16_t MGMT_ID = 0x100c;
 
   static bool is_bridge_device(uint16_t device_id);
+  static bool is_pci_bridge_class(const std::string& sysfs_bus_path);
 
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const override;
   bool is_downstream_port(const std::string& port_bdf, const std::string& bridge_bdf,
