@@ -23,17 +23,41 @@
  *     disables the capture; links planted at every pid-<pid>/blobs/<prefix>
  *     are not written through and leave the archive marked incomplete; and a
  *     hard link planted at pid-<pid>/manifest.json
- *     is not written through, neither at exit nor from the crash callback
- *     (POSIX).
+ *     is not written through, neither at exit nor from the crash callback; a
+ *     link planted at another pid-* in the base directory, or at the root
+ *     manifest's old temporary file name, is not followed (POSIX).
  *
  *   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo:
  *     a FIFO planted at pid-<pid>/manifest.json does not hold up the exit
  *     (POSIX).
+ *
+ *   Unit_HRR_CaptureSurvivesUnusableOutputPath:
+ *     an output path that cannot be created disables the capture with a
+ *     message instead of failing the application's HIP calls (POSIX).
+ *
+ *   Unit_HRR_CaptureDisabledInForkedChild:
+ *     a forked child whose archive cannot be opened says capture is disabled
+ *     and leaves no empty pid-<pid> behind (POSIX).
+ *
+ *   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable:
+ *     a base directory that cannot be listed leaves the root manifest as it
+ *     was, and the application exits cleanly (POSIX, without
+ *     CAP_DAC_OVERRIDE).
+ *
+ *   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete:
+ *     a blob or code object that cannot be written leaves the archive marked
+ *     incomplete (POSIX).
+ *
+ *   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles:
+ *     resuming an archive whose directories and events.bin are readable by
+ *     others makes them private again, and a hard-linked blob found there is
+ *     written again rather than trusted (POSIX).
  */
 
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <algorithm>
 #include <csignal>
 #include <cstdint>
 #include <filesystem>
@@ -42,7 +66,12 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -97,6 +126,13 @@ void write_text(const fs::path& p, const std::string& text) {
   out << text;
 }
 
+// True if p holds exactly `contents`. A bool rather than a string comparison,
+// so that a failed check does not print the file: one written through holds
+// binary events, which the CI's log reader cannot decode.
+bool file_holds(const fs::path& p, const std::string& contents) {
+  return read_text_file(p) == contents;
+}
+
 struct PlantedRun {
   int ret;
   std::string output;  // stdout and stderr
@@ -129,6 +165,31 @@ std::uintmax_t events_bytes(const fs::path& base) {
   const std::uintmax_t n = fs::file_size(archives.front() / "events.bin", ec);
   return ec ? 0 : n;
 }
+
+// Runs a workload with capture into base, stdout and stderr captured.
+PlantedRun capture_workload(const fs::path& base, const std::string& workload) {
+  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout(workload, kCaptureTimeoutSeconds);
+  return {ret, proc.getOutput()};
+}
+
+// Paths, relative to the archive, of its files under `sub` with extension `ext`.
+std::vector<fs::path> archive_files(const fs::path& archive, const char* sub, const char* ext) {
+  std::vector<fs::path> out;
+  for (const auto& ent : fs::recursive_directory_iterator(archive / sub)) {
+    if (ent.is_regular_file() && ent.path().extension() == ext)
+      out.push_back(fs::relative(ent.path(), archive));
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+bool manifest_says_complete(const fs::path& archive, bool complete) {
+  return read_text_file(archive / "manifest.json")
+             .find(complete ? "\"complete\": true" : "\"complete\": false") != std::string::npos;
+}
 #endif
 
 }  // namespace
@@ -146,6 +207,45 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemset(d, 0, 256));
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::raise(SIGABRT);
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureDisabledInForkedChild: records a
+// few events, then forks with RLIMIT_NOFILE at 3. The capture writer's atfork
+// handler opens the child's archive before fork() returns in the child, so that
+// open cannot get a descriptor and fails. The child restores the limit and
+// leaves at once; it touches no HIP state.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipMemset(d, 0, 256));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  // With 0, 1 and 2 taken, the first descriptor the child asks for is over the
+  // limit.
+  for (int fd = 0; fd < 3; ++fd)
+    if (::fcntl(fd, F_GETFD) < 0) REQUIRE(::open("/dev/null", O_RDWR) == fd);
+  struct rlimit saved{};
+  REQUIRE(::getrlimit(RLIMIT_NOFILE, &saved) == 0);
+  struct rlimit tight = saved;
+  tight.rlim_cur = 3;
+  // Nothing between the two setrlimit calls in the parent may need a descriptor.
+  REQUIRE(::setrlimit(RLIMIT_NOFILE, &tight) == 0);
+  const pid_t child = ::fork();
+  if (child == 0) {
+    (void)::setrlimit(RLIMIT_NOFILE, &saved);
+    ::_exit(0);
+  }
+  const int restored = ::setrlimit(RLIMIT_NOFILE, &saved);
+  REQUIRE(child > 0);
+  REQUIRE(restored == 0);
+  int status = 0;
+  REQUIRE(::waitpid(child, &status, 0) == child);
+  CHECK(WIFEXITED(status));
+  CHECK(WEXITSTATUS(status) == 0);
+  HRR_HIP_CHECK(hipFree(d));
 }
 #endif
 
@@ -231,7 +331,12 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  *     at the blob prefixes the capture runs without its blobs and its manifest
  *     says complete: false; with the hard link at manifest.json the capture
  *     runs and writes events.bin, and a hard-linked file shaped like a process
- *     manifest is not read into the root manifest.
+ *     manifest, planted in another pid-*, is not read into the root manifest.
+ *   - A symbolic link at another pid-* in the base directory, pointing at a
+ *     directory with a process manifest in it, is not read into the root
+ *     manifest; a symbolic link at manifest.json.<pid>.tmp in the base
+ *     directory, the root manifest's old predictable temporary name, is not
+ *     written through.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
@@ -255,7 +360,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
     CHECK(refused_events_file(run.output));
-    CHECK(read_text_file(victim_file) == contents);
+    CHECK(file_holds(victim_file, contents));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
@@ -310,7 +415,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
     CHECK(refused_events_file(run.output));
-    CHECK(read_text_file(victim_file) == contents);
+    CHECK(file_holds(victim_file, contents));
     CHECK_FALSE(fs::exists(base / "manifest.json"));
   }
 
@@ -322,16 +427,18 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
     CHECK(events_bytes(base) > sizeof(hrr_file_header));
-    CHECK(read_text_file(victim_file) == contents);
+    CHECK(file_holds(victim_file, contents));
   }
 
   SECTION("hard-linked manifest is not read into the root manifest") {
-    // Shaped like a process manifest, so only the link check keeps it out.
+    // Shaped like a process manifest, so only the link check keeps it out. It
+    // sits in another process's archive: the capture would replace one in its
+    // own before the root manifest reads it.
     write_text(victim_file, "{\n  \"pid\": 424242,\n  \"complete\": true\n}\n");
     const PlantedRun run = capture_after_planting(
         base, script,
-        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
-        "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/manifest.json\"\n");
+        "mkdir -p \"$HRR_TEST_BASE/pid-424242\"\n"
+        "ln '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-424242/manifest.json\"\n");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
     REQUIRE(fs::exists(base / "manifest.json"));
@@ -348,7 +455,34 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 128 + SIGABRT);
     CHECK(events_bytes(base) > sizeof(hrr_file_header));
-    CHECK(read_text_file(victim_file) == contents);
+    CHECK(file_holds(victim_file, contents));
+  }
+
+  SECTION("link at another pid-* is not read into the root manifest") {
+    // A directory that holds a well-formed process manifest, reachable only
+    // through the link.
+    const fs::path elsewhere = work.path / "elsewhere";
+    fs::create_directories(elsewhere);
+    write_text(elsewhere / "manifest.json", "{\n  \"pid\": 424243,\n  \"complete\": true\n}\n");
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "ln -s '" + elsewhere.string() + "' \"$HRR_TEST_BASE/pid-424243\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    REQUIRE(fs::exists(base / "manifest.json"));
+    CHECK(read_text_file(base / "manifest.json").find("424243") == std::string::npos);
+  }
+
+  SECTION("link at the root manifest's <pid>.tmp name") {
+    // The name the root manifest's temporary file used to have, which anyone
+    // who can write to the base directory could predict.
+    const PlantedRun run = capture_after_planting(
+        base, script,
+        "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/manifest.json.$$.tmp\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(file_holds(victim_file, contents));
+    CHECK(fs::is_regular_file(fs::symlink_status(base / "manifest.json")));
   }
 #endif
 }
@@ -376,6 +510,214 @@ HRR_TEST_CASE(Unit_HRR_CaptureDoesNotBlockOnPlantedFifo) {
   INFO("Workload exit code: " << run.ret << "\n" << run.output);
   REQUIRE(run.ret == 0);
   CHECK(events_bytes(base) > sizeof(hrr_file_header));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Points HIP_HRR_CAPTURE_OUTPUT below a regular file, so no directory of
+ *     the archive can be created, and runs Unit_HRR_GpuWorkload_Direct.
+ *   - The workload succeeds and stderr says capture is disabled: setting up the
+ *     archive runs inside hip::init, and a failure there must not reach the
+ *     application's HIP calls.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX paths");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_unusable"};
+  fs::create_directories(work.path);
+  const fs::path not_a_dir = work.path / "file";
+  write_text(not_a_dir, "a regular file where the capture wants a directory\n");
+
+  const PlantedRun run = capture_workload(not_a_dir / "capture", "Unit_HRR_GpuWorkload_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(refused_archive_dir(run.output));
+  CHECK(fs::is_regular_file(fs::symlink_status(not_a_dir)));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureForkWithoutFds_Direct, whose child is forked with
+ *     no descriptor to spare, so its own archive cannot be opened.
+ *   - The child says capture is disabled, and the pid-<pid> it created for
+ *     itself is removed again: producers read an existing pid-<pid> as capture
+ *     being active. The parent's archive is the only one left.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureDisabledInForkedChild) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX fork");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_fork"};
+  const fs::path base = work.path / "capture";
+
+  const PlantedRun run = capture_workload(base, "Unit_HRR_CaptureForkWithoutFds_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(refused_archive_dir(run.output));
+  size_t pid_dirs = 0;
+  for (const auto& ent : fs::directory_iterator(base)) {
+    INFO("Path: " << ent.path().string());
+    if (ent.path().filename().string().rfind("pid-", 0) == 0) ++pid_dirs;
+  }
+  CHECK(pid_dirs == 1);
+  CHECK(hrr_process_archives(base).size() == 1);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct once, then sets the base directory
+ *     to 0333 (searchable and writable, not readable) and captures it again.
+ *   - The second workload exits cleanly and its archive is written, while the
+ *     root manifest stays as the first capture left it: one written from a
+ *     listing that stopped early would drop the archives it did not reach.
+ *   - Skipped where the mode does not stop the listing (CAP_DAC_OVERRIDE).
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX permission bits");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_unreadable"};
+  const fs::path base = work.path / "capture";
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", base);
+  const std::string before = read_text_file(base / "manifest.json");
+  REQUIRE(before.find("\"pid\"") != std::string::npos);
+
+  struct RestoreMode {
+    const fs::path& dir;
+    ~RestoreMode() { ::chmod(dir.c_str(), 0700); }
+  } restore{base};
+  REQUIRE(::chmod(base.c_str(), 0333) == 0);
+  if (DIR* listing = ::opendir(base.c_str())) {
+    ::closedir(listing);
+    HRR_SKIP("The base directory can still be listed at mode 0333 (CAP_DAC_OVERRIDE)");
+  }
+  const PlantedRun run = capture_workload(base, "Unit_HRR_GpuWorkload_Direct");
+  REQUIRE(::chmod(base.c_str(), 0700) == 0);
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(hrr_process_archives(base).size() == 2);
+  CHECK(read_text_file(base / "manifest.json") == before);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct once to learn the names of its
+ *     blobs and code objects, then captures it again after creating a
+ *     directory at each of those names in the second run's pid-<pid>, so the
+ *     final rename of every blob, or of every code object, fails.
+ *   - The first archive is complete; the second says complete: false, since
+ *     its events refer to files it does not have.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX rename semantics");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_unwritten"};
+  const fs::path first = work.path / "first";
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+  const fs::path first_archive = hrr_single_process_archive(first);
+  REQUIRE(manifest_says_complete(first_archive, true));
+
+  std::vector<fs::path> blocked;
+  SECTION("blobs") { blocked = archive_files(first_archive, "blobs", ".blob"); }
+  SECTION("code objects") { blocked = archive_files(first_archive, "code_objects", ".hsaco"); }
+  REQUIRE_FALSE(blocked.empty());
+
+  std::string body;
+  for (const fs::path& rel : blocked)
+    body += "mkdir -p \"$HRR_TEST_BASE/pid-$$/" + rel.string() + "\"\n";
+  const PlantedRun run = capture_after_planting(base, work.path / "plant.sh", body);
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  CHECK(manifest_says_complete(archives.front(), false));
+  for (const fs::path& rel : blocked) {
+    INFO("Path: " << rel.string());
+    CHECK(fs::is_directory(fs::symlink_status(archives.front() / rel)));
+  }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct, copies the archive into the next
+ *     run's pid-<pid> with its directories made 0755 and events.bin 0644, and
+ *     replaces the largest blob with a hard link to a copy of it outside the
+ *     archive; the run then resumes that archive.
+ *   - The archive is resumed (events.bin grows), its directories end up 0700
+ *     and events.bin and manifest.json 0600, and the hard-linked blob is not
+ *     trusted: it is written again, so neither name shares its inode any more.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX permission bits and hard links");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume"};
+  const fs::path first = work.path / "first";
+  const fs::path base = work.path / "capture";
+  const fs::path victim = work.path / "victim.blob";
+  fs::create_directories(base);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+  const fs::path first_archive = hrr_single_process_archive(first);
+  const std::uintmax_t first_bytes = fs::file_size(first_archive / "events.bin");
+
+  // The largest blob is a host buffer the workload copies on every run.
+  const std::vector<fs::path> blobs = archive_files(first_archive, "blobs", ".blob");
+  REQUIRE_FALSE(blobs.empty());
+  const fs::path linked = *std::max_element(
+      blobs.begin(), blobs.end(), [&](const fs::path& a, const fs::path& b) {
+        return fs::file_size(first_archive / a) < fs::file_size(first_archive / b);
+      });
+  fs::copy_file(first_archive / linked, victim);
+  const std::string victim_contents = read_text_file(victim);
+
+  const PlantedRun run = capture_after_planting(
+      base, work.path / "plant.sh",
+      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
+      "find \"$HRR_TEST_BASE/pid-$$\" -type d -exec chmod 0755 {} +\n"
+      "chmod 0644 \"$HRR_TEST_BASE/pid-$$/events.bin\"\n"
+      "ln -f '" + victim.string() + "' \"$HRR_TEST_BASE/pid-$$/" + linked.string() + "\"\n");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  const fs::path archive = archives.front();
+  CHECK(fs::file_size(archive / "events.bin") > first_bytes);
+
+  CHECK(perms_of(archive) == fs::perms::owner_all);
+  for (const auto& ent : fs::recursive_directory_iterator(archive)) {
+    INFO("Path: " << ent.path().string());
+    if (fs::is_directory(fs::symlink_status(ent.path())))
+      CHECK(perms_of(ent.path()) == fs::perms::owner_all);
+  }
+  for (const char* name : {"events.bin", "manifest.json"}) {
+    INFO("File: " << name);
+    CHECK(perms_of(archive / name) == (fs::perms::owner_read | fs::perms::owner_write));
+  }
+
+  INFO("Hard-linked blob: " << linked.string());
+  CHECK(fs::hard_link_count(archive / linked) == 1);
+  CHECK(fs::hard_link_count(victim) == 1);
+  CHECK(file_holds(victim, victim_contents));
 #endif
 }
 
