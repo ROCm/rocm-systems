@@ -553,6 +553,7 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
