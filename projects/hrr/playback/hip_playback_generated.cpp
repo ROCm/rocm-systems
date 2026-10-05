@@ -19,7 +19,6 @@
 #include "hrr/hrr_api_args.h"
 #include <hip/hip_runtime.h>
 #include <cstring>
-#include <vector>
 
 // Manual playback implementations (extern'd below) are in hip_playback.cpp
 // Compiler APIs are no-ops during playback
@@ -6009,11 +6008,14 @@ static hipError_t playback_hipDeviceFlushGPUDirectRDMAWrites(PlaybackContext& ct
 }
 
 static hipError_t playback_hipDeviceGetP2PAtomicCapabilities(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx;
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetP2PAtomicCapabilities*>(payload);
-  std::vector<unsigned int> _out_capabilities(a->count);
-  hipError_t _r = (hipError_t)hipDeviceGetP2PAtomicCapabilities(_out_capabilities.data(), (const hipAtomicOperation*)a->operations, (unsigned int)a->count, (int)a->srcDevice, (int)a->dstDevice);
-  return _r;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetP2PAtomicCapabilities — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {

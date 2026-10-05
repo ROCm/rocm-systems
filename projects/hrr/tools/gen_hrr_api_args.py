@@ -658,6 +658,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # Category 8: Device extra — output ptr stale, dangerous context ops, or struct-ptr params
     # hipDeviceGetUuid — output hipUUID* stale
     "hipDeviceGetUuid",
+    # hipDeviceGetP2PAtomicCapabilities — the `operations` input is a
+    # const hipAtomicOperation* array of `count` entries; only the capture-time
+    # host address is recorded, so replaying it would dereference a stale VA.
+    # Capability query with no effect on replay state — noop.
+    "hipDeviceGetP2PAtomicCapabilities",
     # Primary ctx ops that would destroy the context at playback
     "hipDevicePrimaryCtxRelease",
     "hipDevicePrimaryCtxReset",
@@ -2521,17 +2526,6 @@ CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
         "  return _r;\n"
         "}\n"
     ),
-    # capabilities is an OUTPUT array of `count` unsigned ints, use an 
-    # std::vector to have a variable output
-    "hipDeviceGetP2PAtomicCapabilities": (
-        "static hipError_t playback_hipDeviceGetP2PAtomicCapabilities(PlaybackContext& ctx, const uint8_t* payload) {\n"
-        "  (void)ctx;\n"
-        "  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetP2PAtomicCapabilities*>(payload);\n"
-        "  std::vector<unsigned int> _out_capabilities(a->count);\n"
-        "  hipError_t _r = (hipError_t)hipDeviceGetP2PAtomicCapabilities(_out_capabilities.data(), (const hipAtomicOperation*)a->operations, (unsigned int)a->count, (int)a->srcDevice, (int)a->dstDevice);\n"
-        "  return _r;\n"
-        "}\n"
-    ),
 }
 
 
@@ -2765,7 +2759,6 @@ _PLAYBACK_CPP_PREAMBLE = """\
 #include "hrr/hrr_api_args.h"
 #include <hip/hip_runtime.h>
 #include <cstring>
-#include <vector>
 
 // Manual playback implementations (extern'd below) are in hip_playback.cpp
 // Compiler APIs are no-ops during playback
