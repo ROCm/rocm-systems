@@ -1997,6 +1997,9 @@ fail_stream_mem:
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
+  if (outDevComm->ginContextCount) {
+    NCCLCHECKIGNORE(ncclGinDevCommFree(comm, outDevComm), ret);
+  }
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
 }
