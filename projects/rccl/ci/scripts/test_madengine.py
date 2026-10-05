@@ -50,10 +50,17 @@ PERF_DATASTORE = "madengine_results.jsonl"
 # madengine's perf_entry_super.json uses short metric names that differ
 # from our canonical workload-config keys.  Map each config key to the
 # set of madengine metric names we accept as a match.
+#
+# The ``_avg`` rows hold Megatron's running average over the measured
+# iterations; the plain rows hold the final iteration alone.  Two reasons to
+# score on the average: a single iteration is a one-sample estimate that
+# sporadically dips below the 2% regression gate on its own, and
+# parse_live_log_metrics() already reads the average from the live log, so
+# until now the structured and fallback paths could score one run differently.
 _METRIC_ALIASES: dict[str, set[str]] = {
-    "tokens_per_second_per_gpu": {"tok_per_s_per_gpu"},
+    "tokens_per_second_per_gpu": {"tok_per_s_per_gpu_avg"},
 }
-_TFLOPS_METRICS = {"TFLOPS_per_gpu"}
+_TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
 REGRESSION_WINDOW = 5
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
