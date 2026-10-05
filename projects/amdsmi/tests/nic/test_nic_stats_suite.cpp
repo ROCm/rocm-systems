@@ -16,6 +16,7 @@
 
 #include "smi_nic.h"
 #include "smi_nic_interface.h"
+#include "smi_nic_log.h"
 #include "smi_nic_stats.h"
 #include "smi_nic_transport.h"
 #include "vendors/broadcom/broadcom_stats.h"
@@ -182,6 +183,49 @@ static void test_fec_failure_is_not_an_error() {
   check("no FEC counter present when the call fails", result.count("corrected_blocks") == 0);
 }
 
+static std::vector<std::string> g_log_lines;
+static void capture_log(const std::string& msg) { g_log_lines.push_back(msg); }
+
+static bool has_log_line_with(const std::vector<std::string>& needles) {
+  for (const auto& line : g_log_lines) {
+    bool is_match = true;
+    for (const auto& needle : needles) {
+      is_match = (is_match && (line.find(needle) != std::string::npos));
+    }
+    if (is_match) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A FEC query that returns the wrong card's numbers, or nothing, is invisible
+// without the interface and outcome in the log.
+static void test_fec_query_is_logged_with_interface_and_outcome() {
+  auto transport = std::make_shared<FakeTransport>();
+  transport->stats = {true, {{"tx_packets"}, {1}}, 0};
+  auto port = make_port(transport, &kTestTable);
+
+  g_log_lines.clear();
+  amd::smi::nic::log::set_sink(capture_log);
+
+  transport->fec_stats = {true, {{"corrected_blocks", "corrected_bits"}, {16, 12}}, 0};
+  port.collect_vendor_statistics();
+  check("FEC success line names the interface and values",
+        has_log_line_with({"faketh0", "corrected_blocks=16", "corrected_bits=12"}));
+
+  g_log_lines.clear();
+  transport->fec_stats = {false, {}, ENODATA};
+  port.collect_vendor_statistics();
+  check("FEC failure line names the interface and the error code",
+        has_log_line_with({"faketh0", "error=" + std::to_string(ENODATA)}));
+
+  amd::smi::nic::log::set_sink(nullptr);
+  g_log_lines.clear();
+  port.collect_vendor_statistics();
+  check("no FEC line when no log sink is installed", g_log_lines.empty());
+}
+
 static void test_no_table_yields_empty_map() {
   auto transport = std::make_shared<FakeTransport>();
   transport->stats = {true, {{"tx_packets"}, {1}}, 0};
@@ -238,6 +282,7 @@ int main() {
   test_fec_merge_ionic_shape();
   test_fec_counters_refresh_on_subsequent_collect();
   test_fec_failure_is_not_an_error();
+  test_fec_query_is_logged_with_interface_and_outcome();
   test_no_table_yields_empty_map();
   test_large_table_not_truncated_by_mechanism();
   test_real_tables_fit_within_cap();
