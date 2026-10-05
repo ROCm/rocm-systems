@@ -72,6 +72,9 @@ empty (`metavar=""`).
 - If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
   The help adds the `[]` automatically.
 
+`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
+`<args>...` and `args` shows as `[args]...`.
+
 For an option that takes an argument, the help message follows these rules:
 
 | Case | Notation |

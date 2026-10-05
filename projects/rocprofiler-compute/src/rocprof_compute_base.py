@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from argparser import omniarg_parser
+from argparser import CliHelpFormatter, omniarg_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -265,10 +265,8 @@ class RocProfCompute:
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
-            prog="tool",
-            formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-                prog, max_help_position=30
-            ),
+            prog="rocprof-compute",
+            formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
