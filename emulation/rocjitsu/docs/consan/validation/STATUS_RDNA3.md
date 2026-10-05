@@ -31,6 +31,14 @@ simulator prerequisites use RocJITsu `configs/gfx1100_w7900.json`. Exact counts
 belong to the binaries used for qualification and must be refreshed after
 relevant source, toolchain, workload, emulator, or runtime changes.
 
+The [native publication tests](../../../tests/dbi/consan/hip_consan_rdna3_test.hip)
+check output preservation with and without instrumentation. The aligned
+32-bit store case must produce a complete publication trace. Unaligned stores
+execute their original instruction because observation through atomic exchange
+requires natural alignment; they must set the sticky dropped marker so the
+decoder rejects the trace as incomplete. The tests keep the event count below
+capacity so overflow detection cannot mask a missing dropped marker.
+
 Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
 established, but fault qualification is pending/below bar or the workload is
 outside detector scope; 🟧 clean qualification blocked by prerequisites,

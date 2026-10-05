@@ -24,7 +24,8 @@ namespace program_analysis_target_detail {
   const bool load = matches(ib::build_s_wait_global_load0(arch));
   const bool store = matches(ib::build_s_wait_global_store0(arch));
   const bool flat_load = matches(ib::build_s_wait_flat_load0(arch));
-  const bool flat_store = matches(ib::build_s_wait_flat_store0(arch));
+  // A split wait sequence has no single instruction that drains both counters.
+  const bool flat_store = matches(ib::build_s_wait_memory0<true, true>(arch));
   const bool lds = matches(ib::build_s_wait_lds0(arch));
   const bool release =
       matches(extra_release) || (store_waits_are_release_boundaries && (store || flat_store));

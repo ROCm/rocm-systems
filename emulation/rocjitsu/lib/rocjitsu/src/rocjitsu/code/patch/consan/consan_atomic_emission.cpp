@@ -777,6 +777,26 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
       .require(record.store_vgpr(offsetof(PublicationRecord, lane_id), ticket))
       .append(instrumentation::build_s_wait_global_store0(arch))
       .require(record.store_literal(offsetof(PublicationRecord, state), kPublicationReady));
+  const auto publish_header = [&](size_t offset, uint32_t value) {
+    InstructionSequence header(words);
+    header.require(record.materialize_address(report + offset));
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      // GFX11 non-returning FLAT atomic OR is not reliably visible in the
+      // fine-grained host report allocation. All writers publish the same
+      // value: plan-wide flags, or 1 for the sticky dropped marker. Neither
+      // field is cleared during a report generation, so a completed aligned
+      // store preserves the monotone header contract without a lost update.
+      header.require(record.store_literal(0u, value))
+          .append(instrumentation::build_s_wait_global_store0(arch));
+    } else {
+      header
+          .append(instrumentation::build_v_mov_b32_literal(ticket, value, arch),
+                  instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
+                                                            kAmdGpuScopeDevice, arch))
+          .require(append_global_atomic_wait(words, arch));
+    }
+    return header.finish();
+  };
   // Overflow is sticky even if an extremely long execution wraps the slot
   // counter. No out-of-range lane may address the bounded record allocation.
   sequence.bind_label(overflow)
@@ -786,12 +806,7 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
           instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(ticket), index, arch),
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
       .branch(finish, InstructionSequence::BranchKind::ExecZero)
-      .require(
-          record.materialize_address(report + offsetof(ReportHeader, publication_dropped_count)))
-      .append(instrumentation::build_v_mov_b32_literal(ticket, 1u, arch),
-              instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
-                                                        kAmdGpuScopeDevice, arch))
-      .require(append_global_atomic_wait(words, arch));
+      .require(publish_header(offsetof(ReportHeader, publication_dropped_count), 1u));
   sequence.bind_label(finish).append(
       instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch));
   if (store) {
@@ -799,32 +814,13 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
         .append(
             instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), compare, arch),
             instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
-        .require(
-            record.materialize_address(report + offsetof(ReportHeader, publication_dropped_count)))
-        .append(instrumentation::build_v_mov_b32_literal(ticket, 1u, arch),
-                instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
-                                                          kAmdGpuScopeDevice, arch))
-        .require(append_global_atomic_wait(words, arch))
+        .require(publish_header(offsetof(ReportHeader, publication_dropped_count), 1u))
         .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch));
   }
   const uint32_t publication_flags =
       kPublicationTraceEnabled |
       (plan.publication_modifications_complete ? kPublicationTraceComplete : 0u);
-  sequence.require(record.materialize_address(report + offsetof(ReportHeader, publication_flags)));
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-    // GFX11 does not make the injected FLAT atomic OR visible through the
-    // fine-grained host report allocation, even with GLC and completion waits.
-    // Every site in this code object publishes the same plan-wide value, so an
-    // aligned store preserves the monotone header contract without a lost update.
-    sequence.require(record.store_literal(0u, publication_flags))
-        .append(instrumentation::build_s_wait_global_store0(arch));
-  } else {
-    sequence
-        .append(instrumentation::build_v_mov_b32_literal(ticket, publication_flags, arch),
-                instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
-                                                          kAmdGpuScopeDevice, arch))
-        .require(append_global_atomic_wait(words, arch));
-  }
+  sequence.require(publish_header(offsetof(ReportHeader, publication_flags), publication_flags));
   sequence.require(append_restore_special_state(words, plan.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),

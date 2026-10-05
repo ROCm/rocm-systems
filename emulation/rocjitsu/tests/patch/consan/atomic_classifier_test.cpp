@@ -20,7 +20,7 @@ TEST(ConSan, Rdna3PublicationObservationPreservesEncoding) {
         original.encoding = 0x37u;
         original.seg = segment;
         original.op = op;
-        original.offset = 0x1ffcu;
+        original.offset = segment == 0u ? 0xffcu : 0x1ffcu;
         original.addr = 18u;
         original.data = 23u;
         original.saddr = segment == 0u ? 0x7cu : 6u;
@@ -75,6 +75,14 @@ TEST(ConSan, Rdna3PublicationObservationRejectsUnsupportedForms) {
   raw = original;
   raw.encoding = 0x36u;
   EXPECT_FALSE(build(raw));
+  for (uint32_t offset : {0x1000u, 0x1ffcu, 0x1fffu}) {
+    raw = original;
+    raw.seg = 0u;
+    raw.offset = offset;
+    EXPECT_FALSE(build(raw));
+    raw.seg = 2u;
+    EXPECT_TRUE(build(raw));
+  }
   EXPECT_FALSE(detail::build_rdna3_publication_observation({}, 42u, false));
 }
 
@@ -406,7 +414,7 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
 TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
   for (const auto &target : kAtomicTargets) {
     SCOPED_TRACE(target.arch);
-    for (const int32_t offset : {-(1 << 23), -12, 12, 4095, 4096, (1 << 23) - 1}) {
+    for (const int32_t offset : {-(1 << 23), -4096, -12, -1, 0, 12, 4095, 4096, (1 << 23) - 1}) {
       SCOPED_TRACE(offset);
       for (const bool rmw : {false, true}) {
         auto site = exact_flat_atomic(target);
@@ -417,11 +425,10 @@ TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
           site.destination_vgpr.reset();
         }
         const auto classification = classify_atomic_lowering(site, target.arch, rmw);
-        const bool cdna4_offset =
-            target.arch == ROCJITSU_CODE_ARCH_CDNA4 && offset >= 0 && offset <= 4095;
-        const bool rdna3_offset =
-            target.arch == ROCJITSU_CODE_ARCH_RDNA3 && offset >= -(1 << 12) && offset < (1 << 12);
-        if (target.instruction_size != 12u && !cdna4_offset && !rdna3_offset) {
+        const bool unsigned_offset =
+            (target.arch == ROCJITSU_CODE_ARCH_CDNA4 || target.arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+            offset >= 0 && offset <= 4095;
+        if (target.instruction_size != 12u && !unsigned_offset && offset != 0) {
           EXPECT_FALSE(classification.address_available());
           continue;
         }
@@ -430,11 +437,53 @@ TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
         const auto plan = plan_atomic_address(*classification.form, 32u, 7u,
                                               RegisterAllocationSource::DescriptorGrowth);
         ASSERT_TRUE(plan.supported());
-        EXPECT_EQ(plan.kind, AtomicAddressKind::FlatGuestPairMaterialized);
+        EXPECT_EQ(plan.kind, offset == 0 ? AtomicAddressKind::FlatGuestPair
+                                         : AtomicAddressKind::FlatGuestPairMaterialized);
         EXPECT_EQ(plan.signed_byte_offset, offset);
         EXPECT_EQ(plan.input_address_vgpr, 3u);
-        EXPECT_EQ(plan.result_address_vgpr, 37u);
+        EXPECT_EQ(plan.result_address_vgpr, offset == 0 ? 3u : 37u);
         EXPECT_TRUE(build_atomic_address_materialization(plan, 82u, 84u, target.arch));
+      }
+    }
+  }
+}
+
+TEST(ConSanAtomicClassifier, Rdna3RawFlatOffsetsRejectIgnoredHighBit) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  for (uint32_t segment : {0u, 2u}) {
+    for (uint32_t offset : {0u, 0xfffu, 0x1000u, 0x1ffcu, 0x1fffu}) {
+      SCOPED_TRACE(segment);
+      SCOPED_TRACE(offset);
+      rdna3::FlatMachineInst raw{};
+      raw.encoding = 0x37u;
+      raw.seg = segment;
+      raw.op = rdna3::kFlatAtomicAddU32Flat;
+      raw.offset = offset;
+      raw.addr = 2;
+      raw.data = 4;
+      raw.saddr = kRdna3FlatNoSaddr;
+      raw.glc = 1;
+      raw.vdst = 5;
+      std::array<uint32_t, 3> words{};
+      std::memcpy(words.data(), &raw, sizeof(raw));
+      words.back() = build_s_endpgm(arch);
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
+      const auto inventory = test_semantic_inventory(make_rdna3_lds_code_object(words), options);
+      ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+      ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
+      const auto sites = test_decoded_sites<AtomicSite>(
+          inventory.program_inventory, inventory.program_inventory.kernels().front());
+      ASSERT_EQ(sites.size(), 1u);
+      const auto classification = classify_atomic_lowering(sites.front(), arch);
+      if (segment == 0u && offset > 0xfffu) {
+        EXPECT_EQ(classification.normalization_reason, AtomicClassifierReason::UnsupportedOffset);
+        EXPECT_FALSE(classification.address_available());
+      } else {
+        ASSERT_TRUE(classification.form);
+        const int32_t expected =
+            offset > 0xfffu ? static_cast<int32_t>(offset) - 0x2000 : static_cast<int32_t>(offset);
+        EXPECT_EQ(classification.form->signed_byte_offset, expected);
       }
     }
   }

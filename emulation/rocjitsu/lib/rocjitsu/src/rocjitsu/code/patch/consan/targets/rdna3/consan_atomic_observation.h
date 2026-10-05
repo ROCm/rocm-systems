@@ -22,6 +22,8 @@ build_rdna3_publication_observation(std::span<const uint8_t> instruction, uint16
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (raw.encoding != 0x37u || (raw.seg != 0u && raw.seg != 2u) || raw.sve || raw.glc || raw.pad_25)
     return std::nullopt;
+  if (raw.seg == 0u && raw.offset > 0xfffu)
+    return std::nullopt;
   if (store) {
     if (raw.op != rdna3::kFlatStoreB32Flat)
       return std::nullopt;
