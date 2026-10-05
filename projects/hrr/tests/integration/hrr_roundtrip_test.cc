@@ -1596,4 +1596,37 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
     CHECK(manifest.find("\"complete\": false") != std::string::npos);
   }
 }
+
+/**
+ * Unit_HRR_ForkWhileNotingUnreplayable
+ * ------------------------------------
+ *   - fork() waits for a thread that is noting an API as unreplayable, so the
+ *     child does not inherit the mutex of that list locked. The child records
+ *     a call and exits normally, and its capture shutdown writes its manifest
+ *     under that mutex. The workload fails if the child does not exit within
+ *     its deadline.
+ *   - Both processes leave an archive whose manifest lists the API.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_noting_unreplayable"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileNotingUnreplayable_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    CHECK(manifest.find("\"hipUserObjectCreate\"") != std::string::npos);
+  }
+}
 #endif  // !_WIN32

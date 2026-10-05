@@ -164,8 +164,8 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
-// Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu. atfork_prepare is
-// the only path that holds all three.
+// Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu, then
+// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -499,15 +499,19 @@ static void atfork_prepare() {
   if (g_events_fd >= 0)
     flush_buffer_locked();
   g_buf_busy.clear(std::memory_order_release);
+  // The child's shutdown writes its manifest under this one.
+  g_unreplayable_mu.lock();
 }
 
 static void atfork_parent() {
+  g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
   g_reopen_mu.unlock();
 }
 
 static void atfork_child() {
+  g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
   g_reopen_mu.unlock();

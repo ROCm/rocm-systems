@@ -3745,4 +3745,123 @@ TEST_CASE("Unit_HRR_CaptureCrashDuringFork_Direct", "[.][hrr-direct]") {
   raise(SIGSEGV);
   FAIL("the process outlived its own SIGSEGV");
 }
+
+// ---------------------------------------------------------------------------
+// A forked child that exits normally
+//
+// The capture writer finalizes a process's archive from an atexit handler,
+// hip_capture_shutdown(), which it registers on the first HIP call. A case
+// that registers hrr_after_capture_shutdown() before that call gets a handler
+// that runs right after it: atexit handlers run in reverse order of
+// registration. In a child that set g_hrr_after_capture_shutdown, the handler
+// calls it and ends the child with _exit(0). The child of a HIP process does
+// not run the fat-binary destructors and the runtime's teardown that would
+// follow. In the parent the handler does nothing.
+// ---------------------------------------------------------------------------
+static void (*g_hrr_after_capture_shutdown)() = nullptr;
+
+static void hrr_after_capture_shutdown() {
+  if (!g_hrr_after_capture_shutdown) return;
+  g_hrr_after_capture_shutdown();
+  _exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// strlen() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture writer calls it with the API name once
+// note_unreplayable() holds its mutex. With no hook set it is a plain strlen.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_strlen_hook{nullptr};
+
+extern "C" size_t strlen(const char* s) noexcept {
+  if (auto hook = g_hrr_strlen_hook.load(std::memory_order_acquire)) hook(s);
+  // volatile, so the compiler cannot turn the loop back into a strlen() call.
+  const volatile char* p = s;
+  while (*p) ++p;
+  return static_cast<size_t>(p - static_cast<const volatile char*>(s));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileNotingUnreplayable_Direct
+//
+// Forks while another thread is inside note_unreplayable(), under the mutex of
+// the archive's list of unreplayable APIs. The child records a call and exits
+// normally, and its capture shutdown writes its manifest, which lists those
+// APIs under that mutex. A child that inherited the mutex locked would block
+// there for ever.
+//
+// The recorder calls hipUserObjectCreate(), which the writer notes as
+// unreplayable. The strlen hook holds it at the API name, inside the mutex,
+// for two seconds at most, and the main thread forks while it is held. The
+// writer's prepare handler waits for the mutex, so fork() returns only after
+// the hold has run out; the case checks that too, which shows the hold was
+// inside the mutex. Unit_HRR_ForkWhileNotingUnreplayable checks both archives.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_unreplayable_hold{false};      // hold the next match
+std::atomic<bool> g_unreplayable_held{false};      // the recorder is held
+std::atomic<bool> g_unreplayable_release{false};   // let it go
+std::atomic<bool> g_unreplayable_ran_out{false};   // the hold ran out first
+
+void unreplayable_strlen_hook(const char* s) {
+  static constexpr char kApi[] = "hipUserObjectCreate";
+  const volatile char* p = s;
+  for (size_t i = 0; i < sizeof(kApi); ++i)
+    if (p[i] != kApi[i]) return;
+  if (!g_unreplayable_hold.exchange(false)) return;
+  g_unreplayable_held = true;
+  int ms = 0;
+  for (; ms < 2000 && !g_unreplayable_release.load(); ++ms) hrr_sleep_1ms();
+  g_unreplayable_ran_out = ms == 2000;
+}
+
+int  g_unreplayable_payload = 0;
+void unreplayable_destroy(void*) {}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  g_hrr_strlen_hook = unreplayable_strlen_hook;
+  g_unreplayable_hold = true;
+
+  // Nothing below may REQUIRE before the join.
+  hipError_t created = hipErrorUnknown;
+  std::thread recorder([&] {
+    hipUserObject_t obj = nullptr;
+    created = hipUserObjectCreate(&obj, &g_unreplayable_payload, unreplayable_destroy, 1,
+                                  hipUserObjectNoDestructorSync);
+    if (created == hipSuccess) (void)hipUserObjectRelease(obj, 1);
+  });
+
+  for (int ms = 0; ms < 10000 && !g_unreplayable_held.load(); ++ms) hrr_sleep_1ms();
+  const bool held = g_unreplayable_held.load();
+
+  int status = -1;
+  if (held) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      g_hrr_strlen_hook = nullptr;
+      g_hrr_after_capture_shutdown = [] {};
+      (void)hipGetLastError();  // opens the child's archive
+      exit(0);
+    }
+    g_unreplayable_release = true;
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+
+  g_unreplayable_release = true;
+  recorder.join();
+  g_hrr_strlen_hook = nullptr;
+
+  INFO("hipUserObjectCreate " << created << ", child wait status " << status);
+  REQUIRE(created == hipSuccess);
+  REQUIRE(held);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+  // Clear if fork() did not wait for the recorder to leave the mutex.
+  REQUIRE(g_unreplayable_ran_out.load());
+}
 #endif  // !_WIN32
