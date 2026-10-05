@@ -37,10 +37,10 @@ reader_catalog_t::build_string_list(data_storage::schema_v3::read_statements& st
     const auto& statement   = stmts.string_statement();
     auto        string_list = statement().to_vector();
 
-    string_utility.reserve(string_list.size());
+    strings_by_id.reserve(string_list.size());
     for(auto& string : string_list)
     {
-        string_utility.emplace(string.id, std::move(string.value));
+        strings_by_id.emplace(string.id, std::move(string.value));
     }
 }
 
@@ -65,7 +65,7 @@ reader_catalog_t::build_nodes(data_storage::schema_v3::read_statements& stmts)
         node_info_ptr->domain_name   = node_info.domain_name;
 
         nodes.push_back(node_info_ptr);
-        node_utility.emplace(node_info.node_id, node_info_ptr);
+        nodes_by_id.emplace(node_info.node_id, node_info_ptr);
     }
 }
 
@@ -89,14 +89,14 @@ reader_catalog_t::build_processes(data_storage::schema_v3::read_statements& stmt
         process_info_ptr->environment = process_info.environment;
         process_info_ptr->extdata     = process_info.extdata;
 
-        const auto node_it = node_utility.find(process_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        const auto node_it = nodes_by_id.find(process_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             process_info_ptr->node_info = node_it->second;
         }
 
         processes.push_back(process_info_ptr);
-        process_utility.emplace(process_info.id, process_info_ptr);
+        processes_by_id.emplace(process_info.id, process_info_ptr);
     }
 }
 
@@ -117,20 +117,20 @@ reader_catalog_t::build_threads(data_storage::schema_v3::read_statements& stmts)
         thread_info_ptr->end               = thread_info.end;
         thread_info_ptr->extdata           = thread_info.extdata;
 
-        const auto node_it = node_utility.find(thread_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        const auto node_it = nodes_by_id.find(thread_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             thread_info_ptr->node_info = node_it->second;
         }
 
-        const auto process_it = process_utility.find(thread_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        const auto process_it = processes_by_id.find(thread_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             thread_info_ptr->process_info = process_it->second;
         }
 
         threads.push_back(thread_info_ptr);
-        thread_utility.emplace(thread_info.id, thread_info_ptr);
+        threads_by_id.emplace(thread_info.id, thread_info_ptr);
     }
 }
 
@@ -164,20 +164,20 @@ reader_catalog_t::build_agents(data_storage::schema_v3::read_statements& stmts)
         agent_info_ptr->user_name      = agent_info.user_name.value_or("");
         agent_info_ptr->extdata        = agent_info.extdata;
 
-        auto node_it = node_utility.find(agent_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(agent_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             agent_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(agent_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(agent_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             agent_info_ptr->process_info = process_it->second;
         }
 
         agents.push_back(agent_info_ptr);
-        agent_utility.emplace(agent_info.id, agent_info_ptr);
+        agents_by_id.emplace(agent_info.id, agent_info_ptr);
     }
 }
 
@@ -187,22 +187,22 @@ reader_catalog_t::link_owner(reader_types::track_info_t& track,
                              std::optional<size_t>       pid,
                              std::optional<size_t>       tid) const
 {
-    if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
+    if(const auto node_it = nodes_by_id.find(nid); node_it != nodes_by_id.end())
     {
         track.node_info = node_it->second;
     }
     if(pid.has_value())
     {
-        if(const auto process_it = process_utility.find(pid.value());
-           process_it != process_utility.end())
+        if(const auto process_it = processes_by_id.find(pid.value());
+           process_it != processes_by_id.end())
         {
             track.process_info = process_it->second;
         }
     }
     if(tid.has_value())
     {
-        if(const auto thread_it = thread_utility.find(tid.value());
-           thread_it != thread_utility.end())
+        if(const auto thread_it = threads_by_id.find(tid.value());
+           thread_it != threads_by_id.end())
         {
             track.thread_info = thread_it->second;
         }
@@ -244,16 +244,16 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         link_owner(*track_info_ptr, topo.nid, topo.pid, topo.tid);
 
         tracks.push_back(track_info_ptr);
-        track_to_db_id.emplace(track_info_ptr, no_db_id);
-        track_to_topology.emplace(track_info_ptr, topo);
-        topology_to_track.emplace(topo, track_info_ptr);
+        db_id_by_track.emplace(track_info_ptr, no_db_id);
+        topology_by_track.emplace(track_info_ptr, topo);
+        track_by_topology.emplace(topo, track_info_ptr);
     }
 
     // "Sample" sub-tracks: duration events explicitly tagged with a real
     // rocpd_sample.track_id, one track per tagged db track id. Registered
-    // into track_to_topology with a topology that can never match a real
+    // into topology_by_track with a topology that can never match a real
     // row (own_track_where's UNION branch requires S.track_id IS NULL), and
-    // into track_to_db_id with the REAL sample track id, so
+    // into db_id_by_track with the REAL sample track id, so
     // get_events_for_track()'s existing S.track_id = ? branch serves it --
     // no read-path code changes needed beyond that.
     constexpr topology_key_t no_topology{ no_db_id, no_db_id, no_db_id };
@@ -274,8 +274,8 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         link_owner(*track_info_ptr, stats.nid, stats.pid, stats.tid);
 
         tracks.push_back(track_info_ptr);
-        track_to_db_id.emplace(track_info_ptr, sample_track_id);
-        track_to_topology.emplace(track_info_ptr, no_topology);
+        db_id_by_track.emplace(track_info_ptr, sample_track_id);
+        topology_by_track.emplace(track_info_ptr, no_topology);
         sample_track_by_db_id.emplace(sample_track_id, track_info_ptr);
     }
 
@@ -498,26 +498,26 @@ reader_catalog_t::build_kernel_symbols(data_storage::schema_v3::read_statements&
         kernel_symbol_info_ptr->accum_vgpr_count = kernel_symbol_info.accum_vgpr_count;
         kernel_symbol_info_ptr->extdata          = kernel_symbol_info.extdata;
 
-        auto node_it = node_utility.find(kernel_symbol_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(kernel_symbol_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             kernel_symbol_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(kernel_symbol_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(kernel_symbol_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             kernel_symbol_info_ptr->process_info = process_it->second;
         }
 
-        auto code_object_it = code_object_utility.find(kernel_symbol_info.code_object_id);
-        if(code_object_it != code_object_utility.end() && code_object_it->second)
+        auto code_object_it = code_objects_by_id.find(kernel_symbol_info.code_object_id);
+        if(code_object_it != code_objects_by_id.end() && code_object_it->second)
         {
             kernel_symbol_info_ptr->code_object_info = code_object_it->second;
         }
 
         kernel_symbols.push_back(kernel_symbol_info_ptr);
-        kernel_symbol_utility.emplace(kernel_symbol_info.id, kernel_symbol_info_ptr);
+        kernel_symbols_by_id.emplace(kernel_symbol_info.id, kernel_symbol_info_ptr);
     }
 }
 
@@ -539,29 +539,29 @@ reader_catalog_t::build_code_objects(data_storage::schema_v3::read_statements& s
         code_object_info_ptr->storage_type = code_object_info.storage_type.value_or("");
         code_object_info_ptr->extdata      = code_object_info.extdata;
 
-        auto node_it = node_utility.find(code_object_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(code_object_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             code_object_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(code_object_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(code_object_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             code_object_info_ptr->process_info = process_it->second;
         }
 
         if(code_object_info.agent_id.has_value())
         {
-            auto agent_it = agent_utility.find(code_object_info.agent_id.value());
-            if(agent_it != agent_utility.end() && agent_it->second)
+            auto agent_it = agents_by_id.find(code_object_info.agent_id.value());
+            if(agent_it != agents_by_id.end() && agent_it->second)
             {
                 code_object_info_ptr->agent_info = agent_it->second;
             }
         }
 
         code_objects.push_back(code_object_info_ptr);
-        code_object_utility.emplace(code_object_info.id, code_object_info_ptr);
+        code_objects_by_id.emplace(code_object_info.id, code_object_info_ptr);
     }
 }
 
@@ -579,14 +579,14 @@ reader_catalog_t::build_streams(data_storage::schema_v3::read_statements& stmts)
         stream_info_ptr->name      = stream_info.name.value_or("");
         stream_info_ptr->extdata   = stream_info.extdata;
 
-        auto node_it = node_utility.find(stream_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(stream_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             stream_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(stream_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(stream_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             stream_info_ptr->process_info = process_it->second;
         }
@@ -609,14 +609,14 @@ reader_catalog_t::build_queues(data_storage::schema_v3::read_statements& stmts)
         queue_info_ptr->name     = queue_info.name.value_or("");
         queue_info_ptr->extdata  = queue_info.extdata;
 
-        auto node_it = node_utility.find(queue_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(queue_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             queue_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(queue_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(queue_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             queue_info_ptr->process_info = process_it->second;
         }
@@ -652,22 +652,22 @@ reader_catalog_t::build_pmc_infos(data_storage::schema_v3::read_statements& stmt
         pmc_info_ptr->is_derived       = pmc_info.is_derived;
         pmc_info_ptr->extdata          = pmc_info.extdata;
 
-        auto node_it = node_utility.find(pmc_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        auto node_it = nodes_by_id.find(pmc_info.nid);
+        if(node_it != nodes_by_id.end() && node_it->second)
         {
             pmc_info_ptr->node_info = node_it->second;
         }
 
-        auto process_it = process_utility.find(pmc_info.pid);
-        if(process_it != process_utility.end() && process_it->second)
+        auto process_it = processes_by_id.find(pmc_info.pid);
+        if(process_it != processes_by_id.end() && process_it->second)
         {
             pmc_info_ptr->process_info = process_it->second;
         }
 
         if(pmc_info.agent_id.has_value())
         {
-            auto agent_it = agent_utility.find(pmc_info.agent_id.value());
-            if(agent_it != agent_utility.end() && agent_it->second)
+            auto agent_it = agents_by_id.find(pmc_info.agent_id.value());
+            if(agent_it != agents_by_id.end() && agent_it->second)
             {
                 pmc_info_ptr->agent_info = agent_it->second;
             }

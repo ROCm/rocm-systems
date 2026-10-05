@@ -56,10 +56,10 @@ private:
         if(!id.has_value()) return {};
         if(cache.id == id) return cache.value;
 
-        const auto it = m_catalog.string_utility.find(id.value());
+        const auto it = m_catalog.strings_by_id.find(id.value());
         cache         = { id,
-                  it != m_catalog.string_utility.end() ? std::string_view{ it->second }
-                                                               : std::string_view{} };
+                  it != m_catalog.strings_by_id.end() ? std::string_view{ it->second }
+                                                              : std::string_view{} };
         return cache.value;
     }
 
@@ -80,9 +80,9 @@ private:
                                        row.tid.value_or(0) };
         if(m_last_topology != topology)
         {
-            const auto it = m_catalog.topology_to_track.find(topology);
+            const auto it = m_catalog.track_by_topology.find(topology);
             m_last_topology_track =
-                it != m_catalog.topology_to_track.end() ? it->second : nullptr;
+                it != m_catalog.track_by_topology.end() ? it->second : nullptr;
             m_last_topology = topology;
         }
         return m_last_topology_track;
@@ -405,11 +405,11 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
         case reader_types::track_kind_t::pmc_agent: break;
     }
 
-    auto topo_it = m_catalog->track_to_topology.find(track);
-    if(topo_it == m_catalog->track_to_topology.end()) return {};
+    auto topo_it = m_catalog->topology_by_track.find(track);
+    if(topo_it == m_catalog->topology_by_track.end()) return {};
 
-    auto db_id_it = m_catalog->track_to_db_id.find(track);
-    if(db_id_it == m_catalog->track_to_db_id.end()) return {};
+    auto db_id_it = m_catalog->db_id_by_track.find(track);
+    if(db_id_it == m_catalog->db_id_by_track.end()) return {};
 
     const auto& topo  = topo_it->second;
     auto        db_id = db_id_it->second;
@@ -473,8 +473,8 @@ reader_t::impl::visit_track_events_in_id_range(
     reader_t::event_visitor_t             visitor,
     void*                                 context)
 {
-    const auto topo_it = m_catalog->track_to_topology.find(track);
-    if(topo_it == m_catalog->track_to_topology.end()) return;
+    const auto topo_it = m_catalog->topology_by_track.find(track);
+    if(topo_it == m_catalog->topology_by_track.end()) return;
     const auto& topo = topo_it->second;
 
     std::optional<size_t> last_id;
@@ -488,8 +488,8 @@ reader_t::impl::visit_track_events_in_id_range(
             {
                 if(last_id != row.display_name_id)
                 {
-                    const auto it = m_catalog->string_utility.find(*row.display_name_id);
-                    last_name     = it != m_catalog->string_utility.end()
+                    const auto it = m_catalog->strings_by_id.find(*row.display_name_id);
+                    last_name     = it != m_catalog->strings_by_id.end()
                                         ? std::string_view{ it->second }
                                         : std::string_view{};
                     last_id       = row.display_name_id;
@@ -655,8 +655,8 @@ reader_t::impl::build_event_data(
 
     if(event_meta.category_id.has_value())
     {
-        auto it = m_catalog->string_utility.find(event_meta.category_id.value());
-        if(it != m_catalog->string_utility.end())
+        auto it = m_catalog->strings_by_id.find(event_meta.category_id.value());
+        if(it != m_catalog->strings_by_id.end())
         {
             event_data->event_category = it->second;
         }
@@ -698,8 +698,8 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 
     if(r.name_id.has_value())
     {
-        auto it = m_catalog->string_utility.find(r.name_id.value());
-        if(it != m_catalog->string_utility.end())
+        auto it = m_catalog->strings_by_id.find(r.name_id.value());
+        if(it != m_catalog->strings_by_id.end())
         {
             data.name = it->second;
         }
@@ -745,14 +745,14 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
 
     if(r.region_name_id.has_value())
     {
-        auto it = m_catalog->string_utility.find(r.region_name_id.value());
-        if(it != m_catalog->string_utility.end()) data.name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.region_name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.name = it->second;
     }
 
     if(r.kernel_id.has_value())
     {
-        auto it = m_catalog->kernel_symbol_utility.find(r.kernel_id.value());
-        if(it != m_catalog->kernel_symbol_utility.end())
+        auto it = m_catalog->kernel_symbols_by_id.find(r.kernel_id.value());
+        if(it != m_catalog->kernel_symbols_by_id.end())
         {
             data.kernel_symbol_info = it->second;
             if(it->second && it->second->code_object_info)
@@ -760,19 +760,19 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
         }
     }
 
-    auto node_it = m_catalog->node_utility.find(r.nid);
-    if(node_it != m_catalog->node_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_catalog->process_utility.find(r.pid.value());
-        if(it != m_catalog->process_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_catalog->thread_utility.find(r.tid.value());
-        if(it != m_catalog->thread_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())
@@ -806,41 +806,41 @@ reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& ev
 
     if(r.name_id.has_value())
     {
-        auto it = m_catalog->string_utility.find(r.name_id.value());
-        if(it != m_catalog->string_utility.end()) data.name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.name = it->second;
     }
 
     if(r.region_name_id.has_value())
     {
-        auto it = m_catalog->string_utility.find(r.region_name_id.value());
-        if(it != m_catalog->string_utility.end()) data.region_name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.region_name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.region_name = it->second;
     }
 
     if(r.dst_agent_id.has_value())
     {
-        auto it = m_catalog->agent_utility.find(r.dst_agent_id.value());
-        if(it != m_catalog->agent_utility.end()) data.dst_agent_id = it->second;
+        auto it = m_catalog->agents_by_id.find(r.dst_agent_id.value());
+        if(it != m_catalog->agents_by_id.end()) data.dst_agent_id = it->second;
     }
 
     if(r.src_agent_id.has_value())
     {
-        auto it = m_catalog->agent_utility.find(r.src_agent_id.value());
-        if(it != m_catalog->agent_utility.end()) data.src_agent_id = it->second;
+        auto it = m_catalog->agents_by_id.find(r.src_agent_id.value());
+        if(it != m_catalog->agents_by_id.end()) data.src_agent_id = it->second;
     }
 
-    auto node_it = m_catalog->node_utility.find(r.nid);
-    if(node_it != m_catalog->node_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_catalog->process_utility.find(r.pid.value());
-        if(it != m_catalog->process_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_catalog->thread_utility.find(r.tid.value());
-        if(it != m_catalog->thread_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())
@@ -873,19 +873,19 @@ reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& e
     data.size            = r.size;
     data.extdata         = r.extdata;
 
-    auto node_it = m_catalog->node_utility.find(r.nid);
-    if(node_it != m_catalog->node_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_catalog->process_utility.find(r.pid.value());
-        if(it != m_catalog->process_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_catalog->thread_utility.find(r.tid.value());
-        if(it != m_catalog->thread_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())

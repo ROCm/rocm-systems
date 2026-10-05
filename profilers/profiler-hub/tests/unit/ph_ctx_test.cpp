@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler_hub_ctx.hpp"
+#include "ph_ctx.hpp"
 
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler-hub/cpp/writer.hpp"
@@ -137,7 +137,7 @@ TEST_F(ph_ctx_test, construction_populates_schema_version_and_node)
 
     ph_ctx ctx{ m_db_path };
 
-    const auto version = ctx.get_storage_version();
+    const auto version = ctx.get_schema_version();
     EXPECT_GT(version.major + version.minor + version.patch, 0U);
 
     const auto node = ctx.get_node();
