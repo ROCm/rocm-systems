@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 #include "TestBed.hpp"
@@ -121,11 +122,27 @@ namespace RcclUnitTesting
   // abortFlag skips the barrier, so a peer that entered it waits forever in
   // bootstrapRecv -- the PyTorch ProcessGroupNCCL watchdog hits exactly this.
   //
-  // These run on a single-node communicator, where the barrier cannot be
-  // protecting anything: ncclTopoGetPxnRanks() yields no PXN ranks when
-  // system->inter == 0, which is the case whenever every GPU is on one node.
+  // These run on a single-node communicator at nRanks == 2, where the barrier
+  // cannot be protecting anything: RCCL defaults NCCL_PXN_DISABLE=1 and
+  // rcclSetPxn() only auto-enables PXN at nRanks >= 64 (gfx942) / >= 32
+  // (gfx950), so there is no PXN relay to keep alive.
   namespace
   {
+    // EnvVars reports 0 GPUs in a process re-exec'd by ProcessIsolatedTestRunner, and a
+    // skipped child is scored as a pass -- so every GPU gate below must run in the parent
+    // only, or the coverage silently evaporates into a green run.
+    bool isIsolatedChild()
+    {
+      return std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr;
+    }
+
+    // Never call hipGetDeviceCount() here: HIP state does not survive the fork() below.
+    int getDetectedGpuCount()
+    {
+      static const int detectedGpus = EnvVars().GetNumDetectedGpus();
+      return detectedGpus;
+    }
+
     enum class PeerTeardown
     {
       Abort,    // peer calls ncclCommAbort -- non-zero abortFlag, skips the barrier
@@ -240,10 +257,9 @@ namespace RcclUnitTesting
   // test below proves nothing.
   TEST(Teardown, DivergentTeardown_PeerDestroys_Completes)
   {
-    TestBed testBed;
-    if (testBed.ev.maxGpus < 2)
+    if (!isIsolatedChild() && getDetectedGpuCount() < 2)
       GTEST_SKIP() << "Divergent teardown requires at least 2 GPUs (detected "
-                   << testBed.ev.maxGpus << ")";
+                   << getDetectedGpuCount() << ")";
 
     RUN_ISOLATED_TESTS(
       ProcessIsolatedTestRunner::TestConfig(
@@ -260,10 +276,9 @@ namespace RcclUnitTesting
   // return instead of blocking forever in bootstrapRecv.
   TEST(Teardown, DivergentTeardown_PeerAborts_DoesNotHang)
   {
-    TestBed testBed;
-    if (testBed.ev.maxGpus < 2)
+    if (!isIsolatedChild() && getDetectedGpuCount() < 2)
       GTEST_SKIP() << "Divergent teardown requires at least 2 GPUs (detected "
-                   << testBed.ev.maxGpus << ")";
+                   << getDetectedGpuCount() << ")";
 
     RUN_ISOLATED_TESTS(
       ProcessIsolatedTestRunner::TestConfig(
