@@ -57,7 +57,7 @@ Two layers are covered here, modeled on ``test_cli_set_clk_limit.py`` /
     from ``amdsmi_set_npm_limit()``, which uses ``AMDSMI_STATUS_INVAL`` for
     its own disabled-check) returns a "not supported on this node" message
     without raising. To tell this apart from "the requested mode is absent
-    from this platform's ``supported_npm_mode`` bitmask" (same status code),
+    from this platform's ``supported_mode`` bitmask" (same status code),
     the catch block separately queries
     ``amdsmi_get_npm_supported_balancing_modes()``: if the requested mode is
     missing from that result, the message becomes ``"BALANCING_MODE:

@@ -3328,11 +3328,11 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_ha
   std::string mode_str;
   rsmi_status_t ret = amd::smi::get_npm_board_mode(*board_path_str, &mode_str);
   if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-    // board/npm_mode missing or unreadable: report N/A rather than a guessed
+    // mode file missing or unreadable: report N/A rather than a guessed
     // value, matching set_npm_board_mode()'s RSMI_STATUS_NOT_SUPPORTED for
     // this same state. Get is never gated on NPM enablement.
     *mode = RSMI_NPM_BALANCING_MODE_INVALID;
-    ss << __PRETTY_FUNCTION__ << " | board/npm_mode unavailable -> mode = INVALID";
+    ss << __PRETTY_FUNCTION__ << " | mode file unavailable -> mode = INVALID";
     LOG_DEBUG(ss);
     return RSMI_STATUS_SUCCESS;
   }
@@ -3386,19 +3386,28 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_ha
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // board/supported_npm_mode is not yet implemented on all platforms, so its
-  // absence (RSMI_STATUS_NOT_SUPPORTED) must not block the write -- only an
-  // explicit bitmask that excludes the requested mode does.
+  // supported_mode is not yet implemented on all platforms, so its absence
+  // (RSMI_STATUS_NOT_SUPPORTED) must not block the write. Any other read
+  // failure (e.g. corrupt content) fails closed, like the npm_status check
+  // below.
   uint64_t supported_modes = 0;
   rsmi_status_t supported_ret =
       amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
-  if (supported_ret == RSMI_STATUS_SUCCESS &&
-      (supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
-    ss << __PRETTY_FUNCTION__ << " | mode=" << mode
-       << " not in supported_modes bitmask=" << supported_modes << " -> returning "
-       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
-    LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
+  if (supported_ret != RSMI_STATUS_NOT_SUPPORTED) {
+    if (supported_ret != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | get_npm_supported_modes failed: " << getRSMIStatusString(supported_ret, false)
+         << " -> rejecting write (fail closed)";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    if ((supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
+      ss << __PRETTY_FUNCTION__ << " | mode=" << mode
+         << " not in supported_modes bitmask=" << supported_modes << " -> returning "
+         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+      LOG_ERROR(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
   }
 
   // Fail closed and NEVER touch sysfs when NPM is disabled on this node.

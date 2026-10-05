@@ -115,6 +115,12 @@ rsmi_status_t get_npm_supported_modes(const std::string& board_path, uint64_t* b
   rsmi_status_t r = read_npm_file(p, s);
   if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
 
+  // std::stoull() accepts a leading '-' (e.g. "-1" parses as UINT64_MAX);
+  // reject anything not starting with a digit before parsing.
+  if (s.empty() || !std::isdigit(static_cast<unsigned char>(s[0]))) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   try {
     size_t idx = 0;
     unsigned long long v = std::stoull(s, &idx, 16);

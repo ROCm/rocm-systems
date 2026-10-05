@@ -7737,14 +7737,16 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
  * @details Queries whether the node is currently operating in Power Balancing (PB) or Frequency
  * Balancing (FB) mode. This call is not gated on NPM enablement: it reports the last-selected
  * mode regardless of whether NPM is currently enabled or disabled on the node.
- * ::AMDSMI_NPM_BALANCING_MODE_INVALID means the underlying value could not be read or decoded,
- * and is not treated as an error.
+ * ::AMDSMI_NPM_BALANCING_MODE_INVALID means the underlying sysfs value is missing or unreadable,
+ * and is reported via ::AMDSMI_STATUS_SUCCESS rather than treated as an error. If the sysfs value
+ * is present but cannot be decoded, ::AMDSMI_STATUS_UNEXPECTED_DATA is returned instead.
  *
  * @param[in]  node_handle Handle to the Node to query.
  * @param[out] mode Pointer to amdsmi_npm_balancing_mode_t to receive the current balancing mode.
  *             Must be allocated by the user.
  *
- * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_UNEXPECTED_DATA if the sysfs value
+ * is present but not decodable. Non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
                                               amdsmi_npm_balancing_mode_t* mode);

@@ -3473,7 +3473,7 @@ class AMDSMIHelpers:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
                 # NOT_SUPPORTED covers "NPM disabled", "board/mode sysfs file
                 # missing/unreadable while NPM is enabled", and "requested mode
-                # absent from this platform's supported_npm_mode bitmask" --
+                # absent from this platform's supported_mode bitmask" --
                 # the status code alone can't distinguish them. Query the
                 # supported-modes bitmask separately to tell the last case
                 # apart from the other two, which stay lumped together since

@@ -1812,6 +1812,15 @@ amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   auto board_path_str = reinterpret_cast<std::string*>(node_handle);
   if (board_path_str == nullptr || board_path_str->empty()) {
     return AMDSMI_STATUS_INVAL;
@@ -1841,6 +1850,15 @@ amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
   AMDSMI_CHECK_INIT();
 
   if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -1905,6 +1923,15 @@ amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node
   AMDSMI_CHECK_INIT();
 
   if (node_handle == nullptr || supported_modes == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
     return AMDSMI_STATUS_INVAL;
   }
 

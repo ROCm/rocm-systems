@@ -113,6 +113,9 @@ class NodeCommands:
                 if current_node_power != "N/A":
                     npm_dict["current_node_power"] = current_node_power
 
+            # Balancing mode queries are not gated on NPM being enabled, so
+            # they run regardless of whether npm_info came back as a dict.
+            if args.nodes is not None:
                 try:
                     mode = amdsmi_interface.amdsmi_get_npm_balancing_mode(args.nodes)
                     npm_dict["balancing_mode"] = self.helpers.NPM_BALANCING_MODE_TO_CLI.get(
