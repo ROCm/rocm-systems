@@ -496,8 +496,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
         if (fallback_fields.count(field)) continue;  // reported with its primary
         const auto& fallbacks = health_field_fallbacks();
         auto fallback = fallbacks.find(field);
-        auto fb_probe =
-            (fallback != fallbacks.end()) ? probe.find(fallback->second) : probe.end();
+        auto fb_probe = (fallback != fallbacks.end()) ? probe.find(fallback->second) : probe.end();
         if (fb_probe != probe.end() && fb_probe->second == RDC_ST_OK) {
           RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
                                              << " is not supported on GPU " << gpu_index
@@ -507,8 +506,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
         } else {
           RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
                                              << " is not supported on GPU " << gpu_index
-                                             << " (status " << status
-                                             << "); skipping this field.");
+                                             << " (status " << status << "); skipping this field.");
         }
         continue;
       }
@@ -529,8 +527,8 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
       if (supported_fields.count(field)) watch_ids.push_back(field);
     }
     if (watch_ids.empty()) {
-      RDC_LOG(RDC_ERROR, "No supported health fields for group " << group_id
-                                                                << "; health watch not set.");
+      RDC_LOG(RDC_ERROR,
+              "No supported health fields for group " << group_id << "; health watch not set.");
       return RDC_ST_NOT_SUPPORTED;
     }
   }
@@ -645,9 +643,8 @@ rdc_status_t RdcWatchTableImpl::pcie_check(const HealthWatchedSet& watched,
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
-                                             RDC_HEALTH_PCIE_REPLAY_COUNT, start_timestamp, &start,
-                                             &end);
+  rdc_status_t result = get_start_end_values(
+      watched, group_id, gpu_index, RDC_HEALTH_PCIE_REPLAY_COUNT, start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t pcie_replay_count = end.value.l_int - start.value.l_int;
@@ -698,8 +695,7 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(const HealthWatchedSet& watched,
     // semantics memory_check applies to ECC_UNCORRECT_TOTAL.
     auto fallback = health_field_fallbacks().find(RDC_HEALTH_XGMI_ERROR);
     if (fallback == health_field_fallbacks().end()) return RDC_ST_OK;
-    result =
-        get_start_end_values(watched, group_id, gpu_index, fallback->second, 0, nullptr, &end);
+    result = get_start_end_values(watched, group_id, gpu_index, fallback->second, 0, nullptr, &end);
     if (result != RDC_ST_OK) return RDC_ST_OK;  // neither source available: skip component
 
     uint64_t ue_count = end.value.l_int;
@@ -845,9 +841,9 @@ rdc_status_t RdcWatchTableImpl::thermal_check(const HealthWatchedSet& watched,
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
-                                             RDC_HEALTH_THERMAL_THROTTLE_TIME, start_timestamp,
-                                             &start, &end);
+  rdc_status_t result =
+      get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_THERMAL_THROTTLE_TIME,
+                           start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_socket_thrm = end.value.l_int - start.value.l_int;
@@ -874,9 +870,8 @@ rdc_status_t RdcWatchTableImpl::power_check(const HealthWatchedSet& watched,
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
-                                             RDC_HEALTH_POWER_THROTTLE_TIME, start_timestamp,
-                                             &start, &end);
+  rdc_status_t result = get_start_end_values(
+      watched, group_id, gpu_index, RDC_HEALTH_POWER_THROTTLE_TIME, start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_ppt_pwr = end.value.l_int - start.value.l_int;
