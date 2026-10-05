@@ -1841,21 +1841,54 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ZeroCostNamedRowCountsAsEligible) {
   EXPECT_EQ(1, tbl.countWritten());
 }
 
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowExcludesPatWhenNothingNamesIt) {
+  // The negative control for the case below: on the automatic path the window really does keep
+  // PAT out at 64 MiB, so the lift that follows is a lift and not a no-op. One rank per node,
+  // which is the only shape where ncclPatEnable can be true.
+  CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllGather);
+  task.algMask = 0;
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
+                                             /*userAlgoInput=*/0, tbl.ptr()));
+  EXPECT_FALSE(tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE));
+}
+
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NamingPatLiftsItsHeuristicSizeWindow) {
-  // The PAT size window exists to keep the AUTO selector off PAT outside a good range, and
-  // NCCL_ALGO already lifts it. A per-call selection is just as explicit, so it must lift it too,
-  // or one selection string succeeds at 1 MiB and hard-fails at 4 MiB on the same comm.
-  CostComm cc;
+  // The window keeps the AUTO selector off PAT outside a good range, and NCCL_ALGO already lifts
+  // it. A per-call selection is just as explicit, so it must lift it too, or one string succeeds
+  // at 1 MiB and is dropped at 64 MiB on the same comm. forceAlgSelection is 0 so the EXPECT below
+  // is what fails if the lift goes away, rather than the call erroring first.
+  CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
   task.algMask = GeneralBit(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE);
-  task.forceAlgSelection = 1;
+  task.forceAlgSelection = 0;
   ScriptAllTimes(1.0f);
 
-  // 64 MiB is outside every nNodes band of the window.
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
                                              /*userAlgoInput=*/0, tbl.ptr()));
   EXPECT_TRUE(tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(1, tbl.countWritten());
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NamingLl128LiftsTheXgmiGate) {
+  // The sibling of the PAT case, and the reason the lift is written per row rather than per
+  // algorithm: NCCL_PROTO lifts the XGMI-only LL128 gate, so naming RING_LL128 per call must too.
+  // Without it the only named row is blanked and the default forceAlgSelection fails the launch.
+  CostComm cc;
+  cc.topo().type = 0;  // not all-XGMI, so the LL128 gate would otherwise fire
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  task.forceAlgSelection = 1;
+  ScriptAllTimes(1.0f);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+  EXPECT_EQ(1, tbl.countWritten());
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_ScaledSentinelCellDoesNotCountAsEligible) {

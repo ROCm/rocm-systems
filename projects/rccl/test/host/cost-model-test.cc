@@ -467,7 +467,7 @@ TEST_F(CostModelMicrotest, SymKernelEnvNarrowsSelectionToTheNamedKernel) {
   EXPECT_EQ(1, comm_->tuningContext.enabled[chosen][ncclFuncAllReduce]);
   const int other = kSymOffset + ncclSymkKernelId_AllReduce_RSxLD_AGxST;
   EXPECT_EQ(0, comm_->tuningContext.enabled[other][ncclFuncAllReduce]);
-  // General kernels are excluded as well -- the two enables share one forced flag.
+  // General kernels are excluded as well: the two enables share one forced flag.
   EXPECT_EQ(0, comm_->tuningContext.enabled[kRingSimple][ncclFuncAllReduce]);
 }
 

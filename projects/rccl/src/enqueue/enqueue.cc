@@ -2944,6 +2944,9 @@ static void initCollCostTable(float** collCostTable) {
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
+// Narrowing the table here does not bind the whole pipeline: getAlgoInfo's arch windows and
+// rcclUpdateCollectiveProtocol (rccl_wrap.cc) rewrite the choice after this returns, a tuner plugin may
+// refill a blanked cell, and a CE/DDA backend is picked in rcclSelect*() before the task exists.
 static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                         int collNetSupport, int nvlsSupport, int numPipeOps, int userAlgoInput,
                                         float** collCostTable) {
@@ -2965,9 +2968,10 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
   uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
   uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
-  // Naming a row per call is as explicit as naming it in NCCL_ALGO, so it lifts the same heuristic
-  // windows below. Without this, one selection string succeeds at 1 MiB and fails at 4 MiB.
-  const bool patNamed = (generalMask >> (NCCL_ALGO_PAT * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)) & 1;
+  // Naming a row per call is as explicit as naming it in NCCL_ALGO or NCCL_PROTO, so it lifts the
+  // same heuristic gates those env vars lift. Otherwise one selection string succeeds at 1 MiB and
+  // fails at 4 MiB, or works only on an all-XGMI node.
+  auto algNamed = [&](int a, int p) { return ((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) != 0; };
 
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
@@ -2984,7 +2988,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))
       continue;
     if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
-      if (!userAlgoInput && !patNamed) {
+      if (!userAlgoInput && !algNamed(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE)) {
         int nNodes = comm->nNodes;
         bool inRange = false;
         if (nNodes <= 4) {
@@ -3007,7 +3011,8 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       userProtoInputCached = true;
     }
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput &&
+          !algNamed(a, p)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3030,7 +3035,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     bool anyLeft = false;
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) && table[a][p] >= 0.0) anyLeft = true;
+        if (algNamed(a, p) && table[a][p] >= 0.0) anyLeft = true;
       }
     }
     // Every named row is ineligible here (NVLS_SIMPLE without NVLS). nccl.h.in makes that an error
@@ -3042,16 +3047,12 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     if (anyLeft) {
       for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
         for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-          if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+          if (!algNamed(a, p)) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         }
       }
     }
   }
 
-  // Narrowing does not bind the whole pipeline: getAlgoInfo's arch windows and
-  // rcclUpdateCollectiveProtocol (rccl_wrap.cc) rewrite the choice after this returns, a tuner
-  // plugin may refill a blanked cell, and a CE/DDA backend is picked in rcclSelect*() before the
-  // task exists. None of them consults algMask.
   return ncclSuccess;
 }
 
