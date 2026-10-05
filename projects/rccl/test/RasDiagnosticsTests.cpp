@@ -395,22 +395,25 @@ static void checkAllReduce(const std::vector<ncclComm_t>& comms)
     }
 }
 
-// One report of a communicator with nRanks ranks: one line per check, each covering all ranks and tagged [OK] or
-// [INFO], the NCCL environment consistent, one completion line and no failure line. The GPU checks may report
-// [INFO] when their data source is unavailable; the report still has to name every rank.
-static void expectCompleteReport(const RasReport& report, int nRanks, const std::string& doneScope)
+// nReports reports, each of a communicator with nRanks ranks: one header, one line per check covering all ranks and
+// tagged [OK] or [INFO], the NCCL environment consistent, one completion line and no failure line. The GPU checks
+// may report [INFO] when their data source is unavailable; the report still has to name every rank.
+static void expectCompleteReport(const RasReport& report, int nRanks, const std::string& doneScope, int nReports = 1)
 {
     const std::string across = "across " + std::to_string(nRanks) + " ranks";
+    EXPECT_EQ(report.count(kRasHeader), nReports) << report.dump();
     for(const char* label : {kGpuInventory, kDriver, kEcc, kEnv})
     {
         const std::vector<std::string> lines = report.checkLines(label);
-        ASSERT_EQ(lines.size(), 1u) << label << "\n" << report.dump();
-        EXPECT_NE(lines.front().find(across), std::string::npos) << lines.front();
+        ASSERT_EQ(lines.size(), static_cast<size_t>(nReports)) << label << "\n" << report.dump();
+        for(const std::string& line : lines)
+            EXPECT_NE(line.find(across), std::string::npos) << line;
     }
-    EXPECT_EQ(report.count(std::string(kTagOk) + kEnv + "NCCL_* env vars consistent " + across), 1) << report.dump();
-    EXPECT_EQ(report.count(std::string(kTagOk) + kDriver), 1) << report.dump();
-    EXPECT_EQ(report.count(kRasDone), 1) << report.dump();
-    EXPECT_EQ(report.countDone(doneScope), 1) << report.dump();
+    EXPECT_EQ(report.count(std::string(kTagOk) + kEnv + "NCCL_* env vars consistent " + across), nReports)
+        << report.dump();
+    EXPECT_EQ(report.count(std::string(kTagOk) + kDriver), nReports) << report.dump();
+    EXPECT_EQ(report.count(kRasDone), nReports) << report.dump();
+    EXPECT_EQ(report.countDone(doneScope), nReports) << report.dump();
     EXPECT_TRUE(report.failures().empty()) << "failure lines:\n" << report.dump();
 }
 
@@ -588,14 +591,15 @@ TEST_F(RasDiagnostics, CommUsableAfterRasDiagnostics)
 {
     runRasCases({{"CommUsableAfterRasDiagnostics", 2, []() {
         ASSERT_GT(setRasEnv(true), 0);
+        const int nGpus = usableGpus();
         StdoutToFile capture;
         ASSERT_TRUE(capture.active());
         std::vector<ncclComm_t> comms;
-        ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
+        ASSERT_NO_FATAL_FAILURE(initAll(comms, nGpus));
         const auto commGuards  = guardComms(comms);
         const RasReport report = capture.waitForReports(1);
         capture.restore();
-        EXPECT_EQ(report.count(kRasDone), 1) << report.dump();
+        expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks");
         checkAllReduce(comms);
     }}});
 }
@@ -648,14 +652,7 @@ TEST_F(RasDiagnostics, RunsAtEveryCommInit)
         const auto childGuards = guardComms(children);
         const RasReport report = capture.waitForReports(2);
         capture.restore();
-
-        const std::string across = "across " + std::to_string(half) + " ranks";
-        EXPECT_EQ(report.count(kRasHeader), 2) << report.dump();
-        EXPECT_EQ(report.count(kRasDone), 2) << report.dump();
-        EXPECT_EQ(report.countDone(std::to_string(half) + " ranks"), 2) << report.dump();
-        EXPECT_EQ(report.count(std::string(kTagOk) + kEnv + "NCCL_* env vars consistent " + across), 2)
-            << report.dump();
-        EXPECT_TRUE(report.failures().empty()) << report.dump();
+        expectCompleteReport(report, half, std::to_string(half) + " ranks", 2);
     };
 
     runRasCases({{"ReinitSameProcess", 2, reinit}, {"CommSplit", 4, split}});
