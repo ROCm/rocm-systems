@@ -33,6 +33,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -63,6 +64,34 @@ inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEng
   const int src = srcFn < 0 ? 0 : srcFn;
   const int dst = dstFn < 0 ? 0 : dstFn;
   return (oamEngine + src + dst) % static_cast<int>(numEngines);
+}
+
+// PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
+// function digit, so an unreadable id is not treated as function 0. The physical BDF is rewritten
+// only in that case; a bad tail is left unchanged.
+struct PciFunctionBus {
+  std::string busId;
+  std::string physBusId;
+  int function;
+};
+
+// Split a BDF into its function digit and the function-0 BDF of the same device. Pure, and beside
+// the two helpers above because it decides the same fallback they do: a tail outside '0'-'7'
+// leaves function at -1 and physBusId equal to busId, which collapses getOamId's candidate list to
+// one entry so the physical-BDF read never runs. PCI function numbers are three bits, so '0'-'7'
+// is the whole range.
+inline PciFunctionBus pciFunctionBus(const std::string& busId) {
+  PciFunctionBus loc;
+  loc.busId = busId;
+  loc.physBusId = busId;
+  loc.function = -1;
+  if (busId.empty()) return loc;
+  const char c = busId.back();
+  if (c >= '0' && c <= '7') {
+    loc.function = c - '0';
+    loc.physBusId.back() = '0';
+  }
+  return loc;
 }
 
 // How an engine was chosen for one peer, and the values that explain the choice. The two failure
@@ -135,6 +164,11 @@ class AnvilLib {
   // second communicator reuses a previous create's queues, so a failed create must not take
   // disconnect()'s whole-process path and destroy handles already live on the GPU.
   void disconnectDevice(int dstDeviceId);
+  // Queues this process currently holds, counted across all engines. The budget is otherwise only
+  // visible in a log line, which leaves the refusal in connect() and the teardown in
+  // disconnectDevice() with nothing a test can assert: a refused connect must leave this unchanged
+  // and a fully abandoned create must bring it back to where it started.
+  uint32_t queuesUsed() const { return queuesUsedTotal_; }
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              const EngineSelection& selection, int* channelIdx = nullptr);

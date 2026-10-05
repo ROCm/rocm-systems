@@ -641,29 +641,6 @@ AnvilLib& AnvilLib::getInstance() {
   return *instance;
 }
 
-// PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
-// function digit, so an unreadable id is not treated as function 0. The physical BDF is rewritten
-// only in that case; a bad tail is left unchanged.
-struct PciFunctionBus {
-  std::string busId;
-  std::string physBusId;
-  int function;
-};
-
-static PciFunctionBus pciFunctionBus(const std::string& busId) {
-  PciFunctionBus loc;
-  loc.busId = busId;
-  loc.physBusId = busId;
-  loc.function = -1;
-  if (busId.empty()) return loc;
-  const char c = busId.back();
-  if (c >= '0' && c <= '7') {
-    loc.function = c - '0';
-    loc.physBusId.back() = '0';
-  }
-  return loc;
-}
-
 int AnvilLib::getOamId(int deviceId) {
   // xgmi_physical_id is a property of the physical GPU. A CPX/DPX partition is a HIP alias at PCI
   // function .1-.7 of that GPU and has no sysfs node of its own, so read the physical function
