@@ -224,11 +224,16 @@ ensure_entry_snapshot(range_context_t&                      ctx,
 
     // Fence against work already in flight so the snapshot sees settled memory: first this queue
     // (a barrier packet through the interceptor's writer, exactly as the kernel-replay window
-    // does), then every other queue on the agent.
-    auto drain_signal = hsa_signal_t{.handle = 0};
-    hsa::Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
-    const auto _destroy_signal = common::scope_destructor{[&]() {
-        if(drain_signal.handle != 0) queue.core_api().hsa_signal_destroy_fn(drain_signal);
+    // does), then every other queue on the agent. The signal comes from the SDK's pool because
+    // creating one costs a KFD event allocation, which a range per iteration would pay every
+    // iteration.
+    auto       drain_signal        = hsa_signal_t{.handle = 0};
+    auto*      pooled_drain_signal = hsa::Queue::create_signal(0, &drain_signal, /*use_pool=*/true);
+    const auto _release_signal     = common::scope_destructor{[&]() {
+        if(pooled_drain_signal != nullptr)
+            hsa::Queue::release_signal(pooled_drain_signal);
+        else if(drain_signal.handle != 0)
+            queue.core_api().hsa_signal_destroy_fn(drain_signal);
     }};
 
     if(writer != nullptr && drain_signal.handle != 0)
