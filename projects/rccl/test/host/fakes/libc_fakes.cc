@@ -23,7 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 
-// LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
+// LogCapture.hpp's ncclDebugLevelMask/ncclDebugMask come from fakes/nccl_fakes.cc,
 // which this binary already links. A libc-only unit reports via plain
 // fprintf(stderr), so CaptureLog works without raising the level.
 
