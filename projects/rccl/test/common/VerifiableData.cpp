@@ -19,11 +19,10 @@
 //   regenerated from the same seed (VerifiableFp8Verify). The result is exact in any
 //   accumulation order, so one reference covers every algorithm and protocol.
 // - ReduceScatter checks its slice at offset globalRank * numOutputElements.
-// - UT_VERIFIABLE_FAULT=1 flips one output byte, as a negative control.
+// - UT_DEVICE_DATA_FAULT=1 flips one output byte, as a negative control.
 namespace RcclUnitTesting
 {
-  // Must be identical on every rank, and independent of the element count so
-  // that RunSimpleSweep can reuse a prepared input for smaller sub-cases.
+  // Must be identical on every rank.
   static uint64_t VerifiableSeed(CollectiveArgs const& collArgs)
   {
     char const* env = getenv("UT_VERIFIABLE_SEED");
@@ -70,8 +69,8 @@ namespace RcclUnitTesting
     intptr_t const eltIx0 = OutputEltIx0(collArgs);
     ncclRedOp_t const redOp = collArgs.options.redOp;
 
-    // Negative control: a correct collective output must fail once one byte is flipped
-    char const* faultEnv = getenv("UT_VERIFIABLE_FAULT");
+    // UT_DEVICE_DATA_FAULT negative control: a correct output must fail once one byte is flipped
+    char const* faultEnv = getenv("UT_DEVICE_DATA_FAULT");
     if (faultEnv != nullptr && atoi(faultEnv) != 0 && collArgs.numOutputElements > 0)
     {
       uint8_t byte = 0;

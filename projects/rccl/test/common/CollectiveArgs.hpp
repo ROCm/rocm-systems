@@ -215,5 +215,10 @@ namespace RcclUnitTesting
     // Returns true if collective function utilizes a root rank
     static bool UsesRoot(ncclFunc_t const funcType);
     ErrCode AttachMem();
+
+    // In-place collectives share one base allocation. Gather/AllGather keep it in outputGpu
+    // and offset inputGpu into it; every other collective keeps it in inputGpu.
+    bool   InPlaceBaseIsOutput() const;
+    size_t InPlaceBaseBytes() const;
   };
 }

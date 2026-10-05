@@ -26,7 +26,8 @@ namespace RcclUnitTesting
 
   // Negative control: when UT_DEVICE_DATA_FAULT is set to a non-zero value, corrupt one
   // expected element so a correct collective output must mismatch (proves device validate
-  // is not a no-op). No-op when the var is unset or "0".
+  // is not a no-op). No-op when the var is unset or "0". FP8 reductions on the verifiable
+  // path flip an output byte instead (VerifiableValidate).
   static ErrCode MaybeInjectDeviceDataFault(CollectiveArgs& collArgs)
   {
     char const* faultEnv = getenv("UT_DEVICE_DATA_FAULT");

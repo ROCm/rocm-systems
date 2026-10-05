@@ -3,7 +3,8 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#pragma once
+#ifndef VERIFIABLE_DATA_HPP
+#define VERIFIABLE_DATA_HPP
 #include "ErrCode.hpp"
 
 namespace RcclUnitTesting
@@ -20,3 +21,5 @@ namespace RcclUnitTesting
   // Compares outputGpu against the generated expected values on the GPU
   ErrCode VerifiableValidate(CollectiveArgs& collArgs);
 }
+
+#endif // VERIFIABLE_DATA_HPP

@@ -107,6 +107,9 @@ namespace RcclUnitTesting
     // Prepare parent/child communication pipes - to be executed by parent process
     int InitPipes();
 
+    // Closes every open pipe descriptor and marks it -1 - to be executed by parent process
+    void ClosePipes();
+
     // Execution
     void StartExecutionLoop();
 

@@ -3,7 +3,8 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#pragma once
+#ifndef VERIFIABLE_FP8_HPP
+#define VERIFIABLE_FP8_HPP
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include "rccl/rccl.h"
@@ -33,3 +34,5 @@ namespace RcclUnitTesting
                                  ncclRedOp_t redOp, int rankN, uint64_t seed, intptr_t eltIx0,
                                  int64_t* badEltN, hipStream_t stream);
 }
+
+#endif // VERIFIABLE_FP8_HPP

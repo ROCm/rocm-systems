@@ -71,23 +71,15 @@ namespace RcclUnitTesting
     // No attachment/offsetting is necessary.
     if (!this->inPlace) return TEST_SUCCESS;
 
+    bool const isScatter = (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter);
     size_t requiredBytes = 0;
-    size_t allocatedBytes = 0;
-    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
-    {
-      requiredBytes  = (this->globalRank + 1) * currentOutputBytes;
-      allocatedBytes = this->numInputBytesAllocated;
-    }
-    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-    {
-      requiredBytes  = (this->globalRank + 1) * currentInputBytes;
-      allocatedBytes = this->numOutputBytesAllocated;
-    }
+    if (isScatter)
+      requiredBytes = (this->globalRank + 1) * currentOutputBytes;
+    else if (this->InPlaceBaseIsOutput())
+      requiredBytes = (this->globalRank + 1) * currentInputBytes;
     else
-    {
-      requiredBytes  = std::max(currentInputBytes, currentOutputBytes);
-      allocatedBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
-    }
+      requiredBytes = std::max(currentInputBytes, currentOutputBytes);
+    size_t const allocatedBytes = this->InPlaceBaseBytes();
     if (requiredBytes > allocatedBytes)
     {
       TEST_ERROR("Rank %d in-place %s needs %zu bytes but only %zu were allocated",
@@ -95,12 +87,12 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
 
-    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+    if (isScatter)
     {
       // inputGpu holds the base pointer. Offset outputGpu.
       this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
     }
-    else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+    else if (this->InPlaceBaseIsOutput())
     {
       // outputGpu holds the base pointer. Offset inputGpu.
       this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
@@ -111,6 +103,20 @@ namespace RcclUnitTesting
       this->outputGpu.Attach(this->inputGpu.ptr);
     }
     return TEST_SUCCESS;
+  }
+
+  bool CollectiveArgs::InPlaceBaseIsOutput() const
+  {
+    return this->funcType == ncclCollGather || this->funcType == ncclCollAllGather;
+  }
+
+  size_t CollectiveArgs::InPlaceBaseBytes() const
+  {
+    if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+      return this->numInputBytesAllocated;
+    if (this->InPlaceBaseIsOutput())
+      return this->numOutputBytesAllocated;
+    return std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
   }
 
   ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
@@ -129,19 +135,8 @@ namespace RcclUnitTesting
 
     if (inPlace)
     {
-      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
-      {
-        CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
-      }
-      else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-      {
-        CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-      }
-      else
-      {
-        size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
-        CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
-      }
+      PtrUnion& base = this->InPlaceBaseIsOutput() ? this->outputGpu : this->inputGpu;
+      CHECK_CALL(base.AllocateGpuMem(this->InPlaceBaseBytes(), useManagedMem, userRegistered));
       CHECK_CALL(this->AttachMem());
     }
     else
@@ -279,16 +274,9 @@ namespace RcclUnitTesting
     // is an alias into it and is cleared without being freed.
     if (this->inPlace)
     {
-      if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-      {
-        track(this->outputGpu.FreeGpuMem(this->userRegistered));
-        this->inputGpu.Attach(nullptr);
-      }
-      else
-      {
-        track(this->inputGpu.FreeGpuMem(this->userRegistered));
-        this->outputGpu.Attach(nullptr);
-      }
+      bool const baseIsOutput = this->InPlaceBaseIsOutput();
+      track((baseIsOutput ? this->outputGpu : this->inputGpu).FreeGpuMem(this->userRegistered));
+      (baseIsOutput ? this->inputGpu : this->outputGpu).Attach(nullptr);
     }
     else
     {

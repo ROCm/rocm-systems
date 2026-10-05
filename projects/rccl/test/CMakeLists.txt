@@ -276,6 +276,7 @@ if(BUILD_TESTS)
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
     DoneEventOrderingTests.cpp
+    Fp8VerifiableTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -311,7 +312,6 @@ if(BUILD_TESTS)
     common/StandaloneUtils.cpp
     common/VerifiableData.cpp
     common/VerifiableFp8.cpp
-    Fp8VerifiableTests.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp

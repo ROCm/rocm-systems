@@ -16,9 +16,12 @@ namespace RcclUnitTesting
 {
   // HIP must stay out of the gtest parent (later tests fork without exec), so device checks
   // run in an isolated child and the GPU count comes from EnvVars' out-of-process probe.
-  static bool HasGpuForIsolatedTest()
+  // Gate in the parent only: EnvVars reports 0 GPUs in a re-exec'd child, and a skipped
+  // child is scored as a pass.
+  static bool ShouldSkipForNoGpu()
   {
-    return EnvVars().maxGpus >= 1;
+    if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr) return false;
+    return EnvVars().maxGpus < 1;
   }
 
   // Non-reduce FP8 collectives (e.g. AllToAll) compare against one reference, bit-exactly:
@@ -51,7 +54,7 @@ namespace RcclUnitTesting
 
   TEST(Fp8Validation, DeviceCompareIsExact)
   {
-    if (!HasGpuForIsolatedTest())
+    if (ShouldSkipForNoGpu())
       GTEST_SKIP() << "Requires a GPU";
 
     RUN_ISOLATED_TEST("Fp8Validation_DeviceCompareIsExact", []()
@@ -86,7 +89,7 @@ namespace RcclUnitTesting
   // so that a missing or duplicated rank changes the result (for Min/Max too).
   TEST(Fp8Validation, VerifiableReferenceDetectsErrors)
   {
-    if (!HasGpuForIsolatedTest())
+    if (ShouldSkipForNoGpu())
       GTEST_SKIP() << "Requires a GPU";
 
     RUN_ISOLATED_TEST("Fp8Validation_VerifiableReferenceDetectsErrors", []()

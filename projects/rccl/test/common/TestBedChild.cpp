@@ -56,24 +56,14 @@ static int getThreadId()
   } while (false)
 #define CHILD_NCCL_CALL_NON_BLOCKING(msg, localRank) CHILD_NCCL_CALL_NON_BLOCKING_BASE(msg, localRank, RETURN_RESULT)
 #define PIPE_READ(val) \
-    if (RcclUnitTesting::detail::safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
+    if (RcclUnitTesting::safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
 
-// Receives a std::vector sent by the parent's PIPE_WRITE_VEC: int element count, then the elements
-#define PIPE_READ_VEC(vec)                                                                    \
-  {                                                                                           \
-    int vecSize = 0;                                                                          \
-    PIPE_READ(vecSize);                                                                       \
-    if (vecSize < 0)                                                                          \
-    {                                                                                         \
-      TEST_ERROR("Child %d received invalid %s size %d", childId, #vec, vecSize);             \
-      return TEST_FAIL;                                                                       \
-    }                                                                                         \
-    (vec).resize(vecSize);                                                                    \
-    ssize_t const vecBytes = static_cast<ssize_t>(vecSize * sizeof((vec)[0]));                \
-    if (vecSize > 0 &&                                                                        \
-        RcclUnitTesting::detail::safe_pipe_read(childReadFd, (vec).data(), vecBytes) != vecBytes) \
-      return TEST_FAIL;                                                                       \
-  }
+#define PIPE_READ_VEC(vec)                                                    \
+    if (!RcclUnitTesting::pipe_read_vec(childReadFd, vec))                    \
+    {                                                                         \
+      TEST_ERROR("Child %d failed to receive %s", childId, #vec);             \
+      return TEST_FAIL;                                                       \
+    }
 
 #ifdef ENABLE_OPENMP
 #define CHILD_NCCL_CALL_RANK(errCode, cmd, msg) CHILD_NCCL_CALL_BASE(cmd, msg, OMP_CANCEL_FOR, errCode)
@@ -124,6 +114,15 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  void TestBedChild::ClosePipes()
+  {
+    for (int* fd : {&this->parentWriteFd, &this->parentReadFd, &this->childWriteFd, &this->childReadFd})
+    {
+      if (*fd >= 0) close(*fd);
+      *fd = -1;
+    }
+  }
+
   void TestBedChild::StartExecutionLoop()
   {
 
@@ -139,7 +138,7 @@ namespace RcclUnitTesting
     int command;
     while (true)
     {
-      if (RcclUnitTesting::detail::safe_pipe_read(childReadFd, &command, sizeof(command)) != sizeof(command)) {
+      if (RcclUnitTesting::safe_pipe_read(childReadFd, &command, sizeof(command)) != sizeof(command)) {
         break;
       }
       ErrCode status = TEST_SUCCESS;
@@ -148,7 +147,7 @@ namespace RcclUnitTesting
         // report the failure to the parent, then stop.
         TEST_ERROR("Child %d received invalid command ID: %d", this->childId, command);
         status = TEST_FAIL;
-        RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
         goto stop;
       }
 
@@ -173,19 +172,19 @@ namespace RcclUnitTesting
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
         status = TEST_FAIL;
-        RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
         goto stop;
       }
 
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
-      if (RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
+      if (RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
         TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
         break;
       }
       if (retValBuf.size() > 0 &&
-          RcclUnitTesting::detail::safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
+          RcclUnitTesting::safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
         TEST_ERROR("Child %d write return value to parent failed: %s", this->childId, strerror(errno));
         break;
       }
@@ -1050,12 +1049,8 @@ namespace RcclUnitTesting
     if (!streamsToComplete.empty())
     {
       if (this->verbose) TEST_INFO("Collective timed out, aborting");
-      for (int localRank : localRanksToExecute)
-      {
-        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-        ncclCommAbort(this->comms[localRank]);
-        timedout = 1;
-      }
+      this->AbortComms();
+      timedout = 1;
     }
 
     // extra sync to flush GPU cache for validation later
@@ -1212,6 +1207,20 @@ namespace RcclUnitTesting
   ErrCode TestBedChild::DeregisterMemInternal(int groupId, int collId, int localRank)
   {
     if (this->verbose) TEST_INFO("Child %d begins DeregisterMemInternal", this->childId);
+    // An aborted comm released its windows and registrations; only the stale handles remain.
+    if (this->comms[localRank] == nullptr)
+    {
+      for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+      {
+        if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
+        CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+        collArg.inputWin        = nullptr;
+        collArg.outputWin       = nullptr;
+        collArg.inputRegHandle  = nullptr;
+        collArg.outputRegHandle = nullptr;
+      }
+      return TEST_SUCCESS;
+    }
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     // Enclose RCCL deregistration calls in a group for safety
@@ -1748,36 +1757,14 @@ namespace RcclUnitTesting
     return status;
   }
 
-  // In-place collectives share one base allocation; see CollectiveArgs::AllocateMem.
-  static void InPlaceBaseAllocation(CollectiveArgs const& collArg, void** buff, size_t* bufSize)
-  {
-    ncclFunc_t const fn = collArg.funcType;
-    if (fn == ncclCollScatter || fn == ncclCollReduceScatter)
-    {
-      *buff = collArg.inputGpu.ptr;
-      *bufSize = collArg.numInputBytesAllocated;
-    }
-    else if (fn == ncclCollGather || fn == ncclCollAllGather)
-    {
-      *buff = collArg.outputGpu.ptr;
-      *bufSize = collArg.numOutputBytesAllocated;
-    }
-    else
-    {
-      *buff = collArg.inputGpu.ptr;
-      *bufSize = std::max(collArg.numInputBytesAllocated, collArg.numOutputBytesAllocated);
-    }
-  }
-
   // Must run inside the caller's ncclGroupStart/End: the window handles are only
   // final after ncclGroupEnd().
   ErrCode TestBedChild::RegisterMemSymmetric(int const localRank, CollectiveArgs& collArg)
   {
     if (collArg.inPlace)
     {
-      void* buff = nullptr;
-      size_t bufSize = 0;
-      InPlaceBaseAllocation(collArg, &buff, &bufSize);
+      void* const  buff    = (collArg.InPlaceBaseIsOutput() ? collArg.outputGpu : collArg.inputGpu).ptr;
+      size_t const bufSize = collArg.InPlaceBaseBytes();
       if (buff == nullptr || bufSize == 0) return TEST_SUCCESS;
 
       if (this->verbose)
@@ -1813,9 +1800,8 @@ namespace RcclUnitTesting
   {
     if (collArg.inPlace)
     {
-      void* buff = nullptr;
-      size_t bufSize = 0;
-      InPlaceBaseAllocation(collArg, &buff, &bufSize);
+      void* const  buff    = (collArg.InPlaceBaseIsOutput() ? collArg.outputGpu : collArg.inputGpu).ptr;
+      size_t const bufSize = collArg.InPlaceBaseBytes();
       if (buff == nullptr || bufSize == 0) return TEST_SUCCESS;
 
       CHILD_NCCL_CALL(

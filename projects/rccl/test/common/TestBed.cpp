@@ -14,14 +14,14 @@
 #include <rccl/rccl.h>
 
 #define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), \
+  ASSERT_EQ(RcclUnitTesting::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), \
             static_cast<ssize_t>(sizeof(val)))
 
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
-    ssize_t retval = RcclUnitTesting::detail::safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
+    ssize_t retval = RcclUnitTesting::safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
@@ -39,18 +39,6 @@
       exit(1);                                                                          \
     }                                                                                   \
   }
-
-// Sends a std::vector as its int element count followed by its elements (see the child's PIPE_READ_VEC)
-#define PIPE_WRITE_VEC(childId, vec)                                                              \
-  {                                                                                               \
-    int const vecSize = static_cast<int>((vec).size());                                           \
-    PIPE_WRITE(childId, vecSize);                                                                 \
-    ssize_t const vecBytes = static_cast<ssize_t>(vecSize * sizeof((vec)[0]));                    \
-    if (vecSize > 0)                                                                              \
-      ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,       \
-                                                         (vec).data(), vecBytes), vecBytes);      \
-  }
-
 #define PIPE_CHECK(childId)                         \
   {                                                 \
     int response = 0;                               \
@@ -118,21 +106,9 @@ namespace RcclUnitTesting
     if (child == nullptr)
       return false;
 
-    auto closePipes = [child]()
-    {
-      if (child->parentWriteFd >= 0) close(child->parentWriteFd);
-      if (child->parentReadFd >= 0) close(child->parentReadFd);
-      if (child->childWriteFd >= 0) close(child->childWriteFd);
-      if (child->childReadFd >= 0) close(child->childReadFd);
-      child->parentWriteFd = -1;
-      child->parentReadFd = -1;
-      child->childWriteFd = -1;
-      child->childReadFd = -1;
-    };
-
     if (child->InitPipes() != TEST_SUCCESS)
     {
-      closePipes();
+      child->ClosePipes();
       return false;
     }
 
@@ -145,7 +121,7 @@ namespace RcclUnitTesting
     {
       TEST_ERROR("Unable to configure pipe descriptors for child %d: %s",
                  child->childId, strerror(errno));
-      closePipes();
+      child->ClosePipes();
       return false;
     }
 
@@ -161,7 +137,7 @@ namespace RcclUnitTesting
     std::string const sMemAllocType = std::to_string(static_cast<int>(memAllocType));
 
     char const* childArgv[TestBedChild::NUM_CHILD_ARGS + 1] = {};
-    childArgv[0]                                      = "rccl_unit_test";
+    childArgv[0]                                      = program_invocation_name; // parent's argv[0]
     childArgv[TestBedChild::CHILD_ARG_FLAG]           = TestBedChild::kChildFlag;
     childArgv[TestBedChild::CHILD_ARG_ID]             = sChildId.c_str();
     childArgv[TestBedChild::CHILD_ARG_READ_FD]        = sChildReadFd.c_str();
@@ -183,7 +159,7 @@ namespace RcclUnitTesting
     if (pid < 0)
     {
       TEST_ERROR("fork() failed for child %d: %s", child->childId, strerror(errno));
-      closePipes();
+      child->ClosePipes();
       return false;
     }
 
@@ -383,7 +359,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numGroupCalls);
 
       // Send the number of collectives to be run per group call
-      PIPE_WRITE_VEC(childId, this->numCollectivesInGroup);
+      ASSERT_TRUE(RcclUnitTesting::pipe_write_vec(childList[childId]->parentWriteFd, this->numCollectivesInGroup));
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -396,7 +372,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call
-      PIPE_WRITE_VEC(childId, this->numStreamsPerGroup);
+      ASSERT_TRUE(RcclUnitTesting::pipe_write_vec(childList[childId]->parentWriteFd, this->numStreamsPerGroup));
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();
@@ -618,9 +594,11 @@ namespace RcclUnitTesting
     {
       FAIL() << "Symmetric window registration requires all ranks (rank = -1), got rank " << rank;
     }
-    if (!this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered))
+    // Symmetric windows need ncclMemAlloc buffers, which userRegistered selects.
+    bool const useNcclMemAlloc = userRegistered || this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN;
+    if (!this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,useNcclMemAlloc))
       return;
-    if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN || userRegistered)
+    if (useNcclMemAlloc)
       this->RegisterMemInternal(groupId,collId,rank);
   }
 
@@ -941,7 +919,7 @@ namespace RcclUnitTesting
       if (child == nullptr)
         continue;
       if (child->pid > 0 && child->parentWriteFd >= 0)
-        (void)RcclUnitTesting::detail::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
+        (void)RcclUnitTesting::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
       if (child->parentWriteFd >= 0)
       {
         close(child->parentWriteFd);
@@ -1001,11 +979,10 @@ namespace RcclUnitTesting
         continue;
       }
       // Only a forked worker (pid > 0) has a reader on the pipe; skip the STOP write for a
-      // never-forked entry. close(-1) on an unopened fd is a harmless no-op.
+      // never-forked entry.
       if (c->pid > 0 && c->parentWriteFd >= 0)
-        (void)RcclUnitTesting::detail::safe_pipe_write(c->parentWriteFd, &cmd, sizeof(cmd));
-      close(c->parentWriteFd);
-      close(c->parentReadFd);
+        (void)RcclUnitTesting::safe_pipe_write(c->parentWriteFd, &cmd, sizeof(cmd));
+      c->ClosePipes();
     }
     for (TestBedChild* c : this->poolChildren)
     {
@@ -1281,7 +1258,7 @@ namespace RcclUnitTesting
           // Only allocate once for largest size
           if (neIdx == 0)
           {
-            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx],-1,-1,-1, (memAllocType == MEM_ALLOC_SYMMETRIC_WIN));
+            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);
             if (testing::Test::HasFailure())
             {
               isCorrect = false;
@@ -1291,13 +1268,10 @@ namespace RcclUnitTesting
 
           for (int hgIdx = 0; hgIdx < useHipGraphList.size() && isCorrect; ++hgIdx)
           {
-            // There are some cases when data does not need to be re-prepared
-            // e.g. AllReduce subarray expected results are still valid
-            bool canSkip = (neIdx != 0 && !inPlaceList[ipIdx] &&
-                            (funcTypes[ftIdx] == ncclCollBroadcast ||
-                             funcTypes[ftIdx] == ncclCollReduce    ||
-                             funcTypes[ftIdx] == ncclCollAllReduce));
-            if (!canSkip) this->PrepareData();
+            // Re-prepare every sub-case, even when a prefix of the previous expected values is
+            // still valid: PrepareData also clears the output, so a smaller collective that
+            // writes nothing cannot pass on the output a larger run left behind.
+            this->PrepareData();
             if (testing::Test::HasFailure())
             {
               isCorrect = false;

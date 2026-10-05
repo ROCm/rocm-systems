@@ -5,9 +5,8 @@
  ************************************************************************/
 
 #include "VerifiableFp8.hpp"
-#include "rccl_float8.h"
+#include "DeviceDataOps.hpp"
 #include <algorithm>
-#include <type_traits>
 
 // Design:
 // - Each element is hashed from (seed, element index); each rank's value from that hash and
@@ -20,9 +19,9 @@
 //   Prod: one rank sends a random mantissa, up to 3 send +-2, the rest +-1.
 //   Min/Max: independent random values per rank. Avg: two ranks send small integers.
 // - The expected value is a plain float fold over the ranks' values, which is exact.
-// - Kernels take raw FP8 bytes and touch rccl_float8 / rccl_bfloat8 only in device code,
-//   where they are the device's native encoding (fnuz or OCP), as RCCL's collectives use
-//   (see DeviceDataOps.hpp for why templated kernels on these types cannot be launched).
+// - Kernels are templated on Fp8Bits' format flag, not on rccl_float8 / rccl_bfloat8 (see
+//   DeviceDataOps.hpp), and convert only in device code, where the native type is the
+//   device's encoding (fnuz or OCP), as RCCL's collectives use.
 namespace RcclUnitTesting
 {
   namespace
@@ -37,26 +36,26 @@ namespace RcclUnitTesting
       return x ^ (x >> 31);
     }
 
-    template <typename T>
+    template <bool IsE5m2>
     __device__ uint8_t ToFp8(float x)
     {
-      T const v(x);
-      return *reinterpret_cast<uint8_t const*>(&v);
+      using B = Fp8Bits<IsE5m2>;
+      return B::From(typename B::Native(x)).bits;
     }
 
-    template <typename T>
+    template <bool IsE5m2>
     __device__ float FromFp8(uint8_t bits)
     {
-      return (float)*reinterpret_cast<T const*>(&bits);
+      return (float)Fp8Bits<IsE5m2>{bits}.Get();
     }
 
     // Rank's value for the element whose hash is h. Values are small integers times powers of
     // two, bounded so that every partial sum or product over any subset of ranks is exactly
     // representable in both FP8 formats: the reduction is exact in any order and precision.
-    template <typename T>
+    template <bool IsE5m2>
     __device__ float Contribution(int redOp, int rankN, int rank, uint64_t h)
     {
-      constexpr int M      = std::is_same<T, rccl_bfloat8>::value ? 2 : 3; // Mantissa bits
+      constexpr int M      = IsE5m2 ? 2 : 3;                                // Mantissa bits
       constexpr int maxInt = (2 << M) - 1;                                  // Integers exact up to here
       int      const pos  = (rank + (int)(h % rankN)) % rankN; // Position in a per-element rotation
       uint64_t const hr   = Mix(h ^ (uint64_t)(rank + 1));     // Per-rank bits
@@ -87,21 +86,21 @@ namespace RcclUnitTesting
       }
     }
 
-    template <typename T>
+    template <bool IsE5m2>
     __device__ uint8_t Expected(int redOp, int rankN, uint64_t h)
     {
       float acc = 0.0f;
       for (int r = 0; r < rankN; ++r)
       {
-        float x = Contribution<T>(redOp, rankN, r, h);
-        if (redOp == ncclAvg) x = FromFp8<T>(ToFp8<T>(x * (1.0f / rankN)));
+        float x = Contribution<IsE5m2>(redOp, rankN, r, h);
+        if (redOp == ncclAvg) x = FromFp8<IsE5m2>(ToFp8<IsE5m2>(x * (1.0f / rankN)));
         if (r == 0 && redOp != ncclAvg) acc = x;
         else if (redOp == ncclProd)     acc *= x;
         else if (redOp == ncclMax)      acc = fmaxf(acc, x);
         else if (redOp == ncclMin)      acc = fminf(acc, x);
         else                            acc += x;
       }
-      return ToFp8<T>(acc);
+      return ToFp8<IsE5m2>(acc);
     }
 
     __device__ uint64_t ElementHash(uint64_t seed, intptr_t index)
@@ -110,45 +109,42 @@ namespace RcclUnitTesting
     }
 
     // rankMe < 0 generates the expected result instead of an input
-    template <typename T>
+    template <bool IsE5m2>
     __device__ void GenerateBody(uint8_t* elts, intptr_t eltN, int redOp, int rankN, int rankMe,
                                  uint64_t seed, intptr_t eltIx0)
     {
       for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
       {
         uint64_t const h = ElementHash(seed, eltIx0 + i);
-        elts[i] = rankMe < 0 ? Expected<T>(redOp, rankN, h) : ToFp8<T>(Contribution<T>(redOp, rankN, rankMe, h));
+        elts[i] = rankMe < 0 ? Expected<IsE5m2>(redOp, rankN, h) : ToFp8<IsE5m2>(Contribution<IsE5m2>(redOp, rankN, rankMe, h));
       }
     }
 
-    template <typename T>
+    template <bool IsE5m2>
     __device__ void VerifyBody(uint8_t const* results, intptr_t eltN, int redOp, int rankN,
                                uint64_t seed, intptr_t eltIx0, int tolerance, int64_t* badEltN)
     {
       unsigned long long bad = 0;
       for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
       {
-        int const expected = Expected<T>(redOp, rankN, ElementHash(seed, eltIx0 + i));
+        int const expected = Expected<IsE5m2>(redOp, rankN, ElementHash(seed, eltIx0 + i));
         bad += abs((int)results[i] - expected) > tolerance ? 1 : 0;
       }
       atomicAdd((unsigned long long*)badEltN, bad);
     }
 
     template <bool IsE5m2>
-    using Fp8 = typename std::conditional<IsE5m2, rccl_bfloat8, rccl_float8>::type;
-
-    template <bool IsE5m2>
     __global__ void GenerateKernel(uint8_t* elts, intptr_t eltN, int redOp, int rankN,
                                    int rankMe, uint64_t seed, intptr_t eltIx0)
     {
-      GenerateBody<Fp8<IsE5m2>>(elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
+      GenerateBody<IsE5m2>(elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
     }
 
     template <bool IsE5m2>
     __global__ void VerifyKernel(uint8_t const* results, intptr_t eltN, int redOp, int rankN,
                                  uint64_t seed, intptr_t eltIx0, int tolerance, int64_t* badEltN)
     {
-      VerifyBody<Fp8<IsE5m2>>(results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
+      VerifyBody<IsE5m2>(results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
     }
 
     bool IsSupported(ncclDataType_t dataType, ncclRedOp_t redOp, int rankN)

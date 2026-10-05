@@ -498,7 +498,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
         std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
-        std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected element (default off)"),
+        std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected (FP8 verifiable: output) element (default off)"),
       };
 
     printf("================================================================================\n");
