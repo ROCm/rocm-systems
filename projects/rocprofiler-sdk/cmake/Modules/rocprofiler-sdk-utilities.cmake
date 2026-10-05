@@ -60,6 +60,29 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
     endif()
 endfunction()
 
+# Locates the rocprof-trace-decoder library used by the thread trace (ATT) samples and
+# tests, setting attdecoder_LIBRARY, attdecoder_LIB_DIR and attdecoder_FOUND in the
+# caller's scope. ROCPROFILER_SDK_TRACE_DECODER_ROOT is searched ahead of ${ROCM_PATH} so
+# that a decoder which is not installed under ROCm (e.g. a standalone build directory) can
+# be used. A macro so that the results are visible to the caller.
+macro(rocprofiler_sdk_find_trace_decoder)
+    include(FindPackageHandleStandardArgs)
+
+    find_library(
+        attdecoder_LIBRARY
+        NAMES rocprof-trace-decoder
+        HINTS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
+        PATHS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
+        PATH_SUFFIXES lib)
+
+    if(attdecoder_LIBRARY)
+        cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
+    endif()
+
+    find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
+                                                               attdecoder_LIBRARY)
+endmacro()
+
 # Reports whether the KFD device node (/dev/kfd) is present. Absence typically indicates a
 # WSL2/DXG environment (or a container without KFD passthrough), where GPU work is
 # scheduled through the dxg path instead of the native KFD driver.
