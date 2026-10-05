@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 /*
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
  * Copyright (c) 2007 Jakob Bornecrantz <wallbraker@gmail.com>

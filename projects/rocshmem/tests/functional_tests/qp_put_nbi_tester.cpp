@@ -26,7 +26,7 @@
 
 #include <rocshmem/rocshmem.hpp>
 #include "gda/context_gda_device.hpp"
-#include "gda/queue_pair.hpp"
+#include "gda/queue_pair_provider.hpp"
 #include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
@@ -51,11 +51,6 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
 
     QueuePair &qp = gda_ctx->qps[target];
 
-    uintptr_t local_base =
-        reinterpret_cast<uintptr_t>(gda_ctx->base_heap[pe]);
-    uintptr_t remote_base =
-        reinterpret_cast<uintptr_t>(gda_ctx->base_heap[target]);
-
     int wg_id = hipBlockIdx_x;
     int start_slot = (batch - (skip % batch)) % batch;
 
@@ -76,11 +71,7 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
         }
       }
 
-      uintptr_t d_offset =
-          reinterpret_cast<uintptr_t>(dest + size * slot) - local_base;
-      void *remote_addr = reinterpret_cast<void *>(remote_base + d_offset);
-
-      qp.put_nbi_single(remote_addr, source, size, true);
+      qp.put_nbi_single(&dest[slot * size], source, size);
     }
 
     qp.quiet_single();

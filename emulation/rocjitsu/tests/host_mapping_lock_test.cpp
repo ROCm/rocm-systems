@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <barrier>
+#include <chrono>
+#include <future>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -40,4 +44,59 @@ TEST(HostMappingLockTest, ChildResetsLockHeldByVanishedThread) {
   EXPECT_EQ(WEXITSTATUS(status), 0);
   // The child's reset must also leave the parent's lock usable.
   util::ObservableSharedMutex::ExclusiveGuard lock = rocjitsu::host_mapping_lock().lock_exclusive();
+}
+
+TEST(HostMappingLockTest, QuantumKeepsHostMappingLeasesOperationScoped) {
+  using namespace std::chrono_literals;
+
+  // Isolate the test so an implementation bug that deadlocks a nested access
+  // becomes a bounded failure rather than hanging the whole suite.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    rocjitsu::reset_host_mapping_lock_after_fork();
+
+    const rocjitsu::amdgpu::GpuVmAccessBatchGuard outer_batch;
+    const rocjitsu::amdgpu::GpuVmAccessBatchGuard inner_batch;
+    std::atomic<bool> writer_acquired{false};
+    std::thread writer;
+    {
+      auto access = rocjitsu::host_mapping_lock().lock_shared();
+      writer = std::thread([&] {
+        auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+        writer_acquired.store(true, std::memory_order_release);
+      });
+
+      const auto deadline = std::chrono::steady_clock::now() + 5s;
+      while (rocjitsu::host_mapping_lock().blocked_writers() == 0) {
+        if (std::chrono::steady_clock::now() >= deadline)
+          _exit(1);
+        std::this_thread::yield();
+      }
+
+      if (writer_acquired.load(std::memory_order_acquire))
+        _exit(2);
+    }
+    writer.join();
+    if (!writer_acquired.load(std::memory_order_acquire))
+      _exit(3);
+
+    auto exclusive = rocjitsu::host_mapping_lock().lock_exclusive();
+    auto ordinary_access = std::async(std::launch::async, [] {
+      auto access = rocjitsu::host_mapping_lock().lock_shared();
+      return true;
+    });
+    if (ordinary_access.wait_for(100ms) != std::future_status::timeout)
+      _exit(4);
+    exclusive.unlock();
+    if (ordinary_access.wait_for(2s) != std::future_status::ready || !ordinary_access.get())
+      _exit(5);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
