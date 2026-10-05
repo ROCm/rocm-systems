@@ -3364,7 +3364,16 @@ protected:
   // Publish the team's exchange entries, as the all-gather would. Each peer
   // reports a distinct process unless told to impersonate ours.
   std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherPeers(int sameProcRank = -1) {
-    return [this, sameProcRank](void*, int*, int self, int size, void* buf, int) {
+    return GatherPeersWith([](ExchangeEntry&, int, int) {}, sameProcRank);
+  }
+
+  // The same record, with a hook to rewrite each entry once the defaults are
+  // in. The refusal cases differ from the baseline in one or two fields, and
+  // restating the whole record in each of them means a field added later gets
+  // set in one place and stays silently zero in the rest.
+  std::function<ncclResult_t(void*, int*, int, int, void*, int)> GatherPeersWith(
+      std::function<void(ExchangeEntry& e, int r, int self)> mutate, int sameProcRank = -1) {
+    return [this, mutate, sameProcRank](void*, int*, int self, int size, void* buf, int) {
       auto* e = static_cast<ExchangeEntry*>(buf);
       for (int r = 0; r < size; r++) {
         e[r].hostHash = (r == self || r == sameProcRank) ? peers[0].hostHash : 500 + r;
@@ -3373,6 +3382,7 @@ protected:
         e[r].userSize = 4096;
         e[r].allocSize = 8192;  // covers userOffset + userSize for this team
         e[r].isCuMem = 0;
+        mutate(e[r], r, self);
       }
       return ncclSuccess;
     };
@@ -3423,18 +3433,7 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
 // ncclCuMemEnable() is stubbed to 0 for this suite.
 TEST_F(WindowRegisterNonSymIpcTest, CuMemPeerWhileDisabled_Fails) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
-                    [this](void*, int*, int self, int size, void* buf, int) {
-                      auto* e = static_cast<ExchangeEntry*>(buf);
-                      for (int r = 0; r < size; r++) {
-                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
-                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
-                        e[r].userOffset = 0;
-                        e[r].userSize = 4096;
-                        e[r].allocSize = 4096;
-                        e[r].isCuMem = r == self ? 0 : 1;
-                      }
-                      return ncclSuccess;
-                    });
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) { e.isCuMem = (r == self) ? 0 : 1; }));
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3447,18 +3446,12 @@ TEST_F(WindowRegisterNonSymIpcTest, CuMemPeerWhileDisabled_Fails) {
 // sum comparison would accept it.
 TEST_F(WindowRegisterNonSymIpcTest, UserRangeExceedsAlloc_Fails) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
-                    [this](void*, int*, int self, int size, void* buf, int) {
-                      auto* e = static_cast<ExchangeEntry*>(buf);
-                      for (int r = 0; r < size; r++) {
-                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
-                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
-                        e[r].userOffset = r == self ? 0 : static_cast<size_t>(-1) - 16;
-                        e[r].userSize = r == self ? 4096 : 64;
-                        e[r].allocSize = 4096;
-                        e[r].isCuMem = 0;
-                      }
-                      return ncclSuccess;
-                    });
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      e.userOffset = static_cast<size_t>(-1) - 16;
+                      e.userSize = 64;  // userOffset + userSize wraps past 0
+                      e.allocSize = 4096;
+                    }));
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3472,20 +3465,39 @@ TEST_F(WindowRegisterNonSymIpcTest, UserRangeExceedsAlloc_Fails) {
 // above short-circuits before reaching it.
 TEST_F(WindowRegisterNonSymIpcTest, UserRangeOverrunsAllocWithoutWrapping_Fails) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
-                    [this](void*, int*, int self, int size, void* buf, int) {
-                      auto* e = static_cast<ExchangeEntry*>(buf);
-                      for (int r = 0; r < size; r++) {
-                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
-                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
-                        // 2048 + 4096 overruns 4096 by exactly one window, and
-                        // the sum does not wrap, so the second clause decides.
-                        e[r].userOffset = r == self ? 0 : 2048;
-                        e[r].userSize = 4096;
-                        e[r].allocSize = 4096;
-                        e[r].isCuMem = 0;
-                      }
-                      return ncclSuccess;
-                    });
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      // 2048 + 4096 overruns 4096 by exactly one window, and
+                      // the sum does not wrap, so the second clause decides.
+                      e.userOffset = 2048;
+                      e.allocSize = 4096;
+                    }));
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// The bound is the local window size, not the size the peer published. A peer
+// reporting userSize 0 at the very end of its allocation is self-consistent, so
+// a check against its own size accepts it, but ncclDevrGetLsaRankPtr still
+// admits every offset below the local 4096 and adds it to a pointer already at
+// the end of the mapping. Comparing peers[r].userSize here passes this case.
+TEST_F(WindowRegisterNonSymIpcTest, PeerRangeTooSmallForLocalWindow_Fails) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    GatherPeersWith([](ExchangeEntry& e, int r, int self) {
+                      if (r == self) return;
+                      // Nothing left after the offset, and the peer claims to
+                      // want nothing, so both clauses pass against its size.
+                      e.userOffset = 4096;
+                      e.userSize = 0;
+                      e.allocSize = 4096;
+                    }));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void**, hipIpcMemHandle_t, unsigned int) {
+    ADD_FAILURE() << "a peer whose allocation cannot hold the local window must not be mapped";
+    return hipErrorInvalidValue;
+  });
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3670,6 +3682,22 @@ protected:
     };
   }
 
+  // Same, but with the queried pointer sitting `below` bytes inside its
+  // allocation. AddressRangeOf puts the base on the pointer, which makes
+  // userOffset 0 and allocSize equal to the window size, so the three fields a
+  // rank publishes about itself all carry the same value and swapping any of
+  // them for another still passes. Separating the base gives each one a
+  // distinct value. Keep below + window <= segSize or the walk sees a second
+  // segment and registration is refused.
+  std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> AddressRangeBelow(size_t below,
+                                                                                        size_t segSize) {
+    return [below, segSize](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+      if (pbase) *pbase = static_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - below);
+      if (psize) *psize = segSize;
+      return hipSuccess;
+    };
+  }
+
   // What this rank wrote into its own slot, captured before the hook overwrites
   // the buffer with synthetic peers. A gather hook that overwrites every entry
   // hides the published record completely, so nothing can check that a rank
@@ -3705,7 +3733,10 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
     if (h) *h = kRetained;
     return hipSuccess;
   });
-  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  // The window starts 1 KiB into an 8 KiB allocation, so the three fields this
+  // rank publishes about itself -- allocSize 8192, userOffset 1024, userSize
+  // 4096 -- are all different and each assertion below pins one expression.
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeBelow(/*below=*/1024, /*segSize=*/8192));
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
   // 8 KiB published under a 4 KiB user slice, so the size handed to the import
   // is visibly the whole allocation rather than the caller's request.
@@ -3778,13 +3809,14 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
   EXPECT_EQ(trackedSizes[0], 8192u);
 
   // What this rank broadcast about itself: the retained handle, flagged cuMem,
-  // over the segment the handle actually covers.
+  // over the segment the handle actually covers. The three sizes are distinct,
+  // so publishing userPtr for allocBase or userSize for allocSize is caught.
   ASSERT_TRUE(capturedSelf);
   EXPECT_EQ(publishedSelf.isCuMem, 1);
   EXPECT_EQ(publishedSelf.cuMemHandle, reinterpret_cast<uint64_t>(kRetained));
-  EXPECT_EQ(publishedSelf.allocSize, 4096u);
-  EXPECT_EQ(publishedSelf.userOffset, 0u);
-  EXPECT_EQ(publishedSelf.userSize, 4096u);  // Register()'s default window size
+  EXPECT_EQ(publishedSelf.allocSize, 8192u);  // the whole segment, not the window
+  EXPECT_EQ(publishedSelf.userOffset, 1024u);  // where the window starts in it
+  EXPECT_EQ(publishedSelf.userSize, 4096u);   // Register()'s default window size
 
   // No owner is published for either import, so ncclCommSuspend leaves the
   // mapping in place instead of releasing something resume cannot re-match.
@@ -3811,6 +3843,74 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
     EXPECT_EQ(::close(fd), -1);
     EXPECT_EQ(errno, EBADF);
   }
+}
+
+// Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
+// to pick the release that matches how each peer was opened. windowCloseIpcPeers
+// reads ipcPeerIsCuMem[r] to choose, and the refusal cases above all stop at the
+// first non-self peer or earlier, so no test has reached it with that flag set.
+// Rank 1 imports, rank 2 fails on the proxy fd, and rank 1's mapping must be
+// released with ncclCudaFree -- cudaIpcCloseMemHandle would leave the imported
+// handle pinned.
+TEST_F(WindowRegisterNonSymCuMemTest, PeerImportFailsAfterCuMemPeerMapped_ReleasesAsCuMem) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = kRetained;
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherCuMemPeers(8192));
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           if (g) *g = 4096;
+                           return hipSuccess;
+                         });
+  // Rank 1 gets a real fd and imports; rank 2 is refused, which is what drops
+  // the registration while rank 1 is already mapped.
+  int fdCalls = 0;
+  ScopedHook proxyFd(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (++fdCalls == 2) return ncclSystemError;
+    const int dup3d = dup(STDERR_FILENO);
+    if (fd) *fd = dup3d;
+    return dup3d < 0 ? ncclSystemError : ncclSuccess;
+  });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
+                      if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x6060);
+                      return hipSuccess;
+                    });
+  ScopedHook reserve(g_hipMemAddressReserve, [&](void** p, size_t, size_t, void*, unsigned long long) {
+    if (p) *p = kPeerBase;
+    return hipSuccess;
+  });
+  ScopedHook map(g_hipMemMap,
+                 [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+                   return hipSuccess;
+                 });
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; });
+  // The two halves of the cuMem release. Taking the legacy close instead would
+  // leave both of these at zero.
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook ipcClose(g_hipIpcCloseMemHandle, [](void*) {
+    ADD_FAILURE() << "a cuMem import must not be released with the legacy IPC close";
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+
+  EXPECT_EQ(proxyFd.calls, 2);
+  EXPECT_EQ(import.calls, 1);  // only rank 1 got far enough to import
+  // Rank 1's mapping went back through the cuMem path exactly once. Rank 2 never
+  // recorded an alloc base, so it contributes nothing to either count.
+  EXPECT_EQ(unmap.calls, 1);
+  EXPECT_EQ(addrFree.calls, 1);
+  EXPECT_EQ(ipcClose.calls, 0);
 }
 
 // Branch: the retained handle covers one VMM segment but the window spans more
