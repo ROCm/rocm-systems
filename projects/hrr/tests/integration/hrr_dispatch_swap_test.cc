@@ -78,6 +78,7 @@ namespace {
 #define HRR_SWAP_MARKER "HRR_DISPATCH_SWAP"
 #define HRR_FORK_MARKER "HRR_FORK_CHILD"
 #define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
+#define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
 
 // Big enough that the failing write is cut off by the file size limit, which
 // is set well below it and well above anything else the capture writes then.
@@ -231,19 +232,25 @@ TEST_CASE("Unit_HRR_FailedBlobWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// The blob is buffered whole only if the stdio buffer is larger than it.
+// Reports the block size and the copy's result for the driver to check: the
+// blob is buffered whole only if the stdio buffer is larger than it.
 TEST_CASE("Unit_HRR_FailedBlobClose_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   const char* out = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
-  REQUIRE(out != nullptr);
   struct stat st {};
-  REQUIRE(stat(out, &st) == 0);
-  INFO("block size " << st.st_blksize << " would make fwrite() fail, not fclose()");
-  REQUIRE((st.st_blksize <= 0 || static_cast<size_t>(st.st_blksize) > kSmallBlob));
+  const long long blksize =
+      out && stat(out, &st) == 0 ? static_cast<long long>(st.st_blksize) : -1;
 
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, kSmallBlob));
-  HRR_HIP_CHECK(memcpy_with_failing_blob(dev, kSmallBlob, kSmallFileSizeLimit));
+  // Under the limit no other file may grow past it, so the runtime loads
+  // whatever a small copy needs first, with a copy of another size.
+  std::vector<unsigned char> warm(kSmallBlob - 512, 0x4b);
+  HRR_HIP_CHECK(hipMemcpy(dev, warm.data(), warm.size(), hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  const hipError_t err = memcpy_with_failing_blob(dev, kSmallBlob, kSmallFileSizeLimit);
+  printf(HRR_CLOSE_MARKER " blksize=%lld err=%d\n", blksize, static_cast<int>(err));
+  fflush(stdout);
   HRR_HIP_CHECK(hipFree(dev));
 }
 
@@ -487,8 +494,19 @@ HRR_TEST_CASE(Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete) {
 // Before, fclose()'s result was ignored and the truncated blob was published.
 HRR_TEST_CASE(Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_failed_blob_close.hrr");
-  fs::create_directories(cap.path);  // the workload checks its block size
-  capture_workload(cap.path, "Unit_HRR_FailedBlobClose_Direct", false);
+  const std::string out = capture_workload(cap.path, "Unit_HRR_FailedBlobClose_Direct", false);
+  INFO("Workload output:\n" << out);
+
+  const size_t at = out.find(HRR_CLOSE_MARKER " blksize=");
+  REQUIRE(at != std::string::npos);
+  long long blksize = 0;
+  int err = -1;
+  REQUIRE(sscanf(out.c_str() + at, HRR_CLOSE_MARKER " blksize=%lld err=%d", &blksize, &err) == 2);
+  REQUIRE(err == hipSuccess);
+  {
+    INFO("this block size makes fwrite() fail, not fclose()");
+    REQUIRE((blksize <= 0 || static_cast<unsigned long long>(blksize) > kSmallBlob));
+  }
 
   const fs::path archive = hrr_single_process_archive(cap.path);
   {
