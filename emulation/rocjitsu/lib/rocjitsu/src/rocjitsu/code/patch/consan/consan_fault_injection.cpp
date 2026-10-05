@@ -138,6 +138,7 @@ struct AtomicOrderBoundary {
   const SyncSequence *sequence = nullptr;
   const SyncEvent *fence = nullptr;
   std::optional<uint64_t> release_wait_text_offset;
+  std::optional<uint64_t> lds_release_wait_text_offset;
 };
 
 struct ResolvedFaultTargets {
@@ -179,10 +180,14 @@ static bool apply_resolved_fault_mutations(const AmdGpuCodeObject &code_object, 
                                                            SemanticConfidence::Conservative)) {
     return {};
   }
-  if (edge != AtomicOrderEdge::Acquire)
+  if (edge != AtomicOrderEdge::Acquire) {
+    result.lds_release_wait_text_offset = result.sequence->lds_release_wait_text_offset;
     result.release_wait_text_offset = encoding == AtomicFaultEncoding::CdnaFlat
                                           ? result.sequence->lds_release_wait_text_offset
                                           : result.sequence->release_wait_text_offset;
+    if (!result.release_wait_text_offset)
+      result.release_wait_text_offset = result.lds_release_wait_text_offset;
+  }
   for (SyncEventId identity : result.sequence->member_event_ids) {
     const SyncEvent *event = sync.find_event(identity);
     if (event != nullptr && event->kind == SyncKind::Fence &&
@@ -1510,11 +1515,43 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
       removed_boundary = fence_source->mnemonic;
     }
-    // Release lowering can pair a cache operation with an exact store wait
-    // or, on CDNA, a combined VM/LDS wait. Once either is selected, remove the complete
-    // independently sufficient ordering boundary so staged reinventory cannot re-admit it.
-    if (release_wait_text_offset) {
-      const uint64_t wait_text_offset = *release_wait_text_offset;
+    // Global and LDS completion can use separate waits, in either order.
+    // Removing only the global wait leaves LDS publication intact even if
+    // the replacement NOP interrupts the analyzer's original wait suffix.
+    // The inventory's LDS boundary starts a proven four-byte wait suffix
+    // (possibly containing NOPs and a leading scalar clause). Remove every
+    // release wait in that suffix while preserving the scheduling hints.
+    std::vector<uint64_t> release_wait_offsets;
+    if (release_wait_text_offset)
+      release_wait_offsets.push_back(*release_wait_text_offset);
+    if (const auto begin = order_boundary.lds_release_wait_text_offset) {
+      if (*begin >= source->text_offset() ||
+          (source->text_offset() - *begin) % sizeof(uint32_t) != 0u ||
+          source->decoded_file_offset() < source->text_offset() - *begin ||
+          source->decoded_file_offset() > original_bytes.size()) {
+        result.errors.emplace_back("ConSan atomic weaken-order found malformed LDS wait suffix");
+        return;
+      }
+      bool found_lds = false;
+      for (uint64_t offset = *begin; offset < source->text_offset(); offset += sizeof(uint32_t)) {
+        const uint64_t file_offset =
+            source->decoded_file_offset() - (source->text_offset() - offset);
+        uint32_t word = 0;
+        std::memcpy(&word, original_bytes.data() + file_offset, sizeof(word));
+        const auto wait = classify_wait_instruction({}, word, arch);
+        if (wait.release_boundary || wait.drains_lds)
+          release_wait_offsets.push_back(offset);
+        found_lds |= wait.drains_lds;
+      }
+      if (!found_lds) {
+        result.errors.emplace_back("ConSan atomic weaken-order LDS suffix has no completion wait");
+        return;
+      }
+    }
+    std::ranges::sort(release_wait_offsets);
+    const auto duplicates = std::ranges::unique(release_wait_offsets);
+    release_wait_offsets.erase(duplicates.begin(), duplicates.end());
+    for (const uint64_t wait_text_offset : release_wait_offsets) {
       if (wait_text_offset >= source->text_offset() ||
           source->decoded_file_offset() < source->text_offset() - wait_text_offset) {
         result.errors.emplace_back(
@@ -1532,8 +1569,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       uint32_t wait_word = 0;
       std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
       const WaitInstructionEncoding wait = classify_wait_instruction({}, wait_word, arch);
-      if (!wait.release_boundary &&
-          !(encoding == AtomicFaultEncoding::CdnaFlat && wait.drains_lds)) {
+      if (!wait.release_boundary && !wait.drains_lds) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order release wait no longer has its admitted encoding");
         return;
@@ -1547,12 +1583,14 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       result.note_sequence_member_mutation(*sequence, wait_info.anchor_offset,
                                            wait_info.original_size,
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
-      if (fence != nullptr)
+      if (!removed_boundary.empty())
         removed_boundary += "/";
       removed_boundary += encoding == AtomicFaultEncoding::CdnaFlat ? "s_waitcnt"
                           : encoding == AtomicFaultEncoding::Rdna3Flat
-                              ? "s_waitcnt_vscnt"
-                              : (wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt");
+                              ? (wait.drains_lds ? "s_waitcnt lgkmcnt(0)" : "s_waitcnt_vscnt")
+                          : wait.drains_lds
+                              ? (wait.drains_store ? "s_wait_storecnt_dscnt" : "s_wait_dscnt")
+                              : "s_wait_storecnt";
     }
     result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                  " while preserving " + std::string(source->mnemonic_view()));

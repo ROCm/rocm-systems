@@ -4184,6 +4184,37 @@ TEST(ConSan, LdsPublicationCompletionRequiresExactSameBlockZeroWait) {
   }
 }
 
+TEST(ConSan, Gfx1100LdsPublicationSurvivesNopWithoutGlobalReleaseWait) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+  const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+  for (const bool complete_lds : {false, true}) {
+    std::vector<uint32_t> words{complete_lds ? *instrumentation::build_s_wait_lds0(arch)
+                                             : build_s_nop(0, arch),
+                                build_s_nop(0, arch),
+                                0xdcd64000u,
+                                0x01080201u,
+                                *build_rdna3_s_wait_vmcnt0(arch),
+                                gl1[0],
+                                gl1[1],
+                                gl0[0],
+                                gl0[1],
+                                build_s_endpgm(arch)};
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const auto result = test_semantic_inventory(make_rdna3_lds_code_object(words), options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+    const auto sequences = result.program_inventory.sync().sync_sequences;
+    ASSERT_EQ(sequences.size(), 1u);
+    // A preserved LDS wait still publishes LDS; it does not imply that
+    // global stores have completed. NOPs alone must not create either proof.
+    EXPECT_EQ(sequences.front().lds_release_wait_text_offset,
+              complete_lds ? std::optional<uint64_t>{0u} : std::nullopt);
+    EXPECT_FALSE(sequences.front().release_wait_text_offset);
+    EXPECT_EQ(sequences.front().memory_role, SyncMemoryRole::Acquire);
+  }
+}
+
 TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
   const auto wait_store = build_rdna3_s_wait_vscnt0(kArch);

@@ -338,38 +338,94 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   }));
 }
 
-TEST(ConSan, FaultAtomicWeakenOrderRemovesRdna3VscntReleaseBoundary) {
-  const RdnaWorkgroupClauseReleaseFixture fixture =
-      make_rdna_workgroup_clause_release_code_object(ROCJITSU_CODE_ARCH_RDNA3);
-  ASSERT_FALSE(fixture.bytes.empty());
-  Options options;
-  options.mode = Mode::SuperCollider;
-  options.fault_atomic_weaken_order = true;
-  options.fault_atomic_order_edge = AtomicOrderEdge::Release;
-  options.fault_atomic_index = 0;
-  options.fault_require_exactly_one = true;
+TEST(ConSan, FaultAtomicWeakenOrderRemovesSplitRdnaReleaseWaitsThroughClause) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const bool lds_first : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " lds_first=" << lds_first);
+      auto fixture = make_rdna_workgroup_clause_release_code_object(arch);
+      ASSERT_FALSE(fixture.bytes.empty());
+      AmdGpuCodeObject original(fixture.bytes.data(), fixture.bytes.size());
+      const auto text_offset = original.text_sections().front()->sectionOffset();
+      const auto wait_offset = text_offset + fixture.wait_text_offset;
+      std::array<uint32_t, 2> waits;
+      std::memcpy(waits.data(), fixture.bytes.data() + wait_offset, sizeof(waits));
+      if (lds_first) {
+        std::swap(waits[0], waits[1]);
+        std::memcpy(fixture.bytes.data() + wait_offset, waits.data(), sizeof(waits));
+      }
+      Options options;
+      options.mode = Mode::SuperCollider;
+      options.fault_atomic_weaken_order = true;
+      options.fault_atomic_order_edge = AtomicOrderEdge::Release;
+      options.fault_atomic_index = 0;
+      options.fault_require_exactly_one = true;
+      const auto result = test_lower_consan(fixture.bytes, options);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      EXPECT_EQ(result.mutation.fault.applied, 1u);
+      ASSERT_FALSE(result.replacement.empty());
+      std::memcpy(waits.data(), result.replacement.data() + wait_offset, sizeof(waits));
+      EXPECT_EQ(waits, (std::array<uint32_t, 2>{build_s_nop(0, arch), build_s_nop(0, arch)}));
+      // The clause, both guest atomics, and their operands must remain intact.
+      EXPECT_TRUE(std::equal(fixture.bytes.begin() + wait_offset + sizeof(waits),
+                             fixture.bytes.end(),
+                             result.replacement.begin() + wait_offset + sizeof(waits)));
+      Options inventory_options;
+      inventory_options.mode = Mode::SuperCollider;
+      const auto reinventory = test_semantic_inventory(result.replacement, inventory_options);
+      ASSERT_TRUE(patch_succeeded(reinventory));
+      for (const auto &sequence : reinventory.program_inventory.sync().sync_sequences) {
+        EXPECT_FALSE(sequence.lds_release_wait_text_offset);
+        EXPECT_FALSE(sequence.release_wait_text_offset);
+      }
+    }
+  }
+}
 
-  const TransformArtifacts result = test_lower_consan(fixture.bytes, options);
+TEST(ConSan, FaultRdna3GlobalReleaseRemovesLdsWaitAndPreservesAcquire) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+  const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+  // Native hip-moi arrival order: LDS completion; VSCNT; returning RMW;
+  // result completion; acquire cache pair. Also cover a nonreturning producer.
+  for (const bool returning : {false, true}) {
+    SCOPED_TRACE(returning);
+    std::vector<uint32_t> words{*instrumentation::build_s_wait_lds0(arch),
+                                *build_rdna3_s_wait_vscnt0(arch),
+                                returning ? 0xdcd64000u : 0xdcd60000u, 0x01080201u};
+    if (returning)
+      words.insert(words.end(), {*build_rdna3_s_wait_vmcnt0(arch), gl1[0], gl1[1], gl0[0], gl0[1]});
+    else
+      words.push_back(*build_rdna3_s_wait_vscnt0(arch));
+    words.push_back(build_s_endpgm(arch));
+    const auto bytes = make_rdna3_lds_code_object(words);
+    Options options;
+    options.mode = Mode::SuperCollider;
+    options.fault_atomic_weaken_order = true;
+    options.fault_atomic_order_edge = AtomicOrderEdge::Release;
+    options.fault_require_exactly_one = true;
+    const auto result = test_lower_consan(bytes, options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+    EXPECT_EQ(result.mutation.fault.applied, 1u);
+    ASSERT_FALSE(result.replacement.empty());
+    AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
+    std::vector<uint32_t> staged(words.size());
+    std::memcpy(staged.data(), replacement.text_sections().front()->data(), words.size() * 4u);
+    EXPECT_EQ(staged[0], build_s_nop(0, arch));
+    EXPECT_EQ(staged[1], build_s_nop(0, arch));
+    EXPECT_TRUE(std::equal(words.begin() + 2, words.end(), staged.begin() + 2));
+    Options inventory_options;
+    inventory_options.mode = Mode::SuperCollider;
+    const auto reinventory = test_semantic_inventory(result.replacement, inventory_options);
+    ASSERT_TRUE(patch_succeeded(reinventory));
+    for (const auto &sequence : reinventory.program_inventory.sync().sync_sequences)
+      EXPECT_FALSE(sequence.lds_release_wait_text_offset);
 
-  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.mutation.fault.applied, 1u);
-  const auto mutation = std::ranges::find_if(result.patches, [](const PatchInfo &patch) {
-    return patch.phase == PatchPhase::Mutation && patch.kind == PatchKind::InlineAtomicOrderRewrite;
-  });
-  ASSERT_NE(mutation, result.patches.end());
-  EXPECT_EQ(mutation->anchor_offset, fixture.wait_text_offset);
-  EXPECT_EQ(mutation->original_size, sizeof(uint32_t));
-  ASSERT_FALSE(result.replacement.empty());
-  const uint64_t text_file_offset = result.program_inventory.kernels().front().text_file_offset;
-  uint32_t weakened_wait = 0;
-  std::memcpy(&weakened_wait,
-              result.replacement.data() + text_file_offset + fixture.wait_text_offset,
-              sizeof(weakened_wait));
-  EXPECT_EQ(weakened_wait, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA3));
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("removed associated s_waitcnt_vscnt") != std::string::npos;
-  }));
+    if (returning) {
+      const auto sequences = reinventory.program_inventory.sync().sync_sequences;
+      ASSERT_EQ(sequences.size(), 1u);
+      EXPECT_EQ(sequences.front().memory_role, SyncMemoryRole::Acquire);
+    }
+  }
 }
 
 TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
