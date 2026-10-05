@@ -1592,4 +1592,24 @@ HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
 
   CHECK(hrr_process_archives(cap.path).size() == 1);
 }
+/**
+ * Unit_HRR_ForkAfterCaptureShutdown
+ * ---------------------------------
+ *   - A child forked after its parent's capture shutdown leaves no archive,
+ *     even though it records before it exits.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_after_capture_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkAfterCaptureShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 1);
+}
 #endif  // !_WIN32
