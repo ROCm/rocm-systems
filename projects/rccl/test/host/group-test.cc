@@ -903,6 +903,7 @@ class GroupRegisterSymmetricTest : public ::testing::Test {
 
   void SetUp() override {
     ResetCeFakes();
+    ResetGroupThreadLocals();
     comm_ = std::make_unique<ncclComm>();
     job_.comm = comm_.get();
   }
@@ -910,6 +911,7 @@ class GroupRegisterSymmetricTest : public ::testing::Test {
     while (!ncclIntruQueueEmpty(&comm_->ceInitTaskQueue)) {
       free(ncclIntruQueueDequeue(&comm_->ceInitTaskQueue));
     }
+    ResetGroupThreadLocals();
     ResetCeFakes();
   }
 };
@@ -967,7 +969,6 @@ TEST_F(GroupRegisterSymmetricTest, CeInitQueued_RunsBeforeStagingSetup) {
 
 // A group that fails before its SymRegister job runs must not leave the flag for an unrelated later group.
 TEST_F(GroupRegisterSymmetricTest, GroupCleanup_ClearsPendingStagingOfSymRegisterComms) {
-  ResetGroupThreadLocals();
   comm_->config.blocking = 1;
   for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
     comm_->groupNext[type] = reinterpret_cast<struct ncclComm*>(NCCL_COMM_GROUP_INVALID);
@@ -980,7 +981,6 @@ TEST_F(GroupRegisterSymmetricTest, GroupCleanup_ClearsPendingStagingOfSymRegiste
 
   EXPECT_FALSE(comm_->ceColl.stagingPending);
   EXPECT_EQ(nullptr, ncclGroupCommHead[ncclGroupTaskTypeSymRegister]);
-  ResetGroupThreadLocals();
 }
 
 }  // namespace
