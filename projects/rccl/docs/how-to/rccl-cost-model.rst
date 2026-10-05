@@ -282,6 +282,11 @@ The consequences for a plugin author:
 *  A plugin **cannot** price, veto, or select a copy engine method, for the same reason.
 *  Writing ``0.0`` into a cell is how a plugin claims that algorithm and protocol combination:
    zero is below every modeled cost, so the argmin picks it.
+*  A plugin is **not** bound by a per-call ``algSelection``. The narrowing described in
+   :ref:`cost-model-per-call-selection` runs before ``getCollInfo``, and the argmin skips only
+   cells still exactly equal to ``NCCL_ALGO_PROTO_IGNORE``, so writing a cost into a blanked cell
+   revives a row the selection excluded. Guard on ``NCCL_ALGO_PROTO_IGNORE`` before writing, as
+   in the example below, to leave the caller's selection intact.
 
 .. code-block:: cpp
 
@@ -292,6 +297,8 @@ The consequences for a plugin author:
    }
 
 For the full plugin interface, see :doc:`Using the RCCL Tuner plugin <./using-rccl-tuner-plugin-api>`.
+
+.. _cost-model-per-call-selection:
 
 Restricting the candidate set per call
 ======================================
