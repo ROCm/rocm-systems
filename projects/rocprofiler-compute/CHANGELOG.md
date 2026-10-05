@@ -25,10 +25,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
-* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to analyze mode.
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
   * They are short forms of `-b 2`, `-b 3`, and `-b 4`.
   * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
-
 
 ### Changed
 
@@ -83,6 +82,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--roof-only` → `--roofline`
   * `--bench-only` → `--roofline-bench-only`
   * `--device` → `--roofline-device`
+
+* In profile mode, `--roofline` now works the same as `-b 4`:
+  * It can be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
+  * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
 
 ### Removed
 
