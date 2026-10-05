@@ -1,7 +1,18 @@
 name: HRR CI
 
+# Pull requests always start the workflow. A workflow skipped by a top-level
+# "paths" filter creates no check at all, so a required "HRR CI Summary" would
+# wait forever on every PR that does not touch HRR. The gate job below does the
+# path filtering instead, and the summary job always reports.
+#
+# Pushes to develop run the same suites for one reason beyond post-merge signal:
+# a pull request can only restore caches from its own ref and from the base
+# branch, so without a develop run every PR would start with a cold ccache.
 on:
   pull_request:
+  push:
+    branches:
+      - develop
     paths:
       - "projects/hrr/**"
       - "!projects/hrr/skills/**"
@@ -17,7 +28,8 @@ on:
 
 concurrency:
   group: hrr-ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Never cancel a develop run: it is what saves the ccache for later PRs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -45,11 +57,16 @@ jobs:
   #
   # Capture is off when the repository variable HRR_CAPTURE_ENABLED is "false"
   # or "0", when a manual run passes capture=false, or when the capture guard
-  # is no longer in the CLR sources.
+  # is no longer in the CLR sources. The jobs are also skipped when a pull
+  # request touches nothing HRR owns (the path filter, done here rather than in
+  # the "on:" block so that HRR CI Summary still reports).
   # ---------------------------------------------------------------------------
   gate:
     name: "Capture enabled?"
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       enabled: ${{ steps.decide.outputs.enabled }}
     steps:
@@ -65,21 +82,55 @@ jobs:
         env:
           VAR_ENABLED: ${{ vars.HRR_CAPTURE_ENABLED }}
           INPUT_ENABLED: ${{ github.event.inputs.capture }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
           enabled=true
           reason="capture is enabled"
+          if [ -n "${PR_NUMBER}" ]; then
+            # The files API lists at most 3000 files; a PR that large is treated
+            # as relevant rather than guessed at.
+            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename' > changed-files.txt
+            if ! python3 - changed-files.txt <<'PY'
+          import sys
+
+          INCLUDE = (
+              "projects/hrr/",
+              "projects/clr/hipamd/src/hrr/",
+              ".github/workflows/hrr-ci.yml",
+              ".github/actions/rocprofiler-sdk-util/resolve-ci-config/",
+          )
+          EXCLUDE = ("projects/hrr/skills/",)
+
+          files = [line.strip() for line in open(sys.argv[1]) if line.strip()]
+          relevant = len(files) >= 3000 or any(
+              f.startswith(INCLUDE) and not f.startswith(EXCLUDE) for f in files
+          )
+          sys.exit(0 if relevant else 1)
+          PY
+            then
+              enabled=false
+              reason="the pull request changes no HRR path"
+            fi
+          fi
           case "${VAR_ENABLED,,}" in
             false|0|off|no) enabled=false; reason="repository variable HRR_CAPTURE_ENABLED=${VAR_ENABLED}" ;;
           esac
           case "${INPUT_ENABLED,,}" in
             false) enabled=false; reason="workflow_dispatch input capture=false" ;;
           esac
-          if ! grep -q 'defined(HIP_HRR_CAPTURE_ENABLED)' projects/clr/hipamd/src/hrr/hip_capture.cpp; then
+          # Match the macro name alone, outside comments, so a rewrite such as
+          # "#ifdef HIP_HRR_CAPTURE_ENABLED" still counts as the guard.
+          if ! grep -vE '^[[:space:]]*//' projects/clr/hipamd/src/hrr/hip_capture.cpp \
+              | grep -q 'HIP_HRR_CAPTURE_ENABLED'; then
             enabled=false
-            reason="hip_capture.cpp no longer gates capture on HIP_HRR_CAPTURE_ENABLED"
+            reason="hip_capture.cpp no longer mentions HIP_HRR_CAPTURE_ENABLED"
+            echo "::warning::HRR CI skipped: the capture guard HIP_HRR_CAPTURE_ENABLED was not found in hip_capture.cpp. If capture was renamed or made unconditional, update this gate."
           fi
           echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
-          echo "HRR capture: ${enabled} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "HRR CI: run=${enabled} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
   # ---------------------------------------------------------------------------
   # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
   # include <hip/hip_runtime.h> for types but issue no HIP calls, so they need
@@ -179,6 +230,12 @@ jobs:
             --xml unit-${{ matrix.os }}.xml \
             -- "${bin[0]}"
 
+      # The helpers the suites below rely on (JUnit wrapper, summary table,
+      # expected-case check). They are POSIX-process code; once is enough.
+      - name: Test the CI helper scripts
+        if: ${{ runner.os == 'Linux' }}
+        run: python3 -m unittest discover -s projects/hrr/tests -p 'test_*.py' -v
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -229,6 +286,10 @@ jobs:
     # containerised GPU job has to recreate it (see "Recreate build path").
     outputs:
       workspace: ${{ github.workspace }}
+      # The nightly index moves every day. The integration jobs install exactly
+      # this version so the capture amdhip64 never runs against a newer ROCr
+      # than the one it was built with, however long a GPU queue is.
+      sdk_version: ${{ steps.sdk.outputs.version }}
     runs-on: azure-linux-scale-rocm
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -262,11 +323,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install ROCm SDK
+        id: sdk
         run: |
           # CppHeaderParser is required by hipamd/src/CMakeLists.txt.
           pip install --no-cache-dir CppHeaderParser
           pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
           rocm-sdk init
+          echo "version=$(python -c 'import importlib.metadata as m; print(m.version("rocm"))')" >> "$GITHUB_OUTPUT"
           echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
 
       # Nothing survived between runs before this: the artifact fan-out only
@@ -282,8 +345,14 @@ jobs:
       # costs misses, never a wrong object. Do not replace this with a
       # "skip the build if the key matches" scheme: that trades a correctness
       # property for the same speed.
+      #
+      # Restore everywhere, save only from a push to develop. A pull request can
+      # restore its own caches and the base branch's but never write to
+      # develop's scope, and a per-run entry of up to 5 GB from every PR run
+      # would evict other workflows' caches. One develop entry per push seeds
+      # every PR instead.
       - name: Restore ccache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: hrr-ccache-${{ runner.os }}-${{ github.run_id }}
@@ -360,6 +429,13 @@ jobs:
               *) echo "::error::${arch} missing from the fat binary"; exit 1 ;;
             esac
           done
+
+      - name: Save ccache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: hrr-ccache-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -449,10 +525,13 @@ jobs:
       # these self-hosted machines the console-script wrappers cannot execute,
       # and the system Python has no ensurepip to build a virtualenv with.
       - name: Install ROCm SDK
+        env:
+          SDK_VERSION: ${{ needs.build.outputs.sdk_version }}
         run: |
           # devel as well as libraries: rocm-sdk init refuses to run without it.
+          # The version the build job used, not whatever the index has now.
           python -m pip install --no-cache-dir \
-            --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
+            --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]${SDK_VERSION:+==${SDK_VERSION}}"
           # Run as a module where possible. Falling back to the script means
           # locating it: some of these machines install into a --user bin that
           # is not on PATH, leaving command -v empty.
@@ -489,7 +568,9 @@ jobs:
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
 
-      # The binaries carry no RUNPATH, so the capture build is selected here.
+      # CMake gives the binaries a RUNPATH to the SDK's lib directory, where
+      # the plain amdhip64 lives. LD_LIBRARY_PATH is searched before RUNPATH, so
+      # putting the capture build first here is what selects it.
       - name: Run integration suite
         run: |
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
@@ -500,7 +581,7 @@ jobs:
           # and replacing it makes python3 fail to start on some GPU machines.
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           # A GPU-labelled runner with no visible device is infrastructure
-          # failure, not 67 unsupported capabilities. Still run the four
+          # failure, not 67 unsupported capabilities. Still run the three
           # CPU-only integration checks and publish their JUnit, then fail the
           # job so the table cannot make a broken runner look green.
           # Exit 1 is "confirmed no device". Any other probe failure (broken
@@ -534,9 +615,17 @@ jobs:
           # Catch2 and subprocess output, and only emits it when the suite fails.
           # Time out inside the job's 30 minutes, so a hang prints the cases
           # that finished instead of being cancelled with no output.
+          #
+          # The selector matters: Catch2 leaves out hidden "[.]" cases unless a
+          # tag names them, and every API-matrix tier, the kernel-argument
+          # regression and the HSA first-touch case are hidden drivers tagged
+          # [hrr]. "[hrr]~[direct]" runs them, leaves out the [hrr][direct]
+          # workloads they spawn as subprocesses, and (being an exact tag match)
+          # also leaves out the [hrr-direct] workloads and the disabled
+          # [hrr-repro] cases.
           python3 projects/hrr/tests/run_catch2.py \
             --xml integration-${{ matrix.family }}.xml --timeout 1200 \
-            -- ./build/hrr/tests/integration/hrr-integration-tests
+            -- ./build/hrr/tests/integration/hrr-integration-tests "[hrr]~[direct]"
 
       - name: Upload results
         if: always()
@@ -592,7 +681,10 @@ jobs:
           files: "*.xml"
           check_name: "HRR test results"
           comment_mode: "off"
-          check_run: true
+          # Fork pull requests get a read-only token, and creating a check run
+          # then fails with "Resource not accessible by integration". They keep
+          # the job summary, which needs no token.
+          check_run: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
           job_summary: true
           report_individual_runs: true
           deduplicate_classes_by_file_name: true
@@ -625,7 +717,7 @@ jobs:
               print("::error::capture gate did not complete: " + result["gate"])
               sys.exit(1)
           if needs["gate"]["outputs"].get("enabled") != "true":
-              print("HRR capture is not enabled: HRR CI skipped.")
+              print("HRR CI was skipped by the gate (capture off, or no HRR path changed).")
               sys.exit(0)
 
           fork = os.environ["IS_FORK"] == "true"
