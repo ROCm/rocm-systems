@@ -29,6 +29,12 @@ DEPRECATED_ALIASES = [
     (["profile"], ["--roof-only"], ["--roofline"], "roof_only", True),
     (["profile"], ["--bench-only"], ["--roofline-bench-only"], "bench_only", True),
     (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
+    (["analyze"], ["--sort", "dispatches"], ["--roofline-sort", "dispatches"],
+     "sort", "dispatches"),
+    (["analyze"], ["--mem-level", "HBM"], ["--roofline-mem-level", "HBM"],
+     "mem_level", ["HBM"]),
+    (["analyze"], ["--roofline-data-type", "FP16"], ["--roofline-data-types", "FP16"],
+     "roofline_data_type", ["FP16"]),
 ]  # fmt: skip
 
 # Options whose (Default: ...) describes the default in words
@@ -256,7 +262,7 @@ def test_deprecated_alias_matches_new_name(mode, old, new, dest, expected):
     assert getattr(build_args(mode + old), dest) == expected
 
 
-@pytest.mark.parametrize("mode", ["profile"])
+@pytest.mark.parametrize("mode", ["profile", "analyze"])
 def test_deprecated_aliases_listed_in_help(mode, capsys):
     with pytest.raises(SystemExit):
         build_args([mode, "--help"])
@@ -277,7 +283,8 @@ def test_deprecated_options_are_real_options():
     ("argv", "workload", "warned"),
     [
         (["profile", "--roof-only"], [], ["--roof-only"]),
-        (["profile", "--retain-rocpd-output=1"], [], ["--retain-rocpd-output"]),
+        (["analyze", "--mem-level=HBM", "--retain-rocpd-output"], [],
+         ["--mem-level", "--retain-rocpd-output"]),
         # Options of the workload belong to the workload
         (["profile", "-n", "x", "--", "./app", "--device", "1"],
          ["--", "./app", "--device", "1"], []),
