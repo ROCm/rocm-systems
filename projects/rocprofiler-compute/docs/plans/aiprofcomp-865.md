@@ -78,7 +78,20 @@ Algorithm (normative sketch):
 1. Build unique **SPP** PMC unions (skip SPU parents).
 2. Largest-first: ensure some bucket contains each union’s full set (duplicate PMCs across passes when needed).
 3. Run **SPU residual fill** so residual SPU PMC pieces appear somewhere (+0 extra passes on gfx942).
-4. Optional harden: TCC series affinity / ACCUM slot charging where required.
+4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required).
+
+#### TCC series affinity + coverage (SPP packing harden)
+
+TCC channel series need packing rules beyond plain PMC-union co-location. On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy (approved for design): [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
+
+Normative sketch:
+
+1. Pack by **series base**; when a TCC series is selected, expand **all collectable channel instances** in that pass.
+2. Keep affinity pairs in the **same pass** (e.g. `TCC_EA0_RDREQ_LEVEL` with `TCC_EA0_RDREQ`, and WR/ATOMIC analogues) so latency ratios are not joined across replays — L2 channel maps can remap between passes.
+3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
+4. Do **not** duplicate the same per-channel REQ series into a second pass with a different channel map (orphan REQ copies invite wrong same-pass bind / cross-pass joins).
+
+**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden — offline eval stays at **14** passes / `packable_multi == 0` (not a Phase 2 / SPU concern).
 
 **Locked decisions:**
 
