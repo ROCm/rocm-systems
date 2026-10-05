@@ -32,6 +32,8 @@ struct posix_backend
     {
         return ::execve(path, argv, envp);
     }
+    // Must stay ::_exit, not std::exit: the forked child must not run the parent's
+    // atexit handlers or flush its stdio buffers
     [[noreturn]] static void exit_immediately(int status) { ::_exit(status); }
     static int               poll(pollfd* fds, nfds_t nfds, int timeout_ms)
     {
