@@ -166,7 +166,8 @@ def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
     reader_end = source.index('\n}', reader_start)
     reader = source[reader_start:reader_end]
     assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(operand, lane)' in reader
+    assert 'read_lane_pair32(' in reader
+    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
     assert 'return {pair.lo, pair.hi};' in reader
 
 

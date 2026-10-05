@@ -320,18 +320,18 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_TerminatesProcessWithSta
 
 // --- case 't': accepting and rejecting arms --------------------------------
 
-// case 't' is one strtod plus validation of the parsed value and trailing text, so the three spellings differ only in
-// how getopt hands the value over. One test per side, driven by a table.
+// case 't' is one strtod plus one `errno || *endPtr || !isfinite || < 0` check, so the three spellings differ only in
+// how getopt hands the value over and the values differ only in what strtod makes of them. One test per side.
 TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds) {
   const struct { std::vector<std::string> argv; double want; } cases[] = {
       {{"-t", "37"}, 37.0},          // short, separate argument
       {{"--timeout=37"}, 37.0},      // long, attached
       {{"--timeout", "37"}, 37.0},   // long, separate
       {{"-t", "0"}, 0.0},            // 0 is valid and disables the timeout
-      {{"-t", "1.5"}, 1.5},          // fractional seconds are accepted
-      {{"-t", "010"}, 10.0},         // decimal spelling without an exponent
-      {{"-t", "0x10"}, 16.0},        // strtod accepts hexadecimal floating constants
-      {{"--timeout="}, 0.0},         // empty optarg parses as 0 and leaves endPtr on the NUL
+      {{"-t", "010"}, 10.0},         // strtod, unlike strtol, never treats a leading 0 as octal
+      {{"-t", "3.5"}, 3.5},          // timeout is a double; fractional seconds are accepted
+      {{"--timeout="}, 0.0},         // empty optarg: no end==str clause at client.cc:129, so this disables the timeout
+      {{"-t", "0x10"}, 16.0},        // strtod parses C99 hex floats; this is accepted as 16, not rejected
       {{"-t", "4294967296"}, 4294967296.0},  // values are retained as double rather than narrowed to int
   };
   for (const auto& c : cases) {
@@ -347,13 +347,14 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds
 }
 
 // The rejecting side. `timeout` still carries what strtod produced: the store precedes the check, so a mutant that
-// moved the check first would leave the -1 initializer here instead.
+// moved the check first would leave the -1.0 initializer here instead.
 TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWhatStrtodParsed) {
   const struct { std::vector<std::string> argv; double stored; } cases[] = {
       {{"-t", "-5"}, -5.0},          // negative
       {{"-t", "5x"}, 5.0},           // trailing garbage
       {{"--timeout=abc"}, 0.0},      // strtod consumed nothing
-      {{"-t", "inf"}, INFINITY},     // non-finite
+      {{"-t", "inf"}, HUGE_VAL},     // errno stays 0 and endPtr reaches the NUL; only !isfinite rejects this one
+      {{"--timeout=1e-400"}, 0.0},   // underflow: glibc sets ERANGE, so errno is the only clause rejecting this
   };
   for (const auto& c : cases) {
     ResetLibcFakes();

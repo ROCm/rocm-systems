@@ -19,9 +19,7 @@
 
 #include <dlfcn.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct rccl_recv
@@ -46,7 +44,10 @@ void
 rccl_metadata_initialize_categories()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
@@ -76,8 +77,8 @@ struct production_pmc_registrar
         constexpr auto* k_msg         = "bytes";
         constexpr auto* k_target_arch = "GPU";
 
-        auto register_rccl_info = [&](const char* direction_label,
-                                      const char* description) {
+        auto const register_rccl_info = [&](const char* direction_label,
+                                            const char* description) {
             const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
@@ -240,16 +241,16 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
-        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::gpu), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label,
         static_cast<double>(cumulative), std::nullopt });
 }
 
 rccl_gpu_tracking_state&
 rccl_get_gpu_tracking_state()
 {
-    static auto registrar = std::make_shared<production_pmc_registrar>();
+    static auto const registrar = std::make_shared<production_pmc_registrar>();
     static rccl_gpu_tracking_state state{ registrar };
     return state;
 }
@@ -257,7 +258,7 @@ rccl_get_gpu_tracking_state()
 [[nodiscard]] size_t
 rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
 {
-    auto size = rccl_type_size(datatype);
+    auto const size = rccl_type_size(datatype);
     if(size == 0)
     {
         LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
@@ -273,7 +274,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
-    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+    if(comm == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
 
@@ -292,7 +296,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
         }
     });
 
-    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
+    if(ncclCommCuDevice_ptr == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     int          device_id = DEFAULT_DEVICE_ID;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
@@ -333,8 +340,8 @@ rccl_comm_data_initialize()
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(std::uint32_t                                 operation,
-                           rocprofiler_callback_tracing_rccl_api_data_t* payload,
+tool_tracing_callback_rccl(std::uint32_t                                       operation,
+                           rocprofiler_callback_tracing_rccl_api_data_t const* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {
     const rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
@@ -356,5 +363,4 @@ tool_tracing_callback_rccl(std::uint32_t                                 operati
     }
 }
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

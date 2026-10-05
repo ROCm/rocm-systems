@@ -34,8 +34,14 @@
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+#include "profiler.h"
 
 #include "nccl_stubs.h"
+
+#include "signature-drift.h"
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -62,6 +68,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
@@ -97,14 +104,21 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // The src/os/*.cc entry points (ncclOsCpuCount, ncclOsGetAffinity, ncclOsSetAffinity,
 // ncclOsTopoGetStrFromSys) and their seams: os_fakes.cc.
-ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerPluginFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return g_ncclProfilerPluginFinalize(comm); }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
-ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclProfilerThreadDestroy(comm); }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
-bool ncclProfilerPluginLoaded(void) { return false; }
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
+bool ncclProfilerProxyDiagEnabled(void) { return false; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
@@ -118,9 +132,7 @@ bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
-static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
-ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
+// ncclSymkFinalize: fakes/sym_kernels_fakes.cc, alongside the rest of src/sym_kernels.cc's fakes.
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 // Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
 // TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
@@ -136,8 +148,8 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 }
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
-// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
-// rccl_wrap_fakes.cc.
+// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter,
+// rcclParamHierarchicalLazyInit): rccl_wrap_fakes.cc.
 // rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
@@ -186,7 +198,11 @@ static ncclResult_t DefaultNcclCommDestroy(ncclComm_t) { return ncclSuccess; }
 std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy = DefaultNcclCommDestroy;
 ncclResult_t ncclCommDestroy(ncclComm_t comm) { return g_ncclCommDestroy(comm); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
-ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
+static ncclResult_t DefaultNcclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
+std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit = DefaultNcclCommSplit;
+ncclResult_t ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config) {
+  return g_ncclCommSplit(comm, color, key, newcomm, config);
+}
 char ncclLastError[1024] = {};
 thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
@@ -196,7 +212,8 @@ const char* rcclGitHash = "microtest";
 // under test writes them and no test assigns them. Give one a seam the moment a
 // test starts scripting it, because an unrestored global that a test DOES write
 // is an order-dependent flake.
-int ncclCudaDriverVersionCache = 12000;       // src/misc/cudawrap.cc
+// ncclCudaDriverVersionCache, ncclProfilerEventMask and ncclDevFuncNameToId are scripted, so all reset below.
+int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
@@ -229,9 +246,11 @@ void ResetNcclStubs() {
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
-  g_ncclSymkFinalize = DefaultNcclSymkFinalize;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
+  g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+  g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;
@@ -244,4 +263,8 @@ void ResetNcclStubs() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
+  ncclProfilerEventMask = 0;
+  ncclDevFuncNameToId.clear();
 }

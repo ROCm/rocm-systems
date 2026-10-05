@@ -2167,7 +2167,8 @@ hsa_status_t hsa_executable_load_code_object(hsa_executable_t executable, hsa_ag
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
   CodeObjectReaderImpl reader;
-  // buffer_size == 0 means unbounded size discovery for in-memory ELF images.
+  // Deprecated API has no length. ElfSize(..., 0) does not index header
+  // tables; size is the SHT and PHDR spans from ELF header fields.
   size_t code_object_size = amd::elf::ElfSize(code_object_p, 0);
   if (code_object_size == 0) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;

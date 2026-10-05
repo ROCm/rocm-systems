@@ -117,6 +117,9 @@ struct wrapper
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
+#if ROCPROFILER_VERSION >= 700
+    using async_correlation_id_t = rocprofiler_async_correlation_id_t;
+#endif
 
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
@@ -331,6 +334,8 @@ struct wrapper
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =

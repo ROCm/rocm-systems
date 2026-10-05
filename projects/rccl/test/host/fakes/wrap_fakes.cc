@@ -55,6 +55,8 @@ ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion)
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
 ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
+ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
+ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
 // getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
 // hooks are link-closure symbols with no production header declaration, so
@@ -154,6 +156,14 @@ static ncclResult_t DefaultCommCount(const ncclComm_t comm, int* count) {
 std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCount;
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
 
+static ncclResult_t DefaultEnsureHierarchicalComms(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms = DefaultEnsureHierarchicalComms;
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) { return g_ensureHierarchicalComms(comm); }
+
+static ncclResult_t DefaultReserveHierarchicalTempBuffer(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_reserveHierarchicalTempBuffer = DefaultReserveHierarchicalTempBuffer;
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g_reserveHierarchicalTempBuffer(comm); }
+
 // ---------------------------------------------------------------------------
 // Controllable seams for the top-level dispatchers (rcclSelectAllReduce/
 // AllGather/ReduceScatter, rcclHierarchicalAlgoInfo, rcclGetAlgoInfo,
@@ -168,9 +178,14 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCou
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_all_reduce_sdma.cu, which this host-only
-// binary intentionally does not compile. Keep GIN-SDMA out of the selector by
-// default so ENABLE_ROCSHMEM_GIN builds retain the non-GIN test behaviour.
+// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
+// which this host-only binary intentionally does not compile. Keep GIN-SDMA
+// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
+// non-GIN test behaviour.
+bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
+
 bool ncclAllReduceGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
   return false;
 }
@@ -194,17 +209,29 @@ bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symk
   return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendbuff, recvbuff, agreeAcrossRanks);
 }
 
+// The window-taking twin: rcclSelectXxx hoists the ncclDevrFindWindow lookups
+// and asks this one, so it drives `symEligible` on every path a fixture can
+// reach. Routed through the SAME seam rather than a second hook so one
+// ScopedHook still controls the decision; the windows stand in for the buffers,
+// which no fixture inspects. agreeAcrossRanks is false because the production
+// window overload is the rank-local check (its caller does the agreement).
+bool isSymmetricKernelRequestedWin(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                   size_t nElts, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
+  return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendWin, recvWin,
+                                      /*agreeAcrossRanks=*/false);
+}
+
 // rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
 // linked here), same abort-floor-turned-seam treatment as the rest. Default
 // false: DDA not taken, letting CE-registered/symmetric/plain-kernel run.
-static bool DefaultAllReduceShouldTakeDdaPath(const struct ncclComm*, size_t, ncclDataType_t, bool, bool) {
+static bool DefaultAllReduceShouldTakeDdaPath(const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) {
   return false;
 }
-std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath =
+std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool)> g_allReduceShouldTakeDdaPath =
     DefaultAllReduceShouldTakeDdaPath;
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t dt, bool symEligible,
-                                    bool ceAllReduceAllowed) {
-  return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, ceAllReduceAllowed);
+                                    bool ceAllReduceAllowed, bool query) {
+  return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, ceAllReduceAllowed, query);
 }
 
 // getAlgoInfo / rcclKernelPackedChannels: rccl_wrap.cc `extern`-declares both

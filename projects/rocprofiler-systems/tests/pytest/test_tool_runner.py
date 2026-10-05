@@ -327,6 +327,46 @@ class TestOutputFormatSelection(RocprofsysTest):
         )
 
     @pytest.mark.parametrize(
+        "format_token",
+        [
+            pytest.param("pftrace", id="pftrace"),
+            pytest.param("proto", id="proto_alias"),
+        ],
+    )
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_pftrace_and_proto_alias_enable_perfetto(
+        self, target, format_token, cpu_workload
+    ):
+        """'proto' is a deprecated alias for 'pftrace'; both must behave identically."""
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[
+                "--output-format",
+                format_token,
+                *parallel_overhead_args(cpu_workload),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_TRACE=true",
+                r"ROCPROFSYS_PROFILE=false",
+            ],
+        )
+
+        settings = _resolved_settings(result)
+        assert settings["ROCPROFSYS_TRACE"] is True
+        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert result.perfetto_file is not None, "expected a perfetto trace file"
+        assert result.perfetto_file.suffix == ".pftrace", (
+            f"expected a .pftrace trace regardless of the token used, found "
+            f"{result.perfetto_file}"
+        )
+
+    @pytest.mark.parametrize(
         "old_style_args",
         [
             pytest.param(["--trace"], id="trace"),

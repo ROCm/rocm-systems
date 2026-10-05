@@ -160,13 +160,12 @@ void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x1);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -185,13 +184,12 @@ void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x3);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -384,13 +382,12 @@ void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0x4);
   d->store_data.resize(wf.wf_size() * 1);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -410,13 +407,12 @@ void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec, 0xc);
   d->store_data.resize(wf.wf_size() * 2);
-  const auto data0 = data.lanes(0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = data0[lane];
+    uint32_t val0 = data.lane(0, lane);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -509,7 +505,9 @@ void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -537,7 +535,9 @@ void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -567,7 +567,9 @@ void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -595,7 +597,9 @@ void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -623,7 +627,9 @@ void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -651,7 +657,9 @@ void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -679,7 +687,9 @@ void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -707,7 +717,9 @@ void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -735,7 +747,9 @@ void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -763,7 +777,9 @@ void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -791,7 +807,9 @@ void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -819,7 +837,9 @@ void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -847,7 +867,9 @@ void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -875,7 +897,9 @@ void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -903,7 +927,9 @@ void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -933,7 +959,9 @@ void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -967,7 +995,9 @@ void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -997,7 +1027,9 @@ void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1027,7 +1059,9 @@ void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1057,7 +1091,9 @@ void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1087,7 +1123,9 @@ void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1117,7 +1155,9 @@ void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1147,7 +1187,9 @@ void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1177,7 +1219,9 @@ void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1207,7 +1251,9 @@ void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1237,7 +1283,9 @@ void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1267,7 +1315,9 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1299,7 +1349,9 @@ void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::COND_SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1330,7 +1382,9 @@ void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1361,7 +1415,9 @@ void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1426,7 +1482,9 @@ void GlobalAtomicAddF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1459,7 +1517,9 @@ void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1519,7 +1579,9 @@ void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1547,7 +1609,9 @@ void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1578,7 +1642,9 @@ void GlobalAtomicMinNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1611,7 +1677,9 @@ void GlobalAtomicMaxNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = 3;
   d->atomic_legacy_minmax = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);

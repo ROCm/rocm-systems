@@ -58,8 +58,7 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);
   };
-  return std::lexicographical_compare(lhs_regs.begin(), lhs_regs.end(), rhs_regs.begin(),
-                                      rhs_regs.end(), less);
+  return std::ranges::lexicographical_compare(lhs_regs, rhs_regs, less);
 }
 
 bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
@@ -236,14 +235,12 @@ template <typename Predicate>
 void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEvent> &events,
                                       Predicate should_retire) {
   std::vector<PendingEvent> retired_events;
-  const auto retained =
-      std::remove_if(events.begin(), events.end(), [&](const PendingEvent &event) {
-        if (!should_retire(event))
-          return false;
-        retired_events.push_back(event);
-        return true;
-      });
-  events.erase(retained, events.end());
+  std::erase_if(events, [&](const PendingEvent &event) {
+    if (!should_retire(event))
+      return false;
+    retired_events.push_back(event);
+    return true;
+  });
   make_retired_generations_ready(state, retired_events);
 }
 
@@ -284,24 +281,6 @@ util::Result WaitcheckStateOps::apply_kmcnt_wait(PendingState &state, uint32_t c
   apply_wait(state, WaitCounterKind::Km, count);
   apply_xcnt_wait_implied_by_kmcnt(state, count);
   return util::Result::success();
-}
-
-bool WaitcheckStateOps::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
-  switch (counter) {
-  case WaitCounterKind::Load:
-    return kind == WaitEventKind::VmemNoSamplerLoad || kind == WaitEventKind::FlatLoad;
-  case WaitCounterKind::Store:
-    return kind == WaitEventKind::VmemStore || kind == WaitEventKind::FlatStore;
-  case WaitCounterKind::Ds:
-    return kind == WaitEventKind::Ds || kind == WaitEventKind::FlatLoad ||
-           kind == WaitEventKind::FlatStore;
-  case WaitCounterKind::Sample:
-    return kind == WaitEventKind::Sample;
-  case WaitCounterKind::Bvh:
-    return kind == WaitEventKind::Bvh;
-  default:
-    return false;
-  }
 }
 
 template <typename Predicate>
@@ -401,6 +380,14 @@ bool WaitcheckStateOps::has_xcnt_event(const PendingState &state, Predicate pred
   return false;
 }
 
+bool WaitcheckStateOps::has_xcnt_smem(const PendingState &state) {
+  return has_xcnt_event(state, is_xcnt_smem_event);
+}
+
+bool WaitcheckStateOps::has_xcnt_vmem(const PendingState &state) {
+  return has_xcnt_event(state, is_xcnt_vmem_event);
+}
+
 void WaitcheckStateOps::apply_xcnt_wait(PendingState &state, uint32_t count) {
   // SIInsertWaitcnts treats X_CNT as out of order while an SMEM
   // translation is pending. Only xcnt(0) proves that a particular scalar
@@ -455,61 +442,11 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
          kNoPendingEventAge;
 }
 
-std::optional<WaitEventKind>
-WaitcheckStateOps::normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind,
-                                                  WaitcntModel model) {
-  switch (counter) {
-  case WaitCounterKind::Load:
-    // Generic FLAT and ordinary VMEM loads both raise VMEM_READ_ACCESS.
-    // GLOBAL_INV is explicitly ignored by LLVM's LOAD_CNT out-of-order
-    // test. Pre-gfx12 image event kinds share that same hardware event.
-    if (kind == WaitEventKind::GlobalInv)
-      return std::nullopt;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::LdsDirect ||
-        (uses_legacy_waitcnt(model) &&
-         (kind == WaitEventKind::Sample || kind == WaitEventKind::Bvh))) {
-      return WaitEventKind::VmemNoSamplerLoad;
-    }
-    return kind;
-  case WaitCounterKind::Ds:
-    // A generic FLAT access raises the same LDS_ACCESS event as native DS.
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
-      return WaitEventKind::Ds;
-    return kind;
-  case WaitCounterKind::Store:
-    if (kind == WaitEventKind::GlobalWb)
-      return WaitEventKind::VmemStore;
-    return kind;
-  case WaitCounterKind::X:
-    // X_CNT distinguishes VMEM_GROUP from SMEM_GROUP, not the underlying
-    // load/store/image operation.
-    if (kind == WaitEventKind::Smem)
-      return WaitEventKind::Smem;
-    if (is_xcnt_vmem_kind(kind))
-      return WaitEventKind::VmemNoSamplerLoad;
-    return kind;
-  case WaitCounterKind::VmVsrc:
-    if (kind == WaitEventKind::Ds)
-      return WaitEventKind::Ds;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
-      return WaitEventKind::FlatLoad;
-    if (is_xcnt_vmem_kind(kind))
-      return WaitEventKind::VmemNoSamplerLoad;
-    return kind;
-  case WaitCounterKind::Async:
-    // Load, store, and barrier forms all raise ASYNC_ACCESS.
-    return WaitEventKind::AsyncLdsLoad;
-  case WaitCounterKind::Tensor:
-    return WaitEventKind::TensorLdsLoad;
-  default:
-    return kind;
-  }
-}
-
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
                                                                rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
     return false;
   }
@@ -755,7 +692,7 @@ util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruc
     state.expert_scheduling = expert_scheduling;
     return util::Result::success();
   }
-  if (inst.mnemonic() == "s_wait_alu")
+  if (inst.mnemonic() == "s_wait_alu" || inst.mnemonic() == "s_waitcnt_depctr")
     apply_sgpr_hazard_wait(state.sgpr_hazards,
                            static_cast<uint32_t>(inst.src_operand(0)->encoding_value()));
   return apply_wait_fields(state, *fields.value(), arch);
