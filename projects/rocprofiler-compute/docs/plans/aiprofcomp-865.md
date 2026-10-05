@@ -39,7 +39,7 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 | Metrics with profile PMCs | **374** |
 | Single-bucket today | **~283–299** |
 | Multi-bucket (impacted) | **~75–91** packable (**POLICY_GAP**) + **16** **SLOT_LIMIT** |
-| Metrics with no profile PMCs | 34 |
+| Derived metrics with no profile PMCs | 34 |
 
 **Normative intent:** for \(M = A/B\), collect all PMCs for \(A\) and \(B\) in the same replay when possible. Exceptions: intentional >100% (e.g. VALU dual-issue), **SLOT_LIMIT** (Phase 2), or HW defect — not silent analyze-time caps.
 
