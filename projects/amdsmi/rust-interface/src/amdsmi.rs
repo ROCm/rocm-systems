@@ -5076,6 +5076,42 @@ pub fn amdsmi_get_gpu_device_bdf(
     Ok(bdf)
 }
 
+/// Retrieves the DRM, HSA, HIP, and physical enumeration information for a GPU.
+///
+/// The returned [`AmdsmiEnumerationInfoT`] includes the DRM render node, HIP
+/// UUID, and enumeration IDs. The HIP UUID is distinct from the device UUID
+/// returned by [`amdsmi_get_gpu_device_uuid`].
+///
+/// # Arguments
+///
+/// * `processor_handle` - A processor handle obtained after initializing AMD SMI.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// # fn example(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult<()> {
+/// let info = amdsmi_get_gpu_enumeration_info(processor_handle)?;
+/// println!("DRM render node: renderD{}", info.drm_render);
+/// println!("HSA ID: {}, HIP ID: {}", info.hsa_id, info.hip_id);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns the underlying [`AmdsmiStatusT`] if the query fails.
+pub fn amdsmi_get_gpu_enumeration_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiEnumerationInfoT> {
+    let mut info = MaybeUninit::<AmdsmiEnumerationInfoT>::zeroed();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_enumeration_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    Ok(unsafe { info.assume_init() })
+}
+
 /// Get the UUID of the GPU device with the specified processor handle.
 ///
 /// Given a processor handle `processor_handle`, this function retrieves the UUID of the specified GPU device.
