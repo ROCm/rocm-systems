@@ -7,7 +7,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 - Fortran bindings for the rocTX API, shipped as a single `roctx` module in the `rocprofiler-sdk-roctx` package. A Fortran program writes `use roctx` and links the static archive through the `roc::roctx_fortran` CMake target, found with `find_package(roctx-fortran)`.
+  - String arguments are `type(c_ptr)` and must point to NUL-terminated text, for example `c_loc` of a `character(kind=c_char)` array that ends in `c_null_char`.
   - A Fortran `.mod` file is not portable across compilers, so the archive and the module files install under `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`. The source is installed under `<datadir>/roctx/fortran` so the bindings can be rebuilt with another compiler.
+  - `find_package(roctx-fortran)` picks the directory that matches the consumer's Fortran compiler. Set `ROCTX_FORTRAN_COMPILER_DIR` to choose one explicitly, for example `gfortran-13` when several versions of the same compiler are installed side by side.
   - `BUILD_FORTRAN_BINDINGS` (`ON` on Linux, `OFF` on Windows, where ROCm ships no Fortran compiler) controls whether the bindings are built, and is a no-op when no Fortran compiler is available. `ROCTX_BUILD_FORTRAN_BINDINGS` overrides it for ROCTx alone.
   - `BUILD_FORTRAN_CLIENTS` (`ON`) controls the binding test; in-tree it is additionally bounded by `ROCPROFILER_BUILD_TESTS`, and `ROCTX_BUILD_FORTRAN_CLIENTS` overrides it for ROCTx alone.
 
