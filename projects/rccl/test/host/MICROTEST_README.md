@@ -97,8 +97,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (local collection on each simulated node, then summary) against the
     `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`: count and model
     mismatch, driver mismatch, uncorrectable / deferred ECC errors, the
-    corrected-error threshold, down and missing XGMI links, and AMD SMI
-    unavailable on some or all nodes. Also checks that `rasDiagnosticsGpuInit`
+    corrected-error threshold, down and missing XGMI links, AMD SMI
+    unavailable on some or all nodes, and partition bus IDs (CPX, DPX) that
+    fall back to the physical GPU. Also checks that `rasDiagnosticsGpuInit`
     loads AMD SMI up front.
   - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
     `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers

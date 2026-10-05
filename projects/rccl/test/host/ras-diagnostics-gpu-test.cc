@@ -51,8 +51,10 @@ int RankOfBusId(int64_t busId) {
   return -1;
 }
 
-// What AMD SMI reports for the GPU of one rank; an empty model makes the model query fail.
+// What AMD SMI reports for the GPU of one rank; an empty model makes the model query fail, unknownToAmdSmi every
+// query.
 struct FakeGpu {
+  bool unknownToAmdSmi = false;
   std::string model = kModel;
   amdsmiDiagEccCounts ecc{};
   amdsmiDiagXgmiLinks links{kXgmiLinks, 0};
@@ -126,8 +128,14 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
       ResetAmdSmiFakes();
       return;
     }
+    // Like AMD SMI, the fakes know the physical GPUs only: a partition alias (function .1-.7) is not found.
     auto gpuOf = [this, nodeIdx](int64_t busId) -> FakeGpu* {
+      if (busId & 0xf) {
+        aliasQueries++;
+        return nullptr;
+      }
       int rank = RankOfBusId(busId);
+      if (rank >= 0 && gpus[rank].unknownToAmdSmi) return nullptr;
       EXPECT_EQ(nodeIdx, rank / kRanksPerNode) << "query for bus ID 0x" << std::hex << busId;
       return rank < 0 ? nullptr : &gpus[rank];
     };
@@ -161,7 +169,10 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
     std::string gathered;
     for (int nodeIdx = 0; nodeIdx < kNodes; nodeIdx++) {
       std::vector<FakeRank> ranks;
-      for (int i = 0; i < kRanksPerNode; i++) ranks.emplace_back(nodeIdx * kRanksPerNode + i);
+      for (int i = 0; i < kRanksPerNode; i++) {
+        ranks.emplace_back(nodeIdx * kRanksPerNode + i);
+        ranks.back().comm->busId |= partitionFunction;
+      }
       SetRegisteredComms(ranks);
       InstallNodeFakes(nodeIdx);
       rasDiagnosticsLocalData data{};
@@ -195,6 +206,9 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
 
   FakeNode nodes[kNodes];
   FakeGpu gpus[kRanks];
+  // Function of the bus ID HIP gives every rank: 0 for a whole GPU, 1-7 for a partition alias (CPX, DPX).
+  int partitionFunction = 0;
+  int aliasQueries = 0;
 };
 
 using Lines = std::vector<std::string>;
@@ -294,6 +308,29 @@ TEST_F(RasDiagnosticsGpuMicrotest, XgmiLinkCountMismatchOnOneRank) {
 TEST_F(RasDiagnosticsGpuMicrotest, NoXgmiLinesWithoutXgmiLinks) {
   for (FakeGpu& gpu : gpus) gpu.links = {0, 0};
   EXPECT_EQ(Lines{}, RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, PartitionAliasReadsThePhysicalGpu) {
+  partitionFunction = 3;
+  gpus[2].ecc.uncorrectable = 1;
+  gpus[1].links.nDown = 1;
+  EXPECT_EQ(Lines{"[OK]   GPU inventory: 8x AMD Instinct MI355X per node consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuInventory());
+  EXPECT_EQ(Lines{"[INFO] ECC: uncorrected volatile errors on rank(s) {2} (worst=1) across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunEcc());
+  EXPECT_EQ(Lines{"[INFO] XGMI: inactive link(s) on rank(s) {1} across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunXgmi());
+  EXPECT_EQ(3 * kRanks, aliasQueries);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, PhysicalGpuUnknownToAmdSmiIsNotRetried) {
+  gpus[3].unknownToAmdSmi = true;
+  EXPECT_EQ(Lines{"[INFO] ECC: no uncorrected volatile errors across 3 of 4 ranks in comm 0x5fa31c27a9e0d1b4 (ECC "
+                  "counters unavailable via AMD SMI on 1 ranks)"},
+            RunEcc());
+  EXPECT_EQ(0, aliasQueries);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, AmdSmiUnavailableOnEveryNode) {

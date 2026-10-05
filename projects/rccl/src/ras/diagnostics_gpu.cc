@@ -42,6 +42,18 @@ void rasDiagnosticsGpuInit() {
 #endif
 }
 
+#if RAS_DIAG_AMD_SMI
+// HIP can place the logical GPUs of a partitioned device (CPX, DPX) at functions .1-.7 of its bus ID, which AMD SMI
+// may not know (ncclTopoFillGpu in src/graph/xml.cc handles the same aliases). A query that fails there is retried
+// on function 0, the physical GPU, whose model, ECC counters and XGMI links the partition shares.
+template <typename Query>
+static ncclResult_t rasDiagnosticsAmdSmiQuery(int64_t busId, Query query) {
+  if (query(busId) == ncclSuccess) return ncclSuccess;
+  if ((busId & 0xf) == 0) return ncclSystemError;
+  return query(busId & ~INT64_C(0xf));
+}
+#endif
+
 // *************************************************************************
 // GPU model and count consistency check.
 // *************************************************************************
@@ -64,7 +76,8 @@ static ncclResult_t rasDiagnosticsGpuModelFillLocalData(const struct rasDiagnost
 
 #if RAS_DIAG_AMD_SMI
   if (amd_smi_diagGpuCount(&nDev) == ncclSuccess) gpuData->nGpus = (uint8_t)nDev;
-  if (amd_smi_diagGpuModel(comm->busId, gpuData->model, sizeof(gpuData->model)) != ncclSuccess) {
+  auto queryModel = [&](int64_t busId) { return amd_smi_diagGpuModel(busId, gpuData->model, sizeof(gpuData->model)); };
+  if (rasDiagnosticsAmdSmiQuery(comm->busId, queryModel) != ncclSuccess) {
     gpuData->model[0] = '\0';
   }
 #else
@@ -430,7 +443,8 @@ static ncclResult_t rasDiagnosticsEccFillLocalData(const struct rasDiagnosticsCo
   // AMD SMI reports totals over all memory blocks, kept in the DRAM fields. Deferred errors were detected but not
   // corrected, so they count as uncorrected.
   struct amdsmiDiagEccCounts counts;
-  if (amd_smi_diagEccCounts(comm->busId, &counts) == ncclSuccess) {
+  auto queryEcc = [&](int64_t busId) { return amd_smi_diagEccCounts(busId, &counts); };
+  if (rasDiagnosticsAmdSmiQuery(comm->busId, queryEcc) == ncclSuccess) {
     eccData->correctedDram = counts.correctable;
     eccData->uncorrectedDram = counts.uncorrectable + counts.deferred;
     eccData->available = 1;
@@ -600,7 +614,8 @@ static ncclResult_t rasDiagnosticsNvLinkFillLocalData(const struct rasDiagnostic
 #if RAS_DIAG_AMD_SMI
   // XGMI links take the place of NVLinks: a disabled link is not counted, a link that is down is inactive.
   struct amdsmiDiagXgmiLinks links;
-  if (amd_smi_diagXgmiLinks(comm->busId, &links) == ncclSuccess) {
+  auto queryLinks = [&](int64_t busId) { return amd_smi_diagXgmiLinks(busId, &links); };
+  if (rasDiagnosticsAmdSmiQuery(comm->busId, queryLinks) == ncclSuccess) {
     nvlData->nLinks = (uint8_t)links.nLinks;
     nvlData->nInactive = (uint8_t)links.nDown;
   }
