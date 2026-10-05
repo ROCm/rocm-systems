@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi` multi-value options rejecting comma-separated values with `=`**.  
+  - `--gpu=0,1` and `-g=0,1` now select both GPUs. Space-separated lists remain supported, and argument counts, types, and choices are still validated.
+
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 

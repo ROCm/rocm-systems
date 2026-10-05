@@ -80,6 +80,11 @@ amd-smi reset --gpureset --gpu all
 amd-smi --rocm-smi
 ```
 
+Multi-value options also accept comma-separated values with `=`. For example,
+`amd-smi metric --gpu=0,1` (or `-g=0,1`) selects the same GPUs as
+`amd-smi metric --gpu 0 1`. Keep all values in the equals list, without spaces
+around commas. Repeating a device option keeps its last selection.
+
 ```{note}
 For command-specific help, use `amd-smi [command] --help` for see more detailed
 usage information. See [Commands](#cmds).
@@ -162,6 +167,8 @@ Command Modifiers:
   --file FILE                  Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL             Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+Multi-value syntax: --option VALUE1 VALUE2 or --option=VALUE1,VALUE2.
 ```
 
 (cmd-static)=
