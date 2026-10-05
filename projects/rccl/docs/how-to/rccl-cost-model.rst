@@ -271,8 +271,16 @@ If you are writing a tuner plugin, the important thing to understand is how narr
 view of the candidate space is. When a ``v6`` plugin is loaded, RCCL flattens the general-kernel
 candidates into a ``NCCL_NUM_ALGORITHMS`` by ``NCCL_NUM_PROTOCOLS`` table of modeled costs and
 passes that table, and only that table, to ``getCollInfo``. Cells for candidates the model found
-ineligible are left at ``NCCL_ALGO_PROTO_IGNORE``. After ``getCollInfo`` returns, RCCL copies the
-plugin's values back onto the general candidates and runs the argmin over the whole list.
+ineligible are set to ``NCCL_ALGO_PROTO_IGNORE``, which is ``-1.0``. After ``getCollInfo``
+returns, RCCL copies the plugin's values back onto the general candidates and runs the argmin over
+the whole list.
+
+**A cell is ineligible when it is negative, not only when it equals the sentinel.** The argmin
+drops cells equal to ``NCCL_ALGO_PROTO_IGNORE`` and then accepts only costs ``>= 0.0``, and a
+later cost adjustment can scale an already-ineligible cell so that it stays negative without
+staying equal to ``-1.0``. The fp8 relegation of deep RING reductions does exactly this: it
+multiplies the cell by 1024, turning the ``-1.0`` sentinel into ``-1024.0``. Test ``>= 0.0f``,
+never ``!= NCCL_ALGO_PROTO_IGNORE``.
 
 The consequences for a plugin author:
 
@@ -281,18 +289,20 @@ The consequences for a plugin author:
    represented in the table, and their modeled costs pass through the plugin untouched.
 *  A plugin **cannot** price, veto, or select a copy engine method, for the same reason.
 *  Writing ``0.0`` into a cell is how a plugin claims that algorithm and protocol combination:
-   zero is below every modeled cost, so the argmin picks it.
+   zero is below every modeled cost, so the argmin picks it. Write it only into a cell that was
+   already ``>= 0.0``, or you claim a candidate RCCL ruled out.
 *  A plugin is **not** bound by a per-call ``algSelection``. The narrowing described in
-   :ref:`cost-model-per-call-selection` runs before ``getCollInfo``, and the argmin skips only
-   cells still exactly equal to ``NCCL_ALGO_PROTO_IGNORE``, so writing a cost into a blanked cell
-   revives a row the selection excluded. Guard on ``NCCL_ALGO_PROTO_IGNORE`` before writing, as
-   in the example below, to leave the caller's selection intact.
+   :ref:`cost-model-per-call-selection` runs before ``getCollInfo``, so writing a cost into a
+   blanked cell revives a row the selection excluded. The same ``>= 0.0f`` guard leaves the
+   caller's selection intact.
 
 .. code-block:: cpp
 
    // Claim RING/LL128 for this call; leave every other cell as RCCL costed it.
+   // The guard is >= 0.0f, not != NCCL_ALGO_PROTO_IGNORE: an ineligible cell can be
+   // negative without equalling the sentinel, and claiming it selects an unusable kernel.
    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-   if (table[NCCL_ALGO_RING][NCCL_PROTO_LL128] != NCCL_ALGO_PROTO_IGNORE) {
+   if (table[NCCL_ALGO_RING][NCCL_PROTO_LL128] >= 0.0f) {
      table[NCCL_ALGO_RING][NCCL_PROTO_LL128] = 0.0f;
    }
 
