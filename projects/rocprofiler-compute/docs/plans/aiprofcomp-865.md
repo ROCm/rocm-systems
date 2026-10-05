@@ -15,8 +15,8 @@ Full historical plan drafts are preserved on branch
 
 | Term | Meaning |
 |------|---------|
-| **SPP (Single-pass packable)** | Metric whose PMC set fits one hardware bucket. **Collection:** co-located perfmon replay (PMC duplication across passes allowed when unions conflict). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
-| **SPU (Single-pass unpackable)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
+| **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** co-located perfmon replay (PMC duplication across passes allowed when unions conflict). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
+| **Single-pass unpackable(SPU)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
 | **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). Used to solve **SPU** parents. |
 | **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (fixed by Phase 1, not Phase 2). |
 | **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). |
@@ -49,8 +49,8 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 ```
 408 YAML metrics (gfx942 default)
 ├── 374 with profile PMCs
-│   ├── 358 SPP (single-pass packable)     ← Phase 1 (~14 passes + same-pass bind)
-│   └── 16 SPU (single-pass unpackable)    ← Phase 2 collectables
+│   ├── 358 Single-pass packable(SPP)     ← Phase 1 (~14 passes + same-pass bind)
+│   └── 16 Single-pass unpackable(SPU)    ← Phase 2 collectables
 └── 34 with no profile PMCs                ← out of packing scope
 ```
 
@@ -66,7 +66,7 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 
 ## 4. Solution
 
-### 4.1 Phase 1 design — SPP (collection + same-pass bind)
+### 4.1 Phase 1 design — Single-pass packable(SPP)
 
 #### Collection — single-pass packing
 
@@ -89,7 +89,7 @@ Algorithm (normative sketch):
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
-#### Analyze — same-pass bind (part of SPP)
+#### Analyze — same-pass bind (part of Single-pass packable(SPP))
 
 When packing duplicates hub counters across passes:
 
@@ -101,7 +101,7 @@ Without this bind, SPP layouts can produce impossible percent averages/maxes (e.
 
 **Primary bind code:** `pass_provenance.py`, `file_io` / `utils_analysis` shadow columns, analyze CLI+DB bind paths.
 
-### 4.2 Phase 2 design — Collectables (SPU only)
+### 4.2 Phase 2 design — Collectables for Single-pass unpackable(SPU)
 
 SPU parents cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`.
 
@@ -125,7 +125,7 @@ Submetrics are normal single-pass (SPP) metrics. Parents are analyze-time compos
 
 gfx942: **16** SPU parents ≈ **10** unique PMC sets (panel mirrors share sets).
 
-#### gfx942 SPU conversion summary
+#### gfx942 Single-pass unpackable(SPU) conversion summary
 
 All **16** former SPU parents (**10** unique PMC sets) are analyze-time composites. Sub-collectables are single-bucket; offline eval reports `slot_limit_metrics: 0` (tool key for the SPU residual count).
 
