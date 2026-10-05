@@ -16,14 +16,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 else()
     set(USE_UBO OFF)
 endif()
-option(AIS_WARN_UNSAFE_BUFFER_OPS "Warn about unsafe buffer operations (llvm C++ only)" ${USE_UBO})
+option(HIPFILE_WARN_UNSAFE_BUFFER_OPS "Warn about unsafe buffer operations (llvm C++ only)" ${USE_UBO})
 
-if(AIS_WARN_UNSAFE_BUFFER_OPS)
+if(HIPFILE_WARN_UNSAFE_BUFFER_OPS)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set(AIS_CLANG_WARNING_FLAGS
+        set(HIPFILE_CLANG_WARNING_FLAGS
             -Wunsafe-buffer-usage
             -fsafe-buffer-usage-suggestions
-            ${AIS_CLANG_WARNING_FLAGS}
+            ${HIPFILE_CLANG_WARNING_FLAGS}
         )
     else()
         message(FATAL_ERROR "Unsafe buffer warnings are only useful for clang/llvm")
