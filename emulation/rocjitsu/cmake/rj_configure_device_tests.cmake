@@ -18,7 +18,7 @@ if(NOT DEFINED ROCM_PATH)
     endif()
 endif()
 
-if(ROCM_PATH AND NOT IS_DIRECTORY "${ROCM_PATH}")
+if(NOT "${ROCM_PATH}" STREQUAL "" AND NOT IS_DIRECTORY "${ROCM_PATH}")
     message(FATAL_ERROR "ROCM_PATH must be set to a valid directory")
 endif()
 
