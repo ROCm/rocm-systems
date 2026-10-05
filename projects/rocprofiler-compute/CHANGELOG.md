@@ -7,6 +7,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to analyze mode.
+  * They are short forms of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2,4`.
+
 * Options that take a list now accept values separated by commas, for example `-b 2,5` or `-R FP16,FP32`. Values separated by spaces still work.
 
 ### Changed

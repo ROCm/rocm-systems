@@ -34,6 +34,7 @@ PC_SAMPLING_SOURCE_WORKLOAD = (
 )
 SOURCE_WORKLOAD_NAME = "pc_sampling_source_workload"
 SOURCE_WORKLOAD_SUB_NAME = "run_001"
+SOL_MEMCHART_AND_BLOCK_5 = ["--speed-of-light", "--memory-chart", "-b", "5"]
 
 
 def setup_pc_sampling_source_workload(tmp_path):
@@ -295,6 +296,42 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         assert "Invalid --block value '100'" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.filter_block
+@pytest.mark.parametrize(
+    ("workload", "shortcuts", "blocks"),
+    [
+        ("tests/workloads/vcopy/MI200", SOL_MEMCHART_AND_BLOCK_5, "5,2,3"),
+        ("tests/workloads/vcopy/MI350", SOL_MEMCHART_AND_BLOCK_5, "5,2,3"),
+        # vcopy has no roofline.csv, so compare roofline on a workload that does
+        ("tests/workloads/mem_levels_HBM/MI200", ["--roofline"], "4"),
+    ],
+    ids=["sol_memchart_MI200", "sol_memchart_MI350", "roofline_MI200"],
+)  # fmt: skip
+def test_filter_panel_shortcuts(
+    binary_handler_analyze_rocprof_compute, capsys, workload, shortcuts, blocks
+):
+    """--speed-of-light/--memory-chart/--roofline show the same panels as -b."""
+    workload_dir = integration_common.setup_workload_dir(
+        workload, param_id=Path(workload).parent.name + Path(workload).name
+    )
+    outputs = []
+    for options in (shortcuts, ["--block", blocks]):
+        capsys.readouterr()
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            *options,
+        ])
+        assert code == 0
+        # Compare the report only; the log lines before it can differ
+        out = capsys.readouterr().out
+        outputs.append(out[out.index("0. Top Stats") :])
+    assert outputs[0] == outputs[1]
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial

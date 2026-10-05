@@ -16,6 +16,7 @@ from common import SUPPORTED_ARCHS
 from argparser import (
     DEPRECATED_OPTIONS,
     CommaListAction,
+    apply_panel_shortcuts,
     non_negative_int,
     omniarg_parser,
     warn_deprecated_options,
@@ -370,6 +371,32 @@ def test_comma_list_append_keeps_occurrences():
     args = build_args(["analyze", "-k", "1,2", "-k", "3", "-d", "4,5"])
     assert args.gpu_kernel == [[1, 2], [3]]
     assert args.gpu_dispatch_id == [["4", "5"]]
+
+
+# =============================================================================
+# --speed-of-light / --memory-chart / --roofline
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "dest", "expected"),
+    [
+        (["analyze", "-b", "5,sol", "--roofline"], "filter_metrics", ["5", "sol", "4"]),
+        (["analyze", "-b", "4", "--roofline"], "filter_metrics", ["4"]),
+        (
+            ["analyze", "--roofline", "--speed-of-light", "--memory-chart"],
+            "filter_metrics",
+            ["2", "3", "4"],
+        ),
+        # analyze treats filter_metrics=None as "show everything"
+        (["analyze"], "filter_metrics", None),
+    ],
+    ids=["append_to_block", "no_duplicate", "all_three", "none_selected"],
+)
+def test_apply_panel_shortcuts(argv, dest, expected):
+    args = build_args(argv)
+    apply_panel_shortcuts(args, dest)
+    assert getattr(args, dest) == expected
 
 
 # =============================================================================

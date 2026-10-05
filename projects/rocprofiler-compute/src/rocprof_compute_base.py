@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from argparser import CliHelpFormatter, omniarg_parser, warn_deprecated_options
+from argparser import (
+    CliHelpFormatter,
+    apply_panel_shortcuts,
+    omniarg_parser,
+    warn_deprecated_options,
+)
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -298,6 +303,7 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        apply_panel_shortcuts(args, "filter_metrics")
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )

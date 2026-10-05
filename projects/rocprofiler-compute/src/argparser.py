@@ -9,6 +9,13 @@ from typing import Callable, Optional, Union
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
+# Panel ids selected by the --speed-of-light, --memory-chart and --roofline options
+PANEL_SHORTCUTS = {
+    "speed_of_light": "2",
+    "memory_chart": "3",
+    "roofline": "4",
+}
+
 ROOFLINE_MEM_LEVELS = ["ALL", "HBM", "L2", "vL1D", "L0", "LDS"]
 ROOFLINE_DATA_TYPES = [
     "FP4",
@@ -74,6 +81,20 @@ def non_negative_int(value: str) -> int:
             f"must be a non-negative integer (0 means all), got {parsed}"
         )
     return parsed
+
+
+def apply_panel_shortcuts(args: argparse.Namespace, dest: str) -> None:
+    """Add the --speed-of-light, --memory-chart, and --roofline panels to args.dest."""
+    selected = [
+        panel_id
+        for option, panel_id in PANEL_SHORTCUTS.items()
+        if getattr(args, option, False)
+    ]
+    if not selected:
+        return
+    blocks = list(getattr(args, dest, None) or [])
+    blocks.extend(panel_id for panel_id in selected if panel_id not in blocks)
+    setattr(args, dest, blocks)
 
 
 def add_general_group(
@@ -615,6 +636,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12,34 --decimal 3
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --speed-of-light --roofline
 -----------------------------------------------------------------------------------
         """,
         prog="rocprof-compute",
@@ -770,6 +792,11 @@ Examples:
             "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
     )
+    _add_panel_shortcut(
+        analyze_group, "speed_of_light", "Show the Speed of Light panel."
+    )
+    _add_panel_shortcut(analyze_group, "memory_chart", "Show the Memory Chart panel.")
+    _add_panel_shortcut(analyze_group, "roofline", "Show the Roofline panel.")
     analyze_group.add_argument(
         "--gpu-id",
         dest="gpu_id",
@@ -989,6 +1016,25 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
         if readme.is_file():
             return f"Agent Skills: see {readme} to install them."
     return None
+
+
+def _add_panel_shortcut(
+    group: argparse._ArgumentGroup, dest: str, description: str
+) -> None:
+    """Add the --speed-of-light, --memory-chart or --roofline option for dest."""
+    others = ["-b"] + [
+        "--" + other.replace("_", "-") for other in PANEL_SHORTCUTS if other != dest
+    ]
+    group.add_argument(
+        "--" + dest.replace("_", "-"),
+        dest=dest,
+        default=False,
+        action="store_true",
+        help=(
+            f"{description} Same as -b {PANEL_SHORTCUTS[dest]}.\n"
+            f"Can be combined with {', '.join(others[:-1])}, and {others[-1]}."
+        ),
+    )
 
 
 class ExperimentalAction(argparse.Action):
