@@ -6,6 +6,15 @@
 
 #pragma once
 
+// MI100 (CDNA1) — limited vs gfx90a+; many advanced paths bypass in mega_kernel.hip
+#if defined(__gfx908__)
+#    define ARCH_MI100          1
+#    define ARCH_NAME           "MI100 (gfx908/CDNA1)"
+#    define HAS_HW_FP64_ATOMICS 0
+#    define HAS_FP8             0
+#    define HAS_ASYNC_LDS       0
+#endif
+
 // MI250/MI200 series (CDNA2)
 #if defined(__gfx90a__)
 #    define ARCH_MI250          1
