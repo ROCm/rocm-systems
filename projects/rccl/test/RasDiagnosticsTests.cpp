@@ -66,12 +66,13 @@ static const char* const kEcc          = "ECC: ";
 static const char* const kEnv          = "NCCL environment: ";
 
 // Report lines that indicate a failed, incomplete or inconsistent check (src/ras/diagnostics_gpu.cc,
-// src/ras/diagnostics_env.cc, src/ras/diagnostics_checks_common.cc).
+// src/ras/diagnostics_env.cc, src/ras/diagnostics_checks_common.cc). test/host/CMakeLists.txt checks at configure
+// time that every marker here is still in the report line it marks.
 static const char* const kRasFailureMarkers[] = {
     "diagnostics incomplete",
     "mismatch across",
     "differ across ranks",
-    "comparison may be partial",
+    "comparison may be",
     "uncorrected volatile errors on rank(s)",
     "at or above threshold",
     "inactive link(s)",
