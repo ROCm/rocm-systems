@@ -276,6 +276,7 @@ def apply_filters(workload: schema.Workload, debug: bool) -> pd.DataFrame:
     if workload.filter_kernel_ids:
         filtered_df = apply_kernel_filter(filtered_df, workload)
 
+    # Apply dispatch filter
     if workload.filter_dispatch_ids:
         filtered_df = apply_dispatch_filter(filtered_df, workload)
 
