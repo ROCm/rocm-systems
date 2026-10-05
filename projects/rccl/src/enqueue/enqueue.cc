@@ -1269,11 +1269,19 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 // 4 KiB: the largest cutoff that avoids the legacy-LL mid-size regressions while keeping its win.
 NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
 // Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950 with
-// NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled). Default 16 KiB: internode alltoall/
-// scatter/gather sweeps (1-16 nodes) show LL128 beats SIMPLE for every per-peer size <= 16 KiB at
-// all scales; LL128's low (~1/8 gfx950, ~1/16 gfx1250) flag overhead keeps it beneficial well past
-// the legacy-LL crossover, so it warrants a higher threshold than legacy LL.
+// NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled, and on gfx1250 when
+// NCCL_P2P_LL128_ENABLE=1). Default 16 KiB: internode alltoall/scatter/gather sweeps (1-16 nodes)
+// show LL128 beats SIMPLE for every per-peer size <= 16 KiB at all scales; LL128's low (~1/8 gfx950,
+// ~1/16 gfx1250) flag overhead keeps it beneficial well past the legacy-LL crossover, so it
+// warrants a higher threshold than legacy LL. 0 means no upper bound (use LL128 for all sizes
+// when the path is eligible).
 NCCL_PARAM(P2pLL128Threshold, "P2P_LL128_THRESHOLD", 16384);
+// gfx1250 P2P LL128 enablement. Default -1: SendRecv stays on legacy LL up to
+// NCCL_P2P_LL_THRESHOLD (4 KiB/channel) then SIMPLE; no auto LL128. 0 = off.
+// 1 = SendRecv uses LL128 from 0 through rcclGfx1250SendRecvLl128MaxBytes
+// (4/8/16 ranks: 1 MiB / 512 KiB / 256 KiB); other rank counts and AlltoAll keep
+// the NCCL_P2P_LL128_THRESHOLD opt-in. gfx942/gfx950 ignore this flag.
+NCCL_PARAM(P2pLL128Enable, "P2P_LL128_ENABLE", -1);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 
@@ -1335,9 +1343,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // recv: dir=0, send: dir=1
   void* addrs[2] = {recvAddr, sendAddr};
   ssize_t bytes[2] = {recvBytes, sendBytes};
-  // "Latency-bound" flag per dir: the op is small enough to use an LL-family protocol
-  // (legacy LL or LL128) instead of SIMPLE. The actual protocol is chosen below.
-  bool protoLatency[2] = {!selfSend, !selfSend};
+  bool hasLL[2] = {!selfSend, !selfSend};
+  bool hasLL128[2] = {!selfSend, !selfSend};
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
@@ -1354,30 +1361,45 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
-  //   - LL128 kernel: only activated on gfx942/gfx950 (it is also built for gfx1250 so its
-  //     table slot is not a nullptr), and only when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
-  //     (which is also what makes the LL128 staging buffer available on network connections).
-  //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
-  // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
-  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs that
-  // activate the LL128 send/recv kernel.
+  //   - LL128 kernel (reg=1): gfx942/gfx950 when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, and gfx1250 when
+  //     NCCL_P2P_LL128_ENABLE=1. The kernel is built for all three so the table slot is a real
+  //     function. Wire<->data chunk conversion uses comm->ll128LineElems/ll128DataElems
+  //     (8/7 on gfx9, 16/15 on gfx1250) rather than the legacy-LL x2 factor.
+  //   - legacy LL kernel (reg=0): every other arch/comm, or when the LL128 path is not selected.
+  // The kernel variant is per P2P round (useLL128SendRecv is recomputed from protocol[0/1]
+  // after selection). sendProtoLL/recvProtoLL can still differ for SIMPLE vs latency.
+  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950, 1250 = gfx1250.
   // LL128 send/recv requires ALL of:
   //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
   //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so
   //     selecting it would dispatch to a null/trap device slot.
-  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE).
-  //     If LL128 is not enabled for this comm, P2P must not use it even with the opt-in flag set, so
-  //     send/recv stays consistent with the collective protocol choice.
-  //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
-  //     available on network connections.
-  //   - gfx942/gfx950: the only archs that activate the LL128 send/recv kernel. gfx1250
-  //     builds it so its table slot is a real function, but nothing selects it there.
+  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE;
+  //     gfx1250 default-enables this in init).
+  //   - gfx942/gfx950: NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, which also stages the net LL128
+  //     buffer for internodal P2P.
+  //   - gfx1250: NCCL_P2P_LL128_ENABLE=1. SendRecv on 4/8/16 ranks uses LL128 from 0 through
+  //     rcclGfx1250SendRecvLl128MaxBytes (1 MiB / 512 KiB / 256 KiB). Other rank counts and
+  //     AlltoAll use NCCL_P2P_LL128_THRESHOLD. Default ENABLE=-1 stays on legacy LL then SIMPLE.
+  //     Internodal still needs the LL128 staging buffer (allocated when ENABLE=1); if it is
+  //     missing the op falls back to SIMPLE.
 #if defined(ENABLE_LL128)
-  bool useLL128SendRecv =
-    comm->allocP2pNetLLBuffers && comm->topo->ll128Enabled && (comm->cudaArch == 940 || comm->cudaArch == 950);
+  bool p2pLl128Gfx9 = (comm->cudaArch == 940 || comm->cudaArch == 950) && comm->allocP2pNetLLBuffers;
+  bool p2pLl128Gfx1250 = (comm->cudaArch == 1250) && ncclParamP2pLL128Enable() > 0;
+  bool useLL128OptIn = comm->topo->ll128Enabled && (p2pLl128Gfx9 || p2pLl128Gfx1250);
+  ssize_t srLl128Hi[2] = {0, 0};
+  // ENABLE=1 SendRecv windows only. Default (ENABLE < 0) must not take LL128.
+  if (p2pLl128Gfx1250 && comm->topo->ll128Enabled) {
+    for (int t = 0; t < 2; t++) {
+      if (p2pTasks[t] && (p2pTasks[t]->collAPI == ncclFuncSend || p2pTasks[t]->collAPI == ncclFuncRecv ||
+                          p2pTasks[t]->collAPI == ncclFuncSendRecv))
+        srLl128Hi[t] = rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, comm->nNodes, comm->nRanks);
+    }
+  }
 #else
-  bool useLL128SendRecv = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
+  bool useLL128OptIn = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
+  ssize_t srLl128Hi[2] = {0, 0};
 #endif
+  bool useLL128SendRecv = useLL128OptIn;
   if (comm->p2pNet) {
     for (int dir = 0; dir <= 1; dir++) {
       if (bytes[dir] > rcclParamP2pNetThreshold()) connIndex[dir] = NCCL_CONN_IDX_P2P_NET;
@@ -1393,13 +1415,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-        // The latency path needs the staging buffer for the protocol its kernel variant uses:
-        // the LL128 buffer when the LL128 kernel is active, otherwise the legacy LL buffer. If the
-        // chosen buffer is absent on any connection the op drops straight to SIMPLE (not to the
-        // other LL-family protocol) -- once LL128 is opted in, the fallback is SIMPLE, never legacy
-        // LL. Intranode always allocates the LL128 buffer, so this only affects mixed setups.
-        int latencyProto = useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL;
-        protoLatency[dir] &= conn->conn.buffs[latencyProto] != nullptr;
+        // Record which latency staging buffers exist. Protocol selection below picks LL, LL128,
+        // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
+        hasLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
+        hasLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
         bool isNet = conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         network[dir] |= isNet;
         // Only AND sameProcess on NET connectors. Unused/unconnected P2P parts
@@ -1414,6 +1433,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // Arrays indexed by dir where recv=0, send=1:
   int nChannels[2];
   int protocol[2];
+  bool protoLatency[2];
   int stepSize[2];
   int chunkSize[2];
   int chunkDataSize[2];
@@ -1445,13 +1465,25 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       }
     }
 
-    // Select protocol based on per-channel payload: at/below the latency threshold use the latency
-    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL), above
-    // it SIMPLE. LL128 and legacy LL use independent thresholds (P2P_LL128_THRESHOLD vs
-    // P2P_LL_THRESHOLD) because LL128's lower wire overhead stays beneficial to larger sizes.
-    ssize_t latencyThreshold = useLL128SendRecv ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
-    if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
-    protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
+    // Select protocol. gfx1250 ENABLE=1 SendRecv uses a message-size window (not per-channel):
+    // 0 through the topology max LL128, above that SIMPLE. Default ENABLE=-1 and ENABLE=0 stay
+    // on the threshold path: LL128 (gfx9 + ALLOC, or gfx1250 ENABLE=1 without a window) or
+    // legacy LL, then SIMPLE. P2P_LL128_THRESHOLD=0 means no upper bound. Protocol is
+    // f(bytes[dir]) so both ends of a link agree; do not key off this rank's register cache.
+    if (bytes[dir] == -1) {
+      protocol[dir] = NCCL_PROTO_SIMPLE;
+    } else if (srLl128Hi[dir] > 0) {
+      protocol[dir] = rcclGfx1250SendRecvEnableProtocol(bytes[dir], srLl128Hi[dir], hasLL128[dir]);
+    } else {
+      bool lat = useLL128OptIn ? hasLL128[dir] : hasLL[dir];
+      ssize_t latencyThreshold = useLL128OptIn ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
+      if (!(useLL128OptIn && latencyThreshold == 0)) lat &= bytes[dir] <= nChannels[dir] * latencyThreshold;
+      protocol[dir] = lat ? (useLL128OptIn ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
+    }
+  }
+
+  for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
+    protoLatency[dir] = protocol[dir] == NCCL_PROTO_LL || protocol[dir] == NCCL_PROTO_LL128;
 
     // Emit the selected protocol so tests (and NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=COLL) can confirm
     // the latency protocol was actually chosen rather than silently falling back to SIMPLE.
@@ -1564,6 +1596,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // Update number of channels propagated to the profiler
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
   }
+  useLL128SendRecv = protocol[0] == NCCL_PROTO_LL128 || protocol[1] == NCCL_PROTO_LL128;
 
   struct ncclWorkList* workNode;
   workNode = ncclMemoryStackAllocInlineArray<ncclWorkList, ncclDevWorkP2p>(&comm->memScoped, 1);
@@ -1780,9 +1813,10 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
-        // Ensure room for worst case of one new batch per channel.
-        if (!ncclTestBudget(budget, plan->nWorkBatches + nChannelsMax,
-                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
+        // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
+        // split into two one-sided work items, so reserve twice the P2P work.
+        if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,
+                            plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
         struct ncclTaskP2p* p2pTasks[2] = {recv, send};
