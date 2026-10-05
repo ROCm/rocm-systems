@@ -154,19 +154,11 @@ elseif(ROCM_PATH)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
 endif()
 
-# fmt headers: FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
-if(fmt_SOURCE_DIR)
-  target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
-elseif(TARGET fmt::fmt-header-only)
-  get_target_property(_fmt_inc fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
-  if(_fmt_inc)
-    foreach(_p ${_fmt_inc})
-      if(NOT _p MATCHES "^\\$<")
-        target_include_directories(rccl_device_defs SYSTEM INTERFACE "${_p}")
-      endif()
-    endforeach()
-  endif()
-endif()
+# fmt headers, named directly rather than read off fmt::fmt-header-only: the
+# target carries its include directory in a $<BUILD_INTERFACE:...> generator
+# expression, which cannot be resolved at configure time.
+target_include_directories(rccl_device_defs SYSTEM INTERFACE
+  "${PROJECT_SOURCE_DIR}/external/fmt/include")
 
 # ---------------------------------------------------------------------------
 # Read specialized file list
@@ -294,6 +286,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   add_dependencies(${_dev_target} hipify_all copy_nccl_device_headers)
   if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
+  endif()
+  if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+    add_dependencies(${_dev_target} copy_rocshmem_headers)
   endif()
   # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
   # symbols resolve during the per-arch device.elf link step.
@@ -1109,13 +1104,7 @@ if(GENERATE_SYM_KERNELS)
 
     add_custom_command(
       OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link}
-        ${_bc_dir}/queue_pair.bc
-        ${_bc_dir}/queue_pair_mlx5.bc
-        ${_bc_dir}/queue_pair_bnxt.bc
-        ${_bc_dir}/queue_pair_ionic.bc
-        ${_cm_bc}
-        -o ${_qp_raw}
+      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
       COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
       COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
         ${_qp_raw}.ll > ${_qp_raw}.clean.ll
@@ -1172,6 +1161,9 @@ add_custom_target(device_linker_build ALL
   DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_linker_build copy_rocshmem_headers)
+endif()
 if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
   # The fat objects above include GIN device headers, which pull in rocSHMEM
   # headers installed to ext/rocshmem/include by the ExternalProject.
@@ -1210,3 +1202,6 @@ set(DEVICE_LINKER_OBJECTS
 # ===========================================================================
 add_custom_target(device_ir DEPENDS ${ALL_IR_FILES})
 add_dependencies(device_ir hipify_all copy_nccl_device_headers)
+if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+  add_dependencies(device_ir copy_rocshmem_headers)
+endif()

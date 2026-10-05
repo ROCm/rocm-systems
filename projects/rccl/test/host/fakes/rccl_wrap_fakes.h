@@ -49,9 +49,9 @@ extern int g_rcclOverrideAlgorithmCalls;
 extern int g_rcclOverrideProtocolCalls;
 
 // CE (copy-engine) allreduce gates (rccl_wrap.cc:834-855).
-extern bool g_rcclCeAllReduceAllowed;
-extern int g_rcclCeAllReduceGraphLatchTickCalls;
-extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;
+extern bool g_rcclCeArGraphSafe;  // UNDRIVEN
+extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
+extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 
 // -------------------------------------------------------------------------
 // WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites

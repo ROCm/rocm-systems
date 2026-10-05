@@ -25,16 +25,16 @@ struct nic_track_description
     const char* units;
 };
 
-inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 0;
-inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 1;
-inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 2;
-inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 3;
-inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 4;
-inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 5;
-inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = std::uint32_t(1) << 6;
-inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = std::uint32_t(1) << 7;
-inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = std::uint32_t(1) << 8;
-inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = std::uint32_t(1) << 9;
+inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = static_cast<std::uint32_t>(1) << 0;
+inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = static_cast<std::uint32_t>(1) << 1;
+inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = static_cast<std::uint32_t>(1) << 2;
+inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = static_cast<std::uint32_t>(1) << 3;
+inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = static_cast<std::uint32_t>(1) << 4;
+inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = static_cast<std::uint32_t>(1) << 5;
+inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = static_cast<std::uint32_t>(1) << 6;
+inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = static_cast<std::uint32_t>(1) << 7;
+inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = static_cast<std::uint32_t>(1) << 8;
+inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = static_cast<std::uint32_t>(1) << 9;
 
 // Default track labels and units, keyed by metric bit value. Adding a metric
 // touches several ordered lists that must stay in sync: the *_VALUE bit constant
@@ -86,7 +86,10 @@ inline void
 emit_nic_counter(size_t device_index, std::int64_t track_index, std::uint64_t ts,
                  std::uint64_t value)
 {
-    if(track_index < 0) return;
+    if(track_index < 0)
+    {
+        return;
+    }
     TRACE_COUNTER(trait::name<CategoryTp>::value,
                   perfetto_counter_track<metrics>::at(device_index,
                                                       static_cast<size_t>(track_index)),
@@ -99,9 +102,15 @@ inline std::int64_t
 resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
                   const std::map<std::uint32_t, size_t>& device_tracks)
 {
-    if((effective_metrics.value & bit_key) == 0) return -1;
+    if((effective_metrics.value & bit_key) == 0)
+    {
+        return -1;
+    }
     auto it = device_tracks.find(bit_key);
-    if(it == device_tracks.end()) return -1;
+    if(it == device_tracks.end())
+    {
+        return -1;
+    }
     return static_cast<std::int64_t>(it->second);
 }
 
@@ -163,7 +172,10 @@ struct perfetto_policy
 
         for(const auto& [bit_value, description] : make_default_nic_tracks())
         {
-            if((enabled_metric_config.value & bit_value) == 0) continue;
+            if((enabled_metric_config.value & bit_value) == 0)
+            {
+                continue;
+            }
             device_tracks[bit_value] = counter_track::emplace(
                 device_index, addendum(description.track_name), description.units);
         }

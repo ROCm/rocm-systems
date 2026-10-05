@@ -4722,6 +4722,17 @@ static hipError_t playback_hipInitDevice(PlaybackContext& ctx, const uint8_t* pa
   return hipSuccess;
 }
 
+static hipError_t playback_hipModuleEnumerateFunctions(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleEnumerateFunctions — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   return hipSuccess;
@@ -5315,15 +5326,16 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipMemGetDefaultMemPool)),  // [541] HRR_API_HIPMEMGETDEFAULTMEMPOOL
     static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetLuid)),  // [542] HRR_API_HIPDEVICEGETLUID
     static_cast<uint32_t>(sizeof(hrr_args_hipInitDevice)),  // [543] HRR_API_HIPINITDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [544] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [545] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [546] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [547] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [548] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [549] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [550] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [551] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [552] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipModuleEnumerateFunctions)),  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [545] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [546] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [547] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [548] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [549] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [550] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [551] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [552] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [553] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -5874,13 +5886,14 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipMemGetDefaultMemPool,  // [541] HRR_API_HIPMEMGETDEFAULTMEMPOOL
     playback_hipDeviceGetLuid,  // [542] HRR_API_HIPDEVICEGETLUID
     playback_hipInitDevice,  // [543] HRR_API_HIPINITDEVICE
-    playback___hipPopCallConfiguration,  // [544] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [545] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [546] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [547] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [548] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [549] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [550] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [551] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [552] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipModuleEnumerateFunctions,  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
+    playback___hipPopCallConfiguration,  // [545] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [546] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [547] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [548] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [549] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [550] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [551] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [552] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [553] HRR_API_HIPUNREGISTERFATBINARY
 };

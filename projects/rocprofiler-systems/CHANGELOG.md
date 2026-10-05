@@ -23,6 +23,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
   because PMC metadata names did not match the sample insertion path.
+- `--trace-clock-id` no longer crashes the profiled process; the option is
+  now restricted to its two documented, supported values (realtime,
+  cputime), and an invalid value now fails cleanly at startup instead of
+  aborting mid-run.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 

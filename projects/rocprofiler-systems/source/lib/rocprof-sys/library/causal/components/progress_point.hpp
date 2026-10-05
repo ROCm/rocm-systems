@@ -17,11 +17,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 struct progress_point : comp::base<progress_point, void>
 {
@@ -87,9 +83,7 @@ private:
     std::int64_t    m_departure = 0;
     progress_point* m_iterator  = nullptr;
 };
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_storage, causal::component::progress_point,
                                  false_type)
@@ -100,9 +94,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_timing_units, causal::component::progress_
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_timing_category, causal::component::progress_point,
                                  true_type)
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct push_node<rocprofsys::causal::component::progress_point>
@@ -128,5 +120,4 @@ struct pop_node<rocprofsys::causal::component::progress_point>
 
     void operator()(type& _obj, std::int64_t _tid = threading::get_id()) const;
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
