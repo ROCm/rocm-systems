@@ -31,6 +31,12 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
         return PH_RESULT_INVALID_CONTEXT;
     }
 
+    *ctx = nullptr;
+    if(file_path == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
     try
     {
         *ctx = new ph_ctx(file_path);

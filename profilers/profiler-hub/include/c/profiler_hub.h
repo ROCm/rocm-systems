@@ -21,12 +21,13 @@ extern "C"
     /**
      * @brief Opens a trace file and creates a context for it.
      * @param ctx Out parameter receiving the new context. Must not be null.
-     * @param file_path Path to the trace database to open.
+     * @param file_path Path to the trace database to open. Must not be null.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_CONTEXT_ALLOCATION_FAILED if the
-     *         trace could not be opened/parsed.
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is
+     *         null, PH_RESULT_CONTEXT_ALLOCATION_FAILED if the trace could
+     *         not be opened/parsed.
      * @note On success, the caller owns @p *ctx and must release it with
-     *       ph_ctx_free().
+     *       ph_ctx_free(). On any failure @p *ctx is set to null.
      */
     ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path);
 
