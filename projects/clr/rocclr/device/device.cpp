@@ -363,8 +363,11 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-MemObjMap::GlobalRange MemObjMap::findGlobalRangeNoLock(uintptr_t key) {
-  // Global-map ranges don't overlap, so upper_bound - 1 is the only candidate.
+MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
+
+  // Global (non-overlapping) map: upper_bound - 1 is the only candidate. A hit
+  // returns the allocation size, which marks the result as cacheable.
   auto it = MemObjMap_.upper_bound(key);
   if (it != MemObjMap_.begin()) {
     --it;
@@ -373,29 +376,19 @@ MemObjMap::GlobalRange MemObjMap::findGlobalRangeNoLock(uintptr_t key) {
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      return {mem, it->first, mem_size};
+      return {mem, key - it->first, mem_size};
     }
   }
-  return {nullptr, 0, 0};
-}
 
-MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
-  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
-
-  // First search the global (non-overlapping) map.
-  GlobalRange range = findGlobalRangeNoLock(key);
-  if (range.memory != nullptr) {
-    return {range.memory, key - range.base};
-  }
-
-  // Search per-device va maps on Windows (due to overlapping ranges)
+  // Per-device VA maps on Windows have overlapping ranges, so their results are
+  // not cacheable (size 0).
   if (IS_WINDOWS && dev != nullptr) {
     size_t offset = 0;
     amd::Memory* mem = dev->FindDevMemObj(ptr, &offset);
-    return {mem, offset};
+    return {mem, offset, 0};
   }
 
-  return {nullptr, 0};
+  return {nullptr, 0, 0};
 }
 
 amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
@@ -526,14 +519,14 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
 
   auto resolve = [&](const void* ptr) -> LookupResult {
     const uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
-    LookupResult result;
+    LookupResult result{nullptr, 0, 0};
     bool resolved = false;
 
     if (cache_active) {
       ++probes;
       for (int c = 0; c < cache_count; ++c) {
         if (key >= range_cache[c].base && key < range_cache[c].end) {
-          result = {range_cache[c].memory, key - range_cache[c].base};
+          result = {range_cache[c].memory, key - range_cache[c].base, 0};
           ++hits;
           resolved = true;
           break;
@@ -542,19 +535,16 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
     }
 
     if (!resolved) {
-      GlobalRange range = findGlobalRangeNoLock(key);
-      if (range.memory != nullptr) {
-        if (cache_active) {
-          range_cache[cache_next] = {range.base, range.base + range.size, range.memory};
-          cache_next = (cache_next + 1) % kRangeCacheSize;
-          if (cache_count < kRangeCacheSize) {
-            ++cache_count;
-          }
+      result = findMemObjNoLock(ptr, dev);
+      // size != 0 marks a non-overlapping global-map hit, which is safe to cache
+      // (the range base is key - offset); Windows VA-map hits report size 0.
+      if (cache_active && result.size != 0) {
+        const uintptr_t base = key - result.offset;
+        range_cache[cache_next] = {base, base + result.size, result.memory};
+        cache_next = (cache_next + 1) % kRangeCacheSize;
+        if (cache_count < kRangeCacheSize) {
+          ++cache_count;
         }
-        result = {range.memory, key - range.base};
-      } else {
-        // Global miss: defer to the full resolver (Windows VA map / null result).
-        result = findMemObjNoLock(ptr, dev);
       }
     }
 

@@ -1532,22 +1532,13 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
-  // Helper struct for memory object lookup results
+  //!< Helper struct for memory object lookup results.
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
+    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
+                        //!< not cacheable. Otherwise it should be non-zero for global ranges
   };
-
-  //!< A global-map allocation range [base, base+size) containing a pointer
-  //!< (memory is nullptr for none). Ranges don't overlap, so they are cacheable.
-  struct GlobalRange {
-    amd::Memory* memory;
-    uintptr_t base;
-    size_t size;
-  };
-
-  //!< Global (non-overlapping) allocation-map lookup. Caller must hold AllocatedLock_.
-  static GlobalRange findGlobalRangeNoLock(uintptr_t key);
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
   static LookupResult findMemObjNoLock(const void* ptr, Device* dev);
