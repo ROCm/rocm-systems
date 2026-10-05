@@ -55,6 +55,11 @@ TIER_ORDER = ["T0", "T1", "T2", "T3", "T4", "T5"]
 UNREACHABLE_ALWAYS = "always"
 UNREACHABLE_NO_IMAGE_SUPPORT = "no_image_support"
 VALID_UNREACHABLE_WHEN = (UNREACHABLE_ALWAYS, UNREACHABLE_NO_IMAGE_SUPPORT)
+# The same for an API the matrix does expect to reach, set with an override's
+# when:. A VMM entry point only reaches the archive on a part with VMM, so on
+# any other part its row is unmeasured rather than a lost call site.
+WHEN_VMM_SUPPORT = "vmm_support"
+VALID_OVERRIDE_WHEN = (UNREACHABLE_ALWAYS, WHEN_VMM_SUPPORT)
 
 
 @dataclass
@@ -261,6 +266,18 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
                 f"{api}: expect '{expect}' is not one of "
                 f"derived/{'/'.join(VALID_CLASSES)}")
 
+        when = unreachable.get(api, {}).get("when", UNREACHABLE_ALWAYS)
+        if "when" in ov:
+            if api in unreachable:
+                raise MatrixError(
+                    f"{api}: when: is set by its unreachable group "
+                    f"{unreachable[api]['group']}; not again in overrides")
+            when = ov["when"]
+            if when not in VALID_OVERRIDE_WHEN:
+                raise MatrixError(
+                    f"overrides.{api}: when: '{when}' is not one of "
+                    f"{', '.join(VALID_OVERRIDE_WHEN)}")
+
         shapes = sorted({p["shape"] for p in entry["payload_loss"]})
         # The overlay is authoritative on payload loss: the mechanical detector
         # is a superset (it flags every const-struct pointer regardless of
@@ -300,8 +317,7 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
             skip_unless_multi_gpu=bool(ov.get("skip_unless_multi_gpu", False)) or gpus > 1,
             unreachable_reason=unreachable.get(api, {}).get("reason", ""),
             unreachable_group=unreachable.get(api, {}).get("group", ""),
-            unreachable_when=unreachable.get(api, {}).get(
-                "when", UNREACHABLE_ALWAYS),
+            unreachable_when=when,
             note=ov.get("note", ""),
             source=source,
         ))

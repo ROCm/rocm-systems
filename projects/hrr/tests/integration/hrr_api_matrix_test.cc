@@ -192,6 +192,19 @@ bool device_has_image_support() {
   return supported;
 }
 
+// Whether this part supports virtual memory management. The workloads only
+// call hipMemCreate and the rest of the VMM surface where it does.
+bool device_has_vmm() {
+  static const bool supported = [] {
+    int value = 0;
+    return hipDeviceGetAttribute(
+               &value, hipDeviceAttributeVirtualMemoryManagementSupported, 0) ==
+               hipSuccess &&
+           value != 0;
+  }();
+  return supported;
+}
+
 // ---------------------------------------------------------------------------
 // Capture one workload and fold what it recorded into `obs`.
 //
@@ -354,6 +367,9 @@ void run_tier(const std::string& tier) {
   // Rows declared as never captured. Kept apart from `covered`: see the
   // floor comment below for why their absence is not evidence of coverage.
   int absent_asserted = 0;
+  // Rows declared for a capability this part lacks: nothing here can reach
+  // them, so they are neither coverage nor a lost call site.
+  int unsupported = 0;
   std::vector<std::string> missing;
   for (size_t i = 0; i < kHrrApiMatrixCount; ++i) {
     const HrrApiExpectation& e = kHrrApiMatrix[i];
@@ -372,6 +388,11 @@ void run_tier(const std::string& tier) {
                    << ") is declared as never captured");
       CHECK(count == 0);
       ++absent_asserted;
+      continue;
+    }
+
+    if (e.applies_when == kHrrWhenVmmSupport && !device_has_vmm()) {
+      ++unsupported;
       continue;
     }
 
@@ -443,13 +464,17 @@ void run_tier(const std::string& tier) {
   // it: min_covered is generated counting these rows (T1 is 10 of 14, T0 6
   // of 67 against a floor of 65), so tightening the floor as well needs
   // check_matrix.py to re-emit min_covered over assertable rows only.
-  const int evidence_floor = floor.min_covered - absent_asserted;
+  //
+  // Rows this part cannot reach are subtracted the same way: min_covered
+  // counts them, and no workload can call them here.
+  const int evidence_floor = floor.min_covered - absent_asserted - unsupported;
   INFO("Tier " << tier << ": " << covered << " covered with evidence, "
-               << absent_asserted << " absence-asserted, " << not_exercised
+               << absent_asserted << " absence-asserted, " << unsupported
+               << " unsupported on this part, " << not_exercised
                << " not exercised, " << skipped << " skipped");
   INFO("Evidence floor: " << evidence_floor << " (min_covered "
                << floor.min_covered << " less " << absent_asserted
-               << " absence rows)");
+               << " absence rows and " << unsupported << " unsupported)");
   INFO("Not exercised: " << missing_list);
   INFO("Workloads that contributed: " << obs.workloads.size());
   CHECK(covered >= evidence_floor);

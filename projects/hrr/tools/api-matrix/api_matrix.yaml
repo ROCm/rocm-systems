@@ -814,6 +814,9 @@ overrides:
       unreachable here for the same same-process reason. P2(a).
   hipMemCreate:
     payload_loss: false
+    # The workload only calls it where hipDeviceAttributeVirtualMemory-
+    # ManagementSupported is set; MI250X (gfx90a, ossci pool) reports 0.
+    when: vmm_support
     note: >-
       P2(b). hipMemAllocationProp is carried inline and replay allocates with
       the recorded type and location instead of a hardcoded Pinned/device 0;
