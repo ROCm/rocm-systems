@@ -7,7 +7,10 @@ Imported by both the main runtime code and lightweight tooling such as
 ``tools/validate_sets_metric_ids.py``.
 """
 
+from __future__ import annotations
+
 import re
+from collections.abc import Collection
 
 from utils.logger import console_error
 
@@ -180,3 +183,58 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
+
+
+_ACCUM_SUFFIX = "_ACCUM"
+
+
+def _pmc_bare_name(counter: str) -> str:
+    """Strip TCC channel suffix ``[N]`` if present."""
+    return counter.split("[", 1)[0]
+
+
+def accum_base_counter(counter: str) -> str | None:
+    """Return the base PMC for a named ``*_ACCUM`` counter, else None."""
+    name = _pmc_bare_name(counter)
+    if not name.endswith(_ACCUM_SUFFIX):
+        return None
+    return name[: -len(_ACCUM_SUFFIX)]
+
+
+def pmc_slot_cost(counter: str, present: Collection[str] | None = None) -> int:
+    """Perfmon register slots charged when adding ``counter`` to a bucket.
+
+    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics and
+    need two registers (BASE + HIGH_RES accum) when alone. If ``BASE`` is
+    already in ``present``, only the HIGH_RES slot is charged (+1). Conversely,
+    adding ``BASE`` when ``BASE_ACCUM`` is already present charges 0 (BASE was
+    included in the ACCUM cost). All other PMCs cost 1.
+
+    For an order-independent total over a finished set, use
+    ``pmc_bucket_slot_cost``.
+    """
+    name = _pmc_bare_name(counter)
+    present_names = {_pmc_bare_name(p) for p in present} if present else set()
+
+    base = accum_base_counter(name)
+    if base is not None:
+        return 1 if base in present_names else 2
+
+    if f"{name}{_ACCUM_SUFFIX}" in present_names:
+        return 0
+    return 1
+
+
+def pmc_bucket_slot_cost(counters: Collection[str]) -> int:
+    """Order-independent slot total for a set of PMC names in one block bucket.
+
+    Equivalent to ``len(names) +`` number of ``*_ACCUM`` whose BASE is not also
+    in the set (each such ACCUM still needs its BASE register).
+    """
+    names = {_pmc_bare_name(c) for c in counters}
+    missing_base = 0
+    for name in names:
+        base = accum_base_counter(name)
+        if base is not None and base not in names:
+            missing_base += 1
+    return len(names) + missing_base
