@@ -15,6 +15,7 @@ target_sources(
     rocprofiler-systems-instrument
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/details.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/dynamic_dependency_listing.hpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.cpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.hpp
         ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
@@ -75,3 +76,7 @@ install(
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     OPTIONAL
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

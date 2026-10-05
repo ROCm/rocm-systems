@@ -30,6 +30,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
+    $<$<TARGET_EXISTS:instrument-tests>:$<TARGET_OBJECTS:instrument-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
