@@ -406,8 +406,7 @@ TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipMemset(d, 0, sizeof(uint64_t)));
 
-  // The ordering this case exists to assert.
-  HRR_HIP_CHECK(hipDeviceSynchronize());
+  // NEGATIVE CONTROL: the ordering sync is removed; this case must fail.
 
   HRR_HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
