@@ -52,6 +52,12 @@
  *     resuming an archive whose directories and events.bin are readable by
  *     others makes them private again, and a hard-linked blob found there is
  *     written again rather than trusted (POSIX).
+ *
+ *   Unit_HRR_CaptureActiveMarker:
+ *     pid-<pid>/active, the file producers read as "capture is on", exists
+ *     while the capture runs and is gone after a clean exit; a stale one is
+ *     removed when the archive is refused; and a resume that cannot create it
+ *     disables the capture and leaves the earlier events.bin as it was (POSIX).
  */
 
 #include "hrr_test_common.hh"
@@ -60,6 +66,7 @@
 #include <algorithm>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -186,6 +193,19 @@ std::vector<fs::path> archive_files(const fs::path& archive, const char* sub, co
   return out;
 }
 
+// The one pid-* entry under base, whatever it holds; empty unless there is
+// exactly one.
+fs::path only_pid_dir(const fs::path& base) {
+  std::vector<fs::path> found;
+  for (const auto& ent : fs::directory_iterator(base))
+    if (ent.path().filename().string().rfind("pid-", 0) == 0) found.push_back(ent.path());
+  return found.size() == 1 ? found.front() : fs::path{};
+}
+
+bool refused_active_marker(const std::string& output) {
+  return disabled_because(output, "cannot create ", "/active (");
+}
+
 bool manifest_says_complete(const fs::path& archive, bool complete) {
   return read_text_file(archive / "manifest.json")
              .find(complete ? "\"complete\": true" : "\"complete\": false") != std::string::npos;
@@ -245,6 +265,29 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   REQUIRE(::waitpid(child, &status, 0) == child);
   CHECK(WIFEXITED(status));
   CHECK(WEXITSTATUS(status) == 0);
+  HRR_HIP_CHECK(hipFree(d));
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker: once HIP is up, and
+// with it the capture, its pid-<pid>/active is a private regular file.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipMemset(d, 0, 256));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  REQUIRE(base != nullptr);
+  const std::string marker =
+      std::string(base) + "/pid-" + std::to_string(::getpid()) + "/active";
+  INFO("Marker: " << marker);
+  struct stat st{};
+  REQUIRE(::lstat(marker.c_str(), &st) == 0);
+  CHECK(S_ISREG(st.st_mode));
+  CHECK((st.st_mode & 07777) == 0600);
+  CHECK(st.st_nlink == 1);
   HRR_HIP_CHECK(hipFree(d));
 }
 #endif
@@ -547,8 +590,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
  *   - Runs Unit_HRR_CaptureForkWithoutFds_Direct, whose child is forked with
  *     no descriptor to spare, so its own archive cannot be opened.
  *   - The child says capture is disabled, and the pid-<pid> it created for
- *     itself is removed again: producers read an existing pid-<pid> as capture
- *     being active. The parent's archive is the only one left.
+ *     itself is removed again, so a refused capture leaves nothing behind.
+ *     The parent's archive is the only one left.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureDisabledInForkedChild) {
 #ifdef _WIN32
@@ -718,6 +761,81 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
   CHECK(fs::hard_link_count(archive / linked) == 1);
   CHECK(fs::hard_link_count(victim) == 1);
   CHECK(file_holds(victim, victim_contents));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureActiveMarker_Direct, which finds its
+ *     pid-<pid>/active while the capture runs; after a clean exit it is gone.
+ *   - Plants a stale pid-<pid>/active next to a symbolic link at
+ *     pid-<pid>/events.bin: the capture is refused and the stale marker is
+ *     removed, so producers do not take the refused archive for a live one.
+ *   - Copies a finished archive into the next run's pid-<pid>, with a
+ *     non-empty directory at pid-<pid>/active: the writer opens and resumes
+ *     events.bin, then cannot create the marker. Capture is disabled with a
+ *     message and nothing is appended to events.bin, which stays without a
+ *     marker next to it: the state a resume that fails after opening
+ *     events.bin leaves behind.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX paths");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_marker"};
+  const fs::path base = work.path / "capture";
+  const fs::path victim_file = work.path / "victim.txt";
+  fs::create_directories(base);
+  write_text(victim_file, "must survive a capture\n");
+
+  SECTION("present while capturing, gone after exit") {
+    const PlantedRun run = capture_workload(base, "Unit_HRR_CaptureActiveMarker_Direct");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    const std::vector<fs::path> archives = hrr_process_archives(base);
+    REQUIRE(archives.size() == 1);
+    CHECK(events_bytes(base) > sizeof(hrr_file_header));
+    CHECK_FALSE(fs::exists(fs::symlink_status(archives.front() / "active")));
+  }
+
+  SECTION("stale marker removed when the archive is refused") {
+    const PlantedRun run = capture_after_planting(
+        base, work.path / "plant.sh",
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+        "touch \"$HRR_TEST_BASE/pid-$$/active\"\n"
+        "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(refused_events_file(run.output));
+    const fs::path pid_dir = only_pid_dir(base);
+    REQUIRE_FALSE(pid_dir.empty());
+    CHECK_FALSE(fs::exists(fs::symlink_status(pid_dir / "active")));
+  }
+
+  SECTION("resume that cannot create the marker") {
+    const fs::path first = work.path / "first";
+    hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+    const fs::path first_archive = hrr_single_process_archive(first);
+    const std::uintmax_t first_bytes = fs::file_size(first_archive / "events.bin");
+    REQUIRE(first_bytes > sizeof(hrr_file_header));
+
+    const PlantedRun run = capture_after_planting(
+        base, work.path / "plant.sh",
+        "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$/active/keep\"\n");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    CHECK(refused_active_marker(run.output));
+    const std::vector<fs::path> archives = hrr_process_archives(base);
+    REQUIRE(archives.size() == 1);
+    // No larger: the resume may have stripped the trailer, but nothing was
+    // appended.
+    CHECK(fs::file_size(archives.front() / "events.bin") <= first_bytes);
+    CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
+  }
 #endif
 }
 

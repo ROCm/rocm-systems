@@ -847,8 +847,8 @@ static void update_root_manifest() {
 
 // A failed open() keeps no archive path, so atfork_child does not reopen one in
 // a forked child. When this attempt created pid-<pid>, its empty directories go
-// too: producers read an existing pid-<pid> as capture being active. Only empty
-// directories are removed, and a link in their place is not followed.
+// too, so a refused capture leaves nothing behind. Only empty directories are
+// removed, and a link in their place is not followed.
 static bool open_failed(bool created_pid_dir) {
   if (created_pid_dir) {
     for (const char* sub : {"/blobs", "/code_objects", ""}) {
@@ -866,6 +866,20 @@ static bool open_failed(bool created_pid_dir) {
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
   return false;
+}
+
+// pid-<pid>/active tells producers outside the runtime that this process's
+// capture is on. open() removes a stale one before any step that can fail and
+// creates it as its last step, and flush() removes it at shutdown. events.bin
+// cannot carry that signal: a resume that fails after opening it leaves the
+// earlier run's file in place.
+static constexpr const char* kActiveMarker = "/active";
+
+static bool publish_active_marker() {
+  const int fd = HRR_OPEN((g_output_dir + kActiveMarker).c_str());
+  if (fd < 0) return false;
+  HRR_CLOSE(fd);
+  return true;
 }
 
 bool open(const char* output_dir) {
@@ -893,10 +907,15 @@ bool open(const char* output_dir) {
   std::error_code exists_ec;
   const bool created_pid_dir =
       !fs::exists(fs::symlink_status(g_output_dir, exists_ec));
-  if (!ensure_dir(g_output_dir) || !claim_private_dir(g_output_dir) ||
-      !ensure_dir(g_output_dir + "/blobs") || !claim_private_dir(g_output_dir + "/blobs") ||
-      !ensure_dir(g_output_dir + "/code_objects") ||
-      !claim_private_dir(g_output_dir + "/code_objects")) {
+  bool dirs_ok = ensure_dir(g_output_dir) && claim_private_dir(g_output_dir);
+  // A marker left by an earlier process with this pid goes first, once the
+  // directory it sits in is known to be ours.
+  if (dirs_ok) (void)remove((g_output_dir + kActiveMarker).c_str());
+  dirs_ok = dirs_ok && ensure_dir(g_output_dir + "/blobs") &&
+            claim_private_dir(g_output_dir + "/blobs") &&
+            ensure_dir(g_output_dir + "/code_objects") &&
+            claim_private_dir(g_output_dir + "/code_objects");
+  if (!dirs_ok) {
     const int err = errno;
     LogPrintfError("[HRR capture] Cannot use %s as a private archive directory: %s",
                    g_output_dir.c_str(), strerror(err));
@@ -911,6 +930,19 @@ bool open(const char* output_dir) {
   std::string events_path = g_output_dir + "/events.bin";
   std::string manifest_path = g_output_dir + "/manifest.json";
   snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
+
+  // The last step of a successful open, on resume and on a fresh archive.
+  auto publish_or_fail = [&]() {
+    if (publish_active_marker()) return true;
+    const int err = errno;
+    LogPrintfError("[HRR capture] Cannot create %s%s: %s", g_output_dir.c_str(), kActiveMarker,
+                   strerror(err));
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s%s (%s).\n",
+            g_output_dir.c_str(), kActiveMarker, strerror(err));
+    HRR_CLOSE(g_events_fd);
+    g_events_fd = -1;
+    return open_failed(created_pid_dir);
+  };
 
   std::int64_t existing_size = 0;
   g_events_fd = open_events_file(events_path, &existing_size);
@@ -990,6 +1022,7 @@ bool open(const char* output_dir) {
     if (fast)
       g_blob_count.store(bl_count, std::memory_order_relaxed);
     index_existing_blobs_locked();
+    if (!publish_or_fail()) return false;
 
     LogPrintfInfo("[HRR capture] Resumed archive at %s (events=%llu next_seq=%llu%s%s)",
                   events_path.c_str(),
@@ -1009,6 +1042,7 @@ bool open(const char* output_dir) {
     g_written_blobs.clear();
   }
 
+  if (!publish_or_fail()) return false;
   hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
   buffer_append_locked(&fh, sizeof(fh));
   return true;
@@ -1088,6 +1122,7 @@ void flush(const char* /*output_dir*/) {
   write_manifest_stdio(out_dir.c_str(), /*complete=*/!incomplete);
   update_root_manifest();
   remove((out_dir + "/writer_state.json").c_str());
+  remove((out_dir + kActiveMarker).c_str());
 }
 
 void close() {

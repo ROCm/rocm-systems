@@ -30,9 +30,9 @@ VICTIM_CONTENTS = b"must survive the producer\n"
 
 
 class _ArchiveCase(unittest.TestCase):
-    """A capture root in a temporary directory with this process's pid-<pid>
-    and events.bin in it, as the capture writer leaves them, and
-    HIP_HRR_CAPTURE_OUTPUT pointing at the root."""
+    """A capture root in a temporary directory with this process's pid-<pid>,
+    its events.bin and its active marker in it, as the capture writer leaves
+    them while it runs, and HIP_HRR_CAPTURE_OUTPUT pointing at the root."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="hrr_regions_test_"))
@@ -41,6 +41,8 @@ class _ArchiveCase(unittest.TestCase):
         self.archive = self.root / ("pid-%d" % os.getpid())
         self.archive.mkdir(mode=0o700)
         (self.archive / "events.bin").write_bytes(b"")
+        self.marker = self.archive / "active"
+        self.marker.write_bytes(b"")
         self.victim = self.tmp / "victim"
         self.victim.write_bytes(VICTIM_CONTENTS)
         env = mock.patch.dict(os.environ, {"HIP_HRR_CAPTURE_OUTPUT": str(self.root)})
@@ -57,7 +59,7 @@ class _ArchiveCase(unittest.TestCase):
 @unittest.skipIf(os.name == "nt", "POSIX ownership and link checks")
 class ArchiveDirTest(_ArchiveCase):
     """_archive_dir: capture counts as active only for a real pid-<pid> of
-    ours with a private events.bin in it."""
+    ours with a private active marker in it."""
 
     def test_active_archive(self):
         self.assertEqual(regions._archive_dir(), str(self.archive))
@@ -66,9 +68,12 @@ class ArchiveDirTest(_ArchiveCase):
         with mock.patch.dict(os.environ, {"HIP_HRR_CAPTURE_OUTPUT": ""}):
             self.assertIsNone(regions._archive_dir())
 
-    def test_directory_without_events_bin(self):
-        # What a refused capture can leave behind: pid-<pid> but no events.bin.
-        (self.archive / "events.bin").unlink()
+    def test_events_bin_without_marker(self):
+        # What a refused capture leaves behind, and a resume that fails after
+        # the writer opened the earlier run's events.bin: pid-<pid> and
+        # events.bin, but no marker.
+        self.marker.unlink()
+        self.assertTrue((self.archive / "events.bin").is_file())
         self.assertIsNone(regions._archive_dir())
 
     def test_pid_dir_is_a_link(self):
@@ -77,14 +82,19 @@ class ArchiveDirTest(_ArchiveCase):
         self.archive.symlink_to(elsewhere, target_is_directory=True)
         self.assertIsNone(regions._archive_dir())
 
-    def test_events_bin_is_a_link(self):
-        (self.archive / "events.bin").unlink()
-        (self.archive / "events.bin").symlink_to(self.victim)
+    def test_marker_is_a_link(self):
+        self.marker.unlink()
+        self.marker.symlink_to(self.victim)
         self.assertIsNone(regions._archive_dir())
 
-    def test_events_bin_is_a_hard_link(self):
-        (self.archive / "events.bin").unlink()
-        os.link(self.victim, self.archive / "events.bin")
+    def test_marker_is_a_hard_link(self):
+        self.marker.unlink()
+        os.link(self.victim, self.marker)
+        self.assertIsNone(regions._archive_dir())
+
+    def test_marker_is_a_directory(self):
+        self.marker.unlink()
+        self.marker.mkdir()
         self.assertIsNone(regions._archive_dir())
 
 
@@ -158,7 +168,7 @@ class StreamTest(_ArchiveCase):
         self.assertEqual(result, [False])
 
     def test_inactive_capture_writes_nothing(self):
-        (self.archive / "events.bin").unlink()
+        self.marker.unlink()
         self.assertFalse(self.write_one())
         self.assertFalse(self.regions.exists())
 

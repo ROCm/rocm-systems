@@ -40,9 +40,10 @@ Create `regions/` with mode 0700 and the files in it with 0600 so the archive
 stays private.
 
 **Checking whether capture is active** reduces to checking that the archive's
-`events.bin` is there and is a file the writer would open: a regular file of
-this user with one name, reached through no link. There is no symbol to resolve
-and nothing to `dlopen`:
+`active` file is there and is one the writer created: a regular file of this
+user with one name, reached through no link. The writer creates it as the last
+step of a successful open and removes it at shutdown. There is no symbol to
+resolve and nothing to `dlopen`:
 
 ```python
 import os, stat
@@ -54,7 +55,7 @@ def capture_active():
     d = os.path.join(root, f"pid-{os.getpid()}")
     try:
         ds = os.lstat(d)
-        fs = os.lstat(os.path.join(d, "events.bin"))
+        fs = os.lstat(os.path.join(d, "active"))
     except OSError:
         return False
     return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
@@ -62,10 +63,11 @@ def capture_active():
             and fs.st_nlink == 1)
 ```
 
-The directory alone is not enough: one that was already there stays when the
-writer refuses to open it, and capture is then off. The runtime creates both
-when capture starts, which may be after your producer loads, so re-check rather
-than deciding once at import time.
+Neither the directory nor its `events.bin` is enough: both stay when the
+writer refuses an archive, or fails to resume one with the same pid, and
+capture is then off. The runtime creates the marker when capture starts, which
+may be after your producer loads, so re-check rather than deciding once at
+import time.
 
 ## What to write
 

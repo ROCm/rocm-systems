@@ -153,6 +153,7 @@ capture.hrr/
     events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
+    active             empty marker: present while this process's capture is on (see Transport)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
     regions/*.hrrr     external region annotations (optional; written by producers
@@ -376,6 +377,8 @@ Version history, so an archive written by an older runtime can be placed:
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
                        size); present only mid-capture, removed on clean shutdown
+    active             empty file created as the last step of a successful
+                       writer::open(), removed on clean shutdown
     events.bin         8-byte hrr_file_header, then repeated records
     blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
     code_objects/      .hsaco ELFs keyed by hash
@@ -772,8 +775,12 @@ written by a producer outside `libamdhip64`. Nothing is exported for this, no
 capture-side code runs, and a producer needs neither `dlopen` nor a symbol.
 `HIP_HRR_CAPTURE_OUTPUT` is a plain environment variable and the writer's layout
 is `$HIP_HRR_CAPTURE_OUTPUT/pid-<getpid()>/`, so a producer computes the path
-itself; "is capture active" reduces to whether that directory's `events.bin`
-exists, since a directory refused by the writer is left in place.
+itself; "is capture active" reduces to whether that directory's `active` file
+exists. `writer::open()` removes a stale one before any step that can fail and
+creates it as its last step, and `flush()` removes it at shutdown. Neither the
+directory nor `events.bin` can carry the signal: a refused archive keeps its
+directory, and a same-pid resume that fails after opening `events.bin` keeps the
+earlier run's file.
 
 A sidecar is an ordinary HRR record stream — `hrr_file_header` + repeated
 `hrr_event_header` + payload — carrying its own magic (`HRR_REGION_MAGIC`,
