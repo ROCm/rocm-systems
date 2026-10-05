@@ -167,8 +167,10 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
         try
         {
             execute(pragma);
-        } catch(...)
-        {}
+        } catch(const std::exception& err)
+        {
+            LOG_ERROR("Failed to apply '{}': {}", pragma, err.what());
+        }
     }
 
     validate_sqlite3_result(

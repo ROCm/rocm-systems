@@ -128,13 +128,9 @@ struct reader_catalog_t
     std::unordered_map<size_t, reader_types::process_info_ptr_t> process_utility;
     std::unordered_map<size_t, reader_types::thread_info_ptr_t>  thread_utility;
     std::unordered_map<size_t, reader_types::agent_info_ptr_t>   agent_utility;
-    std::unordered_map<size_t, reader_types::track_info_ptr_t>   track_utility;
     std::unordered_map<size_t, reader_types::kernel_symbol_info_ptr_t>
         kernel_symbol_utility;
     std::unordered_map<size_t, reader_types::code_object_info_ptr_t> code_object_utility;
-    std::unordered_map<size_t, reader_types::stream_info_ptr_t>      stream_utility;
-    std::unordered_map<size_t, reader_types::queue_info_ptr_t>       queue_utility;
-    std::unordered_map<size_t, reader_types::pmc_info_ptr_t>         pmc_utility;
 
     // Track lookup maps (populated by build_tracks()).
     std::

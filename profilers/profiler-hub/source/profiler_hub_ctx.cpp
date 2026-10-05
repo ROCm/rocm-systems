@@ -184,7 +184,6 @@ ph_ctx::initialize_track_list()
 {
     const auto& all_tracks = m_catalog->tracks;
 
-    m_tracks.reserve(all_tracks.size());
     m_c_tracks.reserve(all_tracks.size());
 
     for(const auto& track : all_tracks)
@@ -194,7 +193,6 @@ ph_ctx::initialize_track_list()
             continue;
         }
 
-        m_tracks.push_back(track);
         m_track_by_id.emplace(static_cast<std::uint32_t>(track->id), track);
         m_c_tracks.push_back(ph_track_t{
             .id          = static_cast<std::uint32_t>(track->id),

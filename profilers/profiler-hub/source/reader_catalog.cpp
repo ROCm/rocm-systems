@@ -35,12 +35,12 @@ void
 reader_catalog_t::build_string_list(data_storage::schema_v3::read_statements& stmts)
 {
     const auto& statement   = stmts.string_statement();
-    const auto  string_list = statement().to_vector();
+    auto        string_list = statement().to_vector();
 
     string_utility.reserve(string_list.size());
-    for(const auto& string : string_list)
+    for(auto& string : string_list)
     {
-        string_utility.emplace(string.id, string.value);
+        string_utility.emplace(string.id, std::move(string.value));
     }
 }
 
@@ -230,7 +230,6 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         }
 
         tracks.push_back(track_info_ptr);
-        track_utility.emplace(track_info_ptr->id, track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, no_db_id);
         track_to_topology.emplace(track_info_ptr, topo);
         topology_to_track.emplace(topo, track_info_ptr);
@@ -275,7 +274,6 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         }
 
         tracks.push_back(track_info_ptr);
-        track_utility.emplace(track_info_ptr->id, track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, sample_track_id);
         track_to_topology.emplace(track_info_ptr, no_topology);
         sample_track_by_db_id.emplace(sample_track_id, track_info_ptr);
@@ -313,7 +311,6 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         }
 
         tracks.push_back(track_ptr);
-        track_utility.emplace(track_ptr->id, track_ptr);
     }
 
     add_category_tracks(stmts, next_id);
@@ -347,7 +344,6 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         }
 
         tracks.push_back(track_ptr);
-        track_utility.emplace(track_ptr->id, track_ptr);
     };
 
     auto add_stream_track = [&](reader_types::track_kind_t kind,
@@ -379,7 +375,6 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         }
 
         tracks.push_back(track_ptr);
-        track_utility.emplace(track_ptr->id, track_ptr);
     };
 
     const auto& category_statements = stmts.track_category_statements();
@@ -629,7 +624,6 @@ reader_catalog_t::build_streams(data_storage::schema_v3::read_statements& stmts)
         }
 
         streams.push_back(stream_info_ptr);
-        stream_utility.emplace(stream_info.id, stream_info_ptr);
     }
 }
 
@@ -660,7 +654,6 @@ reader_catalog_t::build_queues(data_storage::schema_v3::read_statements& stmts)
         }
 
         queues.push_back(queue_info_ptr);
-        queue_utility.emplace(queue_info.id, queue_info_ptr);
     }
 }
 
@@ -713,7 +706,6 @@ reader_catalog_t::build_pmc_infos(data_storage::schema_v3::read_statements& stmt
         }
 
         pmc_infos.push_back(pmc_info_ptr);
-        pmc_utility.emplace(pmc_info.id, pmc_info_ptr);
     }
 }
 
