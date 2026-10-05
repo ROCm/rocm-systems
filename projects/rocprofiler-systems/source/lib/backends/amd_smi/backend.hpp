@@ -357,7 +357,7 @@ private:
         check_status(m_amdsmi.get_socket_handles(&socket_count, sockets.data()),
                      "amdsmi_get_socket_handles (data)");
 
-        for(auto socket : sockets)
+        for(auto const socket : sockets)
         {
             std::uint32_t count = 0;
             if(query(socket, &count, nullptr) != STATUS_SUCCESS || count == 0)

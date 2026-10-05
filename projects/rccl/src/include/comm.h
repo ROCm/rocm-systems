@@ -749,6 +749,12 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  // Set at init when a hierarchical collective is enabled and the topology permits
+  // it; cleared if building the sub-communicators fails. Eligible but not yet
+  // initialized means RCCL_HIERARCHICAL_LAZY_INIT deferred them.
+  bool hierarchicalEligible;
+  // Eligible AllGathers seen while the deferred setup is pending.
+  uint64_t hierarchicalLazyCalls;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,
@@ -944,6 +950,10 @@ struct ncclComm {
   // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
   // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
+  // The event the addon collective's last kernel carries as its stopEvent, in place of a standalone
+  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
+  // rcclTakeAddonStopEvent, which hands it out.
+  hipEvent_t addonStopEvent;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1168,6 +1178,16 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
   int op1 = int(h) ^ int(op);
   // Since builtin values are preserved, we also have to preserve their preimage.
   return op1 < int(ncclNumOps) ? op : ncclRedOp_t(op1);
+}
+
+// Returns the stop event for the collective's last stream operation. The result is nullptr while
+// capturing, and after an earlier launch in the same collective has taken it. Only the launch that
+// ends the collective may call this: rcclAddonLaunchEnd reads the cleared field as "a kernel will
+// record it" and skips the standalone record.
+static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
+  hipEvent_t stopEvent = comm->addonStopEvent;
+  comm->addonStopEvent = nullptr;
+  return stopEvent;
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
