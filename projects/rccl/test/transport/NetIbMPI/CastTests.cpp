@@ -2225,9 +2225,8 @@ TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
 // Both ranks run the same checks and reach the barrier from the same place.
 // =============================================================================
 TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
 
     // No CAST_ENV_CHECK_OR_SKIP here, unlike the 16 tests above: the arms under test
     // are argument checks that run before the scheduler, so the WRR env vars are not
