@@ -2925,6 +2925,13 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     fail_pm4_queue(queue, queue.dispatches);
     return;
   }
+  // Publication replaces the GART binding; an unready pinned snapshot cannot observe it.
+  if (!access->info().ready) {
+    queue.command_access.reset();
+    queue.command_retry_pending = true;
+    arm_stall_recheck(now);
+    return;
+  }
   outcome = queue.read_pointer_journal.initialize(*access);
   if (outcome == VmAccessOutcome::Unavailable) {
     queue.command_retry_pending = true;

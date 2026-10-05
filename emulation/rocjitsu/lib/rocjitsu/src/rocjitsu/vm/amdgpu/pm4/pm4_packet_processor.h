@@ -51,6 +51,8 @@ struct Pm4ExecutionContext {
 /// and commits/publishes packet retirement through queue.read_pointer_journal.
 /// queue.commands and queue.command_access retain progress across turns; the
 /// retry and dispatch callbacks must update the shared fields documented above.
+/// An unready VM snapshot is released before retry so a later GART publication
+/// can be observed. Ready snapshots stay pinned through execution and publication.
 /// A VM must be attached before commands can execute; idle queues do not access it.
 /// Returns when idle, waiting for dispatch retirement, blocked, faulted, or at the
 /// packet budget. Retry and fault handling are reported through context callbacks.

@@ -64,11 +64,17 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
     if (!queue.command_access)
       queue.command_access = gpu_vm->snapshot_pinned(queue.address_space);
     const auto &access = queue.command_access;
-    if (!access)
-      throw std::runtime_error("PM4 queue has no GPU address space");
     // Bound one event's packet work, including IB chains.
     const uint32_t packet_budget = queue.submission_queue ? 4096 : 256;
     for (uint32_t budget = 0; budget < packet_budget && !state.submissions.empty(); ++budget) {
+      if (!access)
+        throw std::runtime_error("PM4 queue has no GPU address space");
+      // A snapshot captured before GART publication can never become ready.
+      if (!access->info().ready) {
+        queue.command_access.reset();
+        context.retry();
+        return;
+      }
       // A committed root packet must publish before another packet can execute.
       const auto published = queue.read_pointer_journal.publish();
       if (published == VmAccessOutcome::Unavailable) {

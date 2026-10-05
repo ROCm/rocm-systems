@@ -204,7 +204,9 @@ and nested IB traversal over that CP-owned state. CP supplies cache flushing,
 dispatch admission, retry scheduling, and synchronous fault cancellation
 callbacks. Temporary unavailability retains command and cursor-publication state
 for retry; cancellation stops resident waves before submission resources are
-released.
+released. A snapshot captured before GART publication is unready and must be
+released before retrying, so the next turn can capture the published binding.
+Once ready, the snapshot stays pinned through execution and retirement publication.
 For native rings, CP captures `command_access`, initializes the consumer cursor,
 builds root submissions from doorbells, and retries pending publication even when
 execution is suspended. The processor traverses packets and nested IBs, captures

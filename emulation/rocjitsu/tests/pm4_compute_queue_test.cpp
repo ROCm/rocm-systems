@@ -29,7 +29,7 @@ namespace {
 
 class Pm4QueueMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  Pm4QueueMemory() : bytes_(0x1000) {}
+  Pm4QueueMemory() : bytes_(0x4000) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
@@ -184,6 +184,80 @@ TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   service();
   EXPECT_EQ(writes, 1u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+}
+
+TEST_F(Pm4ComputeQueueTest, NativeRingResumesAfterPublishingAnInitiallyUnreadyGart) {
+  constexpr uint64_t aperture = 0x10000;
+  constexpr uint64_t page_table = 0x1000;
+  constexpr uint64_t physical_page = 0x2000;
+  // One readable/writable system page, also marked as a leaf PDE.
+  constexpr uint64_t page_flags = (uint64_t{1} << 63) | 0x63;
+  memory->store<uint64_t>(page_table, physical_page | page_flags);
+  memory->store<uint32_t>(physical_page + kRing, 0xc0017900);
+  memory->store<uint32_t>(physical_page + kRing + 4, 0x40);
+  memory->store<uint32_t>(physical_page + kRing + 8, 0xdeadbeef);
+  address_space = gpu_vm.initialize_gart_address_space();
+  ASSERT_TRUE(address_space);
+  ASSERT_FALSE(gpu_vm.lookup(address_space)->ready);
+  uint32_t writes = 0;
+  const auto registration = attach({.write_uconfig_register =
+                                        [&](uint64_t, uint32_t value) {
+                                          EXPECT_EQ(value, 0xdeadbeefu);
+                                          ++writes;
+                                          return Pm4RegisterWriteStatus::Complete;
+                                        }},
+                                   aperture + kRing, aperture + kReadPointer);
+  ASSERT_NE(registration, 0u);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
+
+  service();
+  EXPECT_EQ(writes, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0u);
+  ASSERT_TRUE(gpu_vm.publish_gart(
+      {.page_table_base = page_table, .aperture_start = aperture, .aperture_end = aperture + 0xfff},
+      memory));
+  service();
+  EXPECT_EQ(writes, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 3u);
+  service();
+  EXPECT_EQ(writes, 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, SubmittedStreamResumesAfterPublishingAnInitiallyUnreadyGart) {
+  constexpr uint64_t aperture = 0x10000;
+  constexpr uint64_t page_table = 0x1000;
+  constexpr uint64_t physical_page = 0x2000;
+  constexpr uint64_t page_flags = (uint64_t{1} << 63) | 0x63;
+  memory->store<uint64_t>(page_table, physical_page | page_flags);
+  memory->store<uint32_t>(physical_page + kRing, 0xc0033700);
+  memory->store<uint32_t>(physical_page + kRing + 4, 0x100);
+  memory->store<uint32_t>(physical_page + kRing + 8, aperture + kReadPointer);
+  memory->store<uint32_t>(physical_page + kRing + 12, 0);
+  memory->store<uint32_t>(physical_page + kRing + 16, 0xdeadbeef);
+  address_space = gpu_vm.initialize_gart_address_space();
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = address_space, .process_id = 1, .queue_id = 1}));
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = aperture + kRing, .dwords = 5});
+  submission.complete = [&](bool success) {
+    EXPECT_TRUE(success);
+    ++completions;
+  };
+  ASSERT_TRUE(cp->submit_pm4(1, 1, std::move(submission)));
+
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0u);
+  ASSERT_TRUE(gpu_vm.publish_gart(
+      {.page_table_base = page_table, .aperture_start = aperture, .aperture_end = aperture + 0xfff},
+      memory));
+  service();
+  EXPECT_EQ(completions, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0xdeadbeefu);
+  service();
+  EXPECT_EQ(completions, 1u);
 }
 
 TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
