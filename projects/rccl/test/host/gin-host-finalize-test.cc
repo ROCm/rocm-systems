@@ -155,10 +155,11 @@ TEST_F(GinHostFinalizeTest, RegisterAndDeregisterSkipClosedBackend) {
 
   void* hostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
+  uint32_t winGens[NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   hostWins[0] = reinterpret_cast<void*>(0x3333);
 
-  EXPECT_EQ(ncclGinRegister(&comm_, reinterpret_cast<void*>(0x1), 8, hostWins, devWins, 0), ncclSuccess);
-  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins), ncclSuccess);
+  EXPECT_EQ(ncclGinRegister(&comm_, reinterpret_cast<void*>(0x1), 8, hostWins, devWins, winGens, 0), ncclSuccess);
+  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins, winGens), ncclSuccess);
 
   // Surviving splitShare siblings must not call through the NULLed ginComms[].
   EXPECT_EQ(fake_.regMrSymCalls, 0);

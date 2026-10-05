@@ -207,7 +207,10 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
     // ginComms[] are live again, so drop the flag a previous ncclGinHostFinalize
     // set: on a shared sharedRes a surviving splitShare sibling can reconnect GIN,
     // and leaving it set would have the walks below discard that connection.
+    // The bump is what makes dropping it safe: windows registered against the
+    // handles this just replaced stay identifiable to ncclGinDeregister.
     backend->closed = false;
+    backend->connectGeneration++;
   }
 
 exit:
@@ -547,6 +550,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              int winFlags, bool multiSegment, int memType) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   int mrFlags = (winFlags & NCCL_WIN_STRICT_ORDERING) ? NCCL_NET_MR_FLAG_FORCE_SO : 0;
@@ -563,6 +567,9 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
         }
       }
     }
+    // Stamp before regMrSym, not after: a partial failure returns straight to the
+    // caller's deregister walk, which must still recognise the slots just filled.
+    ginWinGenerations[backendIdx] = backend->connectGeneration;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
       NCCLCHECK(backend->ncclGin->regMrSym(backend->ginComms[commIdx], address, size, memType, mrFlags,
@@ -577,11 +584,19 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
 }
 
 ncclResult_t ncclGinDeregister(struct ncclComm* comm,
-                               void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+                               void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
     if (backend->closed) continue;
+    // ginComms[] is shared through sharedRes, these windows are not: a splitShare
+    // sibling's teardown plus a survivor's reconnect leaves the two a generation
+    // apart. Pairing the reconnected collComm with the old mhandle would deregMr
+    // against a connection the plugin has already closed, so skip it and leave the
+    // handle unreleased -- the same leak a closed backend already takes, and
+    // strictly better than unmapping a registration that is not this one.
+    if (ginWinGenerations[backendIdx] != backend->connectGeneration) continue;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
       if (ginHostWins[slot] == nullptr) continue;
