@@ -215,14 +215,21 @@ submit_and_wrap_future(ph_ctx_t                                   ctx,
     }
 
     std::unique_ptr<ph_future> wrapper;
+    bool                       registered = false;
     try
     {
-        wrapper = std::make_unique<ph_future>(*handle);
-        ctx->register_future(wrapper.get());
+        wrapper    = std::make_unique<ph_future>(*handle);
+        registered = ctx->register_future(wrapper.get());
     } catch(...)
     {
         abandon_task(*handle);
         return PH_RESULT_FUTURE_ALLOCATION_FAILED;
+    }
+
+    if(!registered)
+    {
+        abandon_task(*handle);
+        return PH_RESULT_INVALID_CONTEXT;
     }
 
     *future = wrapper.release();
@@ -301,13 +308,16 @@ ph_future_free(ph_ctx_t ctx, ph_future_t future)
         return PH_RESULT_INVALID_CONTEXT;
     }
 
-    if(future == nullptr || !ctx->owns_future(future))
+    if(future == nullptr)
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
     return guard_call([ctx, future]() {
-        ctx->unregister_future(future);
+        if(!ctx->unregister_future(future))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
         delete future;
         return PH_RESULT_SUCCESS;
     });

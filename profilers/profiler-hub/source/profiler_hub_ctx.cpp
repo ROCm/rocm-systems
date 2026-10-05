@@ -83,26 +83,35 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 
 ph_ctx::~ph_ctx()
 {
-    std::scoped_lock lock{ m_futures_mutex };
-    for(auto* future : m_live_futures)
+    std::unordered_set<ph_future*> live;
+    {
+        std::scoped_lock lock{ m_futures_mutex };
+        m_closing = true;
+        live.swap(m_live_futures);
+    }
+
+    for(auto* future : live)
     {
         std::ignore = future->m_handle.cancel();
         future->m_handle.wait();
+        delete future;
     }
 }
 
-void
+bool
 ph_ctx::register_future(ph_future* future)
 {
     std::scoped_lock lock{ m_futures_mutex };
+    if(m_closing) return false;
     m_live_futures.insert(future);
+    return true;
 }
 
-void
+bool
 ph_ctx::unregister_future(ph_future* future)
 {
     std::scoped_lock lock{ m_futures_mutex };
-    m_live_futures.erase(future);
+    return m_live_futures.erase(future) != 0;
 }
 
 bool
