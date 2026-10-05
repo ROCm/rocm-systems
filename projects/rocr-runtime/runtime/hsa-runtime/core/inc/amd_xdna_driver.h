@@ -104,14 +104,14 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
-  /// @param[in] num_core_tiles number of core tiles to give the queue's hardware context. The
-  /// driver divides this by the number of core rows to get a column count, so a value smaller
-  /// than one row's worth of tiles asks for zero columns and is rejected.
+  /// @param[in] num_cols number of columns to create the queue's initial hardware context with.
+  /// Dispatch resizes the context to the columns its kernels declare.
+  /// @param[in] num_core_rows number of core tiles in each column
   /// @param[in] device_id PCI device ID of the agent the queue dispatches to, resolved here so
   /// dispatch does not look the device type up per batch
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles, uint16_t device_id,
-                                     void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_cols, uint32_t num_core_rows,
+                                     uint16_t device_id, void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
