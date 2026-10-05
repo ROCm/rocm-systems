@@ -15,7 +15,7 @@ Full historical plan drafts are preserved on branch
 
 | Term | Meaning |
 |------|---------|
-| **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** co-located perfmon replay (PMC duplication across passes allowed when unions conflict). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
+| **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** guarantee counter collection within a single pass (PMC duplication across passes allowed). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
 | **Single-pass unpackable(SPU)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
 | **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). Used to solve **SPU** parents. |
 | **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (will be fixed by Phase 1 below). |
