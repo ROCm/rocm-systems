@@ -164,8 +164,30 @@ def test_profile_kernel_iteration_range():
     ])
     assert args.kernel_iteration_range == ["1", "3:5"]
 
+    # =============================================================================
+    def test_analyze_debug_options_accept_multiple_selectors():
+        args = build_args([
+            "analyze",
+            "--debug",
+            "table-view",
+            "ignore-amd-smi",
+        ])
+        assert args.debug_options == ["table-view", "ignore-amd-smi"]
 
-# =============================================================================
+    def test_analyze_debug_options_reject_unknown_selector(capsys):
+        with pytest.raises(SystemExit) as exc:
+            build_args(["analyze", "--debug", "unknown"])
+        assert exc.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
+
+    def test_analyze_view_is_hidden_compatibility_option(capsys):
+        args = build_args(["analyze", "--view", "table"])
+        assert args.view == "table"
+
+        output = help_text(HOME, ["analyze"], capsys)
+        assert "--view" not in output
+
+
 # analyze --verify-deps
 # =============================================================================
 

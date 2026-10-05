@@ -236,8 +236,9 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_interface.amdsmi_ctx():
-            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
+        if not getattr(self.__args, "ignore_amd_smi", False):
+            with amdsmi_interface.amdsmi_ctx():
+                self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -260,13 +261,14 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_interface.amdsmi_ctx():
-            gpu_model = "N/A"
-            for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
-                    if model.lower() in amdsmi_gpu_model.lower():
-                        gpu_model = model
-                        break
+        gpu_model = "N/A"
+        if not getattr(self.__args, "ignore_amd_smi", False):
+            with amdsmi_interface.amdsmi_ctx():
+                for model in mi_gpu_specs.get_all_gpu_models():
+                    for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
+                        if model.lower() in amdsmi_gpu_model.lower():
+                            gpu_model = model
+                            break
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 
