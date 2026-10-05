@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -149,7 +150,7 @@ class CostModelMicrotest : public ::testing::Test {
     }
   }
 
-  // Drive one id through the dispatcher with everything enabled.
+  // Drive one id through the dispatcher; the caller seeds enabled[][] first.
   ncclTuningResult_t Sim(int id, ncclFunc_t func = ncclFuncAllReduce) {
     ncclTuningInput_t input{};
     input.comm = comm_.get();
@@ -385,7 +386,8 @@ TEST_F(CostModelMicrotest, NonPositiveModelTimeIsTreatedAsUnavailable) {
   g_modelTimeUs = std::numeric_limits<float>::denorm_min();
   ncclTuningResult_t accepted = Sim(kRingSimple);
   EXPECT_EQ(1, accepted.valid);
-  EXPECT_FLOAT_EQ(g_modelTimeUs, accepted.timeUs);
+  // EXPECT_EQ, not EXPECT_FLOAT_EQ: the latter's 4-ULP window admits 0.0f against a denormal.
+  EXPECT_EQ(g_modelTimeUs, accepted.timeUs);
 }
 
 TEST_F(CostModelMicrotest, ModelErrorInvalidatesTheCandidateAndPropagates) {

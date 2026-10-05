@@ -1774,25 +1774,27 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGenera
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_EnvForcedFunction_OverridesPerCallSelection) {
-  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL win over a per-call selection. forceAlgSelection is
-  // 1 here too: an env-forced function must not error.
+  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL win over a per-call selection. The named row is
+  // ineligible here (nvls=0) and forceAlgSelection is 1, so dropping the forced[] term would
+  // blank the table and error; the return code is what proves the override.
   CostComm cc;
   cc.get()->tuningContext.forced[ncclFuncAllReduce] = 1;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL);
+  task.algMask = GeneralBit(NCCL_ALGO_NVLS, NCCL_PROTO_SIMPLE);
   task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
-  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, 1, 0, tbl.ptr()));
   EXPECT_LT(1, tbl.countWritten()) << "env-forced function must ignore algMask";
   EXPECT_TRUE(tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE));
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_NarrowsOnlyTheGeneralHalf) {
-  // The shape a real selection string makes: "RING_LL,SYMK_LL" on AllGather is one general
-  // bit plus two symmetric ones. The symmetric bits must neither survive the extraction nor
-  // count as a named general row.
+  // The shape a real selection string makes: "RING_LL,SYMK_LL" on AllGather is one general bit
+  // plus two symmetric ones, and the general half must narrow exactly as if they were absent.
+  // The mask-AND itself is pinned by the symmetric-only case above, not here.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
@@ -1808,17 +1810,36 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_N
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionCannotResurrectAnIneligibleRow) {
   // The filter only removes: a row the eligibility guards already skipped stays IGNOREd.
-  // forceAlgSelection is 0, the documented opt-in to falling back instead of erroring.
+  // forceAlgSelection is 0 explicitly, not by CostTask default: production defaults it to 1,
+  // and this is the one case whose outcome turns on it. comm.h documents 0 as "fall back to
+  // automatic", so the table must be left wide rather than blanked down to nothing.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
   task.algMask = GeneralBit(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 0;
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
                                              /*nvls=*/0, 1, 0, tbl.ptr()));
   EXPECT_FALSE(tbl.written(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE));
-  EXPECT_EQ(0, tbl.countWritten()) << "topoGetAlgoInfo then falls back to RING/SIMPLE";
+  EXPECT_LT(1, tbl.countWritten()) << "an unsatisfiable selection with force off is automatic";
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_ScaledSentinelCellDoesNotCountAsEligible) {
+  // The fp8 relegation scales RING cells by 1024, so a cell ncclTopoGetAlgoTime left at the -1.0
+  // sentinel becomes -1024.0. Testing `!= NCCL_ALGO_PROTO_IGNORE` would read that as eligible and
+  // swallow the error, while topoGetAlgoInfo's argmin still rejects it for being negative.
+  CostComm cc(/*nRanks=*/16);
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce, ncclFloat8e4m3);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  ScriptAllTimes(NCCL_ALGO_PROTO_IGNORE);
+
+  EXPECT_EQ(ncclInvalidArgument, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
+                                                     /*nvls=*/0, 1, 0, tbl.ptr()));
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_ForceAlgSelection_ErrorsWhenNothingNamedSurvives) {

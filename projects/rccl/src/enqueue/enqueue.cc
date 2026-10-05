@@ -3021,28 +3021,34 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // A symmetric-only selection ("SYMK_LL") names no general row; leave the table as the fallback
   // the symmetric scheduler declines to.
   if (generalMask != 0) {
+    // Decide before blanking. `>= 0.0`, not `!= IGNORE`: the fp8 relegation above scales a -1.0
+    // sentinel cell to -1024.0, and topoGetAlgoInfo's argmin accepts only a non-negative time.
     bool anyLeft = false;
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) {
-          table[a][p] = NCCL_ALGO_PROTO_IGNORE;
-        } else if (table[a][p] != NCCL_ALGO_PROTO_IGNORE) {
-          anyLeft = true;
-        }
+        if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) && table[a][p] >= 0.0) anyLeft = true;
       }
     }
-    // Every named row was already ineligible here (NVLS_SIMPLE without NVLS). nccl.h.in makes that
-    // an error by default; otherwise topoGetAlgoInfo would fall back to RING/SIMPLE in silence.
+    // Every named row is ineligible here (NVLS_SIMPLE without NVLS). nccl.h.in makes that an error
+    // by default; with force off the contract is automatic selection, so leave the table alone.
     if (!anyLeft && info->forceAlgSelection) {
       WARN("algSelection names only general algorithm(s) that are unavailable for %s",
            ncclFuncToString(info->func));
       return ncclInvalidArgument;
     }
+    if (anyLeft) {
+      for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+          if (((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) == 0) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        }
+      }
+    }
   }
 
-  // Narrowing is not the whole story: getAlgoInfo's arch windows and rcclUpdateCollectiveProtocol
-  // (rccl_wrap.cc) rewrite the choice afterwards without consulting algMask, and a CE/DDA backend is
-  // picked in rcclSelect*() before the task exists, so neither reaches this filter.
+  // Narrowing does not bind the whole pipeline: getAlgoInfo's arch windows and
+  // rcclUpdateCollectiveProtocol (rccl_wrap.cc) rewrite the choice after this returns, a tuner
+  // plugin may refill a blanked cell, and a CE/DDA backend is picked in rcclSelect*() before the
+  // task exists. None of them consults algMask.
   return ncclSuccess;
 }
 
