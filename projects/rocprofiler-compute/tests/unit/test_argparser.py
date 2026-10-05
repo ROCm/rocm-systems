@@ -25,7 +25,7 @@ VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
 
 DEPRECATED_ALIASES = [
     # (mode argv, old argv, new argv, dest, expected value)
-    (["profile"], ["--roof-only"], ["--roofline"], "roof_only", True),
+    (["profile"], ["--roof-only"], ["--roofline"], "roofline", True),
     (["profile"], ["--bench-only"], ["--roofline-bench-only"], "bench_only", True),
     (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
     (["analyze"], ["--sort", "dispatches"], ["--roofline-sort", "dispatches"],
@@ -344,6 +344,18 @@ def test_help_defaults_match_parser_defaults():
             assert match.group(2) == str(value), name
 
 
+def test_profile_help_lists_conflicting_options(capsys):
+    with pytest.raises(SystemExit):
+        build_args(["profile", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    # Options in the same group as --roofline are not listed
+    assert "Cannot be used with --set or --roofline-bench-only." in out
+    assert (
+        "Cannot be used with --block, --speed-of-light, --memory-chart, "
+        "--roofline, --set or --no-roof." in out
+    )
+
+
 # =============================================================================
 # analyze -k / -d
 # =============================================================================
@@ -364,11 +376,11 @@ def test_analyze_kernel_and_dispatch_keep_one_group_per_use():
     ("argv", "dest", "expected"),
     [
         (
-            ["analyze", "-b", "5", "sol", "--roofline"],
-            "filter_metrics",
+            ["profile", "-b", "5", "sol", "--roofline"],
+            "filter_blocks",
             ["5", "sol", "4"],
         ),
-        (["analyze", "-b", "4", "--roofline"], "filter_metrics", ["4"]),
+        (["profile", "-b", "4", "--roofline"], "filter_blocks", ["4"]),
         (
             ["analyze", "--roofline", "--speed-of-light", "--memory-chart"],
             "filter_metrics",
