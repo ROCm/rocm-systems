@@ -141,6 +141,37 @@ cd rust-interface
 cargo build
 ```
 
+### Optional runtime loading
+
+Enable `dynamic-loading` to build and start applications without AMD SMI installed:
+
+```sh
+cargo build --features dynamic-loading
+```
+
+The existing Rust API is unchanged. The first API call loads `libamd_smi.so` using
+the system dynamic loader's search path. To choose an installation explicitly,
+set `AMDSMI_LIB_DIR` to its library directory **at runtime**, before making any
+AMD SMI calls. Use a trusted installation compatible with the generated bindings;
+runtime loading does not make different AMD SMI ABI versions interchangeable.
+
+An unavailable library returns `AmdsmiStatusFailLoadModule`. An unavailable symbol
+returns `AmdsmiStatusFailLoadSymbol` only when that function is called, so unused
+optional APIs do not prevent initialization. Loading and symbol resolution results
+are cached for the process lifetime, including failures. The shared library stays
+loaded after `amdsmi_shut_down()`, allowing later initialization without dangling
+function pointers. Callers remain responsible for the C API's initialization,
+handle lifetimes, and thread-safety requirements.
+
+Without this feature, the existing build-time library lookup and link-time
+dependency are preserved. Neither mode regenerates bindings on ordinary builds.
+
+GPU-free loader tests require a C compiler, but no AMD SMI installation:
+
+```sh
+cargo test --features dynamic-loading --test runtime_loading
+```
+
 
 ### Regenerating FFI Bindings
 
@@ -262,4 +293,3 @@ pub fn amdsmi_get_gpu_id(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResul
     Ok(id)
 }
 ```
-
