@@ -1927,6 +1927,10 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
+# Their host result is already rounded in the MODE the caller checked, so the
+# shared raw-bit stages apply ABS/NEG, OMOD and CLAMP around it.
+_ROUNDED_VOP3_BINARY_FP64 = frozenset({'v_add_f64_vop3', 'v_mul_f64_vop3'})
+
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
 # Fixed-direction rounding of the modifier-applied double, then omod/clamp on
 # the result. util::{ceil,floor,trunc,rndne}_simd wrap the stdx native<double>
@@ -2960,6 +2964,8 @@ def _simd_probe_line(
     # in the f64 domain.
     spec3binf64 = SIMD_VOP3_BINARY_FP64.get(template_name)
     if spec3binf64 is not None:
+        if template_name in _ROUNDED_VOP3_BINARY_FP64:
+            return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64({spec3binf64});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64({spec3binf64});'
     # VOP3 f64 unary (ceil/floor/trunc/rndne/sqrt). Same modifier policy.
     spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
@@ -3103,9 +3109,10 @@ def _simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3 twins of the mixed-width f64<->b32 cvt ops. Their generated VOP3
+        # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->b32 VOP3
         # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
-        # so routing through the existing cvt glue is bit-exact. (A symmetric
+        # so routing through the existing cvt glue is bit-exact. The b32->f64
+        # bodies apply OMOD and CLAMP, so they use the glue only without them. (A symmetric
         # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
         # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
         # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
@@ -3123,7 +3130,9 @@ def _simd_probe_line(
         speccvtinv3 = SIMD_CVT_B32_TO_F64.get(base + '_vop1')
         if speccvtinv3 is not None:
             in_t, cpp_op = speccvtinv3
-            return f'  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});'
+            # The glue has no output modifiers; the scalar body applies OMOD and CLAMP.
+            probe = f'    ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});'
+            return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
     return None
 
 

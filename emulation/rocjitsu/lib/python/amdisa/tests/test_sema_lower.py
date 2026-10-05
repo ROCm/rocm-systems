@@ -690,6 +690,71 @@ class TestLowerVectorAdd:
             '(amdgpu::RegisterAccess(wf).read_lane(vdst, lane) >> 16)' in result
         )
 
+    @staticmethod
+    def _output_modified(inner: SemaNode) -> SemaNode:
+        for wrapper in ('apply_omod', 'apply_clamp'):
+            inner = SemaNode(
+                SemaNodeKind.CALL,
+                call_name=wrapper,
+                ty=inner.ty,
+                children=(SemaNode(SemaNodeKind.ID, id_name=wrapper), inner),
+            )
+        return inner
+
+    @pytest.mark.parametrize('result_type', [SemaType.F16, SemaType.F64])
+    def test_vop3_arithmetic_scales_rounded_result(self, result_type: SemaType):
+        add = SemaNode(
+            SemaNodeKind.ADD,
+            ty=result_type,
+            children=(_cast(_src(0), result_type), _cast(_src(1), result_type)),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(_cast(_dst(0), result_type), self._output_modified(add)),
+        )
+        result = lower_sema_block(SemaBlock('V_ADD', ExecModel.VECTOR, body))
+
+        dtype = 'F16' if result_type == SemaType.F16 else 'F64'
+        policy = f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+        assert (
+            f'const auto output_policy = {policy}(wf, inst_.omod, inst_.clamp);'
+            in result
+        )
+        apply = f'amdgpu::output_modifier::apply<amdgpu::fp_format::{dtype}>('
+        assert apply in result
+        # The arithmetic rounds to the destination format before OMOD and CLAMP.
+        rounded = (
+            'amdgpu::fp_mode::finish_arithmetic_f16('
+            if result_type == SemaType.F16
+            else 'std::bit_cast<uint64_t>(amdgpu::fp_mode::arithmetic<'
+        )
+        assert result.index(apply) < result.index(rounded)
+        assert 'clamp_floating_result' not in result
+        assert 'finalize_omod_' not in result
+
+    def test_vop3_f16_transcendental_overflows_to_nearest(self):
+        rcp = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='rcp',
+            ty=SemaType.F16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='rcp'),
+                _cast(_src(0), SemaType.F16),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(_cast(_dst(0), SemaType.F16), self._output_modified(rcp)),
+        )
+        result = lower_sema_block(SemaBlock('V_RCP_F16', ExecModel.VECTOR, body))
+
+        assert (
+            'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F16>'
+            in result
+        )
+        assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(' in result
+        assert 'apply_omod_f16' not in result
+
 
 class TestLowerCast:
     def test_instoperand_uses_bit_cast(self):
