@@ -102,8 +102,18 @@ INSTRUCTION_MIX = [
 
 
 @dataclass
+class Agent:
+    label: str
+    product: str = ""
+    arch: str = ""
+    wave_size: int = 0
+    peak_tbps: float | None = None
+
+
+@dataclass
 class Sample:
     source: str
+    agent: str
     pid: int
     dispatch_id: int
     kernel: str
@@ -136,6 +146,7 @@ class CounterStat:
 @dataclass
 class KernelStat:
     name: str
+    agent: str = ""
     counters: dict[str, CounterStat] = field(
         default_factory=lambda: defaultdict(CounterStat)
     )
@@ -188,14 +199,25 @@ class KernelStat:
 @dataclass
 class Report:
     inputs: list[str] = field(default_factory=list)
-    gpu_product: str = ""
-    gpu_arch: str = ""
-    wave_size: int = 0
-    peak_tbps: float | None = None
-    kernels: dict[str, KernelStat] = field(default_factory=dict)
+    agents: dict[str, Agent] = field(default_factory=dict)
+    # Keyed by (agent label, kernel name) so that runs on different GPUs never merge.
+    kernels: dict[tuple[str, str], KernelStat] = field(default_factory=dict)
 
-    def add(self, sample: Sample) -> None:
-        self.kernels.setdefault(sample.kernel, KernelStat(sample.kernel)).add(sample)
+    def add(self, sample: Sample, agent: Agent) -> None:
+        self.agents.setdefault(agent.label, agent)
+        key = (sample.agent, sample.kernel)
+        self.kernels.setdefault(key, KernelStat(sample.kernel, sample.agent)).add(sample)
+
+
+def agent_label(product: str, arch: str, type_index) -> str:
+    return f"{product or 'unknown GPU'} ({arch or 'unknown arch'}), GPU {type_index}"
+
+
+def parse_wave_size(value) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def discover_inputs(paths: list[Path]) -> list[Path]:
@@ -224,44 +246,51 @@ def load_db(path: Path, report: Report) -> int:
         }
         if "counters_collection" not in views:
             raise ValueError(f"{path} is not a rocprofv3 rocpd database")
-        for name, product, extdata in conn.execute(
-            "SELECT name, product_name, extdata FROM rocpd_info_agent WHERE type='GPU' "
-            "ORDER BY absolute_index"
+        agents: dict[int, Agent] = {}
+        for abs_index, type_index, name, product, extdata in conn.execute(
+            "SELECT absolute_index, type_index, name, product_name, extdata "
+            "FROM rocpd_info_agent WHERE type='GPU'"
         ):
-            if not report.gpu_arch:
-                report.gpu_arch = name or ""
-                report.gpu_product = product or ""
-                try:
-                    report.wave_size = int(
-                        json.loads(extdata or "{}").get("wave_front_size", 0)
-                    )
-                except (ValueError, TypeError):
-                    report.wave_size = 0
+            try:
+                wave_size = parse_wave_size(
+                    json.loads(extdata or "{}").get("wave_front_size")
+                )
+            except (ValueError, TypeError):
+                wave_size = 0
+            agents[int(abs_index)] = Agent(
+                label=agent_label(product, name, type_index),
+                product=product or "",
+                arch=name or "",
+                wave_size=wave_size,
+            )
         rows = conn.execute(
-            "SELECT pid, dispatch_id, kernel_name, counter_name, value, duration, vgpr_count, "
-            "accum_vgpr_count, sgpr_count, lds_block_size, scratch_size, workgroup_size, grid_size "
-            "FROM counters_collection"
+            "SELECT agent_abs_index, pid, dispatch_id, kernel_name, counter_name, value, "
+            "duration, vgpr_count, accum_vgpr_count, sgpr_count, lds_block_size, scratch_size, "
+            "workgroup_size, grid_size FROM counters_collection"
         ).fetchall()
     finally:
         conn.close()
     for row in rows:
+        agent = agents.get(int(row[0] or 0)) or Agent(label=f"agent {row[0]}")
         report.add(
             Sample(
                 source=str(path),
-                pid=int(row[0] or 0),
-                dispatch_id=int(row[1] or 0),
-                kernel=row[2],
-                counter=row[3],
-                value=float(row[4] or 0.0),
-                duration_ns=float(row[5] or 0.0),
-                vgpr=int(row[6] or 0),
-                agpr=int(row[7] or 0),
-                sgpr=int(row[8] or 0),
-                lds=int(row[9] or 0),
-                scratch=int(row[10] or 0),
-                workgroup=int(row[11] or 0),
-                grid=int(row[12] or 0),
-            )
+                agent=agent.label,
+                pid=int(row[1] or 0),
+                dispatch_id=int(row[2] or 0),
+                kernel=row[3],
+                counter=row[4],
+                value=float(row[5] or 0.0),
+                duration_ns=float(row[6] or 0.0),
+                vgpr=int(row[7] or 0),
+                agpr=int(row[8] or 0),
+                sgpr=int(row[9] or 0),
+                lds=int(row[10] or 0),
+                scratch=int(row[11] or 0),
+                workgroup=int(row[12] or 0),
+                grid=int(row[13] or 0),
+            ),
+            agent,
         )
     return len(rows)
 
@@ -270,25 +299,42 @@ def lower_keys(row: dict) -> dict:
     return {k.lower(): v for k, v in row.items() if k is not None}
 
 
-def load_agent_info_csv(csv_path: Path, report: Report) -> None:
-    if report.gpu_arch:
-        return
+def normalize_agent_id(value: str) -> str:
+    return " ".join((value or "").lower().split())
+
+
+def load_agent_info_csv(csv_path: Path) -> dict[str, Agent]:
+    """Map the counter CSV's Agent_Id values to the GPUs in the sibling agent_info CSV."""
     for candidate in sorted(csv_path.parent.glob("*agent_info.csv")):
         with candidate.open(newline="", encoding="utf-8") as handle:
-            for raw in csv.DictReader(handle):
-                row = lower_keys(raw)
-                if row.get("agent_type") == "GPU":
-                    report.gpu_arch = row.get("name", "")
-                    report.gpu_product = row.get("product_name", "")
-                    try:
-                        report.wave_size = int(row.get("wave_front_size") or 0)
-                    except ValueError:
-                        report.wave_size = 0
-                    return
+            gpus = [
+                row
+                for row in map(lower_keys, csv.DictReader(handle))
+                if row.get("agent_type") == "GPU"
+            ]
+        if not gpus:
+            continue
+        gpus.sort(key=lambda row: int(float(row.get("node_id") or 0)))
+        agents: dict[str, Agent] = {}
+        for type_index, row in enumerate(gpus):
+            agent = Agent(
+                label=agent_label(row.get("product_name"), row.get("name"), type_index),
+                product=row.get("product_name") or "",
+                arch=row.get("name") or "",
+                wave_size=parse_wave_size(row.get("wave_front_size")),
+            )
+            # Agent_Id is "Agent <logical node id>" with the default --agent-index relative,
+            # "Agent <node id>" with absolute, and "GPU <n>" with type-relative.
+            agents[f"agent {row.get('logical_node_id')}"] = agent
+            agents.setdefault(f"agent {row.get('node_id')}", agent)
+            agents[f"gpu {type_index}"] = agent
+        return agents
+    return {}
 
 
 def load_csv(path: Path, report: Report) -> int:
     count = 0
+    agents = load_agent_info_csv(path)
     with path.open(newline="", encoding="utf-8") as handle:
         for raw in csv.DictReader(handle):
             row = lower_keys(raw)
@@ -296,11 +342,14 @@ def load_csv(path: Path, report: Report) -> int:
                 raise ValueError(
                     f"{path} has no Counter_Name column; is it a counter collection CSV?"
                 )
+            agent_id = row.get("agent_id") or "unknown agent"
+            agent = agents.get(normalize_agent_id(agent_id)) or Agent(label=agent_id)
             start = float(row.get("start_timestamp") or 0)
             end = float(row.get("end_timestamp") or 0)
             report.add(
                 Sample(
                     source=str(path),
+                    agent=agent.label,
                     pid=int(row.get("process_id") or 0),
                     dispatch_id=int(row.get("dispatch_id") or 0),
                     kernel=row.get("kernel_name", ""),
@@ -314,10 +363,10 @@ def load_csv(path: Path, report: Report) -> int:
                     scratch=int(float(row.get("scratch_size") or 0)),
                     workgroup=int(float(row.get("workgroup_size") or 0)),
                     grid=int(float(row.get("grid_size") or 0)),
-                )
+                ),
+                agent,
             )
             count += 1
-    load_agent_info_csv(path, report)
     return count
 
 
@@ -346,7 +395,9 @@ class Derived:
 
 def derive(k: KernelStat, report: Report) -> Derived:
     d = Derived()
-    wave_size = report.wave_size or default_wave_size(report.gpu_arch)
+    agent = report.agents.get(k.agent) or Agent(label=k.agent)
+    wave_size = agent.wave_size or default_wave_size(agent.arch)
+    peak_tbps = agent.peak_tbps
 
     # CDNA names the L2 block TCC; RDNA names it GL2C.
     hit = k.mean("TCC_HIT_sum", "TCC_HIT", "GL2C_HIT_sum", "GL2C_HIT")
@@ -397,9 +448,9 @@ def derive(k: KernelStat, report: Report) -> Derived:
         if fetch is None or write is None:
             note += " (only one side collected)"
         value = f"{d.dram_gbps:.1f} GB/s"
-        if report.peak_tbps:
-            d.peak_fraction = d.dram_gbps / (report.peak_tbps * 1000.0)
-            value += f" ({d.peak_fraction:.0%} of {report.peak_tbps:g} TB/s peak)"
+        if peak_tbps:
+            d.peak_fraction = d.dram_gbps / (peak_tbps * 1000.0)
+            value += f" ({d.peak_fraction:.0%} of {peak_tbps:g} TB/s peak)"
         d.rows.append(("DRAM bandwidth", value, note))
         if d.peak_fraction is not None and d.peak_fraction >= HBM_BOUND:
             d.flags.append(
@@ -450,25 +501,76 @@ def derive(k: KernelStat, report: Report) -> Derived:
                 "normalized for this GPU; compare it between kernels rather than against 100%."
             )
 
+    # A limiter is only claimed when the other signals agree: high ALU activity can overlap a
+    # saturated memory system, and few waves can still saturate DRAM.
+    bw_known = d.peak_fraction is not None
+    bw_high = bw_known and d.peak_fraction >= HBM_BOUND
+    bw_note = f"DRAM bandwidth is at {d.peak_fraction:.0%} of peak" if bw_known else ""
+    need_bw = "FETCH_SIZE and WRITE_SIZE (and pass --peak-hbm-tbps if the GPU is not recognized)"
+    valu = k.mean("VALUBusy")
+    mfma = k.mean("MfmaUtil")
+    valu_high = valu is not None and valu.mean >= VALU_HEAVY
+    mfma_high = mfma is not None and mfma.mean >= MFMA_HEAVY
+
     occupancy = k.mean("OccupancyPercent")
     if occupancy and occupancy.mean < OCCUPANCY_LOW:
-        d.flags.append(
-            f"OccupancyPercent {occupancy.mean:.0f}% is below {OCCUPANCY_LOW:.0f}%: too few waves to "
-            "hide latency. Check VGPR/AGPR/LDS usage per workgroup and whether the grid fills every "
-            "CU; very short kernels also read low because of launch ramp-up."
-        )
-    valu = k.mean("VALUBusy")
-    if valu and valu.mean >= VALU_HEAVY:
-        d.flags.append(
-            f"VALUBusy {valu.mean:.0f}%: vector ALU dominates. Reduce instruction count (strength "
-            "reduction, fast-math intrinsics, lower precision) or move matrix math to MFMA."
-        )
-    mfma = k.mean("MfmaUtil")
-    if mfma and mfma.mean >= MFMA_HEAVY:
-        d.flags.append(
-            f"MfmaUtil {mfma.mean:.0f}%: matrix cores are the limiter; gains need lower precision "
-            "formats or less total matrix work."
-        )
+        busy = [bw_note] if bw_high else []
+        if valu_high:
+            busy.append(f"VALUBusy is {valu.mean:.0f}%")
+        if mfma_high:
+            busy.append(f"MfmaUtil is {mfma.mean:.0f}%")
+        occ = f"OccupancyPercent {occupancy.mean:.0f}% is below {OCCUPANCY_LOW:.0f}%"
+        if busy:
+            d.flags.append(
+                f"{occ}, but {' and '.join(busy)}, so the kernel is not starved of waves; raising "
+                "occupancy is unlikely to help."
+            )
+        elif bw_known and valu is not None:
+            d.flags.append(
+                f"{occ} while DRAM bandwidth and VALU activity are low: too few waves to hide "
+                "latency. Check VGPR/AGPR/LDS usage per workgroup and whether the grid fills every "
+                "CU; very short kernels also read low because of launch ramp-up."
+            )
+        else:
+            missing = [] if bw_known else [need_bw]
+            if valu is None:
+                missing.append("VALUBusy")
+            d.flags.append(
+                f"{occ}. Collect {' and '.join(missing)} to tell whether that limits the kernel; "
+                "with low bandwidth and low VALU activity it means too few waves to hide latency."
+            )
+
+    for stat, name, unit, advice in (
+        (
+            valu if valu_high else None,
+            "VALUBusy",
+            "vector ALU",
+            "Reduce instruction count (strength reduction, fast-math intrinsics, lower "
+            "precision) or move matrix math to MFMA.",
+        ),
+        (
+            mfma if mfma_high else None,
+            "MfmaUtil",
+            "matrix cores",
+            "Gains need lower precision formats or less total matrix work.",
+        ),
+    ):
+        if stat is None:
+            continue
+        if bw_high:
+            d.flags.append(
+                f"{name} {stat.mean:.0f}% is high, but {bw_note}: {unit} work overlaps a "
+                "saturated memory system, so treat the kernel as memory-bound first."
+            )
+        elif bw_known:
+            d.flags.append(
+                f"{name} {stat.mean:.0f}% while {bw_note}: {unit} is the limiter. {advice}"
+            )
+        else:
+            d.flags.append(
+                f"{name} {stat.mean:.0f}% is high. Collect {need_bw} before calling the kernel "
+                f"{unit}-bound; that work can overlap a saturated memory pipeline."
+            )
     lds_conflict = k.mean("LDSBankConflict")
     if lds_conflict and lds_conflict.mean > 0:
         d.flags.append(
@@ -503,18 +605,14 @@ def fmt(value: float) -> str:
 def render(report: Report, top: int, kernel_filter: str | None) -> str:
     lines = ["# rocprofv3 Counter Report", ""]
     lines.append(f"- Inputs: {', '.join(report.inputs)}")
-    gpu = report.gpu_product or "unknown GPU"
-    if report.gpu_arch:
-        gpu += f" ({report.gpu_arch})"
-    lines.append(f"- GPU: {gpu}")
-    if report.peak_tbps:
-        lines.append(
-            f"- Peak DRAM bandwidth used for % of peak: {report.peak_tbps:g} TB/s"
+    for agent in report.agents.values():
+        peak = (
+            f"peak DRAM bandwidth {agent.peak_tbps:g} TB/s"
+            if agent.peak_tbps
+            else "peak DRAM bandwidth unknown (pass --peak-hbm-tbps for % of peak)"
         )
-    else:
-        lines.append(
-            "- Peak DRAM bandwidth unknown; pass --peak-hbm-tbps to get % of peak"
-        )
+        lines.append(f"- GPU: {agent.label}; {peak}")
+    multi_gpu = len(report.agents) > 1
     counters = sorted({c for k in report.kernels.values() for c in k.counters})
     lines.append(f"- Counters: {', '.join(counters)}")
     lines.append(
@@ -530,22 +628,28 @@ def render(report: Report, top: int, kernel_filter: str | None) -> str:
             lines.append(f"No kernels matched `{kernel_filter}`.")
             return "\n".join(lines)
     total_ns = sum(k.total_ns for k in kernels)
-    derived = {k.name: derive(k, report) for k in kernels}
+    derived = {(k.agent, k.name): derive(k, report) for k in kernels}
 
     lines.append("## Summary")
     lines.append("")
+    gpu_header = " GPU |" if multi_gpu else ""
     lines.append(
-        "| # | Kernel | Dispatches | Avg (us) | % time | L2 hit | DRAM GB/s | Occupancy % | Flags |"
+        f"| # | Kernel |{gpu_header} Dispatches | Avg (us) | % time | L2 hit | DRAM GB/s | "
+        "Occupancy % | Flags |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|")
+    lines.append(
+        "|---|---|" + ("---|" if multi_gpu else "") + "---|---|---|---|---|---|---|"
+    )
     for rank, k in enumerate(kernels[:top], start=1):
-        d = derived[k.name]
+        d = derived[(k.agent, k.name)]
         occ = k.mean("OccupancyPercent")
         bw = "" if d.dram_gbps is None else f"{d.dram_gbps:.0f}"
         if d.peak_fraction is not None:
             bw += f" ({d.peak_fraction:.0%})"
+        gpu_cell = f" {cell(k.agent)} |" if multi_gpu else ""
         lines.append(
-            f"| {rank} | {cell(short(k.name))} | {k.dispatches} | {k.avg_duration_ns / 1000:.1f} | "
+            f"| {rank} | {cell(short(k.name))} |{gpu_cell} {k.dispatches} | "
+            f"{k.avg_duration_ns / 1000:.1f} | "
             f"{100 * k.total_ns / total_ns if total_ns else 0:.1f}% | "
             f"{'' if d.l2_hit is None else f'{d.l2_hit:.0%}'} | {bw} | "
             f"{'' if occ is None else f'{occ.mean:.0f}'} | {len(d.flags)} |"
@@ -553,8 +657,11 @@ def render(report: Report, top: int, kernel_filter: str | None) -> str:
     lines.append("")
 
     for k in kernels[:top]:
-        d = derived[k.name]
-        lines.append(f"## {cell(short(k.name, 120))}")
+        d = derived[(k.agent, k.name)]
+        heading = cell(short(k.name, 120))
+        if multi_gpu:
+            heading += f" on {cell(k.agent)}"
+        lines.append(f"## {heading}")
         lines.append("")
         lines.append(
             f"- Dispatches: {k.dispatches}; avg duration {k.avg_duration_ns / 1000:.1f} us; "
@@ -599,7 +706,8 @@ def build_report(paths: list[Path], peak_override: float | None) -> Report:
             "Inputs contain no counter records. Check that --pmc (or an input file with pmc) was "
             "given, that the kernel filters matched something, and that the run completed."
         )
-    report.peak_tbps = resolve_peak(report.gpu_product, peak_override)
+    for agent in report.agents.values():
+        agent.peak_tbps = resolve_peak(agent.product, peak_override)
     return report
 
 

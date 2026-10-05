@@ -122,7 +122,9 @@ python3 <this-skill-dir>/scripts/analyze_counters.py rocprof_pmc
 
 - Add `--pmc MfmaUtil` for matrix kernels. On Radeon (RDNA3/RDNA4) swap `TCC_HIT_sum TCC_MISS_sum`
   for `GL2C_HIT_sum GL2C_MISS_sum`, drop `SQ_INSTS_VMEM_*`, `MemUnitStalled`, and `MfmaUtil`, and
-  set the performance level to `STABLE_STD` first (`sudo amd-smi set --perf-level STABLE_STD`).
+  set the performance level to `STABLE_STD` first (`sudo amd-smi set --perf-level STABLE_STD`). On
+  RDNA4 (gfx1200, gfx1201) also drop the `WRITE_SIZE` group: the counter is not defined there, so
+  the report shows read bandwidth only.
 - `FETCH_SIZE` and `WRITE_SIZE` never fit in one group. A group that does not fit fails with
   "Request exceeds the capabilities of the hardware"; split it.
 - The workload must be deterministic across runs. Otherwise use

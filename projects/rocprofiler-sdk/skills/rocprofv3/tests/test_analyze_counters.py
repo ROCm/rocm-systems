@@ -52,30 +52,55 @@ def load_module():
 analyze = load_module()
 
 
-def make_db(path: Path, rows, product="AMD Instinct MI300X") -> None:
-    """rows: (dispatch_id, kernel, counter, value, duration_ns)."""
+PEAK_MI300X_GBPS = 5300.0
+DURATION_NS = 100_000
+
+
+def fetch_kib_for(fraction_of_mi300x_peak: float) -> float:
+    """FETCH_SIZE (KiB) that reaches the given share of MI300X peak in DURATION_NS."""
+    return fraction_of_mi300x_peak * PEAK_MI300X_GBPS * DURATION_NS / 1024
+
+
+def make_db(path: Path, rows, product="AMD Instinct MI300X", agents=None) -> None:
+    """rows: (dispatch_id, kernel, counter, value, duration_ns[, agent_abs_index=2]).
+
+    agents: (absolute_index, type_index, gfx target, product name) for each GPU.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.executescript("""
-        CREATE TABLE _cc (pid INT, dispatch_id INT, kernel_name TEXT, counter_name TEXT,
-            value REAL, duration INT, vgpr_count INT, accum_vgpr_count INT, sgpr_count INT,
-            lds_block_size INT, scratch_size INT, workgroup_size INT, grid_size INT);
-        CREATE TABLE _agents (absolute_index INT, name TEXT, product_name TEXT, extdata TEXT,
-            type TEXT);
+        CREATE TABLE _cc (agent_abs_index INT, pid INT, dispatch_id INT, kernel_name TEXT,
+            counter_name TEXT, value REAL, duration INT, vgpr_count INT, accum_vgpr_count INT,
+            sgpr_count INT, lds_block_size INT, scratch_size INT, workgroup_size INT,
+            grid_size INT);
+        CREATE TABLE _agents (absolute_index INT, type_index INT, name TEXT, product_name TEXT,
+            extdata TEXT, type TEXT);
         CREATE VIEW counters_collection AS SELECT * FROM _cc;
         CREATE VIEW rocpd_info_agent AS SELECT * FROM _agents;
         """)
     conn.execute(
-        "INSERT INTO _agents VALUES (2, 'gfx942', ?, ?, 'GPU')",
-        (product, json.dumps({"wave_front_size": 64})),
+        "INSERT INTO _agents VALUES (0, 0, 'cpu', 'Xeon', '{}', 'CPU')",
     )
-    for dispatch_id, kernel, counter, value, duration in rows:
+    for abs_index, type_index, arch, name in agents or [(2, 0, "gfx942", product)]:
         conn.execute(
-            "INSERT INTO _cc VALUES (7, ?, ?, ?, ?, ?, 12, 0, 32, 0, 0, 256, 1048576)",
-            (dispatch_id, kernel, counter, value, duration),
+            "INSERT INTO _agents VALUES (?, ?, ?, ?, ?, 'GPU')",
+            (abs_index, type_index, arch, name, json.dumps({"wave_front_size": 64})),
+        )
+    for row in rows:
+        dispatch_id, kernel, counter, value, duration = row[:5]
+        agent = row[5] if len(row) > 5 else 2
+        conn.execute(
+            "INSERT INTO _cc VALUES (?, 7, ?, ?, ?, ?, ?, 12, 0, 32, 0, 0, 256, 1048576)",
+            (agent, dispatch_id, kernel, counter, value, duration),
         )
     conn.commit()
     conn.close()
+
+
+def kernel_named(report, name):
+    matches = [k for k in report.kernels.values() if k.name == name]
+    assert len(matches) == 1, matches
+    return matches[0]
 
 
 class PeakLookupTest(unittest.TestCase):
@@ -124,7 +149,7 @@ class ReportTest(unittest.TestCase):
         )
 
         report = analyze.build_report([self.dir], None)
-        kernel = report.kernels["strided"]
+        kernel = kernel_named(report, "strided")
         self.assertEqual(kernel.dispatches, 1)
         derived = analyze.derive(kernel, report)
         self.assertAlmostEqual(derived.l2_hit, 0.10)
@@ -146,9 +171,11 @@ class ReportTest(unittest.TestCase):
             product="AMD Radeon PRO W7900",
         )
         report = analyze.build_report([self.dir], None)
-        derived = analyze.derive(report.kernels["k"], report)
+        derived = analyze.derive(kernel_named(report, "k"), report)
         self.assertAlmostEqual(derived.l2_hit, 0.30)
-        self.assertIsNone(report.peak_tbps)
+        agent = report.agents[kernel_named(report, "k").agent]
+        self.assertEqual(agent.product, "AMD Radeon PRO W7900")
+        self.assertIsNone(agent.peak_tbps)
 
     def test_percent_over_100_and_low_occupancy(self):
         make_db(
@@ -160,7 +187,7 @@ class ReportTest(unittest.TestCase):
             ],
         )
         report = analyze.build_report([self.dir / "run_results.db"], None)
-        flags = " ".join(analyze.derive(report.kernels["k"], report).flags)
+        flags = " ".join(analyze.derive(kernel_named(report, "k"), report).flags)
         self.assertIn("VALUBusy reads 150%", flags)
         self.assertIn("OccupancyPercent 10%", flags)
         self.assertIn("LDSBankConflict", flags)
@@ -187,14 +214,127 @@ class ReportTest(unittest.TestCase):
             writer.writerow([1, "Agent 2", 7, "kern", 8, "TCC_MISS_sum", 25, 0, 1000])
         with (out_dir / "p_agent_info.csv").open("w", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["Agent_Type", "Name", "Product_Name", "Wave_Front_Size"])
-            writer.writerow(["CPU", "cpu", "Xeon", 0])
-            writer.writerow(["GPU", "gfx942", "AMD Instinct MI325X", 64])
+            writer.writerow(
+                [
+                    "Node_Id",
+                    "Logical_Node_Id",
+                    "Agent_Type",
+                    "Name",
+                    "Product_Name",
+                    "Wave_Front_Size",
+                ]
+            )
+            writer.writerow([0, 0, "CPU", "cpu", "Xeon", 0])
+            writer.writerow([2, 2, "GPU", "gfx942", "AMD Instinct MI325X", 64])
         code, out, _ = self.run_main(str(out_dir))
         self.assertEqual(code, 0)
         self.assertIn("AMD Instinct MI325X (gfx942)", out)
         self.assertIn("| L2 hit rate | 75.0% |", out)
         self.assertIn("6 TB/s", out)
+
+    def test_samples_are_attributed_to_their_gpu(self):
+        agents = [
+            (2, 0, "gfx942", "AMD Instinct MI300X"),
+            (3, 1, "gfx942", "AMD Instinct MI325X"),
+        ]
+        make_db(
+            self.dir / "run_results.db",
+            [
+                (1, "k", "SQ_WAVES", 100, DURATION_NS, 2),
+                (2, "k", "SQ_WAVES", 100, DURATION_NS, 3),
+                (3, "only_second", "FETCH_SIZE", 1000, DURATION_NS, 3),
+            ],
+            agents=agents,
+        )
+        report = analyze.build_report([self.dir], None)
+        self.assertEqual(len([k for k in report.kernels.values() if k.name == "k"]), 2)
+        second = report.agents[kernel_named(report, "only_second").agent]
+        self.assertEqual(second.product, "AMD Instinct MI325X")
+        self.assertEqual(second.peak_tbps, 6.0)
+        text = analyze.render(report, top=10, kernel_filter=None)
+        self.assertIn("| # | Kernel | GPU |", text)
+        self.assertIn("## only_second on AMD Instinct MI325X (gfx942), GPU 1", text)
+
+    def test_csv_agent_id_selects_matching_gpu(self):
+        out_dir = self.dir / "conv"
+        out_dir.mkdir()
+        with (out_dir / "p_counter_collection.csv").open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                [
+                    "Dispatch_Id",
+                    "Agent_Id",
+                    "Kernel_Name",
+                    "Counter_Name",
+                    "Counter_Value",
+                ]
+            )
+            writer.writerow([1, "Agent 3", "kern", "SQ_WAVES", 10])
+        with (out_dir / "p_agent_info.csv").open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                ["Node_Id", "Logical_Node_Id", "Agent_Type", "Name", "Product_Name"]
+            )
+            writer.writerow([2, 2, "GPU", "gfx942", "AMD Instinct MI300X"])
+            writer.writerow([3, 3, "GPU", "gfx942", "AMD Instinct MI325X"])
+        report = analyze.build_report([out_dir], None)
+        self.assertEqual(
+            kernel_named(report, "kern").agent, "AMD Instinct MI325X (gfx942), GPU 1"
+        )
+
+    def derive_flags(self, rows) -> str:
+        make_db(self.dir / "run_results.db", rows)
+        report = analyze.build_report([self.dir / "run_results.db"], None)
+        return " ".join(analyze.derive(kernel_named(report, "k"), report).flags)
+
+    def test_valu_is_not_the_limiter_when_dram_is_saturated(self):
+        flags = self.derive_flags(
+            [
+                (1, "k", "VALUBusy", 90.0, DURATION_NS),
+                (1, "k", "FETCH_SIZE", fetch_kib_for(0.9), DURATION_NS),
+            ]
+        )
+        self.assertIn("memory-bandwidth-bound", flags)
+        self.assertIn("treat the kernel as memory-bound first", flags)
+        self.assertNotIn("is the limiter", flags)
+
+    def test_valu_is_the_limiter_when_dram_is_quiet(self):
+        flags = self.derive_flags(
+            [
+                (1, "k", "VALUBusy", 90.0, DURATION_NS),
+                (1, "k", "FETCH_SIZE", fetch_kib_for(0.1), DURATION_NS),
+            ]
+        )
+        self.assertIn("vector ALU is the limiter", flags)
+
+    def test_valu_without_bandwidth_asks_for_more_data(self):
+        flags = self.derive_flags([(1, "k", "VALUBusy", 90.0, DURATION_NS)])
+        self.assertIn("Collect FETCH_SIZE and WRITE_SIZE", flags)
+        self.assertNotIn("is the limiter", flags)
+
+    def test_low_occupancy_with_saturated_dram_is_not_latency(self):
+        flags = self.derive_flags(
+            [
+                (1, "k", "OccupancyPercent", 10.0, DURATION_NS),
+                (1, "k", "FETCH_SIZE", fetch_kib_for(0.9), DURATION_NS),
+            ]
+        )
+        self.assertIn("raising occupancy is unlikely to help", flags)
+        self.assertNotIn("too few waves to hide latency. Check", flags)
+
+    def test_low_occupancy_with_quiet_dram_and_valu_is_latency(self):
+        flags = self.derive_flags(
+            [
+                (1, "k", "OccupancyPercent", 10.0, DURATION_NS),
+                (1, "k", "VALUBusy", 5.0, DURATION_NS),
+                (1, "k", "FETCH_SIZE", fetch_kib_for(0.1), DURATION_NS),
+            ]
+        )
+        self.assertIn("while DRAM bandwidth and VALU activity are low", flags)
+
+    def test_low_occupancy_alone_asks_for_more_data(self):
+        flags = self.derive_flags([(1, "k", "OccupancyPercent", 10.0, DURATION_NS)])
+        self.assertIn("and VALUBusy to tell whether that limits the kernel", flags)
 
     def test_kernel_filter(self):
         make_db(

@@ -84,7 +84,7 @@ for one dispatch.
 | `GRBM_GUI_ACTIVE`, `GRBM_COUNT` | GPU-active and total cycles. In counter mode each dispatch is bracketed, so they are equal; use them as a cycle count, not utilization. |
 | `TCC_HIT_sum`, `TCC_MISS_sum` | L2 hits and misses over all channels (uncached reads count as misses). |
 | `FETCH_SIZE` | KiB read from DRAM (HBM), including over-fetch. |
-| `WRITE_SIZE` | KiB written to DRAM. |
+| `WRITE_SIZE` | KiB written to DRAM. Not defined on RDNA4 (gfx1200, gfx1201); there only read bandwidth is available. |
 | `OccupancyPercent` | Average resident waves as % of the hardware maximum (32 waves/CU on CDNA3). |
 | `MeanOccupancyPerActiveCU` | Average resident waves per CU while the CU is busy. |
 | `VALUBusy` | % of GPU time vector ALUs issue. Can exceed 100% on multi-XCD parts; compare between kernels. |
