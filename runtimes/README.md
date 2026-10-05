@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # ROCm Runtime Components
 
 The `runtimes` directory owns one Cargo workspace and a standalone CMake build
@@ -16,14 +18,28 @@ part of the repository's default build or installation yet.
 - [`ddi/rocddi`](ddi/rocddi/README.md) is the early-access, private,
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
-  builds shared and static libraries.
+  builds a static library. Its shared ABI is an alias of the shared image.
 - [`hsa/libhsa`](hsa/libhsa/README.md) implements the HSA C ABI and builds a
-  shared library. It consumes rocddi directly, not through AMDF.
+  shared ABI in the same image. It consumes rocddi directly, not through AMDF.
 
 Component directories own implementation and local tests. The root owns the
-lockfile, toolchain, Rust profiles, and common CMake integration. Grouping
-directories do not introduce additional Cargo workspaces or CMake projects.
+shared-image linker package, lockfile, toolchain, Rust profiles, and common
+CMake integration. Grouping directories do not introduce additional
+Cargo workspaces or CMake projects.
 Rocddi remains an internal `rlib`; it has no standalone native ABI.
+
+## Shared image
+
+The workspace root is the `rocddi-frontends` Cargo package. It implements no
+third frontend. Its small `src/lib.rs` makes Cargo link the AMDF and HSA `rlib`s
+into one `cdylib`, so both public ABIs use one copy of rocddi's process state.
+The root `build.rs` retains both entry point sets, applies HSA symbol versions
+and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
+remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
+
+The CMake build below stages one physical `libhsa-runtime64.so.1` with
+`libhsa-runtime64.so`, `libhsa_runtime64.so`, and `libamdf.so` aliases.
+The AMDF static archive is built separately.
 
 ## Build with CMake
 
@@ -55,13 +71,14 @@ symlinks are provided there. The `rocm_runtime_rust` target invokes Cargo on eac
 build; Cargo decides what needs recompilation.
 
 Build-tree consumers can link `rocm_runtime::amdf_shared`, `rocm_runtime::amdf_static`, or
-`rocm_runtime::hsa_shared`. These targets include headers and build ordering. The AMDF
+`rocm_runtime::hsa_shared`. The two shared targets resolve to one image and
+retain native process state together. These targets include headers and build ordering. The AMDF
 static target propagates rustc's reported native link requirements through a
 generated linker response file. `rocm_runtime::runtime_headers` exposes the source
 header tree for internal tests, not an installed SDK contract.
 
 The library helper takes keyword arguments for the Cargo package/target, native
-output name, type, and ABI version. Component `project(... VERSION ...)` calls
+output name, type, and ABI version. Component `project(... VERSION ...)` calls and the shared-image module
 own native versions; the helper handles filenames, symlinks, SONAME settings,
 and per-static-library link requirements. Platform-specific conventions live
 in the helper, with explicit errors for Windows/Darwin until implemented.
@@ -110,5 +127,4 @@ cargo fmt --all --check
 ```
 
 Direct Cargo uses the workspace `target/` directory unless `CARGO_TARGET_DIR`
-is set. Its output tree is separate from the CMake build. Shared-library
-coexistence and GPU behavior retain the qualification limits in component docs.
+is set. Its output tree is separate from the CMake build. GPU behavior retains the qualification limits in component docs.

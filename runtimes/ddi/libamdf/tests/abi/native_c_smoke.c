@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* AMDF v3 negotiation and inert instance checks. No endpoint is activated. */
 #include <stddef.h>
 #include <stdint.h>
