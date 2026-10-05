@@ -145,5 +145,7 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
             CXX_STANDARD_REQUIRED ON
     )
 
-    rocprofiler_systems_strip_target(${target_name} EXPLICIT)
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+        rocprofiler_systems_strip_target(${target_name} FORCE EXPLICIT)
+    endif()
 endfunction()
