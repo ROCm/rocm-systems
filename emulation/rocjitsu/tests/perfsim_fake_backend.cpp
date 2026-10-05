@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -266,6 +268,7 @@ using namespace foreign_ffm_v13;
 std::mutex trace_mutex;
 void (*host_log)(FfmLogLevel, const char *) = nullptr;
 std::thread host_log_worker;
+std::atomic<unsigned> active_instruction_callbacks{0};
 
 std::uint8_t memory_flag_byte(bool is_atomic, bool is_read, bool is_write) {
   FfmMemoryAccess access{};
@@ -411,6 +414,22 @@ void append_wave(std::ostringstream &out, const FfmWaveInfo &wave) {
 }
 
 void on_instruction(const FfmInstructionInfo *instruction) {
+  struct CallbackScope {
+    bool probe = false;
+    explicit CallbackScope(bool enabled) : probe(enabled) {
+      if (!probe)
+        return;
+      const unsigned active =
+          active_instruction_callbacks.fetch_add(1, std::memory_order_acq_rel) + 1;
+      if (active > 1)
+        trace("concurrent_instruction_callbacks");
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    ~CallbackScope() {
+      if (probe)
+        active_instruction_callbacks.fetch_sub(1, std::memory_order_acq_rel);
+    }
+  } callback_scope(mode_is("gpucsim_transactional"));
   std::ostringstream out;
   out << "instruction ";
   if (!instruction) {
@@ -542,7 +561,10 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
                     : mode_is("too_old_version") ? 7
                     : mode_is("bad_version")     ? 14
                                                  : 13;
-  api.name = mode_is("gpucsim_name") ? "GPUCompilerSim" : "rocjitsu-perfsim-fake";
+  api.name =
+      mode_is("gpucsim_name") || mode_is("gpucsim_concurrent") || mode_is("gpucsim_transactional")
+          ? "GPUCompilerSim"
+          : "rocjitsu-perfsim-fake";
   api.on_init = on_init;
   api.on_dispatch_begin = on_dispatch_begin;
   api.on_dispatch_end = on_dispatch_end;
@@ -559,6 +581,24 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
   maybe_remove(api.on_tdm_memory_access, "missing_on_tdm_memory_access");
   maybe_remove(api.on_shutdown, "missing_on_shutdown");
   return &api;
+}
+
+extern "C" __attribute__((visibility("default"))) uint64_t
+ffm_observer_plugin_get_capabilities(uint32_t negotiated_api_version) {
+  if (negotiated_api_version < 13)
+    return 0;
+  constexpr uint64_t ConcurrentHotCallbacks = uint64_t{1} << 0;
+  constexpr uint64_t DiscardDispatch = uint64_t{1} << 1;
+  if (mode_is("gpucsim_transactional"))
+    return ConcurrentHotCallbacks | DiscardDispatch;
+  if (mode_is("gpucsim_concurrent"))
+    return ConcurrentHotCallbacks;
+  return 0;
+}
+
+extern "C" __attribute__((visibility("default"))) void
+ffm_observer_plugin_discard_dispatch(uint64_t dispatch_id) {
+  trace("discard " + std::to_string(dispatch_id));
 }
 
 __attribute__((destructor)) static void on_unload() {
