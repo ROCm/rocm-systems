@@ -325,10 +325,7 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
-        (
-            self._roofline_data_per_kernel,
-            self._roofline_data_per_workload,
-        ) = self.calc_roofline_data()
+        self._roofline_data_per_kernel = self.calc_roofline_data()
 
         report_evaluation_diagnostics()
 
@@ -416,21 +413,6 @@ class db_analysis(OmniAnalyze_Base):
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
                         lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
                         kernel=kernel_objs[kernel_key],
-                    )
-                )
-
-            # Add workload-level roofline data
-            workload_roofline = self._roofline_data_per_workload.get(workload_path)
-            if workload_roofline:
-                Database.get_session().add(
-                    orm.WorkloadRooflineData(
-                        total_flops=workload_roofline.get("total_flops"),
-                        l0_cache_data=workload_roofline.get("l0_cache_data"),
-                        l1_cache_data=workload_roofline.get("l1_cache_data"),
-                        l2_cache_data=workload_roofline.get("l2_cache_data"),
-                        hbm_cache_data=workload_roofline.get("hbm_cache_data"),
-                        lds_cache_data=workload_roofline.get("lds_cache_data"),
-                        workload=workload_obj,
                     )
                 )
 
@@ -1442,10 +1424,9 @@ class db_analysis(OmniAnalyze_Base):
 
         return pmc_df_per_workload
 
-    def calc_roofline_data(self) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
-        """Calculate both kernel-level and workload-level roofline data"""
+    def calc_roofline_data(self) -> dict[str, pd.DataFrame]:
+        """Calculate per-kernel roofline data for each workload."""
         roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
-        roofline_data_per_workload: dict[str, dict] = {}
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
@@ -1501,19 +1482,5 @@ class db_analysis(OmniAnalyze_Base):
 
             roofline_data_per_kernel[workload_path] = roofline_df
 
-            # Calculate workload-level roofline data (using full dataframe)
-            workload_roofline = {
-                metric_name: db_analysis.evaluate(
-                    metric_name,
-                    roofline_data_expressions[metric_name],
-                    pmc_df,
-                    sys_info,
-                )
-                for metric_name in roofline_data_expressions
-                if roofline_data_expressions[metric_name]
-            }
-
-            roofline_data_per_workload[workload_path] = workload_roofline
-
-        console_debug("Calculated kernel-level and workload-level roofline data")
-        return roofline_data_per_kernel, roofline_data_per_workload
+        console_debug("Calculated kernel-level roofline data")
+        return roofline_data_per_kernel
