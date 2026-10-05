@@ -645,11 +645,10 @@ static void update_root_manifest() {
 //
 // Capture stops rather than fill the file system it writes to. It keeps free
 // the smaller of 15% of that file system and 4 GiB, the default systemd-journald
-// uses for SystemKeepFree. Free space is read when the archive opens, and again
-// before any write that brings the bytes counted since the last check to
-// g_space_check_bytes, so less than that is ever written unchecked. The interval
-// is at most a quarter of the reserve, which bounds how far a capture can go
-// into it.
+// uses for SystemKeepFree. Free space is read when the archive opens, before any
+// write of at least g_space_check_bytes and after every g_space_check_bytes
+// written. The interval is at most a quarter of the reserve, which bounds how
+// far a capture can go into it.
 // ---------------------------------------------------------------------------
 
 static constexpr uint64_t kKeepFreeMax   = 4ull << 30;
@@ -1133,29 +1132,6 @@ void emergency_finalize(bool clean_shutdown) {
 // Fills all header fields then copies the whole struct into the app buffer.
 // ---------------------------------------------------------------------------
 
-// Assign sequence_id and buffer the record atomically so IDs are only consumed for
-// events that are actually written. A full record is always appended under the
-// lock, so the buffer never holds a torn record — which is what makes the
-// crash-callback flush in emergency_finalize() safe. Caller holds BufWriteGuard and
-// has seen g_events_fd open.
-//
-// The checkpoint flush+fsync happens inside the same lock scope. An earlier
-// version released the lock and re-acquired it for the fsync, which let two
-// threads that both crossed the kCheckpointEvents boundary race into back-to-
-// back fsyncs (a thundering herd at every 4096-event boundary). Doing the
-// fsync under the lock blocks other writers for the duration of the syscall,
-// but guarantees exactly one fsync per checkpoint and removes the race.
-static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len) {
-  hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
-  buffer_append_locked(hdr, payload_len);
-  g_event_count.fetch_add(1, std::memory_order_relaxed);
-  if (++g_events_since_ckpt >= kCheckpointEvents) {
-    flush_buffer_locked();
-    HRR_FSYNC(g_events_fd);
-    g_events_since_ckpt = 0;
-  }
-}
-
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
   // Fill fields that don't require the lock (timestamp and thread_id are
   // cheap and per-thread; getting them outside the lock keeps contention low).
@@ -1165,27 +1141,46 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   hdr->payload_length = payload_len;
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
-  // A record is counted toward the next free-space check before it is written. When
-  // it makes a check due, the check runs first, so it covers the record, as for a
-  // blob: the bytes written between two checks stay under one interval.
+  // A record of at least the check interval is checked before it is written, as a
+  // blob is, so no single record goes into the reserve unchecked.
+  const bool preflight = g_keep_free != 0 && payload_len >= g_space_check_bytes;
+  if (preflight) {
+    {
+      std::lock_guard<std::mutex> lk(g_file_mu);
+      if (g_events_fd < 0) return;
+    }
+    if (!reserve_space(payload_len)) return;
+  }
+  const SpaceReservation reservation{preflight ? payload_len : 0};
+
+  // Acquire once: assign sequence_id and buffer the record atomically so IDs are
+  // only consumed for events that are actually written. A full record is always
+  // appended under the lock, so the buffer never holds a torn record — which is
+  // what makes the crash-callback flush in emergency_finalize() safe.
+  //
+  // The checkpoint flush+fsync happens inside this single lock scope. An earlier
+  // version released the lock and re-acquired it for the fsync, which let two
+  // threads that both crossed the kCheckpointEvents boundary race into back-to-
+  // back fsyncs (a thundering herd at every 4096-event boundary). Doing the
+  // fsync under the lock blocks other writers for the duration of the syscall,
+  // but guarantees exactly one fsync per checkpoint and removes the race.
+  bool space_due = false;
   {
     BufWriteGuard lk;
     if (g_events_fd < 0) return;
-    if (g_keep_free == 0 || !space_check_due_locked(payload_len)) {
-      append_event_locked(hdr, payload_len);
-      return;
+    hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
+    buffer_append_locked(hdr, payload_len);
+    g_event_count.fetch_add(1, std::memory_order_relaxed);
+    if (++g_events_since_ckpt >= kCheckpointEvents) {
+      flush_buffer_locked();
+      HRR_FSYNC(g_events_fd);
+      g_events_since_ckpt = 0;
     }
+    space_due = g_keep_free != 0 && !preflight && space_check_due_locked(payload_len);
   }
-  // Outside g_file_mu, since check_space may take it to stop the capture. The
-  // record's bytes stay reserved until it is buffered, so a concurrent check counts
-  // them.
-  const uint64_t reserved =
-      g_bytes_reserved.fetch_add(payload_len, std::memory_order_acq_rel) + payload_len;
-  if (check_space(reserved)) {
-    BufWriteGuard lk;
-    if (g_events_fd >= 0) append_event_locked(hdr, payload_len);
-  }
-  g_bytes_reserved.fetch_sub(payload_len, std::memory_order_acq_rel);
+  // After the event is buffered, and outside g_file_mu since check_space may take it
+  // to stop the capture: a stop applies from the next event.
+  if (space_due) (void)check_space(g_bytes_reserved.load(std::memory_order_acquire));
 }
 
 // ---------------------------------------------------------------------------
