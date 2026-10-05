@@ -7,7 +7,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
 namespace rocjitsu {
 namespace amdgpu {
