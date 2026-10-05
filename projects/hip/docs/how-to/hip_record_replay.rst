@@ -94,6 +94,8 @@ short run of a big model produces gigabytes.
   in host memory is readable in it. Treat an archive as you would treat the input
   data of the run it came from.
 
+On Linux, a program that the kernel starts in secure-execution mode, such as a set-user-ID, set-group-ID or file-capability program, ignores ``HIP_HRR_CAPTURE_OUTPUT``: it records nothing, and says why in one line on standard error.
+
 Your first replay
 =======================================================
 
