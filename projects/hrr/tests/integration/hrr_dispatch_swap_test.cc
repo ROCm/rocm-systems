@@ -383,8 +383,10 @@ HRR_TEST_CASE(Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete) {
   capture_workload(cap.path, "Unit_HRR_FailedBlobWrite_Direct", false);
 
   const fs::path archive = hrr_single_process_archive(cap.path);
-  INFO("the blob write was meant to fail, but the blob is on disk");
-  REQUIRE(count_files(archive / "blobs", ".blob", kBigBlob).second == 0);
+  {
+    INFO("the blob write was meant to fail, but the blob is on disk");
+    REQUIRE(count_files(archive / "blobs", ".blob", kBigBlob).second == 0);
+  }
 
   hrr::Archive ar;
   REQUIRE(hrr::load_archive(archive.string(), ar));
@@ -411,8 +413,10 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure) {
 
   hrr::Archive parent;
   REQUIRE(hrr::load_archive(parent_dir.string(), parent));
-  INFO("the parent's blob write was meant to fail and mark it incomplete");
-  REQUIRE_FALSE(parent.complete);
+  {
+    INFO("the parent's blob write was meant to fail and mark it incomplete");
+    REQUIRE_FALSE(parent.complete);
+  }
 
   hrr::Archive child_ar;
   REQUIRE(hrr::load_archive(child_dir.string(), child_ar));
