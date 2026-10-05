@@ -1026,6 +1026,11 @@ WriteInterceptor(const void* packets,
             // (b) agent-scoped snapshots so a replay only saves/restores its own agent's device
             // memory (other GPUs untouched). Different agents hold different locks and run
             // concurrently.
+            // Wall time of each phase of this window, reported at INFO once the window closes, so
+            // lock and drain waits, the snapshot, the passes and the restores can be told apart.
+            using phase_clock       = std::chrono::steady_clock;
+            const auto window_start = phase_clock::now();
+
             const auto& core         = queue.core_api();
             hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
             const auto  replay_guard = std::unique_lock<std::shared_mutex>{
@@ -1076,12 +1081,14 @@ WriteInterceptor(const void* packets,
             // replay gate and serializing those is a separate follow-up (TODO: mkuriche,
             // amd-vkale).
             replay_drain_agent_or_fatal(replay_agent);
+            const auto drained_at = phase_clock::now();
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
             // pressure, a failed copy, or module-scope variables it could not enumerate). It logs
             // which of those it hit.
-            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+            const auto snapshot   = kernel_replay::memory_snapshot::snap(replay_agent);
+            const auto snapped_at = phase_clock::now();
 
             // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
             // application data, so decline replay. Close the CONFIG sequence, free our drain
@@ -1113,12 +1120,18 @@ WriteInterceptor(const void* packets,
             auto local_ctx_tls_guard =
                 kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
+            auto     passes_time   = phase_clock::duration{};
+            auto     restores_time = phase_clock::duration{};
+            uint64_t passes_run    = 0;
+            uint64_t restores_run  = 0;
+
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
             for(uint64_t pass = 0;; ++pass)
             {
                 const bool is_final =
                     !replay_plan.indefinite && (pass == replay_plan.total_passes - 1);
+                const auto pass_start = phase_clock::now();
 
                 auto pass_state = kernel_replay::pass_context_state_t{};
                 kernel_replay::execute_pass_phase_enter(
@@ -1140,6 +1153,8 @@ WriteInterceptor(const void* packets,
                 replay_drain_or_fatal(queue);
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
+                passes_time += phase_clock::now() - pass_start;
+                ++passes_run;
 
                 // Stop once the tool (or the fixed pass count) says we're done; the last executed
                 // pass leaves device memory as the app expects, so no restore follows the break.
@@ -1150,9 +1165,12 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
+                const auto restore_start = phase_clock::now();
                 ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
                     "kernel replay: restore failed between passes (partial host->device copy); "
                     "aborting rather than continuing with corrupted device memory");
+                restores_time += phase_clock::now() - restore_start;
+                ++restores_run;
             }
 
             kernel_replay::execute_config_phase_exit(
@@ -1173,6 +1191,27 @@ WriteInterceptor(const void* packets,
 
             // Clean up our private signals (never the app's completion signal).
             release_drain_signal();
+
+            ROCP_INFO << [&]() {
+                using ms_t          = std::chrono::duration<double, std::milli>;
+                auto snapshot_bytes = size_t{0};
+                for(const auto& blk : snapshot.blocks)
+                    snapshot_bytes += blk.host_copy.size();
+                return fmt::format(
+                    "kernel replay: dispatch {} phases: lock+drain {:.3f} ms, snapshot {:.3f} ms "
+                    "({} bytes in {} regions), {} passes {:.3f} ms, {} restores {:.3f} ms, window "
+                    "{:.3f} ms",
+                    replay_dispatch_id,
+                    ms_t{drained_at - window_start}.count(),
+                    ms_t{snapped_at - drained_at}.count(),
+                    snapshot_bytes,
+                    snapshot.blocks.size(),
+                    passes_run,
+                    ms_t{passes_time}.count(),
+                    restores_run,
+                    ms_t{restores_time}.count(),
+                    ms_t{phase_clock::now() - window_start}.count());
+            }();
             return;
         }
     }
