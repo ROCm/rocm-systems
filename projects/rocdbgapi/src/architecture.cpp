@@ -8168,27 +8168,20 @@ gfx12_5_architecture_t::cwsr_record_t::register_address (
      0x04: PC_LO
      0x08: PC_HI
      0x0C: EXEC_LO
-     0x10: EXEC_HI
+     0x10: <zero>
      0x14: STATE_PRIV
-     0x18: TRAPSTS
+     0x18: EXCP_FLAG_PRIV
      0x1C: XNACK_MASK
      0x20: MODE
-     0x24: FLAT_SCRATCH_LO
-     0x28: FLAT_SCRATCH_HI
+     0x24: SCRATCH_BASE_LO
+     0x28: SCRATCH_BASE_HI
      0x2C: EXCP_FLAG_USER
      0x30: TRAP_CTRL
      0x34: STATUS
      0x38: barrier
-     0x3C: <blank>
-     0x40: TTMP4
-     0x44: TTMP5
-     0x48: TTMP6
-     0x4C: TTMP7
-     0x50: TTMP8
-     0x54: TTMP9
-     0x58: TTMP10
-     0x5C: TTMP11: XNACK_STATE_PRIV
-     0x60: TTMP13  */
+     0x3C: cluster barrier state
+     0x38: SCHED_MODE
+  */
   switch (regnum)
     {
     case amdgpu_regnum_t::xnack_mask_32:
