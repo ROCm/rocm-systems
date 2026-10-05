@@ -10,6 +10,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - rocprofv3 no longer hands SIGTERM to its logging library's crash handler instead of the application's own SIGTERM handler. The crash handler, installed during rocprofv3's startup, was recorded as the application's handler, so after writing its output rocprofv3 killed the process with a stack trace and graceful shutdowns (vLLM, SGLang, ATOM) never ran.
+  - Processes that reset their signal handlers while rocprofv3 was writing its output (for example, a Python process exiting) could crash with SIGSEGV when rocprofv3 reinstalled the stale handler and passed the signal on. rocprofv3 now keeps the application's current choice.
+  - `signal()` and `sigaction()` under rocprofv3 returned rocprofv3's own handler for SIGINT, SIGTERM, SIGQUIT, and SIGABRT, including with `--disable-signal-handlers`. Python therefore did not install its `KeyboardInterrupt` handler, so Ctrl+C killed Python scripts without running their cleanup, and servers that restore the handlers they replaced (uvicorn, used by vLLM, SGLang, and ATOM) exited with a `TypeError` traceback. The application now sees its own handlers, and after writing its output rocprofv3 passes the signal to the handler the application installed last instead of the first one.
+  - After a signal, rocprofv3 reaped the application's child processes while waiting for them to exit, so the application could no longer collect their exit status. Python's `multiprocessing`, for example, then reported exited workers as still alive. rocprofv3 now leaves child processes for the application to reap.
+
 ### Known issues
 
 ### Removed

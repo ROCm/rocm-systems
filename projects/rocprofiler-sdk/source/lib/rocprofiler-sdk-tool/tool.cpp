@@ -139,6 +139,9 @@ namespace fs     = ::rocprofiler::common::filesystem;
 extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
+
+static void
+rocprofv3_signal_trampoline(int signo);
 }
 
 namespace
@@ -187,12 +190,8 @@ add_destructor(Tp*& ptr)
     return ptr;
 }
 
-struct chained_siginfo
-{
-    int                        signo   = 0;
-    sighandler_t               handler = nullptr;
-    std::optional<sigaction_t> action  = {};
-};
+// Set just before rocprofv3_main calls the application's main.
+std::atomic<bool> app_main_started = false;
 
 struct child_t
 {
@@ -200,12 +199,98 @@ struct child_t
     int   status{};
 };
 
-auto&
-get_chained_signals()
+// The process the disposition records below belong to. A vfork() child shares its parent's memory
+// until it execs, and CPython's subprocess resets the child's handlers there through sigaction():
+// that must not change the parent's records.
+std::atomic<pid_t> dispositions_owner = 0;
+
+bool
+owns_dispositions()
 {
-    using data_type  = std::array<std::optional<chained_siginfo>, rocprofv3_num_signals>;
+    const auto owner = dispositions_owner.load(std::memory_order_relaxed);
+    return owner == 0 || owner == getpid();
+}
+
+// Per signal, the disposition the application would have in place without rocprofv3: its latest
+// one, else the one rocprofv3 replaced. It gets the signal once rocprofv3 has flushed, and it is
+// what signal() and sigaction() report back: callers keep that and reinstall it later (uvicorn on
+// shutdown, LLVM's crash handler before re-raising), and CPython only installs its
+// KeyboardInterrupt handler when it finds SIGINT at SIG_DFL.
+auto&
+get_app_dispositions()
+{
+    using data_type  = std::array<std::optional<sigaction_t>, rocprofv3_num_signals>;
     static auto*& _v = common::static_object<data_type>::construct();
     return *CHECK_NOTNULL(_v);
+}
+
+// Per signal, a handler of this library registered before the app's main: the logging library's
+// crash handler.
+auto&
+get_own_handlers()
+{
+    static auto _v = std::array<const void*, rocprofv3_num_signals>{};
+    return _v;
+}
+
+const void*
+handler_address(const sigaction_t& sa)
+{
+    return ((sa.sa_flags & SA_SIGINFO) != 0) ? reinterpret_cast<const void*>(sa.sa_sigaction)
+                                             : reinterpret_cast<const void*>(sa.sa_handler);
+}
+
+// Uses dladdr, which is not async-signal-safe, so only call it before the app's main: afterwards
+// a crash handler may call sigaction() from a signal that interrupted the loader.
+void
+note_if_own_handler(int signum, const sigaction_t& sa)
+{
+    static const void* own_base = []() -> const void* {
+        auto info = Dl_info{};
+        return dladdr(reinterpret_cast<void*>(&rocprofv3_error_signal_handler), &info) != 0
+                   ? info.dli_fbase
+                   : nullptr;
+    }();
+
+    const auto* fn   = handler_address(sa);
+    auto        info = Dl_info{};
+    if(fn != nullptr && own_base != nullptr && dladdr(fn, &info) != 0 && info.dli_fbase == own_base)
+        get_own_handlers().at(signum) = fn;
+}
+
+// Whether `sa` runs rocprofv3's handler or the logging library's crash handler, neither of which
+// the application would see without rocprofv3.
+bool
+is_own_disposition(int signum, const sigaction_t& sa)
+{
+    const auto* fn = handler_address(sa);
+    return fn == reinterpret_cast<const void*>(&rocprofv3_error_signal_handler) ||
+           fn == reinterpret_cast<const void*>(&rocprofv3_signal_trampoline) ||
+           (fn != nullptr && fn == get_own_handlers().at(signum));
+}
+
+sigaction_t
+to_sigaction(sighandler_t handler)
+{
+    auto sa       = sigaction_t{};
+    sa.sa_handler = handler;
+    sigemptyset(&sa.sa_mask);
+    return sa;
+}
+
+// Called with each disposition the application installs and each one found in place: any that is
+// not ours is the application's (e.g. the one inherited at exec).
+void
+set_app_disposition(int signum, const sigaction_t& sa)
+{
+    if(!is_own_disposition(signum, sa)) get_app_dispositions().at(signum) = sa;
+}
+
+sigaction_t
+get_app_disposition(int signum)
+{
+    const auto& app = get_app_dispositions().at(signum);
+    return app ? *app : to_sigaction(SIG_DFL);
 }
 
 bool
@@ -2348,7 +2433,7 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
     struct sigaction sig_act = {};
     sigemptyset(&sig_act.sa_mask);
     // No SA_RESETHAND: a one-shot handler resets the disposition to SIG_DFL the instant it fires,
-    // so a *second* delivery of the same signal (e.g. a chained app handler like LLVM/comgr
+    // so a *second* delivery of the same signal (e.g. an app handler like LLVM/comgr's
     // re-raising) would land on SIG_DFL and terminate the process mid-flush -> data loss. Keeping
     // our handler installed routes every re-delivery back through the re-entry guard, which
     // swallows until the flush completes (finalize_done) and only then escalates. Termination is
@@ -2357,19 +2442,17 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
     sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
     for(auto signal_v : rocprofv3_handled_signals)
     {
-        if(get_chained_signals().at(signal_v))
-        {
-            ROCP_INFO << "Skipping install of signal handler for signal " << signal_v
-                      << " (already wrapped)";
-            continue;
-        }
-
         ROCP_INFO << "Installing signal handler for signal " << signal_v;
-        if(sigaction_func(signal_v, &sig_act, nullptr) != 0)
+        auto prev = sigaction_t{};
+        if(sigaction_func(signal_v, &sig_act, &prev) != 0)
         {
             auto _errno_v = errno;
             ROCP_ERROR << "error setting signal handler for " << signal_v
                        << " :: " << strerror(_errno_v);
+        }
+        else
+        {
+            set_app_disposition(signal_v, prev);
         }
     }
 }
@@ -4375,15 +4458,27 @@ int signal_finalize_wait_timeout_sec =
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
-// Returns the waitpid()
-//   result: >0 = child reaped (fills _status),
+// Like waitpid(_pid, &status, _opts | WUNTRACED), but without reaping the child: it is the app's,
+// and a status taken here would never reach the app's own wait (Python's Process.join(), say).
+//   result: >0 = child exited or stopped (fills status in waitpid() form)
 //   result: =0 = still alive
 //   result: <0 = gone/unwaitable (e.g. ECHILD when the app reaped the child itself).
 child_t
 wait_pid(pid_t _pid, int _opts)
 {
-    child_t ret{};
-    ret.pid = waitpid(_pid, &ret.status, _opts | WUNTRACED);
+    auto info = siginfo_t{};
+    if(waitid(P_PID, _pid, &info, WEXITED | WSTOPPED | WNOWAIT | (_opts & WNOHANG)) != 0)
+        return child_t{-1, 0};
+    if(info.si_pid == 0) return child_t{0, 0};
+
+    auto ret = child_t{info.si_pid, 0};
+    switch(info.si_code)
+    {
+        case CLD_EXITED: ret.status = (info.si_status & 0xff) << 8; break;
+        case CLD_KILLED: ret.status = info.si_status & 0x7f; break;
+        case CLD_DUMPED: ret.status = (info.si_status & 0x7f) | 0x80; break;
+        default: ret.status = ((info.si_status & 0xff) << 8) | 0x7f; break;  // stopped, trapped
+    }
     return ret;
 }
 
@@ -4578,32 +4673,41 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
     }
 }
 
-// Reinstall the disposition we wrapped for `signo`: the saved chained handler if any, else
-// SIG_DFL. Uses the real sigaction (bypasses our interceptor).
+// Handler rocprofv3_signal installs in place of the app's (signal() handlers take no siginfo).
+static void
+rocprofv3_signal_trampoline(int signo)
+{
+    rocprofv3_error_signal_handler(signo, nullptr, nullptr);
+}
+
+// Reinstall the app's disposition for `signo`. Uses the real sigaction (bypasses our interceptor).
 void
 restore_signal_disposition(int signo)
 {
-    if(auto& chained = get_chained_signals().at(signo); chained)
-    {
-        if(chained->action)
-        {
-            get_sigaction_function()(signo, &(*chained->action), nullptr);
-        }
-        else
-        {
-            struct sigaction sa = {};
-            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
-            sigemptyset(&sa.sa_mask);
-            get_sigaction_function()(signo, &sa, nullptr);
-        }
-    }
-    else
-    {
-        struct sigaction sa = {};
-        sa.sa_handler       = SIG_DFL;
-        sigemptyset(&sa.sa_mask);
-        get_sigaction_function()(signo, &sa, nullptr);
-    }
+    const auto sa = get_app_disposition(signo);
+    get_sigaction_function()(signo, &sa, nullptr);
+}
+
+// The flush can outlast the app's own view of the signal. A process that starts exiting
+// meanwhile resets its handlers (CPython does), and reinstalling the handler saved earlier would
+// then run it on a torn-down interpreter. So reinstall only while our handler is still in place;
+// if the app replaced it, keep the app's choice. Returns whether to deliver the signal: not to
+// SIG_DFL or SIG_IGN the app set itself.
+static bool
+restore_signal_disposition_unless_replaced(int signo)
+{
+    const auto sa   = get_app_disposition(signo);
+    auto       prev = sigaction_t{};
+    get_sigaction_function()(signo, &sa, &prev);
+
+    const bool ours = ((prev.sa_flags & SA_SIGINFO) != 0)
+                          ? prev.sa_sigaction == &rocprofv3_error_signal_handler
+                          : prev.sa_handler == &rocprofv3_signal_trampoline;
+    if(ours) return true;
+
+    get_sigaction_function()(signo, &prev, nullptr);
+    return ((prev.sa_flags & SA_SIGINFO) != 0) ||
+           (prev.sa_handler != SIG_DFL && prev.sa_handler != SIG_IGN);
 }
 
 void
@@ -4654,35 +4758,39 @@ signal_finalization_worker()
     sw.finalize_done.store(1u, std::memory_order_release);
     syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
 
-    // Re-raise BEFORE reaping children. The app's own handler needs the signal to run its
-    // coordinated shutdown, and that shutdown is what makes the children exit. Reaping first
+    // Re-raise BEFORE waiting for children. The app's own handler needs the signal to run its
+    // coordinated shutdown, and that shutdown is what makes the children exit. Waiting first
     // deadlocks multi-process apps (e.g. tensor-parallel servers) whose worker processes only
     // exit once the main tells them to. signo == 0 is normal-exit finalization; SIGABRT
     // terminates itself once its (synchronously waiting) handler returns into abort().
     if(sw.signo != 0 && sw.signo != SIGABRT)
     {
-        const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
-        restore_signal_disposition(sw.signo);
+        const auto app_sa = get_app_disposition(sw.signo);
+        const bool app_default =
+            (app_sa.sa_flags & SA_SIGINFO) == 0 && app_sa.sa_handler == SIG_DFL;
 
         // Re-raise process-directed (kill, not raise) so it lands on an app thread, not this
-        // worker (which blocks these signals): the chained handler runs, or SIG_DFL exits.
-        if(!have_chained)
+        // worker (which blocks these signals): the app's handler runs, or SIG_DFL exits.
+        if(restore_signal_disposition_unless_replaced(sw.signo))
         {
-            // No chained handler: also unblock here so SIG_DFL is guaranteed to terminate.
-            sigset_t unblock{};
-            sigemptyset(&unblock);
-            sigaddset(&unblock, sw.signo);
-            pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+            if(app_default)
+            {
+                // No app handler: also unblock here so SIG_DFL is guaranteed to terminate.
+                sigset_t unblock{};
+                sigemptyset(&unblock);
+                sigaddset(&unblock, sw.signo);
+                pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+            }
+            kill(getpid(), sw.signo);
         }
-        kill(getpid(), sw.signo);
     }
 
-    // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
-    // that returns). We do NOT signal the children. That is the app's/OS's job. A child that
-    // received the signal finalizes via its own worker.
+    // Report how the children exit, leaving them for the app to reap (see wait_pid). We do NOT
+    // signal the children. That is the app's/OS's job. A child that received the signal
+    // finalizes via its own worker.
     //
     // signo == 0 is the normal-exit wake (finalize_rocprofv3 then join): no signal was
-    // delivered, so a child the app left running is the app's own business. Reaping it would
+    // delivered, so a child the app left running is the app's own business. Waiting for it would
     // block on a child that may never exit, so skip it.
     if(sw.signo != 0)
     {
@@ -4709,7 +4817,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // Well-behaved apps use --disable-signal-handlers (atexit handles everything).
     //
     // Re-entry: a second signal arrived while we're still handling the first
-    // (a chained handler re-raising, or a double Ctrl+C).
+    // (an app handler re-raising, or a double Ctrl+C).
     // While the flush is running, swallow it. Delivering it now would cut the
     // flush short and truncate the profile.
     // After the flush completes (finalize_done), force SIG_DFL and re-raise.
@@ -4917,19 +5025,28 @@ rocprofv3_signal(int signum, sighandler_t handler)
 {
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
-        return get_signal_function()(signum, handler);
+    // Return the app's previous handler rather than ours (see get_app_dispositions).
+    auto app_previous = [signum, handler](sighandler_t prev) {
+        if(prev == SIG_ERR) return prev;
+        set_app_disposition(signum, to_sigaction(prev));
+        // Like glibc's signal(): sa_handler even for an SA_SIGINFO disposition.
+        const auto app_prev = get_app_disposition(signum).sa_handler;
+        set_app_disposition(signum, to_sigaction(handler));
+        return app_prev;
+    };
 
-    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
+    if(!is_handled_signal(signum) || !owns_dispositions())
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
-    // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
-    // rationale in rocprofv3_sigaction.
-    if(!get_chained_signals().at(signum) && handler != SIG_DFL)
-        get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+    if(!app_main_started.load(std::memory_order_acquire))
+        note_if_own_handler(signum, to_sigaction(handler));
 
-    return get_signal_function()(
-        signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
+    // Installed as is while the flush runs or when rocprofv3's handlers are disabled.
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0 ||
+       !tool::get_config().enable_signal_handlers)
+        return app_previous(get_signal_function()(signum, handler));
+
+    return app_previous(get_signal_function()(signum, &rocprofv3_signal_trampoline));
 }
 
 int
@@ -4940,33 +5057,28 @@ rocprofv3_sigaction(int signum,
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
-        return get_sigaction_function()(signum, act, oldact);
+    // Report the app's previous disposition rather than ours (see get_app_dispositions).
+    auto app_previous = [signum, act, oldact](int ret, const sigaction_t& prev) {
+        if(ret != 0) return ret;
+        const auto installed = act ? std::optional<sigaction_t>{*act} : std::nullopt;
+        set_app_disposition(signum, prev);
+        if(oldact) *oldact = get_app_disposition(signum);
+        if(installed) set_app_disposition(signum, *installed);
+        return ret;
+    };
 
-    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
+    if(!is_handled_signal(signum) || !owns_dispositions())
         return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
 
-    // Save the app's disposition so we can restore it on signal delivery.
-    // Only save the first one registered per signal. Later installs (e.g., LLVM comgr) often
-    // don't chain properly — they clobber the disposition on re-raise. Preserving the app's
-    // disposition ensures the application sees its signal as-if the profiler wasn't there.
-    if(!get_chained_signals().at(signum))
-    {
-        if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO)
-        {
-            if(act->sa_sigaction != &rocprofv3_error_signal_handler)
-                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
-        }
-        else
-        {
-            // Save SIG_IGN too (matching signal()): an app that ignores the signal — e.g. a
-            // deliberately un-interruptible process — must still see it ignored after we flush.
-            // SIG_DFL is skipped because an empty entry already restores as SIG_DFL.
-            if(act->sa_handler != SIG_DFL)
-                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
-        }
-    }
+    if(act && !app_main_started.load(std::memory_order_acquire)) note_if_own_handler(signum, *act);
 
+    // A query, or installed as is while the flush runs or when rocprofv3's handlers are disabled.
+    auto prev = sigaction_t{};
+    if(!act || get_signal_worker().handling.load(std::memory_order_relaxed) != 0 ||
+       !tool::get_config().enable_signal_handlers)
+        return app_previous(get_sigaction_function()(signum, act, &prev), prev);
+
+    // Keep our handler in place of the app's; the app's gets the signal once we have flushed.
     struct sigaction _upd_act = *act;
     // See initialize_signal_handler: no SA_RESETHAND so re-deliveries route back through our
     // re-entry guard instead of hitting SIG_DFL mid-flush.
@@ -4974,7 +5086,7 @@ rocprofv3_sigaction(int signum,
     _upd_act.sa_flags |= (SA_SIGINFO | SA_NOCLDSTOP);
     _upd_act.sa_sigaction = &rocprofv3_error_signal_handler;
 
-    return get_sigaction_function()(signum, &_upd_act, oldact);
+    return app_previous(get_sigaction_function()(signum, &_upd_act, &prev), prev);
 }
 
 int
@@ -4997,6 +5109,8 @@ rocprofv3_main(int argc, char** argv, char** envp)
     // auto _envp = convect_to_vec(envp);
 
     LOG_FUNCTION_ENTRY("({}, '{}', ...)", argc, fmt::join(_argv.begin(), _argv.end(), " "));
+
+    dispositions_owner.store(getpid(), std::memory_order_relaxed);
 
     initialize_logging();
 
@@ -5024,6 +5138,7 @@ rocprofv3_main(int argc, char** argv, char** envp)
             atfork_registered = true;
             pthread_atfork(nullptr, nullptr, []() {
                 // Child handler: reset stale state and spawn a fresh worker.
+                dispositions_owner.store(getpid(), std::memory_order_relaxed);
                 auto& child_sw = get_signal_worker();
                 if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
                 {
@@ -5052,6 +5167,7 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(tool_metadata && tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
+    app_main_started.store(true, std::memory_order_release);
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
 
     if(tool_metadata && tool_metadata->process_end_ns == 0)
