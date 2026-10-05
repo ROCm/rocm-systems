@@ -8,8 +8,8 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -198,9 +198,8 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
     auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
     if (!cp)
       return -ENODEV;
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.address_space = process->gpu(ordinal).address_space;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     queue.process_id = local_process_id_;
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
@@ -2495,7 +2494,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
 }
 
 bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size) {
-  if (size == 0)
+  if (size == 0 || size > std::numeric_limits<size_t>::max() - 0xFFF)
     return false;
 
   std::shared_ptr<KfdProcess> proc;
@@ -2511,85 +2510,99 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (!proc)
     return false;
 
-  size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  const size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  if (gpu_va > std::numeric_limits<uint64_t>::max() - aligned_size)
+    return false;
+  const uint64_t end = gpu_va + aligned_size;
 
-  // Every XCD of a fanned-out dispatch races here for the same process-wide pool
-  // VA, each having independently found it unbacked. Only the first may map it:
-  // mapping again would repoint the pool underneath waves the first XCD already
-  // launched and leak the original. The requested size is grid-scale and therefore
-  // identical for every XCD of one grid, so a pool already at least that large
-  // satisfies all of them and this covers the whole fan-out race.
-  //
-  // A later dispatch in the same process needing a LARGER pool still falls through
-  // and remaps, as it did before fan-out existed. That path is unchanged here.
+  // Fan-out shards can request the same range concurrently, and non-barrier
+  // dispatches can grow it while older waves still use it. Keep every existing
+  // allocation in place and back only the gaps: copying or remapping an old
+  // prefix would race with live spills. Retain each chunk until process teardown.
   std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
+  std::vector<std::pair<uint64_t, uint64_t>> backed;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     for (const auto &[handle, alloc] : proc->allocations_) {
-      if (alloc.gpu_va == gpu_va && alloc.size >= aligned_size)
-        return true;
+      if (!alloc.host_ptr || alloc.gpu_va >= end)
+        continue;
+      const uint64_t begin = std::max(gpu_va, alloc.gpu_va);
+      const uint64_t offset = begin - alloc.gpu_va;
+      if (offset < alloc.size)
+        backed.emplace_back(begin, begin + std::min(alloc.size - offset, end - begin));
     }
   }
-
-  auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
-  if (raw_fd < 0)
-    return false;
-
-  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-  if (memfd < 0)
-    memfd = raw_fd;
-  else
-    libc_passthrough().close(raw_fd);
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.insert(memfd);
+  std::ranges::sort(backed);
+  std::vector<std::pair<uint64_t, size_t>> missing;
+  uint64_t cursor = gpu_va;
+  for (const auto &[begin, backed_end] : backed) {
+    if (cursor < begin)
+      missing.emplace_back(cursor, static_cast<size_t>(begin - cursor));
+    cursor = std::max(cursor, backed_end);
   }
+  if (cursor < end)
+    missing.emplace_back(cursor, static_cast<size_t>(end - cursor));
 
-  if (ftruncate(memfd, static_cast<off_t>(aligned_size)) != 0) {
+  for (const auto &[range_va, range_size] : missing) {
+    auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
+    if (raw_fd < 0)
+      return false;
+
+    int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (memfd < 0)
+      memfd = raw_fd;
+    else
+      libc_passthrough().close(raw_fd);
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(memfd);
+    }
+
+    if (ftruncate(memfd, static_cast<off_t>(range_size)) != 0) {
+      {
+        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+        owned_fds_.erase(memfd);
+      }
+      libc_passthrough().close(memfd);
+      return false;
+    }
+    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+    if (host_ptr == MAP_FAILED) {
+      {
+        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+        owned_fds_.erase(memfd);
+      }
+      libc_passthrough().close(memfd);
+      return false;
+    }
     {
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
     libc_passthrough().close(memfd);
-    return false;
-  }
-  auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-  if (host_ptr == MAP_FAILED) {
+    std::memset(host_ptr, 0, range_size);
+    // Driver-owned for the same reason as the allocation path: the backing is a
+    // memfd this function created and mapped read-write.
+    proc->map_pages(range_va, host_ptr, range_size, amdgpu::Mtype::RW,
+                    KfdProcess::HostExtentOwner::Driver);
+
     {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
+      std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+      KfdProcess::GpuAllocation alloc{};
+      alloc.gpu_va = range_va;
+      alloc.size = range_size;
+      alloc.host_ptr = host_ptr;
+      alloc.host_ptr_owned = true;
+      alloc.handle = proc->next_handle_++;
+      alloc.memfd = -1;
+      proc->allocations_[alloc.handle] = alloc;
     }
-    libc_passthrough().close(memfd);
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.erase(memfd);
-  }
-  libc_passthrough().close(memfd);
-  std::memset(host_ptr, 0, aligned_size);
-  // Driver-owned for the same reason as the allocation path: the backing is a
-  // memfd this function created and mapped read-write.
-  proc->map_pages(gpu_va, host_ptr, aligned_size, amdgpu::Mtype::RW,
-                  KfdProcess::HostExtentOwner::Driver);
 
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    KfdProcess::GpuAllocation alloc{};
-    alloc.gpu_va = gpu_va;
-    alloc.size = aligned_size;
-    alloc.host_ptr = host_ptr;
-    alloc.host_ptr_owned = true;
-    alloc.handle = proc->next_handle_++;
-    alloc.memfd = -1;
-    proc->allocations_[alloc.handle] = alloc;
+    util::Logger::vm([&](auto &os) {
+      os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << range_va
+         << " size=0x" << range_size << std::dec << " host=" << host_ptr;
+    });
   }
-
-  util::Logger::vm([&](auto &os) {
-    os << "SCRATCH_BACKING pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va << " size=0x"
-       << aligned_size << std::dec << " host=" << host_ptr;
-  });
-
   return true;
 }
 
@@ -2680,6 +2693,9 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_create_queue_args *>(arg);
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   auto *gpu = find_gpu(args->gpu_id);
   if (!gpu || !gpu->soc)
     return -EINVAL;
@@ -2689,9 +2705,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   const bool is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
-  if (is_pm4_compute)
-    return -ENOTSUP;
-  if (!is_aql_compute && !is_sdma)
+  if (!is_aql_compute && !is_pm4_compute && !is_sdma)
     return -ENOTSUP;
 
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
@@ -2703,12 +2717,18 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
   const uint32_t queue_ordinal = proc.next_queue_id_ - 1;
+  // KFD reserves percentage bits 8..15 for a native PM4 queue's target XCC.
+  // An AQL vendor IB inherits the AQL queue's replicas instead of this placement.
+  const uint32_t owner_ordinal =
+      is_pm4_compute ? (args->queue_percentage >> 8) & 0xff : queue_ordinal;
+  if (is_pm4_compute && owner_ordinal >= gpu->soc->num_xcds())
+    return -EINVAL;
   amdgpu::CommandProcessor *target_cp =
-      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(queue_ordinal);
+      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(owner_ordinal);
   if (!is_sdma && target_cp == nullptr)
     return -EINVAL;
   const uint32_t target_xcc_id =
-      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(queue_ordinal);
+      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(owner_ordinal);
 
   // Build the HW queue and reserve all per-process state under alloc_mutex_, then
   // register it with the CommandProcessor with the lock RELEASED. The CP thread
@@ -2782,8 +2802,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                           .producer_pointer_address = args->write_pointer_address};
     queue_request.binding_factory =
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
-                : amdgpu::make_aql_queue_binding_factory(*target_cp);
+                : amdgpu::make_compute_queue_binding_factory(*target_cp);
     queue_request.engine_id = args->sdma_engine_id;
+    queue_request.scheduling_percentage = scheduling_percentage;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
     // page before creating queues, and queue creation for a process is single-
@@ -2795,9 +2816,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                               .host_base = gs.doorbell_monitor_page,
                               .last_value = ~uint64_t(0)};
     queue_request.type = is_sdma ? amdgpu::QueueType::Sdma : amdgpu::QueueType::Compute;
-    queue_request.packet_format =
-        is_sdma ? amdgpu::QueuePacketFormat::Sdma : amdgpu::QueuePacketFormat::Aql;
-    queue_request.abi = is_sdma ? amdgpu::QueueAbi::Generic : amdgpu::QueueAbi::KfdAql;
+    queue_request.packet_format = is_sdma          ? amdgpu::QueuePacketFormat::Sdma
+                                  : is_pm4_compute ? amdgpu::QueuePacketFormat::Pm4
+                                                   : amdgpu::QueuePacketFormat::Aql;
+    queue_request.abi = is_aql_compute ? amdgpu::QueueAbi::KfdAql : amdgpu::QueueAbi::Generic;
     // Queue creation initializes both SDMA pointers to zero below. Preserve that
     // device-side cursor explicitly so execution does not depend on reading the
     // writeback destination before the first packet can retire.
@@ -2814,7 +2836,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // unsupported value silently acquires.
     queue_request.xcd_fanout = is_aql_compute;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!is_sdma)
+    if (is_aql_compute)
       queue_request.queue_descriptor_address =
           args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
     if (!is_sdma && args->ctx_save_restore_address != 0) {
@@ -2882,6 +2904,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .gpu_ordinal = gpu_ordinal(args->gpu_id),
         .doorbell_offset = queue_request.doorbell.offset,
         .queue_handle = queue_handle,
+        .pm4_target_xcc = is_pm4_compute ? std::optional(owner_ordinal) : std::nullopt,
     };
     proc.queue_snapshot_map_[queue_id] = {
         .ring_base_address = args->ring_base_address,
@@ -2995,6 +3018,10 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_update_queue_args *>(arg);
+  // Decode scheduling independently of the native PM4 placement field.
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
   if (!ring_size)
     return -EINVAL;
@@ -3012,12 +3039,21 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!queue || queue->gpu_ordinal >= gpus_.size() || !gpus_[queue->gpu_ordinal].soc)
     return -EFAULT;
 
+  if (queue->pm4_target_xcc) {
+    const uint32_t target_xcc = (args->queue_percentage >> 8) & 0xff;
+    if (target_xcc >= gpus_[queue->gpu_ordinal].soc->num_xcds())
+      return -EINVAL;
+    // Moving a live CP record requires migrating its registers and pending streams.
+    if (target_xcc != *queue->pm4_target_xcc)
+      return -EOPNOTSUPP;
+  }
+
   amdgpu::QueueReconfigureResult update;
   try {
     update = gpus_[queue->gpu_ordinal].soc->queue_registry().reconfigure_queue(
         queue->queue_handle, {.ring_base_address = args->ring_base_address,
                               .ring_size_bytes = *ring_size,
-                              .scheduling_percentage = args->queue_percentage});
+                              .scheduling_percentage = scheduling_percentage});
   } catch (const std::bad_alloc &) {
     return -ENOMEM;
   } catch (...) {
@@ -4154,7 +4190,8 @@ void SimulatedKfd::complete_runtime_queue_exception(uint32_t process_id, uint32_
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
-                                                  uint32_t process_id, uint64_t exception_mask) {
+                                                  uint32_t process_id, uint64_t exception_mask,
+                                                  bool wait_for_ack) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || exception_mask == 0)
     return false;
@@ -4189,7 +4226,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   bool published = false;
   {
     std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
-    published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
+    published =
+        publisher->publish_queue_exception(queue_id, process_id, exception_mask, wait_for_ack);
   }
   if (queue_exception_cleanup_hook_for_testing_)
     queue_exception_cleanup_hook_for_testing_(false);
@@ -6054,18 +6092,24 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       auto *gpu = find_gpu(event.gpu_id);
       if (!gpu || !gpu->soc)
         return -ENODEV;
-      // Drop debug_sessions_mutex_ first: signal_queue_exception() takes the CU
-      // wave-state lock and waits up to a second for the target to observe the
-      // exception word, while the engine thread runs its issue loop under that
-      // same wave-state lock and calls back into the trap/watchpoint handlers,
-      // which take debug_sessions_mutex_. Holding it across the call inverts
-      // that order -- the inversion DISABLE and SUSPEND_QUEUES both avoid -- and
-      // would additionally stall every trap callback for the duration of the
-      // wait. Nothing below this point reads debug_sessions_ or session_it.
+      // Drop debug_sessions_mutex_ before entering the CU wave-state locks:
+      // trap callbacks acquire these in the opposite order. Nothing below
+      // this point reads debug_sessions_ or session_it.
       lk.unlock();
-      const bool delivered = signal_runtime_queue_exception(
-          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask);
-      return delivered ? 0 : -ENOENT;
+      // KFD's SEND_RUNTIME_EVENT publishes the status and event without
+      // waiting for ROCr to acknowledge them. ROCr removes its async exception
+      // handler after a fatal error, so later waves forwarding their aborts
+      // cannot satisfy such a wait. A debugger can also have the host stopped.
+      const bool published = signal_runtime_queue_exception(
+          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask,
+          /*wait_for_ack=*/false);
+      if (published)
+        return 0;
+      // The runtime may already have destroyed this queue after the first
+      // forwarded abort. KFD accepts that stale request too. Keep reporting
+      // actual publication failures for queues that still exist.
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      return target_proc->queue_snapshot_map_.contains(event.queue_id) ? -ENOENT : 0;
     }
     std::lock_guard<std::mutex> runtime_lock(runtime_handshake_mutex_);
     runtime_acked_.insert(target_pid);

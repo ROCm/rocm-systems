@@ -59,8 +59,8 @@ private:
 
     progress::tracker&                                                  m_tracker;
     output_file_registry&                                               m_registry;
-    std::optional<std::reference_wrapper<core::cached_perfetto_engine>> m_engine{};
-    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   m_tracks{};
+    std::optional<std::reference_wrapper<core::cached_perfetto_engine>> m_engine;
+    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   m_tracks;
 };
 
 }  // namespace rocprofsys::trace_cache

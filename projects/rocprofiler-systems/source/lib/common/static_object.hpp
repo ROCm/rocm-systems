@@ -153,7 +153,7 @@ inline void
 destroy_static_objects()
 {
     static auto _sync = std::mutex{};
-    auto        _lk   = std::unique_lock<std::mutex>{ _sync };
+    auto const  _lk   = std::unique_lock<std::mutex>{ _sync };
 
     auto*& _stack = get_static_object_stack();
     if(_stack)
@@ -161,7 +161,10 @@ destroy_static_objects()
         while(!_stack->empty())
         {
             auto& itr = _stack->top();
-            if(itr) itr();
+            if(itr)
+            {
+                itr();
+            }
             _stack->pop();
         }
 
@@ -174,7 +177,7 @@ inline void
 register_static_dtor(static_dtor_func_t&& _func)
 {
     static auto _sync = std::mutex{};
-    auto        _lk   = std::unique_lock<std::mutex>{ _sync };
+    auto const  _lk   = std::unique_lock<std::mutex>{ _sync };
 
     auto*& _stack = get_static_object_stack();
     if(_stack)

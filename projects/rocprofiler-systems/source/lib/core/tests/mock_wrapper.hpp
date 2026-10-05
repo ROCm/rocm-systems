@@ -698,7 +698,10 @@ struct name_info
     // get_operations_impl can iterate an empty .items() without throwing.
     value_type& operator[](std::size_t idx)
     {
-        if(idx >= impl.size()) impl.resize(idx + 1);
+        if(idx >= impl.size())
+        {
+            impl.resize(idx + 1);
+        }
         return impl[idx];
     }
     const value_type& operator[](std::size_t idx) const

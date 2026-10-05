@@ -28,7 +28,8 @@ metadata_initialize_counter_category()
 void
 metadata_initialize_counter_track(const char* name)
 {
-    trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { .track_name = name, .thread_id = std::nullopt, .extdata = "{}" });
 }
 
 void
@@ -85,7 +86,10 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                           const std::string& track_name, timing_interval _timing,
                           scope::config _scope) const
 {
-    if(!record.dispatch_data) return;
+    if(!record.dispatch_data)
+    {
+        return;
+    }
 
     const auto& _dispatch_info = record.dispatch_data->dispatch_info;
     const auto* _kern_sym_data =
@@ -117,7 +121,7 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         const size_t      agent_handle    = record.record_counter.agent_id.handle;
         const size_t      value           = record.record_counter.counter_value;
 
-        auto agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
+        auto const agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
 
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(
@@ -162,8 +166,10 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
                              [storage_ptr = storage.get(), metric_name = metric_name,
                               metric_description = metric_description]() {
                                  if(storage_ptr)
+                                 {
                                      counter_storage::write(storage_ptr, metric_name,
                                                             metric_description);
+                                 }
                              });
     }
     else
@@ -198,7 +204,10 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 void
 counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
 {
-    if(!track || timestamp == 0) return;
+    if(!track || timestamp == 0)
+    {
+        return;
+    }
 
     // Write zero to Perfetto trace (for legacy Perfetto)
     TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
