@@ -1145,6 +1145,15 @@ HRR_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
 }
 
 HRR_TEST_CASE(Unit_HRR_VMMRoundtrip) {
+  // The workload skips on a part without VMM (MI250X on the ossci pool),
+  // which leaves no D2H blob for the archive assertions.
+  int vmmSupported = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(
+      &vmmSupported, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  if (!vmmSupported) {
+    HRR_SKIP_CASE("virtual memory management unsupported");
+  }
+
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_vmm"};
   hrr_run_roundtrip("Unit_HRR_VMM_Direct", cap.path);
 }

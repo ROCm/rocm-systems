@@ -39,6 +39,7 @@ enum HrrExpectCode {
 enum HrrAppliesWhen {
   kHrrWhenAlways = 0,          // holds on any part
   kHrrWhenNoImageSupport = 1,  // only where hipDeviceAttributeImageSupport = 0
+  kHrrWhenVmmSupport = 2,  // only where VirtualMemoryManagementSupported != 0
 };
 
 struct HrrApiExpectation {
@@ -52,12 +53,13 @@ struct HrrApiExpectation {
   // then a known failure rather than the API having been reclassified.
   bool handler_error_ok;
   bool skip;           // not assertable from a single-process Catch2 workload
-  // Device capability this API's unreachable: declaration was measured under.
-  // kHrrWhenAlways for everything that holds on any part. Otherwise the matrix
-  // has only ever seen the API on a part with that capability, and on any
-  // other one it is unmeasured: whether a texture or array handle can exist is
-  // a property of the device, so a declaration taken where none can is not
-  // evidence about a part where they can.
+  // Device capability this API's declaration was measured under: its
+  // unreachable: group's, or an override's when:. kHrrWhenAlways for
+  // everything that holds on any part. Otherwise the matrix has only ever seen
+  // the API on a part with that capability, and on any other one it is
+  // unmeasured: whether a texture or array handle, or a VMM allocation, can
+  // exist is a property of the device, so a declaration taken where one can
+  // is not evidence about a part where it cannot, and the reverse.
   int applies_when;
 };
 
@@ -157,7 +159,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipIpcOpenEventHandle", "T1", 0, false, false, false, false, 0},
     {"hipIpcOpenMemHandle", "T1", 0, false, false, false, false, 0},
     {"hipLaunchCooperativeKernelMultiDevice", "T1", 5, false, true, false, false, 0},
-    {"hipMemCreate", "T1", 0, false, true, false, false, 0},
+    {"hipMemCreate", "T1", 0, false, true, false, false, 2},
     {"hipSignalExternalSemaphoresAsync", "T1", 0, true, false, false, false, 0},
     {"hipStreamBatchMemOp", "T1", 0, false, true, false, false, 0},
     {"hipWaitExternalSemaphoresAsync", "T1", 0, true, false, false, false, 0},

@@ -102,7 +102,8 @@ CLASS_CODE = {mc.CLASS_REAL: 0, mc.CLASS_NOOP: 1, mc.CLASS_ERROR_STUB: 2,
               mc.CLASS_UNREPLAYABLE: 5}
 
 # Must match HrrAppliesWhen in the emitted header.
-WHEN_CODE = {mc.UNREACHABLE_ALWAYS: 0, mc.UNREACHABLE_NO_IMAGE_SUPPORT: 1}
+WHEN_CODE = {mc.UNREACHABLE_ALWAYS: 0, mc.UNREACHABLE_NO_IMAGE_SUPPORT: 1,
+             mc.WHEN_VMM_SUPPORT: 2}
 
 # Classes that mean the API ran a real handler and did not come back cleanly.
 # Both are known-broken rather than misclassified, so they report as XFAIL and
@@ -159,6 +160,7 @@ enum HrrExpectCode {{
 enum HrrAppliesWhen {{
   kHrrWhenAlways = 0,          // holds on any part
   kHrrWhenNoImageSupport = 1,  // only where hipDeviceAttributeImageSupport = 0
+  kHrrWhenVmmSupport = 2,  // only where VirtualMemoryManagementSupported != 0
 }};
 
 struct HrrApiExpectation {{
@@ -172,12 +174,13 @@ struct HrrApiExpectation {{
   // then a known failure rather than the API having been reclassified.
   bool handler_error_ok;
   bool skip;           // not assertable from a single-process Catch2 workload
-  // Device capability this API's unreachable: declaration was measured under.
-  // kHrrWhenAlways for everything that holds on any part. Otherwise the matrix
-  // has only ever seen the API on a part with that capability, and on any
-  // other one it is unmeasured: whether a texture or array handle can exist is
-  // a property of the device, so a declaration taken where none can is not
-  // evidence about a part where they can.
+  // Device capability this API's declaration was measured under: its
+  // unreachable: group's, or an override's when:. kHrrWhenAlways for
+  // everything that holds on any part. Otherwise the matrix has only ever seen
+  // the API on a part with that capability, and on any other one it is
+  // unmeasured: whether a texture or array handle, or a VMM allocation, can
+  // exist is a property of the device, so a declaration taken where one can
+  // is not evidence about a part where it cannot, and the reverse.
   int applies_when;
 }};
 
