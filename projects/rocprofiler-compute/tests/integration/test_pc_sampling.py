@@ -71,28 +71,6 @@ def _assert_pc_sampling_files(
     assert remaining == {"sysinfo.csv"}
 
 
-def is_pc_sampling_not_supported(output):
-    """
-    To be called with the stdout + stderr after profiling.
-    Check whether profiling output said PC sampling is not supported on the machine
-    """
-    return any(
-        marker in output
-        for marker in (
-            # rocprof-compute's own pre-flight check against the agent configs
-            "is not supported on any of the agents on this system",
-            # rocprofiler-sdk, when it accepts the run and then rejects the config
-            "Given PC sampling configuration is not supported",
-        )
-    )
-
-
-def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
-    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
-        common.clean_output_dir(config["cleanup"], workload_dir)
-        pytest.skip("PC sampling is not supported")
-
-
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypatch):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
@@ -122,7 +100,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -160,7 +138,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -208,7 +186,7 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
         app_name="app_conjugate_gradient",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -293,7 +271,7 @@ def test_multi_rank_pc_sampling_only(
         check_success=False,
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
@@ -337,7 +315,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         check_success=False,
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     output = stdout + stderr
     assert "Multi-rank application detected" in output
@@ -384,7 +362,7 @@ def test_pc_sampling_profile_then_analyze(
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -478,7 +456,7 @@ def test_pc_sampling_with_sol_block(
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 1)
