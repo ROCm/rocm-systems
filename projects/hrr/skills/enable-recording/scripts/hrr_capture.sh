@@ -122,7 +122,7 @@ workload_interpreter() {
         ;;
     esac
   fi
-  command -v python3 2>/dev/null || echo python3
+  PATH="${WORKLOAD_PATH:-$PATH}" command -v python3 2>/dev/null || echo python3
 }
 
 # Launchers that wrap the real workload. The binary that matters is the one
@@ -243,8 +243,16 @@ resolved_runtime() {
 # copies are worth listing because an application that ships its own runtime
 # uses that one, whatever is installed on the system.
 candidate_libs() {
-  local entry dir pkg_dir
+  local entry dir pkg_dir interpreter
   local IFS_SAVE="$IFS"
+
+  # `#!/usr/bin/env python3` names an interpreter the workload finds on its own
+  # PATH, which under `env PATH=/venv/bin vllm` is not this script's.
+  interpreter="$(workload_interpreter)"
+  if [[ "$interpreter" != */* ]]; then
+    interpreter="$(PATH="${WORKLOAD_PATH:-$PATH}" command -v -- "$interpreter" 2>/dev/null ||
+                   echo "$interpreter")"
+  fi
 
   IFS=': '
   for entry in ${LD_PRELOAD:-}; do
@@ -280,7 +288,7 @@ candidate_libs() {
     # The interpreter that will run the workload, not the one on PATH. A job
     # launched as /opt/venv/bin/python has different site directories from the
     # shell's python3, and asking the wrong one hides the wheel that matters.
-  done < <("$(workload_interpreter)" - <<'PY' 2>/dev/null || true
+  done < <("$interpreter" - <<'PY' 2>/dev/null || true
 import site
 seen = []
 for path in list(site.getsitepackages()) + [site.getusersitepackages()]:
@@ -480,6 +488,30 @@ check_output_path() {
   return 0
 }
 
+# --- the workload's process group -------------------------------------------
+
+# Whether anything in process group $1 is still running. `kill -0` is true of a
+# zombie, and a child that outlives the workload is reparented to PID 1: where
+# PID 1 reaps nothing, a container whose entry point is `sleep infinity` or a
+# Python process, that zombie stays forever and waiting on it never ended.
+group_running() {
+  local pgid="$1" stat line fields
+  if [[ ! -r /proc/self/stat ]]; then
+    kill -0 -- "-$pgid" 2>/dev/null
+    return
+  fi
+  for stat in /proc/[0-9]*/stat; do
+    read -r line 2>/dev/null < "$stat" || continue
+    # The command name is in parentheses and may itself hold spaces or a `)`,
+    # so the fields are counted from the last one: state, ppid, pgrp.
+    read -r -a fields <<<"${line##*) }"
+    if [[ "${fields[2]:-}" == "$pgid" && "${fields[0]:-}" != Z ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # --- verbs ------------------------------------------------------------------
 
 VERB="${1:-}"
@@ -523,6 +555,8 @@ done
 # The executable the command will run, when there is one. Preflight answers a
 # different and much weaker question without it.
 WORKLOAD_BIN=""
+# The PATH the workload is started with. Empty means this script's own.
+WORKLOAD_PATH=""
 LAUNCHER_ENV=()
 if [[ ${#CMD[@]} -gt 0 ]]; then
   WORKLOAD_NAME=""
@@ -534,12 +568,10 @@ if [[ ${#CMD[@]} -gt 0 ]]; then
   [[ "$WORKLOAD_NAME" == *=* ]] && { LAUNCHER_ENV+=("$WORKLOAD_NAME"); WORKLOAD_NAME=""; }
   # Looked up on the PATH the workload is started with: `env PATH=/x app` runs
   # /x/app, and the last assignment wins as it does for env.
-  WORKLOAD_BIN="$(
-    for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
-      [[ "$assignment" == PATH=* ]] && PATH="${assignment#PATH=}"
-    done
-    command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true
-  )"
+  for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
+    if [[ "$assignment" == PATH=* ]]; then WORKLOAD_PATH="${assignment#PATH=}"; fi
+  done
+  WORKLOAD_BIN="$(PATH="${WORKLOAD_PATH:-$PATH}" command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true)"
 fi
 
 # check_runtime in the environment the workload will have. `local -x` exports
@@ -548,6 +580,11 @@ fi
 check_runtime_as_launched() {
   local assignment
   for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
+    # Except PATH, which is the workload's and has been used to find it and its
+    # interpreter. This script's own tools come from the caller's: exported,
+    # `env PATH=/opt/app/bin app` left grep, ldd and readlink unfound, and a
+    # runtime that can capture read as one that cannot.
+    [[ "$assignment" == PATH=* ]] && continue
     [[ "${assignment%%=*}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && local -x "$assignment"
   done
   check_runtime
@@ -665,10 +702,10 @@ case "$VERB" in
     wait "$workload_pid"
     workload_rc=$?
     # Then the rest of its group, which is still writing the archive.
-    if kill -0 -- "-$workload_pid" 2>/dev/null; then
+    if group_running "$workload_pid"; then
       log "the workload has exited and processes it started are still running; waiting"
       log "for them, so the archive is checked once it is complete"
-      while kill -0 -- "-$workload_pid" 2>/dev/null; do sleep 1; done
+      while group_running "$workload_pid"; do sleep 1; done
     fi
     set -e
     trap - TERM INT HUP

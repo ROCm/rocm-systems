@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import struct
 import subprocess
 import sys
@@ -464,13 +465,44 @@ def test_the_workload_is_looked_up_on_the_path_its_launcher_sets(world):
     bound = world.lib("rocm/lib", capture=True)
     world.workload("job", links=bound, bindir="elsewhere")
 
-    # The rest of the PATH is the caller's: preflight's own tools are looked up
-    # on it while the launcher's environment is applied.
     launcher_path = f"{world.root / 'elsewhere'}:{world.env['PATH']}"
     result = world.script("preflight", "--", "env", f"PATH={launcher_path}", "job")
 
     assert result.returncode == 0, result.stderr
     assert "(via bound by job) and it has capture" in result.stderr
+
+
+@linux_only
+def test_a_launcher_path_without_the_system_directories_does_not_blind_preflight(world):
+    """`env PATH=/opt/app/bin app` is the workload's PATH, not preflight's.
+    Applied to the whole check, it left grep, ldd and readlink unfound, and a
+    runtime that can capture was reported as one that cannot."""
+    bound = world.lib("rocm/lib", capture=True)
+    world.workload("job", links=bound, bindir="opt/app/bin")
+
+    result = world.script("preflight", "--", "env", f"PATH={world.root / 'opt/app/bin'}", "job")
+
+    assert result.returncode == 0, result.stderr
+    assert ("resolved", str(bound), "yes") in listing(result.stderr)
+
+
+@linux_only
+def test_a_console_script_finds_its_interpreter_on_the_launchers_path(world):
+    """`#!/usr/bin/env python3` is resolved on the PATH the workload runs
+    with, so under `env PATH=/venv/bin serve` it is the venv's Python whose
+    packages count."""
+    wheel = world.lib("venv/site/torch/lib", "libamdhip64.so", capture=False)
+    _executable(
+        world.root / "venv/bin/python3",
+        f'#!/bin/sh\ncat >/dev/null\necho "{world.root / "venv/site"}"\n',
+    )
+    world.lib("rocm/lib", capture=True)
+    _executable(world.root / "venv/bin/serve", "#!/usr/bin/env python3\nimport sys\n")
+
+    result = world.script("preflight", "--", "env", f"PATH={world.root / 'venv/bin'}", "serve")
+
+    assert ("bundled package", str(wheel), "NO") in listing(result.stderr)
+    assert result.returncode == 1
 
 
 @linux_only
@@ -711,12 +743,7 @@ def test_run_passes_piped_input_to_the_workload(world):
 
 def test_run_waits_for_what_the_workload_left_running(world):
     """A launcher that returns before its workers leaves them writing the
-    archive. Verifying then reads it half-written.
-
-    The child outlives the workload, so it is reaped by PID 1. Where PID 1
-    reaps nothing, a container without --init whose entry point is Python,
-    the zombie stays in the group and this waits out the timeout.
-    """
+    archive. Verifying then reads it half-written."""
     done = world.root / "done"
     app = world.workload(body=f'( sleep 1; touch "{done}" ) </dev/null >/dev/null 2>&1 &\nexit 0\n')
 
@@ -725,6 +752,48 @@ def test_run_waits_for_what_the_workload_left_running(world):
     assert result.returncode == 0, result.stderr
     assert "processes it started are still running; waiting" in result.stderr
     assert done.exists(), "the wrapper returned while the workload's children were running"
+
+
+# Runs a command as a child subreaper that waits for that command only: a
+# process orphaned below it is reparented here and never reaped, as under a
+# container whose PID 1 is `sleep infinity` or a Python entry point.
+NON_REAPING_PARENT = (
+    "import ctypes, subprocess, sys\n"
+    "PR_SET_CHILD_SUBREAPER = 36\n"
+    "assert ctypes.CDLL(None).prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0\n"
+    "sys.exit(subprocess.call(sys.argv[1:]))\n"
+)
+
+
+@linux_only
+def test_run_does_not_wait_on_a_child_that_has_already_exited(world):
+    """`kill -0` is true of a zombie. A child that outlived the workload and
+    then exited stayed one under a parent that never reaps, and the wait for
+    the workload's group never ended."""
+    done = world.root / "done"
+    app = world.workload(body=f'( sleep 1; touch "{done}" ) </dev/null >/dev/null 2>&1 &\nexit 0\n')
+
+    harness = subprocess.Popen(
+        [sys.executable, "-c", NON_REAPING_PARENT,
+         "bash", str(SCRIPT), "run", "--skip-preflight", "--no-playback",
+         "--output", str(world.root / "capture"), "--", str(app)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=world.env,
+        start_new_session=True,
+    )
+    try:
+        _, stderr = harness.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        os.killpg(harness.pid, signal.SIGKILL)
+        harness.communicate()
+        pytest.fail("the wrapper was still waiting 30 s after the workload's child exited")
+
+    assert harness.returncode == 0, stderr
+    assert done.exists()
+    assert "workload exited 0" in stderr
 
 
 @linux_only
