@@ -35,8 +35,10 @@ A wait instruction (`s_waitcnt`; on gfx12 and later `s_wait_loadcnt`, `s_wait_ds
 the other `s_wait_*` instructions) holds the wave until enough of the memory instructions
 it issued earlier have completed for their count to fall to the value in its operand
 (`vmcnt(0)` waits for all of them). A costly wait is time the wave spent waiting for their
-results. Which of the earlier instructions it waited for is not in the trace; see
-[latency.md](latency.md).
+results. The trace does not record which of the earlier instructions it waited for; rocprofv3
+works them out per wave from the instruction sequence, assuming in-order completion, in the
+`waitcnt` list of each wave's file, which leaves some waits out
+([capture.md](capture.md#the-ui_output-directory)). See [latency.md](latency.md).
 
 ## STALL: the pipe did not accept the instruction
 

@@ -9,6 +9,8 @@ directly when a question is narrower than `att_mine.py`'s reports: one instructi
 - [Functions](#functions)
 - [Records](#records)
 - [Examples](#examples)
+- [Counters, wall-clock time, and markers](#counters-wall-clock-time-and-markers)
+- [Sample scripts](#sample-scripts)
 
 ## Setup
 
@@ -64,7 +66,9 @@ cannot share a call.
 ## Records
 
 `TraceRecords` holds, among other fields, `waves`, `occupancy`, and `dispatches`, plus `info` (decoder
-warnings). Times are in shader clock cycles.
+warnings); `perf_events`, `realtime`, and `shaderdata` are in
+[Counters, wall-clock time, and markers](#counters-wall-clock-time-and-markers). Times are in
+shader clock cycles.
 
 | Record | Field | Meaning |
 | --- | --- | --- |
@@ -199,4 +203,94 @@ for begin, finish in spans[1:]:
     if begin > end:
         idle_gaps.append((end, begin - end))     # (when, how many cycles)
     end = max(end, finish)
+```
+
+## Counters, wall-clock time, and markers
+
+### SQ counters (gfx9)
+
+With `--att-activity N`, or `--att-perfcounters` and `--att-perfcounter-ctrl`, the trace also
+holds SQ counter samples, in `records.perf_events`. Each `PerfEvent` gives four counters read
+at `time` on compute unit `cu`: `events0` to `events3` are counters 0 to 3 when `bank` is 0,
+and 4 to 7 when it is 1. rocprofv3 configures the counters in the order they are listed, but
+drops a name the GPU does not have, with the warning `counter not found`, which moves the later
+ones up. Each sample counts one sampling period. The GPU sends no sample for a period in which
+all four counts are zero, though the decoder may add a zero-count record to mark the gap, so
+add the samples up for a total. The samples cover every compute unit of the shader engine, not only the traced one, unless
+`--att-perfcounter-target-only` is set.
+
+```python
+# the eight counters --att-activity lists, in its order
+names = ["SQ_BUSY_CU_CYCLES", "SQ_VALU_MFMA_BUSY_CYCLES", "SQ_ACTIVE_INST_VALU",
+         "SQ_ACTIVE_INST_LDS", "SQ_ACTIVE_INST_VMEM", "SQ_ACTIVE_INST_FLAT",
+         "SQ_ACTIVE_INST_SCA", "SQ_ACTIVE_INST_MISC"]
+counts = defaultdict(int)            # (shader engine, cu, counter) -> total
+for se, records in records_by_file:
+    for p in records.perf_events:
+        for k, v in enumerate((p.events0, p.events1, p.events2, p.events3)):
+            counts[(se, p.cu, names[4 * p.bank + k])] += v
+```
+
+### Wall-clock time
+
+`records.realtime` pairs shader clock readings with a reference clock, whose frequency in Hz
+is `records.realtime_frequency` (`None` when the capture did not record it). From them, the
+shader clock's average frequency over the capture, to turn cycle counts into time:
+
+```python
+for se, records in records_by_file:
+    rt, hz = records.realtime, records.realtime_frequency
+    if len(rt) >= 2 and hz:
+        seconds = (rt[-1].realtime_clock - rt[0].realtime_clock) / hz
+        mhz = (rt[-1].shader_clock - rt[0].shader_clock) / seconds / 1e6
+        span = max(w.end_time for w in records.waves) - min(w.begin_time for w in records.waves)
+        print(se, f"{mhz:.0f} MHz; traced waves span {span / mhz:.1f} us")
+```
+
+### Markers from the kernel
+
+A kernel can write values into the trace: `__builtin_amdgcn_s_ttracedata(value)` writes a
+32-bit value (`s_ttracedata`, through M0), and on gfx10 and later
+`__builtin_amdgcn_s_ttracedata_imm(value)` writes an 8-bit immediate. Each becomes a
+`ShaderData` record in `records.shaderdata` with its `time`, `value`, and the wave slot
+(`cu`, `simd`, `wave_id`) that wrote it, so markers can label loop iterations or phases in
+each wave. On gfx10 and later, `flags` is a bitmask: 1 marks a value from `s_ttracedata_imm`,
+and 2 a record the trap handler wrote rather than the kernel; on gfx9 it is always 0. Records can also come from compute units that were not traced, and a record's time can
+fall after its wave's `end_time`. Each marker adds instructions, so time the kernel without
+them.
+
+To give each traced wave its markers, take the last wave on the same slot, in the same `.att`
+file, that began before the record:
+
+```python
+marks = defaultdict(list)            # id(wave) -> [(time, value), ...]
+for _, records in records_by_file:
+    by_slot = defaultdict(list)
+    for w in sorted(records.waves, key=lambda w: w.begin_time):
+        by_slot[(w.cu, w.simd, w.wave_id)].append(w)
+    for s in records.shaderdata:
+        if s.flags & 2:              # gfx10 and later: written by the trap handler
+            continue
+        began = [w for w in by_slot.get((s.cu, s.simd, s.wave_id), []) if w.begin_time <= s.time]
+        if began:
+            marks[id(began[-1])].append((s.time, s.value))
+```
+
+## Sample scripts
+
+The decoder's source tree has command-line samples in
+`projects/rocprof-trace-decoder/samples`; two of them plot the trace:
+
+| Script | Output |
+| --- | --- |
+| `plot_occupancy_resources.py` | Active waves and SGPR and VGPR allocation over time (PNG) |
+| `plot_wave_lifetime.py` | Each wave's lifetime against its wait, VALU, other, and idle cycles (PNG) |
+
+Run them from `projects/rocprof-trace-decoder` with the `.att` files and code objects; they need
+`matplotlib` and `numpy`, and write the PNG to the directory given with `-d` (default: the
+current one):
+
+```bash
+PYTHONPATH=python python3 samples/plot_wave_lifetime.py -d <outdir> \
+    <capture>/*.att <capture>/*_code_object_id_*.out
 ```

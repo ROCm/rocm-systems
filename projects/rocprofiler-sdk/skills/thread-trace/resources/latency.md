@@ -14,7 +14,9 @@ they issued earlier.
   (little issue on other pipes overlapped them).
 - `lifetime`: `s_wait` latency holds the largest share of wave lifetime; with many traced
   waves, a positive slope and r also show that waves that waited longer tended to live longer.
-- The disassembly shows which memory instructions each costly wait follows. When a wait
+- The disassembly shows which memory instructions each costly wait follows, and each wave's
+  `waitcnt` list names those rocprofv3 works out it required to complete, assuming in-order
+  completion ([capture.md](capture.md#the-ui_output-directory)). When a wait
   comes right after the memory instruction it needs, nothing was scheduled in between; when
   a memory instruction's address comes from an earlier load, each step of the chain waits in
   turn.

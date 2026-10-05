@@ -61,10 +61,22 @@ dispatches the traced waves came from.
 | Output | What it is |
 | --- | --- |
 | `stats_*_dispatch_<n>.csv` | Per-instruction summary of the traced waves, summed over waves; `att_mine.py stats` ranks it ([reading-the-trace.md](reading-the-trace.md#the-stats-csv)) |
-| `ui_output_*_dispatch_<n>/` | The decoded trace as JSON for the ROCprof Compute Viewer; `att_mine.py` does not need it |
+| `ui_output_*_dispatch_<n>/` | The decoded trace as JSON, written for the ROCprof Compute Viewer and readable directly ([below](#the-ui_output-directory)) |
 | `*_shader_engine_<se>_<n>.att` | The raw trace: one file per traced shader engine and dispatch on each GPU traced (consecutive kernels share a file) |
 | `*_code_object_id_<n>.out` | Every code object loaded during the run, runtime kernels included |
 | `*_results.db` | rocprofv3's database for the run, with the GPU's properties (compute units, SIMDs per CU, wave size, maximum waves per SIMD, LDS size); `summary` prints them. With `--output-format csv` they are in `*_agent_info.csv`. |
+
+### The `ui_output` directory
+
+| File | What it holds |
+| --- | --- |
+| `se*_sm*_sl*_wv*.json` | One traced wave: `instructions` (`[time, category, stall, duration, line]`, where `line` is the instruction's row in `code.json`), `timeline` (`[state, duration]`), and `waitcnt`: for executed waits, per counter, the earlier memory instructions each required to complete (`[wait line, [[line, 0], ...]]`). rocprofv3 works these out from the wave's instruction sequence, assuming each counter's memory instructions complete in order; scalar and flat memory instructions can complete out of order, so after one, waits on the counters it uses are listed only when they wait for zero, until one does. Only `s_load` and `s_store` count as scalar memory instructions, so in a kernel with others (such as `s_buffer_load`) the list can name the wrong instructions. Waits matched to no instruction are left out, and the list stops at the first instruction rocprofv3 cannot resolve |
+| `code.json` | The disassembly: one row per instruction with its source line and totals over the traced waves, plus a `; <kernel>` row before each kernel; `header` names the columns |
+| `wstates<k>.json` | How many traced waves were in wave state `k` over time (`time`, `state`); `k` is the state's `WaveStateType` value (1 IDLE, 2 EXEC, 3 WAIT, 4 STALL) |
+| `occupancy.json` | Wave starts and ends on the traced shader engines (`occupancy_fields` names the fields), dispatches and other trace events per shader engine (`events`), and kernel names by `kernel_id` (`dispatches`) |
+| `filenames.json` | The GPU generation, the requested counter names, and an index of the wave, marker, and other-SIMD files |
+| `source_*`, `snapshots.json` | Copies of the source files the code objects refer to, when they exist on this machine |
+| `shaderdata_*.json`, `se*_perfcounter.json`, `realtime.json`, `other_simd_se*.json` | Markers, SQ counters, clock pairs, and (gfx11 and later) memory instructions (VMEM, FLAT, LDS) issued on the other SIMD, when the capture has them ([python-api.md](python-api.md#counters-wall-clock-time-and-markers)) |
 
 The code objects are also the kernel's ISA: `llvm-objdump -d` the one whose symbols
 include your kernel (`llvm-objdump -t <file> | grep <name>`).
