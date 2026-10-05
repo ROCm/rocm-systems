@@ -7,12 +7,9 @@
 # section with the bundled AMDGPU device code. The code object loader
 # (Executable) extracts and parses the device ELF from this section.
 #
-# Requires an ROCm installation with amdclang++. When the compiler is not
-# found the kernel targets are silently skipped and tests that depend on them
-# are disabled at runtime via the HAS_DEVICE_KERNELS compile definition.
-
-include(rj_find_amdcxx)
-rj_find_amdcxx(AMDCXX)
+# Requires a working ROCm HIP toolchain. When it is unavailable, the kernel
+# targets are skipped and tests that depend on them are disabled at runtime
+# via the HAS_DEVICE_KERNELS compile definition.
 
 if(NOT AMDCXX)
     message(
@@ -27,6 +24,11 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
         STATUS
         "SKIP_DEVICE_KERNELS set - device kernel tests will be disabled"
     )
+    return()
+endif()
+
+include(rj_check_hip_kernel_toolchain)
+if(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
     return()
 endif()
 
