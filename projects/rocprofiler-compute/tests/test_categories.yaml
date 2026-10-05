@@ -67,8 +67,6 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
-      - test-torch-trace-collector
-      - test-torch-trace-collector-before-install
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -86,7 +84,6 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
-      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_bench
@@ -160,8 +157,6 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
-      - test-torch-trace-collector
-      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -181,7 +176,6 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
-      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -256,8 +250,6 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
-      - test-torch-trace-collector
-      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -277,7 +269,6 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
-      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -352,8 +343,6 @@ test_categories:
       - test-pc-sampling-collector
       - test-compression
       - test-csv
-      - test-torch-trace-collector
-      - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_live_attach_detach
       - test_metric_validation
