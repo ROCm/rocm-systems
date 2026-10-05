@@ -274,11 +274,11 @@ void KFDPerfCountersTest::ClockCountersBasicTest(int gpuNode) {
     HsaClockCounters counters1;
     HsaClockCounters counters2;
 
-    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters1));
+    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters1, false));
 
     Delay(100);
 
-    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters2));
+    EXPECT_SUCCESS(hsaKmtGetClockCounters(gpuNode, &counters2, false));
 
     EXPECT_NE(0, counters1.GPUClockCounter);
     EXPECT_NE(0, counters2.GPUClockCounter);

@@ -30,7 +30,8 @@
 #include "util/os.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
-                                               HsaClockCounters *Counters) {
+                                               HsaClockCounters *Counters,
+                                               bool /*precise_timestamps*/) {
   HSAKMT_STATUS result = HSAKMT_STATUS_SUCCESS;
 
   CHECK_DXG_OPEN();

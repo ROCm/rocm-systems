@@ -233,7 +233,8 @@ class ThunkLoader {
                                       HSAuint32 *entry_size, \
                                       bool suspend_queues);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetClockCounters))(HSAuint32 NodeId, \
-                                      HsaClockCounters* Counters);
+                                      HsaClockCounters* Counters, \
+                                      bool precise_timestamps);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcGetCounterProperties))(HSAuint32 NodeId, \
                                       HsaCounterProperties** CounterProperties);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcRegisterTrace))(HSAuint32 NodeId, \

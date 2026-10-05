@@ -130,6 +130,12 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_SDMA");
     enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // Opt-in multi-sample GPU/CPU clock correlation. Profiling tools enable this
+    // at runtime through hsa_amd_enable_high_precision_timestamps. Unset or any
+    // value other than "1" leaves the single-query path in place.
+    var = os::GetEnvVar("HSA_ENABLE_HIGH_PRECISION_TIMESTAMPS");
+    enable_high_precision_timestamps_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
@@ -448,6 +454,12 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  bool enable_high_precision_timestamps() const { return enable_high_precision_timestamps_; }
+
+  void set_enable_high_precision_timestamps(bool enable) {
+    enable_high_precision_timestamps_ = enable;
+  }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -641,6 +653,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  bool enable_high_precision_timestamps_ = false;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
