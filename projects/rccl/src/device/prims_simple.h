@@ -113,7 +113,10 @@ class Primitives<T, RedOp, Fan, Direct,
     if (sysAcquire || !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS) {
       return ld_acquire_sys_global(ptr);
     }
-    return ld_relaxed_sys_global(ptr);
+    uint64_t value = ld_relaxed_sys_global(ptr);
+    // Compiler-only barrier so the payload loads after the poll cannot be hoisted above the relaxed load.
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    return value;
 #elif defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
