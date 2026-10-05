@@ -908,6 +908,15 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, uint32_t, unsigned int)
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
 }
 
+// ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+hipError_t hipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
+                               hipStream_t)
+{
+    FailLoudUnfaked("hip_fakes", "hipMemcpyBatchAsync");
+}
+#endif
+
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 {
     return g_hipThreadExchangeStreamCaptureMode(mode);
