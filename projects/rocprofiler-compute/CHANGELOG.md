@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
 
+* Removed the hidden profile option `--target`, which had no effect.
+
 ### Optimized
 
 ### Resolved issues
