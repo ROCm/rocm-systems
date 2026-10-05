@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -141,6 +142,11 @@ struct reader_catalog_t
     std::unordered_map<size_t, reader_types::track_info_ptr_t> sample_track_by_db_id;
 
 private:
+    void link_owner(reader_types::track_info_t& track,
+                    size_t                      nid,
+                    std::optional<size_t>       pid = std::nullopt,
+                    std::optional<size_t>       tid = std::nullopt) const;
+
     // Discovers "thread" tracks directly from the duration-event tables
     // (region/kernel_dispatch/memory_allocate/memory_copy, grouped by
     // (nid,pid,tid)) -- a track only exists if this returns a non-empty
