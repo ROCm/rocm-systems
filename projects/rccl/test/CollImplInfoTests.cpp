@@ -281,6 +281,29 @@ namespace RcclUnitTesting
       bool ceAllReduce = false;  // force CE AllReduce; registers recv only so symk cannot claim it
     };
 
+    // Names the file a child writes its skip reason to, since a GTEST_SKIP in an isolated child scores as a pass.
+    constexpr char kSkipFileEnv[] = "RCCL_UT_COLLIMPL_SKIP_FILE";
+
+    // Skips here, or hands the reason to the parent when it asked for one via kSkipFileEnv.
+    void SkipSweep(const std::string& reason)
+    {
+      const char* path = getenv(kSkipFileEnv);
+      if (path == nullptr)
+      {
+        GTEST_SKIP() << reason;
+      }
+      std::ofstream out(path);
+      out << reason;
+      EXPECT_TRUE(out.good()) << "cannot hand the skip to the parent via " << path << ": " << reason;
+    }
+
+    // Element count for one swept size; CE AllReduce needs it to divide evenly across ranks.
+    size_t SweepCount(size_t bytes, size_t denom, int nRanks, const SweepMode& mode)
+    {
+      const size_t count = bytes / denom;
+      return mode.ceAllReduce ? count - count % (size_t)nRanks : count;
+    }
+
     // Runs one collective across all comms, captures its selection log to a fresh
     // per-size file, then asserts rcclGetCollImplInfo reports what was logged.
     void CheckSizeMatchesLog(const char* funcStr, ncclFunc_t coll, int idx, int nRanks,
@@ -407,9 +430,15 @@ namespace RcclUnitTesting
       HIPCALL(hipGetDeviceCount(&numDevices));
       if (numDevices < 2)
       {
-        GTEST_SKIP() << "This test requires at least 2 GPUs.";
+        SkipSweep("This test requires at least 2 GPUs.");
+        return;
       }
       const int nRanks = std::min(numDevices, 8);
+      if (mode.ceAllReduce && !isCeRuntimeDriverSupported())
+      {
+        SkipSweep("CE driver not in supported range");
+        return;
+      }
 
       // Force cuMem off before init so comm->symmetricSupport is false: the -R 2
       // reporter (rcclSymKGetInfo) must then fall back to the real backend and
@@ -428,6 +457,18 @@ namespace RcclUnitTesting
 
       std::vector<ncclComm_t> comms(nRanks);
       ASSERT_EQ(ncclCommInitAll(comms.data(), nRanks, nullptr), ncclSuccess);
+
+      // CE-registered AllReduce is capped by the arch table's ceRegMax, so an arch without a table never selects it.
+      if (mode.ceAllReduce &&
+          std::any_of(comms.begin(), comms.end(), [](ncclComm_t c) { return c->archThresholds == nullptr; }))
+      {
+        for (auto& c : comms)
+        {
+          NCCLCHECK(ncclCommDestroy(c));
+        }
+        SkipSweep("no arch thresholds table, so CE AllReduce is never selected");
+        return;
+      }
 
       const std::vector<ncclDataType_t> dtypes = {ncclFloat32, ncclBfloat16};
 
@@ -507,8 +548,9 @@ namespace RcclUnitTesting
             hipStreamDestroy(streams[j]);
           }
           for (auto& c : comms) ncclCommDestroy(c);
-          GTEST_SKIP() << "symmetric windows unavailable (cuMem/VMM off or unsupported): "
-                       << ncclGetErrorString(regRes);
+          SkipSweep(std::string("symmetric windows unavailable (cuMem/VMM off or unsupported): ") +
+                    ncclGetErrorString(regRes));
+          return;
         }
 
         for (int i = 0; i < nRanks; i++)
@@ -545,7 +587,7 @@ namespace RcclUnitTesting
           elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
-          const size_t count = bytes / denom;
+          const size_t count = SweepCount(bytes, denom, nRanks, mode);
           if (count == 0) continue;
           NCCLCHECK(ncclGroupStart());
           for (int i = 0; i < nRanks; i++)
@@ -578,7 +620,7 @@ namespace RcclUnitTesting
           elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
-          const size_t count = bytes / denom;
+          const size_t count = SweepCount(bytes, denom, nRanks, mode);
           if (count == 0) continue;  // total too small to split across ranks for this dtype
           CheckSizeMatchesLog(funcStr, coll, idx++, nRanks, comms, streams, sbuf, rbuf, count, dt,
                               mode, &sawSym, &nCe);
@@ -661,16 +703,22 @@ namespace RcclUnitTesting
   // One thread drives every GPU, so CE AllReduce staging setup must not run at launch (ROCM-32044): this hangs there.
   TEST(CollImplInfo, AllReduceCeRegisteredMatchesDispatchLog)
   {
-    if (!isCeRuntimeDriverSupported())
-    {
-      GTEST_SKIP() << "CE driver not in supported range";
-    }
+    // The child judges eligibility, since HIP in this parent breaks later TestBed forks; the skip is scored here.
+    const std::string skipFile = "/tmp/rccl_collimpl_ce_skip_" + std::to_string(getpid());
+    remove(skipFile.c_str());
     RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("AllReduceCeRegisteredMatchesDispatchLog", []() {
       SweepMode mode;
       mode.registerSym = true;
       mode.ceAllReduce = true;
       RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
-    }).withTimeout(std::chrono::seconds(180)));
+    }).withEnvironment({{kSkipFileEnv, skipFile}}).withTimeout(std::chrono::seconds(180)));
+    std::string reason;
+    std::getline(std::ifstream(skipFile), reason);
+    remove(skipFile.c_str());
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
   }
 
   TEST(CollImplInfo, AllGatherSymmetricMatchesDispatchLog)

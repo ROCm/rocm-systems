@@ -30,6 +30,8 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce;
 
 // Fail-loud default: a window registration is collective, so a test must opt in to reaching one.
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, int, ncclWindow_t*)> g_devrWindowRegisterInGroup;
+// Fail-loud default; same spelling as dev_runtime_micro_fakes.h, which no target links alongside this file.
+extern std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindowDeregister;
 
 void ResetDevRuntimeFakes();
 

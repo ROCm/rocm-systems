@@ -49,6 +49,7 @@ class CeCollMicrotest : public ::testing::Test {
   ncclWindow_vidmem hostVidmem_{};
   ncclDevrWindow devrWin_{};
   ncclResult_t registerResult_ = ncclInternalError;
+  ncclResult_t toHostResult_ = ncclSuccess;
   int expectedRegistrations_ = 0;  // TearDown checks it, so every launch test also guards against registering
   // Lets a regressed launch-time staging setup reach the window registration the tests count instead of aborting.
   ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t size) {
@@ -74,8 +75,10 @@ class CeCollMicrotest : public ::testing::Test {
   ScopedHook<ncclResult_t(ncclShadowPool*, void*, void**)> toHost_{
       g_shadowPoolToHost, [this](ncclShadowPool*, void* devObj, void** hostObj) {
         EXPECT_EQ(&devVidmem_, devObj);
-        *hostObj = &hostVidmem_;
-        return ncclSuccess;
+        if (toHostResult_ == ncclSuccess) {
+          *hostObj = &hostVidmem_;
+        }
+        return toHostResult_;
       }};
 
   void SetUp() override {
@@ -179,6 +182,24 @@ TEST_F(CeCollMicrotest, EnsureStaging_RegistrationFails_FreesTheBufferAndReturns
 
   EXPECT_EQ(ncclInternalError, ncclCeEnsureAllReduceStaging(comm_.get()));
 
+  EXPECT_EQ(1, free_.calls);
+  EXPECT_EQ(nullptr, comm_->ceColl.ceARTmpBuf);
+  EXPECT_EQ(nullptr, comm_->ceColl.ceARTmpWin);
+}
+
+TEST_F(CeCollMicrotest, EnsureStaging_ToHostFails_DeregistersAndFreesOnceAndReturnsTheError) {
+  registerResult_ = ncclSuccess;
+  toHostResult_ = ncclSystemError;
+  expectedRegistrations_ = 1;
+  ScopedHook deregister(g_devrNcclCommWindowDeregister, [this](ncclComm_t comm, ncclWindow_t win) {
+    EXPECT_EQ(comm_.get(), comm);
+    EXPECT_EQ(&devVidmem_, win);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSystemError, ncclCeEnsureAllReduceStaging(comm_.get()));
+
+  EXPECT_EQ(1, deregister.calls);
   EXPECT_EQ(1, free_.calls);
   EXPECT_EQ(nullptr, comm_->ceColl.ceARTmpBuf);
   EXPECT_EQ(nullptr, comm_->ceColl.ceARTmpWin);

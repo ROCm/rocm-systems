@@ -18,6 +18,7 @@ ASSERT_HOOK_MATCHES_PROD(g_devrWindowIsMultiSegment, ncclDevrWindowIsMultiSegmen
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowRegisterInGroup, ncclDevrWindowRegisterInGroup);
+ASSERT_HOOK_MATCHES_PROD(g_devrNcclCommWindowDeregister, ncclCommWindowDeregister);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
@@ -60,9 +61,12 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, siz
   return g_devrWindowRegisterInGroup(comm, ptr, size, winFlags, outWinDev);
 }
 
-// Floor for ce_coll.cc's staging-setup failure path, which deregisters the window it registered.
-ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) {
+static ncclResult_t DefaultCommWindowDeregister(ncclComm_t, ncclWindow_t) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclCommWindowDeregister");
+}
+std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
+ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
+  return g_devrNcclCommWindowDeregister(comm, win);
 }
 
 // Floors for the LSA addressing ce_coll.cc's copy paths reach.
@@ -84,4 +88,5 @@ void ResetDevRuntimeFakes() {
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
   g_devrInitOnce = DefaultDevrInitOnce;
   g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
+  g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
 }
