@@ -1,15 +1,13 @@
 ---
 name: rocprofv3
 description: >-
-  Profiles GPU applications on AMD GPUs with rocprofv3 and explains the results: application
-  tracing (hot kernels, memory copies, API time, idle GPU, Perfetto timelines), hardware counters
+  Profiles applications on AMD GPUs with rocprofv3 and explains the results: application
+  tracing (hot kernels, memory copies, idle GPU, Perfetto timelines), hardware counters
   (occupancy, cache hit rate, HBM bandwidth, memory- or compute-bound), Advanced Thread Trace,
-  PC sampling, process attach, MPI, and rocpd databases. Use when the user asks to profile, trace,
-  or measure HIP, Triton, OpenMP, or PyTorch GPU code with rocprofv3 or rocprof, collect
-  performance counters, use rocprofv3-avail, capture a thread trace for ROCprof Compute Viewer,
-  or query a rocprofv3 results.db. Prefer the dedicated PC sampling or thread-trace skill, when
-  installed, for in-depth PC sampling or thread trace analysis. Not for PyTorch profiler JSON
-  traces, rocprof-compute, or NVIDIA tools.
+  PC sampling, process attach, MPI, and rocpd databases. Use when the user asks to profile or
+  trace HIP, Triton, OpenMP, or PyTorch GPU code with rocprofv3 or rocprof, collect performance
+  counters, or query a rocprofv3 results.db. Prefer the dedicated PC sampling or thread-trace
+  skill when installed. Not for PyTorch profiler JSON traces, rocprof-compute, or NVIDIA tools.
 ---
 
 # rocprofv3
