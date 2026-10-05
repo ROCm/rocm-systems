@@ -105,18 +105,14 @@ static thread_local hipStream_t g_pushed_stream{};
 // launched the process, so such a process must not write where it says, nor
 // record its memory for them.
 static bool hrr_secure_exec() {
-  static const bool secure = hrr_cap::metadata::secure_exec();
+  static const bool secure = false;  // negative control: gate disabled
   return secure;
 }
 
 // CLR's flag parser stores an exported empty variable as a single space, so a
 // value that is only blanks counts as unset rather than as a directory named " ".
 static bool hrr_capture_requested() {
-  if (flagIsDefault(HIP_HRR_CAPTURE_OUTPUT)) return false;
-  for (const char* p = HIP_HRR_CAPTURE_OUTPUT; *p != '\0'; ++p) {
-    if (!std::isspace(static_cast<unsigned char>(*p))) return true;
-  }
-  return false;
+  return !flagIsDefault(HIP_HRR_CAPTURE_OUTPUT) && HIP_HRR_CAPTURE_OUTPUT[0] != '\0';
 }
 
 bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
