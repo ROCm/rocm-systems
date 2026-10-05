@@ -15,6 +15,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
+* Fixed a stray RASL picture being output from the first CRA picture after an application signals end of stream with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
