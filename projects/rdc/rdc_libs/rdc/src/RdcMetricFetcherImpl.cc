@@ -194,8 +194,9 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
   amdsmi_error_count_t ec;
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Error in ecc count [" << gpu_block << "]:" << err);
     value->status = Smi2RdcError(err);
+    RDC_LOG(is_capability_miss(static_cast<rdc_status_t>(value->status)) ? RDC_INFO : RDC_ERROR,
+            "Error in ecc count [" << gpu_block << "]:" << err);
     return;
   }
 

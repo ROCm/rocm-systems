@@ -493,6 +493,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
 
       rdc_status_t status = probed->second;
       if (is_capability_miss(status)) {
+        if (fallback_fields.count(field)) continue;  // reported with its primary
         const auto& fallbacks = health_field_fallbacks();
         auto fallback = fallbacks.find(field);
         auto fb_probe =
