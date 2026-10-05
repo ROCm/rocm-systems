@@ -48,6 +48,8 @@ architectures:
 
   gfx942:
     same_bucket_priority_metric_ids:
+      "6.1.2":
+        name: "Workgroup Manager Utilization"
       "17.2.1":
         name: "HBM Read Traffic"
       "17.2.5":
