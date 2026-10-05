@@ -1477,10 +1477,16 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
         void* peerBase = nullptr;
         // userOffset + userSize wraps when the offset is near SIZE_MAX and would accept a range
         // that does not fit. Compare each side against what remains in the allocation.
-        if (peers[r].userOffset > peers[r].allocSize ||
-            peers[r].userSize > peers[r].allocSize - peers[r].userOffset) {
-          WARN("windowRegisterNonSym: peer %d userOffset=%zu userSize=%zu exceeds allocSize=%zu", r,
-               peers[r].userOffset, peers[r].userSize, peers[r].allocSize);
+        //
+        // The size compared here is the local one, not peers[r].userSize. What this rank can
+        // reach in the peer's mapping is ipcPeerPtrs[r] + offset for any offset the local
+        // winHost->size admits (ncclDevrGetLsaRankPtr), so the local size is the bound that has
+        // to fit; the peer's own size is never read again. Two ranks registering different sizes
+        // is enough to matter: a peer publishing userOffset = allocSize with userSize = 0 passes
+        // a check against its own size and still hands out pointers past the end of the mapping.
+        if (peers[r].userOffset > peers[r].allocSize || userSize > peers[r].allocSize - peers[r].userOffset) {
+          WARN("windowRegisterNonSym: peer %d userOffset=%zu with local userSize=%zu exceeds allocSize=%zu", r,
+               peers[r].userOffset, userSize, peers[r].allocSize);
           goto fail;
         }
         if (peers[r].isCuMem) {
