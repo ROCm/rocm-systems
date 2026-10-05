@@ -20,6 +20,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to analyze mode.
+  * They are short forms of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
