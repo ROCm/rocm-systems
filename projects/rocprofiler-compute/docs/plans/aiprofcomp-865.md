@@ -15,7 +15,7 @@ Full historical plan drafts are preserved on branch
 
 | Term | Meaning |
 |------|---------|
-| **Collectable** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). |
+| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). |
 | **SPP (Single-pass packable)** | Default packing objective: every metric whose PMC set fits one hardware bucket gets a co-located perfmon replay. |
 | **SLOT_LIMIT** | Metric whose full PMC set cannot fit one hardware bucket under `perfmon_config` slot limits, even with global repack. |
 | **POLICY_GAP** | Metric that is multi-bucket under the old shipping layout but **is** packable in one bucket with SPP (fixed by Phase 1, not Phase 2). |
