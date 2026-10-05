@@ -52,7 +52,11 @@ HIP_TEST_CASE(Unit_kernel_ChkPrintf) {
       capture.abortCapture();
       HIP_CHECK(err);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    err = hipDeviceSynchronize();
+    if (err != hipSuccess) {
+      capture.abortCapture();
+      HIP_CHECK(err);
+    }
     capture.endCapture();
 
     auto CapturedData = capture.getCapturedData();
