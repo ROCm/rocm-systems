@@ -528,7 +528,7 @@ Analyze multiple kernels for comparison:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0,1,2 -b 4
 
 .. _roofline-html-generation:
 
@@ -569,7 +569,7 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM,L2 --roofline-data-type FP32,FP16
 
 Interactive Roofline HTML:
 

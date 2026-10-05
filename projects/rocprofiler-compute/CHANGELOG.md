@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Options that take a list now accept values separated by commas, for example `-b 2,5` or `-R FP16,FP32`. Values separated by spaces still work.
+
 ### Changed
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.

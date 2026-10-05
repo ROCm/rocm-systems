@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, Union
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
@@ -305,13 +305,13 @@ Examples:
     profile_group.add_argument(
         "--kernel-iteration-range",
         metavar="<ranges>",
-        nargs="+",
+        action=CommaListAction,
         dest="kernel_iteration_range",
         required=False,
         help=(
             "Which iterations of each kernel to profile\n"
             "(1-based; positive integer or 'start:end'/'start-end'\n"
-            "range, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th\n"
+            "range, e.g. 1,3:5 captures 1st, 3rd, 4th and 5th\n"
             "iterations)."
         ),
     )
@@ -349,15 +349,15 @@ Examples:
         "--block",
         dest="filter_blocks",
         metavar="<ids>",
-        nargs="+",
-        type=block_token_or_alias,
+        action=CommaListAction,
+        item_type=block_token_or_alias,
         required=False,
         default=[],
         help=(
             "Specify metric id(s) from --list-metrics for filtering "
-            "(e.g. 12 12.1 12.1.1).\n"
+            "(e.g. 12,12.1,12.1.1).\n"
             "Alternatively, specify block id(s) for filtering "
-            "(e.g. 12 13 14).\n"
+            "(e.g. 12,13,14).\n"
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-blocks <arch> to see\n"
             "all valid block ids and aliases.\n"
@@ -589,7 +589,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 -----------------------------------------------------------------------------------
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
-\trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+\trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12,34 --decimal 3
 -----------------------------------------------------------------------------------
         """,
         prog="rocprof-compute",
@@ -720,9 +720,9 @@ Examples:
         "--kernel",
         metavar="<ids>",
         dest="gpu_kernel",
-        type=int,
-        nargs="+",
-        action="append",
+        action=CommaListAction,
+        item_type=int,
+        append=True,
         help="Specify kernel id(s) from --list-stats for filtering.",
     )
     analyze_group.add_argument(
@@ -730,8 +730,8 @@ Examples:
         "--dispatch",
         dest="gpu_dispatch_id",
         metavar="<ids>",
-        nargs="+",
-        action="append",
+        action=CommaListAction,
+        append=True,
         help="Specify dispatch id(s) for filtering (1-based).",
     )
     analyze_group.add_argument(
@@ -739,8 +739,8 @@ Examples:
         "--block",
         dest="filter_metrics",
         metavar="<ids>",
-        nargs="+",
-        type=block_token_or_alias,
+        action=CommaListAction,
+        item_type=block_token_or_alias,
         help=(
             "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
@@ -749,7 +749,7 @@ Examples:
         "--gpu-id",
         dest="gpu_id",
         metavar="<ids>",
-        nargs="+",
+        action=CommaListAction,
         help="Specify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
@@ -827,9 +827,9 @@ Examples:
         dest="mem_level",
         required=False,
         metavar="<levels>",
-        nargs="+",
-        choices=ROOFLINE_MEM_LEVELS,
-        default="ALL",
+        action=CommaListAction,
+        item_choices=ROOFLINE_MEM_LEVELS,
+        default=["ALL"],
         help=(
             "Filter by memory level (Default: ALL).\n"
             f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}"
@@ -841,8 +841,8 @@ Examples:
         dest="roofline_data_type",
         required=False,
         metavar="<types>",
-        nargs="+",
-        choices=ROOFLINE_DATA_TYPES,
+        action=CommaListAction,
+        item_choices=ROOFLINE_DATA_TYPES,
         default=["FP32"],
         help=(
             "Choose datatypes to view roofline HTMLs for (Default: FP32).\n"
@@ -889,15 +889,15 @@ Examples:
         "--cols",
         dest="cols",
         metavar="<indices>",
-        nargs="+",
-        type=int,
+        action=CommaListAction,
+        item_type=int,
         help="Specify column indices to display (Default: all columns).",
     )
     analyze_advanced_group.add_argument(
         "--include-cols",
         dest="include_cols",
         metavar="<names>",
-        nargs="+",
+        action=CommaListAction,
         help=(
             "Specify which hidden column names should be included in cli output.\n"
             'For example, to show "Description" column which is hidden by '
@@ -1057,3 +1057,76 @@ class CliHelpFormatter(argparse.RawTextHelpFormatter):
         default_metavar = self._get_default_metavar_for_optional(action)
         args_string = self._format_args(action, default_metavar)
         return f"{', '.join(action.option_strings)} {args_string}"
+
+
+class CommaListAction(argparse.Action):
+    """List option that accepts "-R FP16,FP32" as well as "-R FP16 FP32".
+
+    With append=True, each use of the option is stored as its own list.
+    """
+
+    def __init__(
+        self,
+        option_strings: list[str],
+        dest: str,
+        item_type: Callable[[str], Union[int, str]] = str,
+        item_choices: Optional[list[str]] = None,
+        append: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=argparse.ONE_OR_MORE,
+            **kwargs,
+        )
+        self.item_type = item_type
+        self.item_choices = item_choices
+        self.append = append
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values,  # noqa: ANN001
+        option_string: Optional[str] = None,
+    ) -> None:
+        texts = [text.strip() for token in values for text in token.split(",")]
+        items = [self._parse_item(parser, text) for text in texts if text]
+        if not items:
+            parser.error(
+                f"argument {self._option_label()}: expected at least one value"
+            )
+
+        current = getattr(namespace, self.dest)
+        # Replace the default instead of extending it
+        if current is self.default:
+            current = []
+        if self.append:
+            current.append(items)
+        else:
+            current.extend(items)
+        setattr(namespace, self.dest, current)
+
+    def _parse_item(
+        self, parser: argparse.ArgumentParser, text: str
+    ) -> Union[int, str]:
+        try:
+            item = self.item_type(text)
+        except argparse.ArgumentTypeError as error:
+            parser.error(f"argument {self._option_label()}: {error}")
+        except ValueError:
+            type_name = getattr(self.item_type, "__name__", "value")
+            parser.error(
+                f"argument {self._option_label()}: invalid {type_name} value: {text!r}"
+            )
+        if self.item_choices is not None and item not in self.item_choices:
+            choices = ", ".join(str(choice) for choice in self.item_choices)
+            parser.error(
+                f"argument {self._option_label()}: invalid choice: {text!r} "
+                f"(choose from {choices})"
+            )
+        return item
+
+    def _option_label(self) -> str:
+        return "/".join(self.option_strings)
