@@ -70,6 +70,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -1712,13 +1713,13 @@ write_rocpd(
         // not collide with counter ids or KFD rows.
         struct spm_location_key
         {
-            uint64_t agent_id      = 0;
-            uint64_t counter_id    = 0;
-            int64_t  xcc           = 0;
-            int64_t  shader_engine = 0;
-            int64_t  shader_array  = 0;
-            int64_t  wgp           = 0;
-            int64_t  instance      = 0;
+            uint64_t               agent_id   = 0;
+            uint64_t               counter_id = 0;
+            std::optional<int64_t> xcc;
+            std::optional<int64_t> shader_engine;
+            std::optional<int64_t> shader_array;
+            std::optional<int64_t> wgp;
+            std::optional<int64_t> instance;
 
             bool operator==(const spm_location_key& rhs) const
             {
@@ -1735,14 +1736,18 @@ write_rocpd(
                     return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
                                    (seed << 6) + (seed >> 2));
                 };
+                auto mix_dimension = [&mix](size_t seed, const std::optional<int64_t>& value) {
+                    seed = mix(seed, value.has_value());
+                    return value ? mix(seed, static_cast<uint64_t>(*value)) : seed;
+                };
                 size_t seed = 0;
                 seed        = mix(seed, key.agent_id);
                 seed        = mix(seed, key.counter_id);
-                seed        = mix(seed, static_cast<uint64_t>(key.xcc));
-                seed        = mix(seed, static_cast<uint64_t>(key.shader_engine));
-                seed        = mix(seed, static_cast<uint64_t>(key.shader_array));
-                seed        = mix(seed, static_cast<uint64_t>(key.wgp));
-                seed        = mix(seed, static_cast<uint64_t>(key.instance));
+                seed        = mix_dimension(seed, key.xcc);
+                seed        = mix_dimension(seed, key.shader_engine);
+                seed        = mix_dimension(seed, key.shader_array);
+                seed        = mix_dimension(seed, key.wgp);
+                seed        = mix_dimension(seed, key.instance);
                 return seed;
             }
         };
@@ -1751,23 +1756,6 @@ write_rocpd(
 
         auto spm_location_pmc_id = [&](const auto&            count,
                                        rocprofiler_agent_id_t sample_agent) -> uint64_t {
-            auto key = spm_location_key{
-                sample_agent.handle,
-                count.id.handle,
-                static_cast<int64_t>(counters::rec_to_dim_pos(count.instance_id,
-                                                              counters::ROCPROFILER_DIMENSION_XCC)),
-                static_cast<int64_t>(counters::rec_to_dim_pos(
-                    count.instance_id, counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
-                static_cast<int64_t>(counters::rec_to_dim_pos(
-                    count.instance_id, counters::ROCPROFILER_DIMENSION_SHADER_ARRAY)),
-                static_cast<int64_t>(counters::rec_to_dim_pos(count.instance_id,
-                                                              counters::ROCPROFILER_DIMENSION_WGP)),
-                static_cast<int64_t>(counters::rec_to_dim_pos(
-                    count.instance_id, counters::ROCPROFILER_DIMENSION_INSTANCE)),
-            };
-            if(auto found = location_ids.find(key); found != location_ids.end())
-                return found->second;
-
             const tool_counter_info* base_info = nullptr;
             if(auto agent_counters = tool_metadata.agent_counter_info.find(sample_agent);
                agent_counters != tool_metadata.agent_counter_info.end())
@@ -1780,17 +1768,47 @@ write_rocpd(
                 }
             }
 
+            auto dimension_value =
+                [&](counters::rocprofiler_profile_counter_instance_types dimension) {
+                    auto result = std::optional<int64_t>{};
+                    if(!base_info) return result;
+
+                    auto dimension_id = static_cast<rocprofiler_counter_dimension_id_t>(dimension);
+                    if(std::find(base_info->dimension_ids.begin(),
+                                 base_info->dimension_ids.end(),
+                                 dimension_id) == base_info->dimension_ids.end())
+                        return result;
+
+                    return std::optional<int64_t>{static_cast<int64_t>(
+                        counters::rec_to_dim_pos(count.instance_id, dimension))};
+                };
+            auto key = spm_location_key{
+                sample_agent.handle,
+                count.id.handle,
+                dimension_value(counters::ROCPROFILER_DIMENSION_XCC),
+                dimension_value(counters::ROCPROFILER_DIMENSION_SHADER_ENGINE),
+                dimension_value(counters::ROCPROFILER_DIMENSION_SHADER_ARRAY),
+                dimension_value(counters::ROCPROFILER_DIMENSION_WGP),
+                dimension_value(counters::ROCPROFILER_DIMENSION_INSTANCE),
+            };
+            if(auto found = location_ids.find(key); found != location_ids.end())
+                return found->second;
+
             auto pmc_id = next_location_pmc_id++;
             location_ids.emplace(key, pmc_id);
 
-            const auto* agent       = tool_metadata.get_agent(sample_agent);
-            auto        json_data   = get_json_string([agent](auto& ar) {
+            const auto* agent              = tool_metadata.get_agent(sample_agent);
+            auto        json_data          = get_json_string([agent](auto& ar) {
                 if(agent) cereal::save(ar, *agent);
             });
-            const auto* name        = base_info ? base_info->name : "";
-            const auto* description = base_info ? base_info->description : "";
-            const auto* block       = base_info ? base_info->block : "";
-            const auto* expression  = base_info ? base_info->expression : "";
+            const auto* name               = base_info ? base_info->name : "";
+            const auto* description        = base_info ? base_info->description : "";
+            const auto* block              = base_info ? base_info->block : "";
+            const auto* expression         = base_info ? base_info->expression : "";
+            auto nullable_dimension = [](std::string_view name,
+                                         const std::optional<int64_t>& value) {
+                return value ? insert_value(name, *value) : sql_insert_value{name, nullptr};
+            };
 
             get_insert_statement(
                 db,
@@ -1811,11 +1829,11 @@ write_rocpd(
                     insert_value("is_constant", base_info ? base_info->is_constant : 0),
                     insert_value("is_derived", base_info ? base_info->is_derived : 0),
                     insert_value("spm_support", base_info ? base_info->spm_support : 1),
-                    insert_value("xcc", key.xcc),
-                    insert_value("shader_engine", key.shader_engine),
-                    insert_value("shader_array", key.shader_array),
-                    insert_value("wgp", key.wgp),
-                    insert_value("instance", key.instance),
+                    nullable_dimension("xcc", key.xcc),
+                    nullable_dimension("shader_engine", key.shader_engine),
+                    nullable_dimension("shader_array", key.shader_array),
+                    nullable_dimension("wgp", key.wgp),
+                    nullable_dimension("instance", key.instance),
                     insert_value("extdata", json_data),
                 });
             return pmc_id;

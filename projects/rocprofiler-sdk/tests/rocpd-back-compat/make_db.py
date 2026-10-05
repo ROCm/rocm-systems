@@ -530,7 +530,7 @@ def insert_minimal_data(
                         0,
                         0,
                         1,
-                        0,  # xcc
+                        None,  # xcc is absent on a single-XCC agent
                         0,  # shader_engine
                         1,  # shader_array
                         2,  # wgp
@@ -554,7 +554,7 @@ def insert_minimal_data(
                         0,
                         0,
                         1,
-                        0,
+                        None,  # xcc is absent on a single-XCC agent
                         1,
                         0,
                         3,

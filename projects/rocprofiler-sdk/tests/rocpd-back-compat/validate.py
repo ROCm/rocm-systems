@@ -298,6 +298,9 @@ def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
     assert any(
         "SA:" in name and "WGP:" in name for name in names
     ), f"schema {latest_schema} counter names omit shader array or WGP: {names}"
+    assert all(
+        "XCC: ," in name for name in names
+    ), f"schema {latest_schema} counter names do not leave absent XCC blank: {names}"
     assert any("SE: 0" in name and "SA: 1" in name and "WGP: 2" in name for name in names)
     assert any("SE: 1" in name and "SA: 0" in name and "WGP: 3" in name for name in names)
 

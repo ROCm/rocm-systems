@@ -456,7 +456,11 @@ def write_spm_counters_csv(importData, config) -> None:
         "accum_vgpr_count",
         "sgpr_count",
         (
-            "counter_name || '[XCC: ' || xcc || ', Instance: ' || instance || ', SE: ' || shader_engine || ', SA: ' || shader_array || ', WGP: ' || wgp || ']' AS counter_name"
+            "counter_name || '[XCC: ' || COALESCE(xcc, '') || "
+            "', Instance: ' || COALESCE(instance, '') || "
+            "', SE: ' || COALESCE(shader_engine, '') || "
+            "', SA: ' || COALESCE(shader_array, '') || "
+            "', WGP: ' || COALESCE(wgp, '') || ']' AS counter_name"
             if "spm_counter_location" in importData.supported_features
             else "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name"
         ),

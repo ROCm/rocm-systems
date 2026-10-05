@@ -31,7 +31,7 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     assert (
         filtered[counter_column]
         .str.contains(
-            r"\[XCC: \d+, Instance: \d+, SE: \d+, SA: \d+, WGP: \d+\]$",
+            r"\[XCC: \d*, Instance: \d+, SE: \d*, SA: \d*, WGP: \d*\]$",
             regex=True,
         )
         .all()
@@ -132,20 +132,20 @@ def test_validate_spm_rocpd(spm_json_data, rocpd_data):
     assert not {"xcc", "shader_engine", "shader_array", "wgp", "instance"} & event_columns
 
     topology = rocpd_data.execute(
-        f"SELECT p.shader_engine, p.shader_array, p.wgp "
+        f"SELECT p.xcc, p.shader_engine, p.shader_array, p.wgp, p.instance "
         f"FROM {pmc_event_table} e "
         f"JOIN {pmc_table} p ON e.pmc_id = p.id AND e.guid = p.guid "
         f"WHERE e.sample_id IS NOT NULL"
     ).fetchall()
     assert topology
     assert all(
-        shader_engine is not None
-        and shader_array is not None
-        and wgp is not None
-        and 0 <= shader_engine < 256
-        and shader_array >= 0
-        and wgp >= 0
-        for shader_engine, shader_array, wgp in topology
+        (xcc is None or xcc >= 0)
+        and (shader_engine is None or 0 <= shader_engine < 256)
+        and (shader_array is None or shader_array >= 0)
+        and (wgp is None or wgp >= 0)
+        and instance is not None
+        and instance >= 0
+        for xcc, shader_engine, shader_array, wgp, instance in topology
     )
 
 
