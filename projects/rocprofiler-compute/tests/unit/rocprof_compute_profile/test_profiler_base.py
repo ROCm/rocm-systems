@@ -591,7 +591,6 @@ def _make_rpc_args(
         membw_analysis=membw_analysis,
         experimental=experimental,
         set_selected=None,
-        roof_only=False,
         bench_only=False,
         no_roof=False,
         name="unit-test",
@@ -742,6 +741,15 @@ def test_sanitize_membw_analysis_injects_block_30(
     instance = _make_profiler_with_args(args)
     instance.sanitize()
     assert args.filter_blocks == expected_filter_blocks
+
+
+def test_sanitize_pc_sampling_rejects_set(caplog):
+    """--set would replace the PC sampling block, so the pair is rejected."""
+    args = _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[])
+    args.set_selected = "launch_stats"
+    with pytest.raises(SystemExit):
+        _make_profiler_with_args(args).sanitize()
+    assert "--pc-sampling cannot be used with --set." in caplog.text
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from argparser import CliHelpFormatter, omniarg_parser, warn_deprecated_options
+from argparser import (
+    PROFILE_SELECTION_CONFLICT,
+    CliHelpFormatter,
+    apply_panel_shortcuts,
+    omniarg_parser,
+    warn_deprecated_options,
+)
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -289,15 +295,14 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
-        # Handle list operations first - these are independent and exit immediately
-        if getattr(self.__args, "list_sets", False):
-            return
-        if getattr(self.__args, "list_available_metrics", False):
-            return
+        apply_panel_shortcuts(self.__args, "filter_blocks")
+        # True when only block 4 is selected, by --roofline or -b 4
+        self.__args.roof_only = self.__args.filter_blocks == ["4"]
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        apply_panel_shortcuts(args, "filter_metrics")
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
@@ -542,25 +547,19 @@ class RocProfCompute:
     def _validate_profile_mode_arguments(self) -> None:
         """Validate that the profile-mode invocation is internally consistent.
 
-        Covers the mutual exclusion among action-selection flags
-        (--block, --set, --roofline, --roofline-bench-only) and the
-        --roofline-bench-only / --no-roof conflict.
+        Block selection, --set and --roofline-bench-only exclude each other, and
+        --roofline-bench-only cannot be combined with --no-roof.
         """
         args = self.__args
         if (
             sum((
                 bool(getattr(args, "filter_blocks", None)),
                 bool(getattr(args, "set_selected", None)),
-                bool(getattr(args, "roof_only", False)),
                 bool(getattr(args, "bench_only", False)),
             ))
             > 1
         ):
-            console_error(
-                "--block, --set, --roofline, and --roofline-bench-only"
-                " are mutually exclusive options."
-                " Please use only one of them."
-            )
+            console_error(PROFILE_SELECTION_CONFLICT)
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--roofline-bench-only cannot be used with --no-roof.")
@@ -617,12 +616,13 @@ class RocProfCompute:
         if not block_active:
             return
 
+        block_options = "-b/--block, --speed-of-light, --memory-chart or --roofline"
         if args.list_metrics is not None:
-            console_error("Cannot use --list-metrics with --blocks")
+            console_error(f"Cannot use --list-metrics with {block_options}.")
         if args.list_blocks is not None:
-            console_error("Cannot use --list-blocks with --blocks")
+            console_error(f"Cannot use --list-blocks with {block_options}.")
         if getattr(args, "list_available_metrics", False):
-            console_error("Cannot use --list-available-metrics with --blocks")
+            console_error(f"Cannot use --list-available-metrics with {block_options}.")
 
     @demarcate
     def _run_bench_only(self) -> None:

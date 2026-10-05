@@ -16,6 +16,7 @@ from common import SUPPORTED_ARCHS
 from argparser import (
     DEPRECATED_OPTIONS,
     CommaListAction,
+    apply_panel_shortcuts,
     non_negative_int,
     omniarg_parser,
     warn_deprecated_options,
@@ -26,7 +27,7 @@ VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
 
 DEPRECATED_ALIASES = [
     # (mode argv, old argv, new argv, dest, expected value)
-    (["profile"], ["--roof-only"], ["--roofline"], "roof_only", True),
+    (["profile"], ["--roof-only"], ["--roofline"], "roofline", True),
     (["profile"], ["--bench-only"], ["--roofline-bench-only"], "bench_only", True),
     (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
     (["analyze"], ["--sort", "dispatches"], ["--roofline-sort", "dispatches"],
@@ -329,6 +330,18 @@ def test_help_defaults_match_parser_defaults():
             assert match.group(2) == str(value), name
 
 
+def test_profile_help_lists_conflicting_options(capsys):
+    with pytest.raises(SystemExit):
+        build_args(["profile", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    # Options in the same group as --roofline are not listed
+    assert "Cannot be used with --set or --roofline-bench-only." in out
+    assert (
+        "Cannot be used with --block, --speed-of-light, --memory-chart, "
+        "--roofline, --set or --no-roof." in out
+    )
+
+
 # =============================================================================
 # Comma separated lists
 # =============================================================================
@@ -370,6 +383,32 @@ def test_comma_list_append_keeps_occurrences():
     args = build_args(["analyze", "-k", "1,2", "-k", "3", "-d", "4,5"])
     assert args.gpu_kernel == [[1, 2], [3]]
     assert args.gpu_dispatch_id == [["4", "5"]]
+
+
+# =============================================================================
+# --speed-of-light / --memory-chart / --roofline
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "dest", "expected"),
+    [
+        (["profile", "-b", "5,sol", "--roofline"], "filter_blocks", ["5", "sol", "4"]),
+        (["profile", "-b", "4", "--roofline"], "filter_blocks", ["4"]),
+        (
+            ["analyze", "--roofline", "--speed-of-light", "--memory-chart"],
+            "filter_metrics",
+            ["2", "3", "4"],
+        ),
+        # analyze treats filter_metrics=None as "show everything"
+        (["analyze"], "filter_metrics", None),
+    ],
+    ids=["append_to_block", "no_duplicate", "all_three", "none_selected"],
+)
+def test_apply_panel_shortcuts(argv, dest, expected):
+    args = build_args(argv)
+    apply_panel_shortcuts(args, dest)
+    assert getattr(args, dest) == expected
 
 
 # =============================================================================

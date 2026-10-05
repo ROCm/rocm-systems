@@ -45,7 +45,12 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --speed-of-light
+
+.. tip::
+
+   ``--speed-of-light``, ``--memory-chart``, and ``--roofline`` are short forms of
+   ``-b 2``, ``-b 3``, and ``-b 4``. They can be combined with each other and with ``-b``.
 
 .. image:: ../../data/analyze/cli/system_speed_of_light.png
    :align: left
@@ -55,7 +60,7 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --memory-chart
 
 .. image:: ../../data/analyze/cli/mem_chart.png
    :align: left
@@ -92,7 +97,7 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 4
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline
 
 .. image:: ../../data/analyze/cli/roofline_chart.png
    :align: left
