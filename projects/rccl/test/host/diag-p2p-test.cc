@@ -156,7 +156,13 @@ std::string DiagLine(const std::string& body) {
 }
 
 std::string DiagP2pOkLine(int edges) {
-  return DiagLine("NCCL DIAG [OK]   p2p: all " + std::to_string(edges) + " directed GPU P2P edges verified");
+  return DiagLine("NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair (" +
+                  std::to_string(edges) + " peer accesses)");
+}
+
+std::string DiagP2pPartialLine(int passed, int tested) {
+  return DiagLine("NCCL DIAG [INFO] p2p: only " + std::to_string(passed) + "/" + std::to_string(tested) +
+                  " GPU-to-GPU peer accesses passed verification");
 }
 
 std::string DiagP2pSetupFailLine(int rank, ncclResult_t result) {
@@ -515,44 +521,34 @@ TEST_F(DiagP2pMicrotest, FormatPeerFields_WritesBothPeersAndTruncatesToSize) {
   EXPECT_STREQ(small, "srcRank=1 s");
 }
 
-TEST_F(DiagP2pMicrotest, BuildGroupSummary_CountsTestedPassedAndIndirect) {
+TEST_F(DiagP2pMicrotest, BuildGroupSummary_CountsTestedAndPassedButNotUntestedIndirect) {
   constexpr int kN = 3;
   ncclDiagP2pEdgeResult results[kN * kN] = {};
   results[0 * kN + 1] = {1, ncclDiagP2pReasonNone, 0, 0, 0};
   results[0 * kN + 2] = {1, ncclDiagP2pReasonImport, 0, 0, 0};
   results[1 * kN + 0] = {0, ncclDiagP2pReasonIndirect, 0, 0, 0};
   results[1 * kN + 2] = {1, ncclDiagP2pReasonNone, 0, 0, 0};
-  results[2 * kN + 0] = {1, ncclDiagP2pReasonIndirect, 0, 0, 0};
+  results[2 * kN + 0] = {1, ncclDiagP2pReasonReadMismatch, 0, 0, 0};
   results[2 * kN + 2] = {0, ncclDiagP2pReasonNone, 0, 0, 0};
-  ncclDiagP2pSummary summary = {100, 200, 300};
+  ncclDiagP2pSummary summary = {100, 200};
   ncclDiagP2pBuildGroupSummary(kN, results, &summary);
   EXPECT_EQ(summary.tested, 4u);
   EXPECT_EQ(summary.passed, 2u);
-  EXPECT_EQ(summary.skipped, 2u);
 }
 
 TEST_F(DiagP2pMicrotest, ReportSummary_PrintsOnlyOnRankZeroWithCountsSummedOverRanks) {
   BuildComm(3, 1, {0, 1, 2});
-  ncclDiagP2pSummary summaries[3] = {{2, 2, 0}, {3, 3, 0}, {1, 1, 0}};
+  ncclDiagP2pSummary summaries[3] = {{2, 2}, {3, 3}, {1, 1}};
   EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), "");
   comm_->rank = 0;
-  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }),
-            DiagLine("NCCL DIAG [OK]   p2p: all 6 directed GPU P2P edges verified"));
-  summaries[2] = {1, 1, 2};
-  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }),
-            DiagLine("NCCL DIAG [OK]   p2p: all 6 directed GPU P2P edges verified (skipped indirect=2)"));
-  summaries[1] = {3, 1, 1};
-  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }),
-            DiagLine("NCCL DIAG [INFO] p2p: 4/6 directed GPU P2P edges verified (skipped indirect=3)"));
-  summaries[1] = {3, 1, 0};
-  summaries[2] = {1, 1, 0};
-  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }),
-            DiagLine("NCCL DIAG [INFO] p2p: 4/6 directed GPU P2P edges verified"));
+  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), DiagP2pOkLine(6));
+  summaries[1] = {3, 1};
+  EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), DiagP2pPartialLine(4, 6));
 }
 
 TEST_F(DiagP2pMicrotest, ReportSummary_SilentWhenNothingTested) {
   BuildComm(2, 0, {0, 1});
-  ncclDiagP2pSummary summaries[2] = {{0, 0, 3}, {0, 0, 1}};
+  ncclDiagP2pSummary summaries[2] = {{0, 0}, {0, 0}};
   EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReportSummary(comm_.get(), summaries); }), "");
 }
 
@@ -1676,7 +1672,6 @@ TEST_F(DiagP2pMicrotest, Run_HappyPathOnRankZero_PrintsOkAndReleasesEverything) 
   EXPECT_EQ(run.mySetup, ncclSuccess);
   EXPECT_EQ(run.mySummary.tested, 12u);
   EXPECT_EQ(run.mySummary.passed, 12u);
-  EXPECT_EQ(run.mySummary.skipped, 0u);
   EXPECT_EQ(run.setDevices, (std::vector<int>{0, kSavedDevice}));
   EXPECT_EQ(run.streamDestroy.calls, 1);
   EXPECT_EQ(run.ipcClose.calls, run.n - 1);
@@ -1895,7 +1890,12 @@ TEST_F(DiagP2pMicrotest, Run_VerifyFaults_ZeroOwnObservationsAndSkipRead) {
   ExpectEachFault(
       comm_.get(), localRanks_, ncclDiagP2pReasonReadLaunch,
       {
-          {"hostSlotsCalloc", [](DiagP2pRunScene* r) { FailCallocOf(r->n * sizeof(ncclDiagP2pSlot), 1); }},
+          {"hostSlotsCalloc",
+           [](DiagP2pRunScene* r) {
+             // The earlier summaries calloc can be the same size; skip it so the fault lands on hostSlots.
+             const std::size_t bytes = r->n * sizeof(ncclDiagP2pSlot);
+             FailCallocOf(bytes, bytes == kGroupWorld * sizeof(ncclDiagP2pSummary) ? 2 : 1);
+           }},
           {"verifyLaunch", [](DiagP2pRunScene* r) { r->failLaunch = DiagP2pLaunch::kVerify; }},
           {"verifyCopy",
            [](DiagP2pRunScene* r) { r->FailCopy(hipMemcpyDeviceToHost, r->n * sizeof(ncclDiagP2pSlot)); }},
@@ -1937,7 +1937,7 @@ TEST_F(DiagP2pMicrotest, Run_MismatchesAndMissingDescriptor_ReportEachFailedEdge
   const std::string head = "srcRank=0 srcCudaDev=1 srcNvmlDev=10 dstRank=";
   const std::string tail = " path=DIS handle=LEGACY_CUDA_IPC";
   EXPECT_EQ(run.out,
-            DiagLine("NCCL DIAG [INFO] p2p: 9/12 directed GPU P2P edges verified") +
+            DiagP2pPartialLine(9, 12) +
                 DiagLine("NCCL DIAG [INFO] p2p: write mismatch " + head + "3 dstCudaDev=0 dstNvmlDev=13" + tail +
                          " expected=0x4000000000000003 got=0x4000000000000013 verify=0x4000000000000013; " +
                          kGenericAdvice) +
@@ -2012,7 +2012,7 @@ TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
   EXPECT_EQ(run.remoteCounts, (std::vector<int>{2, 2}));
   EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonImport, 0, 0}));
   EXPECT_EQ(run.out,
-            DiagLine("NCCL DIAG [INFO] p2p: 11/12 directed GPU P2P edges verified") +
+            DiagP2pPartialLine(11, 12) +
                 DiagLine("NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 srcCudaDev=0 srcNvmlDev=10 "
                          "dstRank=3 dstCudaDev=3 dstNvmlDev=13 path=DIS handle=DIRECT reason=import; inspect "
                          "preceding CUDA peer-access or virtual-memory mapping errors on the source rank") +
