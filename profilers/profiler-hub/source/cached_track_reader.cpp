@@ -228,6 +228,16 @@ cached_track_reader::read_thread_track_in_parts(
     const auto ranges = plan_id_ranges(spans, m_options.parallel_read_parts);
     std::vector<std::vector<ph_event_t>> outputs(ranges.size());
 
+    size_t total_ids = 0;
+    for(const auto& range : ranges)
+    {
+        total_ids += range.end - range.begin;
+    }
+    const auto expected_events = [&](const id_range& range) {
+        const size_t share = track->event_count * (range.end - range.begin) / total_ids;
+        return share + share / 8 + 16;
+    };
+
     const auto visitor = [](void*                        context,
                             reader_types::timestamp_ns_t start,
                             reader_types::timestamp_ns_t end,
@@ -246,12 +256,15 @@ cached_track_reader::read_thread_track_in_parts(
             for(size_t i = next.fetch_add(1); i < ranges.size() && !failed.load();
                 i = next.fetch_add(1))
             {
+                std::vector<ph_event_t> events;
+                events.reserve(expected_events(ranges[i]));
                 worker_reader.visit_events_in_id_range(track,
                                                        ranges[i].type,
                                                        ranges[i].begin,
                                                        ranges[i].end,
                                                        visitor,
-                                                       &outputs[i]);
+                                                       &events);
+                outputs[i] = std::move(events);
             }
         } catch(...)
         {

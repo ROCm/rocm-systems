@@ -165,6 +165,13 @@ struct id_span_result
     std::optional<size_t> max_id;
 };
 
+struct event_range_result
+{
+    size_t                start_timestamp{};
+    size_t                end_timestamp{};
+    std::optional<size_t> display_name_id;
+};
+
 struct timeline_event_result
 {
     size_t id{};
@@ -462,7 +469,7 @@ struct read_statements
 
     using timeline_event_track_range_filtered_func_t =
         std::function<sqlite_backend::result_set<
-            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+            event_range_result>(size_t, size_t, size_t, size_t, size_t)>;
 
     using id_span_func_t = std::function<sqlite_backend::result_set<id_span_result>()>;
 
@@ -1295,6 +1302,33 @@ private:
             &pmc_info_result::extdata);
     }
 
+    [[nodiscard]] timeline_event_track_range_filtered_func_t make_track_range_statement(
+        std::string_view table,
+        std::string_view alias,
+        std::string_view name_expression,
+        std::string_view event_join = {})
+    {
+        const auto a   = std::string(alias);
+        const auto sql = fmt::format(
+            "SELECT {a}.start, {a}.end, {name} FROM {table}_{uuid} {a} {event_join} "
+            "LEFT JOIN rocpd_sample S ON S.event_id = {a}.event_id "
+            "WHERE {a}.nid = ? AND {a}.pid = ? AND {a}.tid = ? AND S.track_id IS NULL "
+            "AND {a}.id >= ? AND {a}.id < ?",
+            fmt::arg("a", a),
+            fmt::arg("name", name_expression),
+            fmt::arg("table", table),
+            fmt::arg("uuid", m_uuid),
+            fmt::arg("event_join", event_join));
+
+        return m_backend->create_read_statement_executor<
+            event_range_result,
+            bind_types<size_t, size_t, size_t, size_t, size_t>>(
+            sql,
+            &event_range_result::start_timestamp,
+            &event_range_result::end_timestamp,
+            &event_range_result::display_name_id);
+    }
+
     template <typename JoinBuilder>
     void initialize_timeline_event_variants(
         JoinBuilder&                  base,
@@ -1364,21 +1398,6 @@ private:
                 " WHERE S.track_id = ?6 AND EXISTS (SELECT 1 FROM rocpd_sample WHERE "
                 "track_id = ?6)" +
                 time_where,
-            &timeline_event_result::id,
-            &timeline_event_result::start_timestamp,
-            &timeline_event_result::end_timestamp,
-            &timeline_event_result::display_name_id,
-            &timeline_event_result::category_id,
-            &timeline_event_result::nid,
-            &timeline_event_result::pid,
-            &timeline_event_result::tid,
-            &timeline_event_result::track_id);
-
-        out.track_range_filtered = m_backend->create_read_statement_executor<
-            timeline_event_result,
-            bind_types<size_t, size_t, size_t, size_t, size_t>>(
-            unfiltered_sql + " WHERE " + own_track_where + " AND " + a + ".id >= ? AND " +
-                a + ".id < ?",
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
             &timeline_event_result::end_timestamp,
@@ -1486,6 +1505,8 @@ private:
                          .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
 
         initialize_timeline_event_variants(base, "R", m_region_statements);
+        m_region_statements.track_range_filtered =
+            make_track_range_statement("rocpd_region", "R", "R.name_id");
     }
 
     void initialize_kernel_dispatch_timeline_event_statements()
@@ -1507,6 +1528,8 @@ private:
 
         initialize_timeline_event_variants(
             base, "K", m_kernel_dispatch_statements, std::string("agent_id"));
+        m_kernel_dispatch_statements.track_range_filtered =
+            make_track_range_statement("rocpd_kernel_dispatch", "K", "K.region_name_id");
     }
 
     void initialize_memory_allocate_timeline_event_statements()
@@ -1528,6 +1551,11 @@ private:
 
         initialize_timeline_event_variants(
             base, "MA", m_memory_allocate_statements, std::string("agent_id"));
+        m_memory_allocate_statements.track_range_filtered =
+            make_track_range_statement("rocpd_memory_allocate",
+                                       "MA",
+                                       "E.category_id",
+                                       "INNER JOIN rocpd_event E ON E.id = MA.event_id");
     }
 
     void initialize_memory_copy_timeline_event_statements()
@@ -1549,6 +1577,8 @@ private:
 
         initialize_timeline_event_variants(
             base, "MC", m_memory_copy_statements, std::string("dst_agent_id"));
+        m_memory_copy_statements.track_range_filtered =
+            make_track_range_statement("rocpd_memory_copy", "MC", "MC.region_name_id");
     }
 
     void initialize_detail_statements()

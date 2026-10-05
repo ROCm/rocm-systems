@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -13,6 +14,7 @@
 #include <future>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -65,16 +67,53 @@ protected:
 
     void TearDown() override
     {
-        unsetenv("PH_POOL_THREADS");
         if(m_ctx != nullptr) ph_ctx_free(m_ctx);
         std::filesystem::remove(m_db_path);
     }
 
-    void create_context(const char* pool_threads = nullptr)
+    void create_context()
     {
-        if(pool_threads != nullptr) setenv("PH_POOL_THREADS", pool_threads, 1);
         ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
     }
+
+    // The context pool has max(1, hardware threads / 2) workers; keeping every one of
+    // them busy makes the next submitted task wait in the queue.
+    void occupy_all_workers()
+    {
+        const size_t workers =
+            std::max<size_t>(1, std::thread::hardware_concurrency() / 2);
+        m_blockers.reserve(workers);
+        for(size_t i = 0; i < workers; ++i)
+        {
+            auto&       state  = *m_blockers.emplace_back(std::make_unique<task_state>());
+            ph_future_t future = nullptr;
+            ASSERT_EQ(ph_future_get(m_ctx, &future, blocking_task, &state),
+                      PH_RESULT_SUCCESS);
+            m_blocker_futures.push_back(future);
+        }
+        for(const auto& state : m_blockers)
+        {
+            wait_until(state->started);
+        }
+    }
+
+    void release_blockers()
+    {
+        for(const auto& state : m_blockers)
+        {
+            state->release = true;
+        }
+    }
+
+    [[nodiscard]] bool blockers_finished() const
+    {
+        return std::all_of(m_blockers.begin(), m_blockers.end(), [](const auto& state) {
+            return state->finished.load();
+        });
+    }
+
+    std::vector<std::unique_ptr<task_state>> m_blockers;
+    std::vector<ph_future_t>                 m_blocker_futures;
 
     std::string m_db_path;
     ph_ctx_t    m_ctx{ nullptr };
@@ -169,44 +208,41 @@ TEST_F(c_api_future_test, concurrent_frees_of_one_future_succeed_exactly_once)
 
 TEST_F(c_api_future_test, cancelling_a_pending_task_prevents_it_from_running)
 {
-    create_context("1");
-    task_state  blocker;
+    create_context();
+    occupy_all_workers();
     task_state  skipped;
-    ph_future_t first  = nullptr;
-    ph_future_t second = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &first, blocking_task, &blocker), PH_RESULT_SUCCESS);
-    wait_until(blocker.started);
-    ASSERT_EQ(ph_future_get(m_ctx, &second, quick_task, &skipped), PH_RESULT_SUCCESS);
+    ph_future_t pending = nullptr;
+    ASSERT_EQ(ph_future_get(m_ctx, &pending, quick_task, &skipped), PH_RESULT_SUCCESS);
 
-    EXPECT_EQ(ph_future_cancel(m_ctx, second), PH_RESULT_SUCCESS);
-    blocker.release = true;
-    EXPECT_EQ(ph_future_wait(m_ctx, first), PH_RESULT_SUCCESS);
-    EXPECT_EQ(ph_future_wait(m_ctx, second), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_future_cancel(m_ctx, pending), PH_RESULT_SUCCESS);
+    release_blockers();
+    for(const auto future : m_blocker_futures)
+    {
+        EXPECT_EQ(ph_future_wait(m_ctx, future), PH_RESULT_SUCCESS);
+    }
+    EXPECT_EQ(ph_future_wait(m_ctx, pending), PH_RESULT_SUCCESS);
 
     EXPECT_FALSE(skipped.finished);
 }
 
 TEST_F(c_api_future_test,
-       freeing_the_context_waits_for_a_running_task_and_drops_pending_ones)
+       freeing_the_context_waits_for_running_tasks_and_drops_pending_ones)
 {
-    create_context("1");
-    task_state  blocker;
+    create_context();
+    occupy_all_workers();
     task_state  skipped;
-    ph_future_t first  = nullptr;
-    ph_future_t second = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &first, blocking_task, &blocker), PH_RESULT_SUCCESS);
-    wait_until(blocker.started);
-    ASSERT_EQ(ph_future_get(m_ctx, &second, quick_task, &skipped), PH_RESULT_SUCCESS);
+    ph_future_t pending = nullptr;
+    ASSERT_EQ(ph_future_get(m_ctx, &pending, quick_task, &skipped), PH_RESULT_SUCCESS);
 
     std::thread releaser{ [&] {
         std::this_thread::sleep_for(100ms);
-        blocker.release = true;
+        release_blockers();
     } };
     EXPECT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
     m_ctx = nullptr;
     releaser.join();
 
-    EXPECT_TRUE(blocker.finished);
+    EXPECT_TRUE(blockers_finished());
     EXPECT_FALSE(skipped.finished);
 }
 
@@ -224,7 +260,7 @@ TEST_F(c_api_future_test, freeing_the_context_with_unfreed_futures_succeeds)
 TEST_F(c_api_future_test,
        a_task_that_uses_the_context_while_it_is_freed_does_not_deadlock)
 {
-    create_context("2");
+    create_context();
     struct reentrant
     {
         ph_ctx_t          ctx;

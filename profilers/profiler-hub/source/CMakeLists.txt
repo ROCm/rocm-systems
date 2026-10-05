@@ -25,7 +25,6 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/event_partitions.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pooled_connection_source.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pooled_connection_source.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/track_read_options.cpp
     ${CMAKE_CURRENT_LIST_DIR}/track_read_options.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_row_reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_window.hpp
