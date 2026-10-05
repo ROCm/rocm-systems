@@ -297,6 +297,25 @@ namespace RcclUnitTesting
       EXPECT_TRUE(out.good()) << "cannot hand the skip to the parent via " << path << ": " << reason;
     }
 
+    // Why CE-registered AllReduce can never be selected on these comms, or "" when it can.
+    std::string CeAllReduceUnselectableReason(const std::vector<ncclComm_t>& comms)
+    {
+      for (ncclComm_t c : comms)
+      {
+        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off on e.g. kernels < 6.8.
+        if (!c->symmetricSupport)
+        {
+          return "no symmetric memory (cuMem unavailable on this host), so CE AllReduce is never selected";
+        }
+        // The arch table's ceRegMax caps CE-registered AllReduce, so an arch without a table never selects it.
+        if (c->archThresholds == nullptr)
+        {
+          return "no arch thresholds table, so CE AllReduce is never selected";
+        }
+      }
+      return "";
+    }
+
     // Element count for one swept size; CE AllReduce needs it to divide evenly across ranks.
     size_t SweepCount(size_t bytes, size_t denom, int nRanks, const SweepMode& mode)
     {
@@ -434,6 +453,20 @@ namespace RcclUnitTesting
         return;
       }
       const int nRanks = std::min(numDevices, 8);
+      if (mode.ceAllReduce)
+      {
+        for (int dev = 0; dev < nRanks; ++dev)
+        {
+          hipDeviceProp_t prop;
+          HIPCALL(hipGetDeviceProperties(&prop, dev));
+          // gcnArchName reads like "gfx942:sramecc+:xnack-".
+          if (std::strncmp(prop.gcnArchName, "gfx942", 6) == 0)
+          {
+            SkipSweep("CE AllReduce regression sweep is not enabled on gfx942");
+            return;
+          }
+        }
+      }
       if (mode.ceAllReduce && !isCeRuntimeDriverSupported())
       {
         SkipSweep("CE driver not in supported range");
@@ -458,15 +491,14 @@ namespace RcclUnitTesting
       std::vector<ncclComm_t> comms(nRanks);
       ASSERT_EQ(ncclCommInitAll(comms.data(), nRanks, nullptr), ncclSuccess);
 
-      // CE-registered AllReduce is capped by the arch table's ceRegMax, so an arch without a table never selects it.
-      if (mode.ceAllReduce &&
-          std::any_of(comms.begin(), comms.end(), [](ncclComm_t c) { return c->archThresholds == nullptr; }))
+      const std::string ceSkip = mode.ceAllReduce ? CeAllReduceUnselectableReason(comms) : "";
+      if (!ceSkip.empty())
       {
         for (auto& c : comms)
         {
           NCCLCHECK(ncclCommDestroy(c));
         }
-        SkipSweep("no arch thresholds table, so CE AllReduce is never selected");
+        SkipSweep(ceSkip);
         return;
       }
 
@@ -706,12 +738,13 @@ namespace RcclUnitTesting
     // The child judges eligibility, since HIP in this parent breaks later TestBed forks; the skip is scored here.
     const std::string skipFile = "/tmp/rccl_collimpl_ce_skip_" + std::to_string(getpid());
     remove(skipFile.c_str());
+    // CE AllReduce needs symmetric memory, so cuMem, which is on by default only on gfx1250; the child skips gfx942.
     RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("AllReduceCeRegisteredMatchesDispatchLog", []() {
       SweepMode mode;
       mode.registerSym = true;
       mode.ceAllReduce = true;
       RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
-    }).withEnvironment({{kSkipFileEnv, skipFile}}).withTimeout(std::chrono::seconds(180)));
+    }).withEnvironment({{kSkipFileEnv, skipFile}, {"NCCL_CUMEM_ENABLE", "1"}}).withTimeout(std::chrono::seconds(180)));
     std::string reason;
     std::getline(std::ifstream(skipFile), reason);
     remove(skipFile.c_str());
