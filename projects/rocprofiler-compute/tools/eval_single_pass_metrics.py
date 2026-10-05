@@ -99,11 +99,13 @@ def main() -> int:
         print(f"  {key}: {val}")
     print()
     if args.arch == "gfx942":
+        # Phase 1: 14 passes and every single-pass metric set stays together.
+        # Phase 2: multi-pass metrics are analyze composites with no parent PMCs.
         ok = (
             single_pass_metrics["single_pass_metric_sets_without_pass"] == 0
             and single_pass_metrics["passes"] == 14
             and single_pass_metrics["multi_pass_additional_passes"] == 0
-            and single_pass_metrics["multi_pass_metric_count"] == 16
+            and single_pass_metrics["multi_pass_metric_count"] == 0
         )
         print(f"gfx942 gates: {'PASS' if ok else 'FAIL'}")
         if not ok:
