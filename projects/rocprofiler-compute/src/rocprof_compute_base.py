@@ -543,8 +543,8 @@ class RocProfCompute:
         """Validate that the profile-mode invocation is internally consistent.
 
         Covers the mutual exclusion among action-selection flags
-        (--block, --set, --roof-only, --bench-only) and the
-        --bench-only / --no-roof conflict.
+        (--block, --set, --roofline, --roofline-bench-only) and the
+        --roofline-bench-only / --no-roof conflict.
         """
         args = self.__args
         if (
@@ -557,13 +557,13 @@ class RocProfCompute:
             > 1
         ):
             console_error(
-                "--block, --set, --roof-only, and --bench-only"
+                "--block, --set, --roofline, and --roofline-bench-only"
                 " are mutually exclusive options."
                 " Please use only one of them."
             )
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
-            console_error("--bench-only cannot be used with --no-roof.")
+            console_error("--roofline-bench-only cannot be used with --no-roof.")
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and

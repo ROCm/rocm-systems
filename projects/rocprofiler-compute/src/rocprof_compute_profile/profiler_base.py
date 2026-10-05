@@ -259,7 +259,7 @@ class RocProfCompute_Base:
             > 1
         ):
             console_error(
-                "--block, --set, and --roof-only are mutually exclusive options. "
+                "--block, --set, and --roofline are mutually exclusive options. "
                 "Please use only one of them."
             )
 
@@ -367,7 +367,7 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
-        # --set and --roof-only resolve to block ids here, so store them back on
+        # --set and --roofline resolve to block ids here, so store them back on
         # the args every later stage reads.
         self.__args.filter_blocks = self._filter_blocks
 

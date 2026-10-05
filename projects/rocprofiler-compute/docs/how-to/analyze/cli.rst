@@ -553,7 +553,7 @@ Two-step workflow:
 .. code-block:: shell-session
 
    # Step 1: Profile to generate roofline.csv
-   $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --roofline -- tests/vcopy -n 1048576 -b 256
 
    # Step 2: Analyze to generate HTML roofline plots
    $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
