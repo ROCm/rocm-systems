@@ -4,9 +4,13 @@
 #include "pensando_subsystem.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
+#include <stdexcept>
 
 #include "pensando_stats.h"
+#include "smi_nic_log.h"
+#include "smi_sysfs.h"
 
 namespace fs = std::filesystem;
 
@@ -15,6 +19,31 @@ NicVendor SmiNicSubsystemPensando::vendor() const { return NicVendor::AMD; }
 bool SmiNicSubsystemPensando::is_bridge_device(uint16_t device_id) {
   return std::find(BRIDGE_DEVICE_IDS.begin(), BRIDGE_DEVICE_IDS.end(), device_id) !=
          BRIDGE_DEVICE_IDS.end();
+}
+
+bool SmiNicSubsystemPensando::is_pci_bridge_class(const std::string& sysfs_bus_path) {
+  SmiSysfsReader::SysfsValue class_val;
+  // Discovery rescans every PCI device, so successful reads stay out of the debug log.
+  constexpr bool kIsSuccessLogged = false;
+  if (SmiSysfsReader::readLine(sysfs_bus_path + "/class", class_val, kIsSuccessLogged) !=
+      SmiSysfsReader::SysfsStatus::Success) {
+    return false;
+  }
+
+  uint32_t pci_class = 0;
+  try {
+    if (std::holds_alternative<int>(class_val)) {
+      pci_class = static_cast<uint32_t>(std::get<int>(class_val));
+    } else if (std::holds_alternative<std::string>(class_val)) {
+      pci_class = static_cast<uint32_t>(std::stoul(std::get<std::string>(class_val), nullptr, 0));
+    }
+  } catch (const std::invalid_argument&) {
+    return false;
+  } catch (const std::out_of_range&) {
+    return false;
+  }
+
+  return ((pci_class >> PCI_CLASS_SHIFT) == PCI_CLASS_PCI_BRIDGE);
 }
 
 bool SmiNicSubsystemPensando::is_driver_loaded(const std::string& bdf,
@@ -57,6 +86,12 @@ void SmiNicSubsystemPensando::discover(
       // devlink. No card observed so far enumerates this way, so the branch is
       // a deliberate allowance rather than a path any hardware has exercised.
       nics_.push_back(std::move(nic));
+    } else if (amd::smi::nic::log::is_enabled() && (vendor_id == VENDOR_ID) &&
+               (device_id != MID_BRIDGE_ID) && is_pci_bridge_class(sysfs_bus_path)) {
+      // A card behind a bridge id missing from BRIDGE_DEVICE_IDS is otherwise silent.
+      char device_hex[8];
+      std::snprintf(device_hex, sizeof(device_hex), "0x%04x", device_id);
+      NIC_LOG_DEBUG("unlisted Pensando bridge " + bdf + " (device " + device_hex + ")");
     }
   }
 }

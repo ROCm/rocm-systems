@@ -30,6 +30,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
+- **AI-NIC discovery now recognizes the ``1dd8:1478`` Pensando upstream bridge**.  
+  - Cards whose bridge reports ``0x1478`` were not registered, so their ionic ports were orphaned and ``amd-smi list --nic all`` and ``amd-smi metric --nic all`` showed only the UALoE endpoints. Each such card is now listed with its identity, ``ASIC_TEMP_C`` and health.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

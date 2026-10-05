@@ -20,6 +20,7 @@
 
 #include "smi_nic.h"
 #include "smi_nic_interface.h"
+#include "smi_nic_log.h"
 #include "smi_nic_subsystem.h"
 #include "smi_nic_system.h"
 #include "vendors/amd/ifoe_subsystem.h"
@@ -86,6 +87,18 @@ static void make_fake_pci_device(const fs::path& root, const std::string& bdf,
 // -> ionic port, with sys/bus/pci/devices/<bdf> symlinked into sys/devices the
 // way the kernel does it. is_downstream_port() proves ancestry off the resolved
 // path, so the nesting has to be genuine for the port to attach.
+static std::vector<std::string> g_log_lines;
+static void capture_log(const std::string& msg) { g_log_lines.push_back(msg); }
+
+static bool has_log_line_with(const std::string& needle) {
+  for (const auto& line : g_log_lines) {
+    if (line.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void make_fake_pci_tree(const fs::path& root, const std::string& domain,
                                const std::string& bridge_bdf, const std::string& bridge_dev,
                                const std::string& mid_bdf, const std::string& port_bdf,
@@ -321,6 +334,78 @@ int main() {
           (nnics.size() == 1) && (nnics[0]->nic_ports_num() == 1) &&
               (nnics[0]->nic_ports().at(0).interface() == "enP1p68s0"));
     fs::remove_all(nest_root);
+  }
+
+  // ---- Pensando discover(): the 0x1dd8:1478 upstream bridge ----
+  // Same nested layout with a third bridge id; the 0x1001 virtual downstream
+  // port in the middle must stay unregistered, and the 0x100c management
+  // function beside the ionic must still be adopted.
+  {
+    fs::path b1478_root = make_tmp_root();
+    make_fake_pci_tree(b1478_root, "0001:00", "0001:01:00.0", "0x1478", "0001:02:00.0",
+                       "0001:03:00.3", "enP1p3s0f3");
+    const fs::path b1478_mgmt =
+        b1478_root / "sys/devices/pci0001:00/0001:01:00.0/0001:02:00.0/0001:03:00.2";
+    fs::create_directories(b1478_mgmt);
+    std::ofstream(b1478_mgmt / "vendor") << "0x1dd8\n";
+    std::ofstream(b1478_mgmt / "device") << "0x100c\n";
+    fs::create_symlink(b1478_mgmt, b1478_root / "sys/bus/pci/devices/0001:03:00.2");
+
+    SmiNicSubsystemPensando b1478_disc;
+    b1478_disc.discover((b1478_root / "sys/bus/pci/devices").string(),
+                        (b1478_root / "sys/class/net").string(), nullptr);
+    const auto& b1478_nics = b1478_disc.get_nics();
+    check("pensando discover finds the 0x1478 bridge", b1478_nics.size() == 1);
+    check("0x1478 NIC claims its ionic port", (b1478_nics.size() == 1) &&
+                                                  (b1478_nics[0]->bdf() == "0001:01:00.0") &&
+                                                  (b1478_nics[0]->nic_ports_num() == 1));
+    check("0x1478 NIC adopts its management function",
+          (b1478_nics.size() == 1) && (b1478_nics[0]->mgmt_bdf() == "0001:03:00.2"));
+    fs::remove_all(b1478_root);
+  }
+
+  // ---- Pensando discover(): an unlisted 1dd8 bridge is named in the debug log ----
+  // A card whose upstream bridge id is not in the allow-list vanishes without a
+  // trace; the log is the only hint. The 0x1001 middle bridge is on every card
+  // and must not add a line per scan.
+  {
+    fs::path log_root = make_tmp_root();
+    make_fake_pci_tree(log_root, "0001:00", "0001:01:00.0", "0x1234", "0001:02:00.0",
+                       "0001:03:00.3", "enP1p3s0f3");
+    const fs::path log_bridge = log_root / "sys/devices/pci0001:00/0001:01:00.0";
+    std::ofstream(log_bridge / "class") << "0x060400\n";
+    std::ofstream(log_bridge / "0001:02:00.0/class") << "0x060400\n";
+
+    g_log_lines.clear();
+    amd::smi::nic::log::set_sink(capture_log);
+    SmiNicSubsystemPensando log_disc;
+    log_disc.discover((log_root / "sys/bus/pci/devices").string(),
+                      (log_root / "sys/class/net").string(), nullptr);
+    amd::smi::nic::log::set_sink(nullptr);
+
+    check("unlisted bridge is named in the log",
+          has_log_line_with("unlisted Pensando bridge 0001:01:00.0 (device 0x1234)"));
+    check("0x1001 middle bridge is not logged",
+          !has_log_line_with("unlisted Pensando bridge 0001:02:00.0"));
+    check("unlisted bridge registers no NIC", log_disc.get_nics().empty());
+    fs::remove_all(log_root);
+
+    fs::path quiet_root = make_tmp_root();
+    make_fake_pci_tree(quiet_root, "0001:00", "0001:01:00.0", "0x1478", "0001:02:00.0",
+                       "0001:03:00.3", "enP1p3s0f3");
+    const fs::path quiet_bridge = quiet_root / "sys/devices/pci0001:00/0001:01:00.0";
+    std::ofstream(quiet_bridge / "class") << "0x060400\n";
+    std::ofstream(quiet_bridge / "0001:02:00.0/class") << "0x060400\n";
+
+    g_log_lines.clear();
+    amd::smi::nic::log::set_sink(capture_log);
+    SmiNicSubsystemPensando quiet_disc;
+    quiet_disc.discover((quiet_root / "sys/bus/pci/devices").string(),
+                        (quiet_root / "sys/class/net").string(), nullptr);
+    amd::smi::nic::log::set_sink(nullptr);
+
+    check("listed bridge is not logged", !has_log_line_with("unlisted Pensando bridge"));
+    fs::remove_all(quiet_root);
   }
 
   // ---- Identity falls back to the ionic port when the bridge carries no VPD ----
