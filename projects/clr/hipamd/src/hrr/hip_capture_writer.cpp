@@ -751,9 +751,7 @@ bool open(const char* output_dir) {
     return false;
   }
 
-  // Pitched host copies record only their copied rows (hip_capture.cpp,
-  // write_host_rect_blob), which replay reads back by this flag.
-  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
+  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
   buffer_append_locked(&fh, sizeof(fh));
   return true;
 }
