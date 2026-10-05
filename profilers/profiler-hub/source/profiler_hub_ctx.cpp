@@ -267,15 +267,32 @@ ph_ctx::build_thread_track_events(
         }
     };
 
+    const auto helper = [&](const std::stop_token&) {
+        if(next.load() >= items.size()) return;
+        auto lease = m_connection_pool.try_acquire();
+        if(lease.has_value()) worker(**lease);
+    };
+
+    struct helper_group
     {
-        std::vector<std::jthread> helpers;
-        const size_t              wanted = std::min(parts, items.size());
+        std::vector<profiler_hub::common::thread_pool::task_handle> handles;
+
+        ~helper_group()
+        {
+            for(const auto& handle : handles)
+            {
+                std::ignore = handle.cancel();
+                handle.wait();
+            }
+        }
+    };
+
+    {
+        helper_group helpers;
+        const size_t wanted = std::min(parts, items.size());
         for(size_t i = 1; i < wanted; ++i)
         {
-            auto lease = m_connection_pool.try_acquire();
-            if(!lease.has_value()) break;
-            helpers.emplace_back(
-                [&worker, held = std::move(lease)]() mutable { worker(**held); });
+            helpers.handles.push_back(m_thread_pool.submit(helper));
         }
         worker(conn);
     }
