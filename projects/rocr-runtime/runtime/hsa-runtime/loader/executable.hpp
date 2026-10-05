@@ -527,13 +527,10 @@ public:
     const std::string &uri,
     hsa_loaded_code_object_t *loaded_code_object) override;
 
-  hsa_status_t LoadCodeObject(
-    hsa_agent_t agent,
-    hsa_code_object_t code_object,
-    size_t code_object_size,
-    const char *options,
-    const std::string &uri,
-    hsa_loaded_code_object_t *loaded_code_object) override;
+  hsa_status_t LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                              size_t code_object_size, const char* options, const std::string& uri,
+                              hsa_loaded_code_object_t* loaded_code_object, void* load_address,
+                              size_t load_limit) override;
 
   hsa_status_t Freeze(const char *options) override;
 
@@ -606,10 +603,11 @@ private:
     const char *symbol_name,
     const hsa_agent_t *agent);
 
-  hsa_status_t LoadSegments(hsa_agent_t agent, const code::AmdHsaCode *c,
-                            uint32_t majorVersion);
+  hsa_status_t LoadSegments(hsa_agent_t agent, const code::AmdHsaCode* c, uint32_t majorVersion,
+                            void* load_address, size_t load_limit);
   hsa_status_t LoadSegmentsV1(hsa_agent_t agent, const code::AmdHsaCode *c);
-  hsa_status_t LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode *c);
+  hsa_status_t LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode* c, void* load_address,
+                              size_t load_limit);
   hsa_status_t LoadSegmentV1(hsa_agent_t agent, const code::Segment *s);
   hsa_status_t LoadSegmentV2(const code::Segment *data_segment,
                              loader::Segment *load_segment);
