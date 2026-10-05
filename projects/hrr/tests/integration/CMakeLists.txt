@@ -30,6 +30,12 @@
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
 # [.][hrr-direct] workload.
+#
+# hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
+# wrapped keeps its wrapper, nothing is recorded after the trailer, and a failed
+# blob write leaves the archive incomplete, in the parent only across fork().
+# It reaches the live dispatch table through rocprofiler-register, with
+# hrr_dispatch_tool.cc as the tool library. Linux only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -59,6 +65,7 @@ add_executable(hrr-integration-tests
   ${HRR_GPU_WORKLOAD_SOURCES}
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_dispatch_swap_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
@@ -131,5 +138,20 @@ target_compile_definitions(hrr-integration-tests PRIVATE
 
 # The integration tests spawn hrr-playback; make sure it is built first.
 add_dependencies(hrr-integration-tests hrr-playback)
+
+# The rocprofiler-register tool library hrr_dispatch_swap_test.cc loads into its
+# workloads. libamdhip64 registers with rocprofiler-register on Linux only.
+if(NOT WIN32)
+  add_library(hrr-test-dispatch-tool MODULE hrr_dispatch_tool.cc)
+  set_target_properties(hrr-test-dispatch-tool PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_VISIBILITY_PRESET hidden)
+  find_package(Threads REQUIRED)
+  target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  target_compile_definitions(hrr-integration-tests PRIVATE
+    HRR_DISPATCH_TOOL="$<TARGET_FILE:hrr-test-dispatch-tool>")
+  add_dependencies(hrr-integration-tests hrr-test-dispatch-tool)
+endif()
 
 add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
