@@ -456,25 +456,40 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_clean_coverage_rejects_default_findings_and_malformed_counts(self) -> None:
         good = auto_report(7, 1)
-        self.assertTrue(validation._coverage_summary(
-            complete_coverage_log(good), profile="default")["accepted"])
+        self.assertTrue(
+            validation._coverage_summary(
+                complete_coverage_log(good), profile="default"
+            )["accepted"]
+        )
         for field in ("diagnostics", "conflicts", "immediate_conflicts"):
             for value in ("1", "-1", "invalid"):
                 with self.subTest(field=field, value=value):
                     bad = good.replace(f" {field}=0", f" {field}={value}")
                     summary = validation._coverage_summary(
-                        complete_coverage_log(bad, good), profile="default")
+                        complete_coverage_log(bad, good), profile="default"
+                    )
                     self.assertFalse(summary["accepted"])
                     self.assertTrue(summary["analysis_complete"])
             with self.subTest(field=field, missing=True):
                 bad = good.replace(f" {field}=0", "")
-                self.assertFalse(validation._coverage_summary(
-                    complete_coverage_log(bad), profile="default")["accepted"])
-        self.assertFalse(validation._coverage_summary(complete_coverage_log(
-            good + " conflicts=0"), profile="default")["accepted"])
-        self.assertFalse(validation._coverage_summary(complete_coverage_log(
-            "ConSan auto report reader=7 has invalid header magic=0"),
-            profile="default")["accepted"])
+                self.assertFalse(
+                    validation._coverage_summary(
+                        complete_coverage_log(bad), profile="default"
+                    )["accepted"]
+                )
+        self.assertFalse(
+            validation._coverage_summary(
+                complete_coverage_log(good + " conflicts=0"), profile="default"
+            )["accepted"]
+        )
+        self.assertFalse(
+            validation._coverage_summary(
+                complete_coverage_log(
+                    "ConSan auto report reader=7 has invalid header magic=0"
+                ),
+                profile="default",
+            )["accepted"]
+        )
 
     def test_clean_coverage_rejects_supercollider_reports(self) -> None:
         # The historical runner accepted TP2 clean logs with six mismatches.
@@ -491,8 +506,12 @@ class ConSanValidationTest(unittest.TestCase):
             ):
                 with self.subTest(spelling=spelling, field=field):
                     fields = dict(
-                        buffers="6", mismatches="0", allocation_failures="0",
-                        read_failures="0", cleanup_failures="0", complete="true",
+                        buffers="6",
+                        mismatches="0",
+                        allocation_failures="0",
+                        read_failures="0",
+                        cleanup_failures="0",
+                        complete="true",
                     )
                     clean = f"[rocjitsu-dbi-hooks] ConSan {spelling} report summary "
                     good = clean + " ".join(f"{k}={v}" for k, v in fields.items())
@@ -501,15 +520,26 @@ class ConSanValidationTest(unittest.TestCase):
                         f"ConSan {spelling} auto report cleanup reader=7 outcome=runtime-reclaimed",
                         good,
                     )
-                    self.assertTrue(validation._coverage_summary(
-                        good_log, profile="supercollider")["accepted"])
+                    self.assertTrue(
+                        validation._coverage_summary(good_log, profile="supercollider")[
+                            "accepted"
+                        ]
+                    )
                     fields[field] = value
                     bad = clean + " ".join(f"{k}={v}" for k, v in fields.items())
-                    self.assertFalse(validation._coverage_summary(
-                        complete_coverage_log(bad), profile="supercollider")["accepted"])
-            self.assertFalse(validation._coverage_summary(complete_coverage_log(
-                f"ConSan {spelling} auto report reader=7 outcome=complete marker=1 mismatch=true"
-            ), profile="supercollider")["accepted"])
+                    self.assertFalse(
+                        validation._coverage_summary(
+                            complete_coverage_log(bad), profile="supercollider"
+                        )["accepted"]
+                    )
+            self.assertFalse(
+                validation._coverage_summary(
+                    complete_coverage_log(
+                        f"ConSan {spelling} auto report reader=7 outcome=complete marker=1 mismatch=true"
+                    ),
+                    profile="supercollider",
+                )["accepted"]
+            )
 
     def test_coverage_summary_preserves_strict_load_rejection(self) -> None:
         summary = validation._coverage_summary(
@@ -2845,7 +2875,9 @@ class ConSanValidationTest(unittest.TestCase):
         for returncode in (0, 1):
             with self.subTest(returncode=returncode), temporary_root() as workspace:
                 completed = subprocess.CompletedProcess(
-                    [], returncode, stdout="",
+                    [],
+                    returncode,
+                    stdout="",
                     stderr="No module named iree" if returncode else "",
                 )
                 with (
@@ -2864,9 +2896,7 @@ class ConSanValidationTest(unittest.TestCase):
                     doctor = validation._doctor(workspace, "gfx1201", ("tp1-prefill",))
                 runtime = doctor["runtimes"]["sharktank"]
                 self.assertEqual(runtime["ok"], returncode == 0)
-                self.assertEqual(
-                    run.call_args.args[0][0], "/selected/venv/bin/python"
-                )
+                self.assertEqual(run.call_args.args[0][0], "/selected/venv/bin/python")
                 self.assertEqual(
                     run.call_args.kwargs["env"]["PYTHONPATH"], "/local/iree-bindings"
                 )
@@ -3382,39 +3412,70 @@ class ConSanValidationTest(unittest.TestCase):
         for value in ("0", "1"):
             with self.subTest(value=value), mock.patch.dict(os.environ, {name: value}):
                 commands = validation._workload_commands(
-                    Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                    Path("/workspace"),
+                    "gfx1250",
+                    workload,
+                    "clean",
+                    Path("/out/result.json"),
                 )
                 self.assertEqual(len(commands), 3)
                 for command in commands:
-                    self.assertEqual("--disable-benchmark-sleep" in command, value == "1")
+                    self.assertEqual(
+                        "--disable-benchmark-sleep" in command, value == "1"
+                    )
         for invalid in ("", "true", "2", "-1", "١"):
-            with self.subTest(invalid=invalid), mock.patch.dict(os.environ, {name: invalid}):
+            with (
+                self.subTest(invalid=invalid),
+                mock.patch.dict(os.environ, {name: invalid}),
+            ):
                 with self.assertRaisesRegex(validation.ValidationError, name):
                     validation._workload_commands(
-                        Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                        Path("/workspace"),
+                        "gfx1250",
+                        workload,
+                        "clean",
+                        Path("/out/result.json"),
                     )
 
-    def test_tensile_untimed_override_preserves_shards_and_rejects_overhead(self) -> None:
+    def test_tensile_untimed_override_preserves_shards_and_rejects_overhead(
+        self,
+    ) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8f4gemm-tdm"]
         name = "CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES"
         for value in ("0", "1"):
             with self.subTest(value=value), mock.patch.dict(os.environ, {name: value}):
                 commands = validation._workload_commands(
-                    Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                    Path("/workspace"),
+                    "gfx1250",
+                    workload,
+                    "clean",
+                    Path("/out/result.json"),
                 )
                 self.assertEqual(len(commands), 3)
                 for command in commands:
-                    self.assertEqual("--skip-timing-dispatches" in command, value == "1")
+                    self.assertEqual(
+                        "--skip-timing-dispatches" in command, value == "1"
+                    )
         with mock.patch.dict(os.environ, {name: "1"}):
-            with self.assertRaisesRegex(validation.ValidationError, "timing measurement"):
+            with self.assertRaisesRegex(
+                validation.ValidationError, "timing measurement"
+            ):
                 validation._workload_command(
-                    Path("/workspace"), "gfx1250", workload, "overhead", Path("/out/result.json")
+                    Path("/workspace"),
+                    "gfx1250",
+                    workload,
+                    "overhead",
+                    Path("/out/result.json"),
                 )
         for value in ("", "true", "2"):
             with self.subTest(value=value), mock.patch.dict(os.environ, {name: value}):
                 with self.assertRaisesRegex(validation.ValidationError, name):
                     validation._workload_commands(
-                        Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                        Path("/workspace"),
+                        "gfx1250",
+                        workload,
+                        "clean",
+                        Path("/out/result.json"),
                     )
 
     def test_tensile_client_timeout_override_applies_to_every_shard(self) -> None:
@@ -3422,16 +3483,27 @@ class ConSanValidationTest(unittest.TestCase):
         name = "CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS"
         with mock.patch.dict(os.environ, {name: "1800"}):
             commands = validation._workload_commands(
-                Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                Path("/workspace"),
+                "gfx1250",
+                workload,
+                "clean",
+                Path("/out/result.json"),
             )
         self.assertEqual(len(commands), 3)
         for command in commands:
             self.assertEqual(command[command.index("--timeout-seconds") + 1], "1800")
         for invalid in ("0", "-1", "1.5", "", "abc", "١"):
-            with self.subTest(invalid=invalid), mock.patch.dict(os.environ, {name: invalid}):
+            with (
+                self.subTest(invalid=invalid),
+                mock.patch.dict(os.environ, {name: invalid}),
+            ):
                 with self.assertRaisesRegex(validation.ValidationError, name):
                     validation._workload_commands(
-                        Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                        Path("/workspace"),
+                        "gfx1250",
+                        workload,
+                        "clean",
+                        Path("/out/result.json"),
                     )
 
     def test_gfx1250_manifest_excludes_inapplicable_f16_sb_sweep(self) -> None:
@@ -3985,7 +4057,9 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertTrue(paths["hook"].is_file())
 
     def test_required_paths_retains_canonical_build_prerequisite(self) -> None:
-        hook = Path("/workspace/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so")
+        hook = Path(
+            "/workspace/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+        )
         with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_HOOK": str(hook)}):
             paths = validation._required_paths(Path("/workspace"), ())
         self.assertEqual(paths["hook"], hook)
@@ -4682,9 +4756,7 @@ class ConSanValidationTest(unittest.TestCase):
         result, trials = validation._fault_trials(fault, "default")
         self.assertEqual(result["detector"], "not_detected")
         self.assertEqual(result["oracle"], "pass")
-        self.assertEqual(
-            result["environment"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
-        )
+        self.assertEqual(result["environment"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1")
         self.assertEqual(result["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
@@ -4697,7 +4769,9 @@ class ConSanValidationTest(unittest.TestCase):
             for fault in entry["faults"]:
                 with self.subTest(workload=workload_id, fault=fault["id"]):
                     validation._load_fault(
-                        path, "gfx1250", validation.WORKLOAD_BY_ID[workload_id],
+                        path,
+                        "gfx1250",
+                        validation.WORKLOAD_BY_ID[workload_id],
                         fault["id"],
                     )
 
@@ -5083,13 +5157,20 @@ class ConSanValidationTest(unittest.TestCase):
                 [
                     sys.executable,
                     rdna4_matmul_validation.__file__,
-                    "--executable", str(executable),
-                    "--workload", "fp16-production",
-                    "--phase", "clean",
-                    "--minimum-timed-ms", "250",
-                    "--label", "timeout-test",
+                    "--executable",
+                    str(executable),
+                    "--workload",
+                    "fp16-production",
+                    "--phase",
+                    "clean",
+                    "--minimum-timed-ms",
+                    "250",
+                    "--label",
+                    "timeout-test",
                 ],
-                os.environ.copy(), root / "run.log", 1,
+                os.environ.copy(),
+                root / "run.log",
+                1,
             )
         self.assertEqual(returncode, 124)
         self.assertIn("transform progress", output)
@@ -6265,52 +6346,123 @@ class ConSanValidationTest(unittest.TestCase):
     def test_fault_batch_stops_on_admission_failure_but_not_detector_misses(self):
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         fault = {
-            "id": "drop", "family": "barrier-drop",
-            "environment": {"RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-                            "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a"},
-            "profiles": {"default": {"detector": "statistical",
-                "minimum_detections": 1, "oracle": "any", "trials": [{}, {}, {}]}},
+            "id": "drop",
+            "family": "barrier-drop",
+            "environment": {
+                "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+                "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
+            },
+            "profiles": {
+                "default": {
+                    "detector": "statistical",
+                    "minimum_detections": 1,
+                    "oracle": "any",
+                    "trials": [{}, {}, {}],
+                }
+            },
         }
         for admitted, missing_result, expected_calls in (
-            (False, False, 1), (False, True, 1), (True, False, 3)
+            (False, False, 1),
+            (False, True, 1),
+            (True, False, 3),
         ):
-            with self.subTest(admitted=admitted, missing_result=missing_result), temporary_root() as root:
+            with (
+                self.subTest(admitted=admitted, missing_result=missing_result),
+                temporary_root() as root,
+            ):
                 spec = root / "fault.json"
                 spec.write_text("{}")
-                args = validation._parse_args([
-                    "--target", "gfx1201", "fault", "--workload", workload.id,
-                    "--profile", "default", "--spec", str(spec), "--fault", "drop",
-                    "--artifact-root", str(root / "artifacts"), "--allow-destructive",
-                ])
+                args = validation._parse_args(
+                    [
+                        "--target",
+                        "gfx1201",
+                        "fault",
+                        "--workload",
+                        workload.id,
+                        "--profile",
+                        "default",
+                        "--spec",
+                        str(spec),
+                        "--fault",
+                        "drop",
+                        "--artifact-root",
+                        str(root / "artifacts"),
+                        "--allow-destructive",
+                    ]
+                )
+
                 def run(command, **kwargs):
                     if not missing_result:
                         out = Path(command[command.index("--artifact-root") + 1])
                         name = command[command.index("--name") + 1]
                         row = out / name
                         row.mkdir(parents=True)
-                        (row / "result.json").write_text(json.dumps({
-                            "sanitizer": {"outcome": "not_detected"},
-                            "oracle": {"outcome": "pass"},
-                        }))
+                        (row / "result.json").write_text(
+                            json.dumps(
+                                {
+                                    "sanitizer": {"outcome": "not_detected"},
+                                    "oracle": {"outcome": "pass"},
+                                }
+                            )
+                        )
+
                 with (
-                    mock.patch.object(validation_faults, "_workspace_from_environment", return_value=root),
-                    mock.patch.object(validation_faults, "_doctor", return_value={"ok": True}),
-                    mock.patch.object(validation_faults, "_load_fault", return_value=fault),
-                    mock.patch.object(validation_faults, "_write_provenance", return_value=root / "provenance.json"),
-                    mock.patch.object(validation_faults, "_health_smoke_command", return_value=["/bin/true"]),
-                    mock.patch.object(validation_faults, "_fault_acceptance", return_value=(admitted, [])),
-                    mock.patch.object(validation_faults, "_fault_admission_and_reach", return_value=(admitted, admitted, "reviewed", [])),
-                    mock.patch.object(validation.subprocess, "run", side_effect=run) as execute,
+                    mock.patch.object(
+                        validation_faults,
+                        "_workspace_from_environment",
+                        return_value=root,
+                    ),
+                    mock.patch.object(
+                        validation_faults, "_doctor", return_value={"ok": True}
+                    ),
+                    mock.patch.object(
+                        validation_faults, "_load_fault", return_value=fault
+                    ),
+                    mock.patch.object(
+                        validation_faults,
+                        "_write_provenance",
+                        return_value=root / "provenance.json",
+                    ),
+                    mock.patch.object(
+                        validation_faults,
+                        "_health_smoke_command",
+                        return_value=["/bin/true"],
+                    ),
+                    mock.patch.object(
+                        validation_faults,
+                        "_fault_acceptance",
+                        return_value=(admitted, []),
+                    ),
+                    mock.patch.object(
+                        validation_faults,
+                        "_fault_admission_and_reach",
+                        return_value=(admitted, admitted, "reviewed", []),
+                    ),
+                    mock.patch.object(
+                        validation.subprocess, "run", side_effect=run
+                    ) as execute,
                     redirect_stdout(io.StringIO()),
                 ):
                     self.assertEqual(validation._fault(args), 1)
                 self.assertEqual(execute.call_count, expected_calls)
-                summary = json.loads((root / "artifacts" / workload.id / "faults" / "drop" / "summary.json").read_text())
+                summary = json.loads(
+                    (
+                        root
+                        / "artifacts"
+                        / workload.id
+                        / "faults"
+                        / "drop"
+                        / "summary.json"
+                    ).read_text()
+                )
                 profile = summary["profiles"][0]
                 self.assertFalse(profile["accepted"])
                 self.assertEqual(profile["planned_trials"], 3)
                 self.assertEqual(profile["attempted_trials"], expected_calls)
-                self.assertEqual(any("batch stopped" in reason for reason in profile["reasons"]), not admitted)
+                self.assertEqual(
+                    any("batch stopped" in reason for reason in profile["reasons"]),
+                    not admitted,
+                )
 
     def test_fault_does_not_execute_a_spec_not_applicable_profile(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
@@ -6415,7 +6567,9 @@ class ConSanValidationTest(unittest.TestCase):
                     fcntl.flock(child, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     fcntl.flock(child, fcntl.LOCK_UN)
 
-    def test_cdna4_mode_fixture_uses_multiwave_shape_in_clean_and_fault_commands(self) -> None:
+    def test_cdna4_mode_fixture_uses_multiwave_shape_in_clean_and_fault_commands(
+        self,
+    ) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
         with temporary_root() as root, mock.patch.dict(os.environ, {}, clear=True):
             for phase in ("clean", "fault"):
@@ -6441,7 +6595,9 @@ class ConSanValidationTest(unittest.TestCase):
             "target": "gfx950",
             "workload": "d128-block",
             "review_required": False,
-            "faults": [{"id": "drop", "family": "barrier-drop", "environment": environment}],
+            "faults": [
+                {"id": "drop", "family": "barrier-drop", "environment": environment}
+            ],
         }
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         with temporary_root() as root:
@@ -6456,7 +6612,9 @@ class ConSanValidationTest(unittest.TestCase):
                 with self.subTest(missing=key):
                     saved = environment.pop(key)
                     path.write_text(json.dumps(document))
-                    with self.assertRaisesRegex(validation.ValidationError, "grouped barrier"):
+                    with self.assertRaisesRegex(
+                        validation.ValidationError, "grouped barrier"
+                    ):
                         validation._load_fault(path, "gfx950", workload, "drop")
                     environment[key] = saved
 
@@ -6567,12 +6725,22 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_gfx1250_tensile_correctness_has_no_benchmark_duration_floor(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
-        for phase, minimum in (("clean", "0.0"), ("fault", "0.0"), ("overhead", "250.0")):
+        for phase, minimum in (
+            ("clean", "0.0"),
+            ("fault", "0.0"),
+            ("overhead", "250.0"),
+        ):
             with self.subTest(phase=phase):
                 command = validation._workload_command(
-                    Path("/workspace"), "gfx1250", workload, phase, Path("/out/result.json")
+                    Path("/workspace"),
+                    "gfx1250",
+                    workload,
+                    phase,
+                    Path("/out/result.json"),
                 )
-                self.assertEqual(command[command.index("--minimum-timed-ms") + 1], minimum)
+                self.assertEqual(
+                    command[command.index("--minimum-timed-ms") + 1], minimum
+                )
 
     def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
         path = Path(__file__).with_name(
@@ -6710,80 +6878,137 @@ class FaultSpecSnapshotTest(unittest.TestCase):
             metadata = validation_faults._snapshot_fault_spec(source, root, loaded)
             self.assertEqual(Path(metadata["snapshot"]).read_bytes(), loaded)
             self.assertEqual(metadata["sha256"], hashlib.sha256(loaded).hexdigest())
-            self.assertEqual(validation_faults._snapshot_fault_spec(source, root, loaded), metadata)
+            self.assertEqual(
+                validation_faults._snapshot_fault_spec(source, root, loaded), metadata
+            )
             with self.assertRaises(validation.ValidationError):
-                validation_faults._snapshot_fault_spec(source, root, source.read_bytes())
+                validation_faults._snapshot_fault_spec(
+                    source, root, source.read_bytes()
+                )
             self.assertEqual(Path(metadata["snapshot"]).read_bytes(), loaded)
 
 
 class DefaultPresetEnvironmentTest(unittest.TestCase):
     def test_watchpoint_banks_match_clean_and_fault_controls(self):
-        with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_WATCHPOINT_BANKS": "256",
-            "RJ_CONSAN_WATCHPOINT_BANKS": "1",
-        }, clear=True):
+        with (
+            temporary_root() as root,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_WATCHPOINT_BANKS": "256",
+                    "RJ_CONSAN_WATCHPOINT_BANKS": "1",
+                },
+                clear=True,
+            ),
+        ):
             workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
             clean = validation_commands._clean_environment(
-                "default", workload, root / "hook.so", "gfx1201", root)
+                "default", workload, root / "hook.so", "gfx1201", root
+            )
             fault = validation_faults._fault_trial_environment(
-                "default", workload, root / "hook.so", "gfx1201",
-                {"environment": {}}, {}, {}, root)
+                "default",
+                workload,
+                root / "hook.so",
+                "gfx1201",
+                {"environment": {}},
+                {},
+                {},
+                root,
+            )
             for environment in (clean, fault):
                 self.assertEqual(environment["RJ_CONSAN_WATCHPOINT_BANKS"], "256")
             for profile in (None, "supercollider"):
                 environment = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1201", root)
+                    profile, workload, root / "hook.so", "gfx1201", root
+                )
                 self.assertNotIn("RJ_CONSAN_WATCHPOINT_BANKS", environment)
             for value in ("-1", "4294967296", "typo", ""):
                 os.environ["CONSAN_VALIDATION_WATCHPOINT_BANKS"] = value
                 with self.assertRaises(validation.ValidationError):
                     validation_commands._clean_environment(
-                        "default", workload, root / "hook.so", "gfx1201", root)
+                        "default", workload, root / "hook.so", "gfx1201", root
+                    )
 
     def test_preset_applies_to_default_clean_and_fault_only(self):
-        with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_DEFAULT_PRESET": "max",
-            "RJ_CONSAN_PRESET": "low",
-        }, clear=True):
+        with (
+            temporary_root() as root,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_DEFAULT_PRESET": "max",
+                    "RJ_CONSAN_PRESET": "low",
+                },
+                clear=True,
+            ),
+        ):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
             clean = validation_commands._clean_environment(
-                "default", workload, root / "hook.so", "gfx1201", root)
+                "default", workload, root / "hook.so", "gfx1201", root
+            )
             fault = validation_faults._fault_trial_environment(
-                "default", workload, root / "hook.so", "gfx1201",
-                {"environment": {}}, {}, {}, root)
+                "default",
+                workload,
+                root / "hook.so",
+                "gfx1201",
+                {"environment": {}},
+                {},
+                {},
+                root,
+            )
             for environment in (clean, fault):
                 self.assertEqual(environment["RJ_CONSAN_PRESET"], "max")
             for profile in (None, "supercollider"):
                 environment = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1201", root)
+                    profile, workload, root / "hook.so", "gfx1201", root
+                )
                 self.assertNotIn("RJ_CONSAN_PRESET", environment)
             os.environ["CONSAN_VALIDATION_DEFAULT_PRESET"] = "typo"
             with self.assertRaises(validation.ValidationError):
                 validation_commands._clean_environment(
-                    "default", workload, root / "hook.so", "gfx1201", root)
+                    "default", workload, root / "hook.so", "gfx1201", root
+                )
 
     def test_report_cap_applies_to_default_clean_and_fault_only(self):
-        with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE": "1073741824",
-            "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE": "1",
-        }, clear=True):
+        with (
+            temporary_root() as root,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE": "1073741824",
+                    "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE": "1",
+                },
+                clear=True,
+            ),
+        ):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
             clean = validation_commands._clean_environment(
-                "default", workload, root / "hook.so", "gfx1250", root)
+                "default", workload, root / "hook.so", "gfx1250", root
+            )
             fault = validation_faults._fault_trial_environment(
-                "default", workload, root / "hook.so", "gfx1250",
-                {"environment": {}}, {}, {}, root)
+                "default",
+                workload,
+                root / "hook.so",
+                "gfx1250",
+                {"environment": {}},
+                {},
+                {},
+                root,
+            )
             for environment in (clean, fault):
-                self.assertEqual(environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"], "1073741824")
+                self.assertEqual(
+                    environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"], "1073741824"
+                )
             for profile in (None, "supercollider"):
                 environment = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1250", root)
+                    profile, workload, root / "hook.so", "gfx1250", root
+                )
                 self.assertNotIn("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", environment)
             for value in ("0", "-1", "1073741825", "typo", ""):
                 os.environ["CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE"] = value
                 with self.assertRaises(validation.ValidationError):
                     validation_commands._clean_environment(
-                        "default", workload, root / "hook.so", "gfx1250", root)
+                        "default", workload, root / "hook.so", "gfx1250", root
+                    )
 
 
 class SuperColliderDelayEnvironmentTest(unittest.TestCase):
@@ -6794,104 +7019,168 @@ class SuperColliderDelayEnvironmentTest(unittest.TestCase):
             {"trials": [{obsolete: "16"}]},
             {"trial_axis": {obsolete: {"start": 0, "stop": 2}}},
         ):
-            with self.subTest(policy=policy), self.assertRaisesRegex(
-                validation.ValidationError, "use RJ_CONSAN_SC_DELAY"
+            with (
+                self.subTest(policy=policy),
+                self.assertRaisesRegex(
+                    validation.ValidationError, "use RJ_CONSAN_SC_DELAY"
+                ),
             ):
                 validation_faults._fault_trials(
-                    {"profiles": {"supercollider": policy}}, "supercollider")
+                    {"profiles": {"supercollider": policy}}, "supercollider"
+                )
         _, trials = validation_faults._fault_trials(
-            {"profiles": {"supercollider": {
-                "trials": [{"RJ_CONSAN_SC_DELAY": "16"}]
-            }}}, "supercollider")
+            {"profiles": {"supercollider": {"trials": [{"RJ_CONSAN_SC_DELAY": "16"}]}}},
+            "supercollider",
+        )
         self.assertEqual(trials, [{"RJ_CONSAN_SC_DELAY": "16"}])
 
     def test_matching_delay_controls_apply_only_to_supercollider(self):
-        with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_SC_DELAY": "4",
-            "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep",
-        }, clear=True):
+        with (
+            temporary_root() as root,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_SC_DELAY": "4",
+                    "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep",
+                },
+                clear=True,
+            ),
+        ):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
             clean = validation_commands._clean_environment(
-                "supercollider", workload, root / "hook.so", "gfx1201", root)
+                "supercollider", workload, root / "hook.so", "gfx1201", root
+            )
             fault = validation_faults._fault_trial_environment(
-                "supercollider", workload, root / "hook.so", "gfx1201",
-                {"environment": {}}, {}, {}, root)
+                "supercollider",
+                workload,
+                root / "hook.so",
+                "gfx1201",
+                {"environment": {}},
+                {},
+                {},
+                root,
+            )
             for environment in (clean, fault):
                 self.assertEqual(environment["RJ_CONSAN_SC_DELAY"], "4")
                 self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep")
             for profile in (None, "default"):
                 environment = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1201", root)
+                    profile, workload, root / "hook.so", "gfx1201", root
+                )
                 self.assertNotIn("RJ_CONSAN_SC_DELAY", environment)
                 self.assertNotIn("RJ_CONSAN_SC_DELAY_MODE", environment)
-            for key, bad in (("CONSAN_VALIDATION_SC_DELAY", "-1"),
-                             ("CONSAN_VALIDATION_SC_DELAY", "4294967296"),
-                             ("CONSAN_VALIDATION_SC_DELAY_MODE", "typo")):
+            for key, bad in (
+                ("CONSAN_VALIDATION_SC_DELAY", "-1"),
+                ("CONSAN_VALIDATION_SC_DELAY", "4294967296"),
+                ("CONSAN_VALIDATION_SC_DELAY_MODE", "typo"),
+            ):
                 with mock.patch.dict(os.environ, {key: bad}):
                     with self.assertRaises(validation.ValidationError):
                         validation_commands._clean_environment(
-                            "supercollider", workload, root / "hook.so", "gfx1201", root)
-
+                            "supercollider", workload, root / "hook.so", "gfx1201", root
+                        )
 
     def test_wave_sleep_rejects_unsupported_target_before_execution(self):
-        with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_SC_DELAY": "15",
-            "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep_wave",
-        }, clear=True):
+        with (
+            temporary_root() as root,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_SC_DELAY": "15",
+                    "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep_wave",
+                },
+                clear=True,
+            ),
+        ):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
             with self.assertRaisesRegex(validation.ValidationError, "requires gfx1201"):
                 validation_commands._clean_environment(
-                    "supercollider", workload, root / "hook.so", "gfx950", root)
+                    "supercollider", workload, root / "hook.so", "gfx950", root
+                )
             for target in ("gfx1201", "gfx1250"):
                 with self.subTest(target=target):
                     clean = validation_commands._clean_environment(
-                        "supercollider", workload, root / "hook.so", target, root)
+                        "supercollider", workload, root / "hook.so", target, root
+                    )
                     fault = validation_faults._fault_trial_environment(
-                        "supercollider", workload, root / "hook.so", target,
-                        {"environment": {}}, {}, {}, root)
+                        "supercollider",
+                        workload,
+                        root / "hook.so",
+                        target,
+                        {"environment": {}},
+                        {},
+                        {},
+                        root,
+                    )
                     for environment in (clean, fault):
-                        self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep_wave")
+                        self.assertEqual(
+                            environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep_wave"
+                        )
                         self.assertEqual(environment["RJ_CONSAN_SC_DELAY"], "15")
-                    with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "16"}):
-                        with self.assertRaisesRegex(validation.ValidationError, "maximum"):
+                    with mock.patch.dict(
+                        os.environ, {"CONSAN_VALIDATION_SC_DELAY": "16"}
+                    ):
+                        with self.assertRaisesRegex(
+                            validation.ValidationError, "maximum"
+                        ):
                             validation_commands._clean_environment(
-                                "supercollider", workload, root / "hook.so", target, root)
+                                "supercollider",
+                                workload,
+                                root / "hook.so",
+                                target,
+                                root,
+                            )
             # A disabled delay does not emit the architecture-specific sequence.
             with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "0"}):
                 validation_commands._clean_environment(
-                    "supercollider", workload, root / "hook.so", "gfx950", root)
+                    "supercollider", workload, root / "hook.so", "gfx950", root
+                )
 
 
 class SameValueWriteEnvironmentTest(unittest.TestCase):
     def test_policy_is_explicit_and_matches_clean_and_fault(self):
         knob = "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
         selector = "CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
-        with temporary_root() as root, mock.patch.dict(
-            os.environ, {knob: "1"}, clear=True
+        with (
+            temporary_root() as root,
+            mock.patch.dict(os.environ, {knob: "1"}, clear=True),
         ):
             workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
             for profile in ("default", "supercollider"):
                 clean = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1201", root)
+                    profile, workload, root / "hook.so", "gfx1201", root
+                )
                 self.assertNotIn(knob, clean)
             os.environ[selector] = "1"
             for profile in ("default", "supercollider"):
                 clean = validation_commands._clean_environment(
-                    profile, workload, root / "hook.so", "gfx1201", root)
+                    profile, workload, root / "hook.so", "gfx1201", root
+                )
                 fault = validation_faults._fault_trial_environment(
-                    profile, workload, root / "hook.so", "gfx1201",
-                    {"environment": {}}, {}, {}, root)
+                    profile,
+                    workload,
+                    root / "hook.so",
+                    "gfx1201",
+                    {"environment": {}},
+                    {},
+                    {},
+                    root,
+                )
                 for environment in (clean, fault):
                     self.assertEqual(environment[knob], "1")
                     self.assertEqual(
-                        validation_commands._controlled_environment(environment)[knob], "1")
+                        validation_commands._controlled_environment(environment)[knob],
+                        "1",
+                    )
             native = validation_commands._clean_environment(
-                None, workload, None, "gfx1201", root)
+                None, workload, None, "gfx1201", root
+            )
             self.assertNotIn(knob, native)
             os.environ[selector] = "typo"
             with self.assertRaises(validation.ValidationError):
                 validation_commands._clean_environment(
-                    "default", workload, root / "hook.so", "gfx1201", root)
+                    "default", workload, root / "hook.so", "gfx1201", root
+                )
 
 
 class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
@@ -6901,22 +7190,38 @@ class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
             path = root / "gfx1201" / "d128-block.txt"
             path.parent.mkdir()
             path.write_text("kernel_a\nkernel_b\n")
-            with mock.patch.dict(os.environ, {
-                "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
-                "RJ_CONSAN_KERNEL_ALLOWLIST": "inherited_wrong_kernel",
-                "RJ_CONSAN_KERNEL_ALLOWLIST_FILE": "/wrong/inherited.txt",
-            }, clear=True):
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
+                    "RJ_CONSAN_KERNEL_ALLOWLIST": "inherited_wrong_kernel",
+                    "RJ_CONSAN_KERNEL_ALLOWLIST_FILE": "/wrong/inherited.txt",
+                },
+                clear=True,
+            ):
                 clean = validation_commands._run_environment(
-                    "default", workload, root / "hook.so", "gfx1201", "clean", root)
+                    "default", workload, root / "hook.so", "gfx1201", "clean", root
+                )
                 inventory = validation_commands._clean_environment(
-                    "supercollider", workload, root / "hook.so", "gfx1201", root)
+                    "supercollider", workload, root / "hook.so", "gfx1201", root
+                )
                 fault = validation_faults._fault_trial_environment(
-                    "default", workload, root / "hook.so", "gfx1201",
-                    {"environment": {}}, {}, {}, root)
+                    "default",
+                    workload,
+                    root / "hook.so",
+                    "gfx1201",
+                    {"environment": {}},
+                    {},
+                    {},
+                    root,
+                )
                 native = validation_commands._clean_environment(
-                    None, workload, None, "gfx1201", root)
+                    None, workload, None, "gfx1201", root
+                )
             for environment in (clean, inventory, fault):
-                self.assertEqual(environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], str(path))
+                self.assertEqual(
+                    environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], str(path)
+                )
                 self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST", environment)
                 settings = {
                     item["name"]: item
@@ -6937,9 +7242,13 @@ class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
             path = root / "gfx1201" / "d128-block.txt"
             path.parent.mkdir()
-            with mock.patch.dict(os.environ, {
-                "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
-            }, clear=True):
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
+                },
+                clear=True,
+            ):
                 with self.assertRaises(validation.ValidationError):
                     validation_commands._kernel_allowlist_file("gfx1201", workload)
                 for contents in ("", "kernel\nkernel\n", " kernel\n", "# comment\n"):
@@ -6951,11 +7260,17 @@ class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
                     validation_commands._kernel_allowlist_file("gfx950", workload)
 
     def test_explicit_hook_selects_current_build(self):
-        with mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_HOOK": "/tmp/current-build/hook.so",
-        }, clear=True):
-            self.assertEqual(validation_commands._hook_path(Path("/workspace")),
-                             Path("/tmp/current-build/hook.so"))
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CONSAN_VALIDATION_HOOK": "/tmp/current-build/hook.so",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                validation_commands._hook_path(Path("/workspace")),
+                Path("/tmp/current-build/hook.so"),
+            )
 
 
 if __name__ == "__main__":
