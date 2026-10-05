@@ -284,8 +284,11 @@ protected:
   };
 
   amdgcn_architecture_t (elf_amdgpu_machine_t e_machine,
-                         std::string target_triple)
-    : architecture_t (e_machine, std::move (target_triple))
+                         std::string target_triple,
+                         amdgpu_regnum_t max_vgpr32,
+                         amdgpu_regnum_t max_vgpr64)
+    : architecture_t (e_machine, std::move (target_triple),
+                      max_vgpr32, max_vgpr64)
   {
   }
 
@@ -1899,7 +1902,12 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
         = utils::narrow<int> (regnum - amdgpu_regnum_t::first_sgpr);
       return string_printf ("s%d", print_num);
     }
-  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= max_vgpr_32)
+    {
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
+      return string_printf ("v%d", print_num);
+    }
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= max_vgpr_64)
     {
       int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_64);
       return string_printf ("v%d", print_num);
@@ -1997,10 +2005,12 @@ std::string
 amdgcn_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
-    {
-      return "int32_t[64]";
-    }
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= max_vgpr_32)
+    return "int32_t[32]";
+
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= max_vgpr_64)
+    return "int32_t[64]";
+
   /* Scalar registers.  */
   if ((regnum >= amdgpu_regnum_t::first_shadow_sgpr
        && regnum <= amdgpu_regnum_t::last_shadow_sgpr)
@@ -2060,10 +2070,12 @@ amd_dbgapi_size_t
 amdgcn_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
-    {
-      return sizeof (int32_t) * 64;
-    }
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= max_vgpr_32)
+    return sizeof (int32_t) * 32;
+
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= max_vgpr_64)
+    return sizeof (int32_t) * 64;
+
   /* Scalar registers.  */
   if ((regnum >= amdgpu_regnum_t::first_shadow_sgpr
        && regnum <= amdgpu_regnum_t::last_shadow_sgpr)
@@ -2562,7 +2574,10 @@ protected:
   wave_get_state (wave_t &wave) const override;
 
   gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
-                       std::string target_triple);
+                       std::string target_triple,
+                       /* gfx9 has wave64 mode only.  */
+                       amdgpu_regnum_t max_vgpr32 = amdgpu_regnum_t::absent,
+                       amdgpu_regnum_t max_vgpr64 = amdgpu_regnum_t::v255_64);
 
 public:
   std::string register_type (amdgpu_regnum_t regnum) const override;
@@ -2632,8 +2647,11 @@ protected:
 };
 
 gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
-                                          std::string target_triple)
-  : amdgcn_architecture_t (e_machine, std::move (target_triple))
+                                          std::string target_triple,
+                                          amdgpu_regnum_t max_vgpr32,
+                                          amdgpu_regnum_t max_vgpr64)
+  : amdgcn_architecture_t (e_machine, std::move (target_triple),
+                           max_vgpr32, max_vgpr64)
 {
   /* Create address spaces.  */
 
@@ -2672,10 +2690,9 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
       + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
       - 1));
 
-  /* Vector registers: [v0-v255]  */
+  /* Vector registers: [v0 ...]  */
   auto &vector_registers = create<register_class_t> (*this, "vector");
-  vector_registers.add_registers (amdgpu_regnum_t::v0_64,
-                                  amdgpu_regnum_t::v255_64);
+  vector_registers.add_registers (amdgpu_regnum_t::v0_64, max_vgpr_64);
 
   /* Trap temporary registers: [ttmp4-ttmp11, ttmp13]  */
   auto &trap_registers = create<register_class_t> (*this, "trap");
@@ -2704,8 +2721,7 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
      amdgpu_regnum_t::first_sgpr
      + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
      - 1);
-  general_registers.add_registers (amdgpu_regnum_t::v0_64,
-                                   amdgpu_regnum_t::v255_64);
+  general_registers.add_registers (amdgpu_regnum_t::v0_64, max_vgpr_64);
   general_registers.add_registers (amdgpu_regnum_t::m0, amdgpu_regnum_t::m0);
   general_registers.add_registers (amdgpu_regnum_t::pc, amdgpu_regnum_t::pc);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_exec_64,
@@ -3386,7 +3402,7 @@ gfx9_architecture_t::cwsr_record_t::register_address (
 
   if (lane_count () == 64
       && regnum >= amdgpu_regnum_t::v0_64
-      && regnum <= amdgpu_regnum_t::v255_64
+      && regnum <= architecture.max_vgpr_64
       && ((regnum - amdgpu_regnum_t::v0_64)
           < utils::narrow<amdgpu_regdiff_t> (vgpr_count ())))
     {
@@ -4543,7 +4559,9 @@ protected:
                  const instruction_t &instruction) const override;
 
   gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
-                        std::string target_triple);
+                        std::string target_triple,
+                        amdgpu_regnum_t max_vgpr32 = amdgpu_regnum_t::v255_32,
+                        amdgpu_regnum_t max_vgpr64 = amdgpu_regnum_t::v255_64);
 
 public:
   std::string register_name (amdgpu_regnum_t regnum) const override;
@@ -4598,8 +4616,11 @@ public:
 };
 
 gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
-                                            std::string target_triple)
-  : gfx9_architecture_t (e_machine, std::move (target_triple))
+                                            std::string target_triple,
+                                            amdgpu_regnum_t max_vgpr32,
+                                            amdgpu_regnum_t max_vgpr64)
+  : gfx9_architecture_t (e_machine, std::move (target_triple),
+                         max_vgpr32, max_vgpr64)
 {
   /* Scalar registers: [s103-s105]  */
   register_class_t &scalar_registers = get_register_class ("scalar");
@@ -4623,10 +4644,9 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
       + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
       - 1));
 
-  /* Vector registers: [v0_32-v255_32]  */
+  /* Vector registers: [v0_32 ...]  */
   register_class_t &vector_registers = get_register_class ("vector");
-  vector_registers.add_registers (amdgpu_regnum_t::v0_32,
-                                  amdgpu_regnum_t::v255_32);
+  vector_registers.add_registers (amdgpu_regnum_t::v0_32, max_vgpr_32);
 
   /* System registers: [xnack_mask_32]  */
   register_class_t &system_registers = get_register_class ("system");
@@ -4648,8 +4668,7 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
      (amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
       - 1));
-  general_registers.add_registers (amdgpu_regnum_t::v0_32,
-                                   amdgpu_regnum_t::v255_32);
+  general_registers.add_registers (amdgpu_regnum_t::v0_32, max_vgpr_32);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_exec_32,
                                    amdgpu_regnum_t::pseudo_exec_32);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_vcc_32,
@@ -4659,11 +4678,6 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
 std::string
 gfx10_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32)
-    {
-      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
-      return string_printf ("v%d", print_num);
-    }
   if (regnum == amdgpu_regnum_t::exec_32
       || regnum == amdgpu_regnum_t::pseudo_exec_32)
     {
@@ -4694,11 +4708,6 @@ gfx10_architecture_t::register_name (amdgpu_regnum_t regnum) const
 std::string
 gfx10_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
-    {
-      return "int32_t[32]";
-    }
   if (regnum == amdgpu_regnum_t::exec_32
       || regnum == amdgpu_regnum_t::pseudo_exec_32
       || regnum == amdgpu_regnum_t::vcc_32
@@ -4809,11 +4818,6 @@ gfx10_architecture_t::register_type (amdgpu_regnum_t regnum) const
 amd_dbgapi_size_t
 gfx10_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
-  /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
-    {
-      return sizeof (int32_t) * 32;
-    }
   if (regnum == amdgpu_regnum_t::exec_32
       || regnum == amdgpu_regnum_t::pseudo_exec_32
       || regnum == amdgpu_regnum_t::vcc_32
@@ -5081,6 +5085,8 @@ gfx10_architecture_t::cwsr_record_t::register_address (
       break;
     }
 
+  const auto &architecture = queue ().architecture ();
+
   /* The shared vgprs are 32-wide vector registers shared between the 2 halves
      of a wave64 on gfx10.  They are logically addressed right after the
      64-wide private vector registers.  Note: In wave32, although unsupported,
@@ -5088,7 +5094,7 @@ gfx10_architecture_t::cwsr_record_t::register_address (
   size_t num_vgprs = vgpr_count ();
   if (regnum >= (amdgpu_regnum_t::v0_32
                  + utils::narrow<amdgpu_regdiff_t> (num_vgprs))
-      && regnum <= amdgpu_regnum_t::v255_32
+      && regnum <= architecture.max_vgpr_32
       && ((regnum - amdgpu_regnum_t::v0_32)
           < utils::narrow<amdgpu_regdiff_t> (num_vgprs
                                              + shared_vgpr_count ())))
@@ -5103,7 +5109,7 @@ gfx10_architecture_t::cwsr_record_t::register_address (
     }
 
   if (lane_count == 32 && regnum >= amdgpu_regnum_t::v0_32
-      && regnum <= amdgpu_regnum_t::v255_32
+      && regnum <= architecture.max_vgpr_32
       && ((regnum - amdgpu_regnum_t::v0_32)
           < utils::narrow<amdgpu_regdiff_t> (num_vgprs)))
     {
@@ -5544,8 +5550,11 @@ protected:
   scalar_operand_to_regnum (int operand, bool priv = false) const override;
 
   gfx11_architecture_t (elf_amdgpu_machine_t e_machine,
-                        std::string target_triple)
-    : gfx10_architecture_t (e_machine, std::move (target_triple))
+                        std::string target_triple,
+                        amdgpu_regnum_t max_vgpr32 = amdgpu_regnum_t::v255_32,
+                        amdgpu_regnum_t max_vgpr64 = amdgpu_regnum_t::v255_64)
+    : gfx10_architecture_t (e_machine, std::move (target_triple),
+                            max_vgpr32, max_vgpr64)
   {
   }
 
@@ -5718,9 +5727,12 @@ std::optional<agent_address_t>
 gfx11_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
 {
-  if ((regnum >= amdgpu_regnum_t::v0_64 && regnum < amdgpu_regnum_t::v255_64)
+  const auto &architecture = queue ().architecture ();
+
+  if ((regnum >= amdgpu_regnum_t::v0_64
+       && regnum < architecture.max_vgpr_64)
       || (regnum >= amdgpu_regnum_t::v0_32
-          && regnum < amdgpu_regnum_t::v255_32))
+          && regnum < architecture.max_vgpr_32))
     {
       const agent_address_t status_reg_address
         = register_address (amdgpu_regnum_t::status).value ();
@@ -6436,7 +6448,9 @@ protected:
   }
 
   gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
-                        std::string target_triple);
+                        std::string target_triple,
+                        amdgpu_regnum_t max_vgpr32 = amdgpu_regnum_t::v255_32,
+                        amdgpu_regnum_t max_vgpr64 = amdgpu_regnum_t::v255_64);
 
   std::optional<uint64_t> dispatch_packet_id (
     const architecture_t::cwsr_record_t &cwsr_record) const override;
@@ -6519,8 +6533,10 @@ protected:
 };
 
 gfx12_architecture_t::gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
-                                            std::string target_triple)
-  : gfx11_architecture_t (e_machine, target_triple)
+                                            std::string target_triple,
+                                            amdgpu_regnum_t max_vgpr32,
+                                            amdgpu_regnum_t max_vgpr64)
+  : gfx11_architecture_t (e_machine, target_triple, max_vgpr32, max_vgpr64)
 {
   auto &system_registers = get_register_class ("system");
 
@@ -7675,7 +7691,12 @@ class gfx12_5_architecture_t : public gfx12_architecture_t
 {
 protected:
   gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
-                          std::string target_triplet);
+                          std::string target_triplet,
+                          amdgpu_regnum_t max_vgpr32
+                            = amdgpu_regnum_t::v1023_32,
+                          /* gfx12_5 has wave32 mode only.  */
+                          amdgpu_regnum_t max_vgpr64
+                            = amdgpu_regnum_t::absent);
 
   class cwsr_record_t : public gfx12_architecture_t::cwsr_record_t
   {
@@ -7890,8 +7911,10 @@ gfx12_5_architecture_t::get_apertures (const os_agent_info_t &info) const
 }
 
 gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
-                                                std::string target_triple)
-  : gfx12_architecture_t (e_machine, target_triple)
+                                                std::string target_triple,
+                                                amdgpu_regnum_t max_vgpr32,
+                                                amdgpu_regnum_t max_vgpr64)
+  : gfx12_architecture_t (e_machine, target_triple, max_vgpr32, max_vgpr64)
 {
   /* Create address space.  */
 
@@ -7913,17 +7936,7 @@ gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
     /* va_address_size  */ 57u,
     static_cast<const private_swizzled_address_space_t &> (*private_lane));
 
-  /* Create register classes.  */
-
   auto &sys_regs = get_register_class ("system");
-  auto &vec_regs = get_register_class ("vector");
-  auto &gen_regs = get_register_class ("general");
-
-  /* v0_32-v255_32 are added by gfx10_architecture_t.  */
-  vec_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
-                          amdgpu_regnum_t::v1023_32);
-  gen_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
-                          amdgpu_regnum_t::v1023_32);
 
   /* GFX10 adds an xnack_mask_32 conditionally for ELF machines:
 
@@ -7939,12 +7952,6 @@ gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
 std::string
 gfx12_5_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v1023_32)
-    {
-      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
-      return string_printf ("v%d", print_num);
-    }
-
   switch (regnum)
     {
     case amdgpu_regnum_t::xnack_mask_32:
@@ -7958,12 +7965,6 @@ gfx12_5_architecture_t::register_name (amdgpu_regnum_t regnum) const
 std::string
 gfx12_5_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  if ((regnum >= amdgpu_regnum_t::v0_32
-       && regnum <= amdgpu_regnum_t::v1023_32))
-    {
-      return "int32_t[32]";
-    }
-
   switch (regnum)
     {
     case amdgpu_regnum_t::mode:
@@ -8009,12 +8010,6 @@ gfx12_5_architecture_t::register_type (amdgpu_regnum_t regnum) const
 amd_dbgapi_size_t
 gfx12_5_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
-  if ((regnum >= amdgpu_regnum_t::v0_32
-       && regnum <= amdgpu_regnum_t::v1023_32))
-    {
-      return sizeof (int32_t) * 32;
-    }
-
   switch (regnum)
     {
     case amdgpu_regnum_t::xnack_mask_32:
@@ -8501,10 +8496,13 @@ public:
 };
 
 architecture_t::architecture_t (elf_amdgpu_machine_t e_machine,
-                                std::string target_triple)
+                                std::string target_triple,
+                                amdgpu_regnum_t max_vgpr32,
+                                amdgpu_regnum_t max_vgpr64)
   : m_architecture_id (
       amd_dbgapi_architecture_id_t{ s_next_architecture_id () }),
-    m_e_machine (e_machine), m_target_triple (std::move (target_triple))
+    m_e_machine (e_machine), m_target_triple (std::move (target_triple)),
+    max_vgpr_32 (max_vgpr32), max_vgpr_64 (max_vgpr64)
 {
 }
 
