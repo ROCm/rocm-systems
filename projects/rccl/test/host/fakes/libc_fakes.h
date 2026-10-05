@@ -91,6 +91,8 @@ extern std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite;
 extern std::function<int(FILE*)> g_fflush;
 extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
+extern std::function<int(char*, size_t)> g_gethostname;
+extern std::function<int(const char*, int)> g_access;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own

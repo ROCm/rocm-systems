@@ -97,6 +97,20 @@ ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int siz
   return g_devrBootstrapIntraNodeAllGather(bs, ranks, self, size, buf, bytes);
 }
 
+static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend = DefaultBootstrapSend;
+
+ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapSend(bs, peer, tag, data, size);
+}
+
+static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv = DefaultBootstrapRecv;
+
+ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapRecv(bs, peer, tag, data, size);
+}
+
 // ---------------------------------------------------------------------------
 // Arg checks / comm readiness.
 // ---------------------------------------------------------------------------
@@ -527,6 +541,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_devrBootstrapAllGather                      = DefaultAllGather;
+  g_devrBootstrapSend                           = DefaultBootstrapSend;
+  g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;

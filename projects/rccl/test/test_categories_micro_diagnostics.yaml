@@ -1,11 +1,12 @@
-# CTest categories for the host-only src/diagnostics/p2p.cc microtests.
+# CTest categories for the host-only src/diagnostics/p2p.cc and ib_write_bw.cc microtests.
 #
-# gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with diag-p2p-test.cc's suites.
+# gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with the diag-*-test.cc suites.
 test_categories:
   quick: &micro_diagnostics_quick
-    description: "Smoke - host-only src/diagnostics/p2p.cc micro-tests, sub-second."
+    description: "Smoke - host-only src/diagnostics/ micro-tests, sub-second."
     test_patterns:
       - "DiagP2pMicrotest.*"
+      - "DiagIbWriteBwMicrotest.*"
     exclude_windows:
       - "*"
     labels:

@@ -111,6 +111,18 @@ std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTop
 ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw) {
   return g_ncclTopoGetLocalNetCountByBw(system, gpu, count, bw);
 }
+static ncclResult_t DefaultTopoGetLocalNet(struct ncclTopoSystem*, int, int, int64_t* id, int* dev) {
+  if (id != nullptr) {
+    *id = 0;
+  }
+  *dev = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet =
+    DefaultTopoGetLocalNet;
+ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
+  return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
+}
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
 // Controllable (was fail-loud). This is the FIRST call after initTransportsRank's MNNVL/intra-proc block, so arming it
@@ -227,6 +239,7 @@ void ResetTopoStubs() {
     *bw = 0.0f;
     return ncclSuccess;
   };
+  g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
