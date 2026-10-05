@@ -208,7 +208,7 @@ class TcpBootstrap::Impl {
   std::vector<int> ipcCapableRanks_;
 
   void netSend(Socket* sock, const void* data, int size);
-  void netRecv(Socket* sock, void* data, int size);
+  bool netRecv(Socket* sock, void* data, int size);
 
   std::shared_ptr<Socket> getPeerSendSocket(int peer, int tag);
   std::shared_ptr<Socket> getPeerRecvSocket(int peer, int tag);
@@ -348,11 +348,22 @@ void TcpBootstrap::Impl::getRemoteAddresses(Socket* listenSock, std::vector<Sock
   {
     Socket sock(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown, abortFlag_);
     sock.accept(listenSock);
-    netRecv(&sock, &info, sizeof(info));
+    if (!netRecv(&sock, &info, sizeof(info))) {
+      LOG_WARN("Bootstrap Root : discarding malformed check-in");
+      return;
+    }
   }
 
   if (this->nRanks_ != info.nRanks) {
     ERROR("Bootstrap Root : mismatch in rank count from procs %d : %d\n", this->nRanks_, info.nRanks);
+    return;
+  }
+
+  // info.rank is peer-supplied and is used below to index nRanks_-element
+  // vectors. Reject out-of-range values before any subscript to prevent a
+  // heap out-of-bounds read/write (CWE-129/CWE-787).
+  if (info.rank < 0 || info.rank >= this->nRanks_) {
+    ERROR("Bootstrap Root : invalid rank %d of %d from peer\n", info.rank, this->nRanks_);
     return;
   }
 
@@ -675,14 +686,18 @@ void TcpBootstrap::Impl::netSend(Socket* sock, const void* data, int size) {
   sock->send(const_cast<void*>(data), size);
 }
 
-void TcpBootstrap::Impl::netRecv(Socket* sock, void* data, int size) {
+bool TcpBootstrap::Impl::netRecv(Socket* sock, void* data, int size) {
   int recvSize;
   sock->recv(&recvSize, sizeof(int));
-  if (recvSize > size) {
-    ERROR("Message truncated : received %d bytes instead of %d\n", recvSize, size);
-    return;
+  // A peer-controlled length prefix must never be able to abort the process.
+  // Treat an out-of-range length as a protocol violation and fail closed by
+  // dropping the message so the caller can discard this connection.
+  if (recvSize < 0 || recvSize > size) {
+    LOG_WARN("netRecv: invalid message length %d (expected 0..%d); dropping connection", recvSize, size);
+    return false;
   }
-  sock->recv(data, std::min(recvSize, size));
+  sock->recv(data, recvSize);
+  return true;
 }
 
 void TcpBootstrap::Impl::send(void* data, int size, int peer, int tag) {
