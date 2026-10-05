@@ -15,6 +15,7 @@
 
 // hrr_api_args.h — HRR_API_* enum values and hrr_api_names[] string table
 #include "hrr/hrr_api_args.h"
+#include "hrr_replay_limits.h"  // kDefaultMaxEvents
 
 // HRR Archive Reader — reads .hrr trace archives produced by the in-tree
 // capture layer (HIP_HRR_CAPTURE_OUTPUT).
@@ -237,6 +238,13 @@ std::vector<std::string> find_region_streams(const std::string& archive_dir);
 constexpr uint64_t kDefaultMaxFileBytes = 4ull << 30;
 uint64_t max_file_bytes();
 void set_max_file_bytes(uint64_t bytes);
+
+// Most events load_archive() will hold. It stops at the first record past the
+// cap and fails, naming the count and the cap, so an archive cannot make the
+// reader allocate without bound. Default kDefaultMaxEvents (hrr_replay_limits.h). Set once at
+// start-up, before any reader thread runs.
+uint64_t max_events();
+void set_max_events(uint64_t events);
 
 // Read a whole file into `data`, refusing one larger than max_file_bytes().
 // Returns false if the file cannot be opened or read, or is too large; *error

@@ -15,8 +15,13 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
+#include <mutex>
+#include <string>
 #include <thread>
 
 namespace hrr {
@@ -27,6 +32,25 @@ namespace hrr {
 // recorded run needs, and still end a malformed archive.
 constexpr uint64_t kDefaultMaxSeqWaits      = 5000000;
 constexpr uint64_t kDefaultMaxQueryAttempts = 5000000;
+
+// Caps on the resources an archive can make replay consume.
+// Each is set with a --max-* option; 0 turns the wall-clock watchdog off and
+// makes every other cap refuse everything, so there is no "unlimited" value to
+// pass by accident. The defaults hold on a developer machine: a recorded run
+// has a handful of threads and a bounded working set, and a replay that needs
+// more says so with the option that raises it.
+//
+//   threads     one operating-system thread is created per recorded thread id
+//               in --multi-thread mode.
+//   events      events held in memory after the archive is loaded.
+//   host bytes  host memory the replay holds on behalf of the archive: blob
+//               and code-object caches, pinned and registered host buffers,
+//               graph landing buffers and D2H read-back buffers.
+//   wall time   seconds from the start of the replay.
+constexpr uint64_t kDefaultMaxThreads   = 256;
+constexpr uint64_t kDefaultMaxEvents    = 50000000;
+constexpr uint64_t kDefaultMaxHostBytes = 16ull << 30;  // 16 GiB
+constexpr uint64_t kDefaultMaxWallSecs  = 3600;         // 1 hour
 
 // Number of yields before a wait starts sleeping.
 constexpr int kSpinYields = 1000;
@@ -123,5 +147,99 @@ bool retry_bounded(uint64_t max_attempts, Attempt&& attempt) {
   }
   return false;
 }
+
+// Refuse a recorded thread count above the cap. Returns true if `recorded`
+// threads may be created; otherwise false and *message says how many were
+// recorded and what the cap is. Called before any replay thread starts, so the
+// process never exceeds the cap.
+inline bool check_thread_cap(size_t recorded, uint64_t cap, std::string* message) {
+  if (recorded <= cap) return true;
+  if (message)
+    *message = "archive records " + std::to_string(recorded) +
+               " threads, more than the cap of " + std::to_string(cap) +
+               " (--max-threads)";
+  return false;
+}
+
+// A running total of bytes against a cap. try_charge() is all-or-nothing: it
+// adds `n` only if the total stays within the cap, with no overflow for any
+// `n`. Thread safe.
+class ByteBudget {
+ public:
+  explicit ByteBudget(uint64_t cap = kDefaultMaxHostBytes) : cap_(cap) {}
+  void set_cap(uint64_t cap) { cap_.store(cap, std::memory_order_relaxed); }
+  uint64_t cap() const { return cap_.load(std::memory_order_relaxed); }
+  uint64_t used() const { return used_.load(std::memory_order_relaxed); }
+
+  bool try_charge(uint64_t n) {
+    const uint64_t cap = cap_.load(std::memory_order_relaxed);
+    uint64_t cur = used_.load(std::memory_order_relaxed);
+    do {
+      if (n > cap || cur > cap - n) return false;
+    } while (!used_.compare_exchange_weak(cur, cur + n, std::memory_order_relaxed));
+    return true;
+  }
+  void release(uint64_t n) {
+    uint64_t cur = used_.load(std::memory_order_relaxed);
+    while (!used_.compare_exchange_weak(cur, cur > n ? cur - n : 0,
+                                        std::memory_order_relaxed)) {}
+  }
+
+ private:
+  std::atomic<uint64_t> cap_;
+  std::atomic<uint64_t> used_{0};
+};
+
+// Holds a charge against a ByteBudget for the life of the object, for buffers
+// that are freed again (read-back buffers). ok() is false if the charge was
+// refused; nothing is held then.
+class ScopedCharge {
+ public:
+  ScopedCharge(ByteBudget& b, uint64_t n) : b_(b), n_(n), ok_(b.try_charge(n)) {}
+  ~ScopedCharge() { if (ok_) b_.release(n_); }
+  ScopedCharge(const ScopedCharge&) = delete;
+  ScopedCharge& operator=(const ScopedCharge&) = delete;
+  bool ok() const { return ok_; }
+
+ private:
+  ByteBudget& b_;
+  uint64_t n_;
+  bool ok_;
+};
+
+// Calls `on_expire` once, from its own thread, if it is still alive `limit`
+// after construction. Destroying it first cancels the call. A zero `limit`
+// disables it. The callback must end the process (the replay may be blocked in
+// a HIP call that no flag can interrupt), for example by printing and calling
+// _exit.
+class WallClockWatchdog {
+ public:
+  WallClockWatchdog(std::chrono::milliseconds limit, std::function<void()> on_expire)
+      : on_expire_(std::move(on_expire)) {
+    if (limit.count() == 0) return;
+    thread_ = std::thread([this, limit] {
+      std::unique_lock<std::mutex> lk(m_);
+      if (!cv_.wait_for(lk, limit, [this] { return cancel_; }))
+        on_expire_();
+    });
+  }
+  ~WallClockWatchdog() {
+    {
+      std::lock_guard<std::mutex> lk(m_);
+      cancel_ = true;
+    }
+    cv_.notify_all();
+    if (thread_.joinable()) thread_.join();
+  }
+  WallClockWatchdog(const WallClockWatchdog&) = delete;
+  WallClockWatchdog& operator=(const WallClockWatchdog&) = delete;
+
+ private:
+  std::function<void()> on_expire_;
+  std::mutex m_;
+  std::condition_variable cv_;
+  bool cancel_ = false;
+  std::thread thread_;
+};
 
 }  // namespace hrr

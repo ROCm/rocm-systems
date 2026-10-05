@@ -18,27 +18,30 @@
 #include "hrr_test_common.hh"
 #include "hrr_reader.h"
 #include "hrr_replay_limits.h"
+#include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
 
 namespace {
 
-hrr_event_header make_record(uint64_t seq) {
+hrr_event_header make_record(uint64_t seq, uint64_t thread_id = 42) {
   hrr_event_header h{};
   std::memset(&h, 0, sizeof(h));
   h.event_type     = static_cast<uint16_t>(HRR_API_HIPDEVICESYNCHRONIZE);
   h.sequence_id    = seq;
   h.timestamp_ns   = 1000 + seq;
-  h.thread_id      = 42;
+  h.thread_id      = thread_id;
   h.payload_length = static_cast<uint16_t>(sizeof(hrr_event_header));
   return h;
 }
@@ -47,7 +50,9 @@ hrr_event_header make_record(uint64_t seq) {
 struct TmpArchive {
   fs::path root;
 
-  TmpArchive(const std::string& name, const std::vector<uint64_t>& seqs) {
+  // Event i is recorded by thread 42 + (i % distinct_threads).
+  TmpArchive(const std::string& name, const std::vector<uint64_t>& seqs,
+             uint64_t distinct_threads = 1) {
     root = fs::temp_directory_path() / ("hrr_lim_" + name);
     fs::remove_all(root);
     fs::create_directories(root / "blobs");
@@ -55,8 +60,9 @@ struct TmpArchive {
     std::ofstream f(root / "events.bin", std::ios::binary);
     hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
     f.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+    uint64_t i = 0;
     for (uint64_t s : seqs) {
-      hrr_event_header h = make_record(s);
+      hrr_event_header h = make_record(s, 42 + (i++ % distinct_threads));
       f.write(reinterpret_cast<const char*>(&h), sizeof(h));
     }
   }
@@ -305,6 +311,220 @@ HRR_TEST_CASE(Unit_HRR_Limits_ParseU64) {
     CHECK(v == 99);
   }
   CHECK_FALSE(hrr::parse_u64(nullptr, &v));
+}
+
+// ---------------------------------------------------------------------------
+// Caps on threads, host memory, events and wall time
+// ---------------------------------------------------------------------------
+
+// Restores the process-wide event cap when a test ends, pass or fail.
+struct EventCapGuard {
+  uint64_t saved = hrr::max_events();
+  ~EventCapGuard() { hrr::set_max_events(saved); }
+};
+
+/**
+ * Test Description
+ * ----------------
+ *   - check_thread_cap allows a recorded thread count up to the cap and
+ *     refuses one above it, with the recorded count and the cap in the message.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_ThreadCap) {
+  std::string why;
+  CHECK(hrr::check_thread_cap(256, 256, &why));
+  CHECK(why.empty());
+  CHECK_FALSE(hrr::check_thread_cap(257, 256, &why));
+  CHECK(why.find("257") != std::string::npos);
+  CHECK(why.find("256") != std::string::npos);
+  CHECK_FALSE(hrr::check_thread_cap(1, 0, nullptr));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hrr-playback --multi-thread on an archive recording more threads than
+ *     --max-threads exits non-zero with the recorded count in the message,
+ *     before it creates a replay thread (and before it touches the GPU, so the
+ *     case needs no device).
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyThreads) {
+  TmpArchive arc("threads", {0, 1, 2, 3, 4, 5}, /*distinct_threads=*/6);
+  auto [ret, out] = hrr_playback_merged(arc.root, "--multi-thread --max-threads 4");
+  CHECK(ret != 0);
+  CHECK(out.find("6 threads") != std::string::npos);
+  CHECK(out.find("--max-threads") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - load_archive stops at the event cap: an archive with three events fails
+ *     to load under a cap of two and loads under a cap of three.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_EventCap) {
+  EventCapGuard guard;
+  CHECK(guard.saved == hrr::kDefaultMaxEvents);  // max_events() default
+  TmpArchive arc("events", {0, 1, 2});
+  hrr::Archive a;
+  hrr::set_max_events(2);
+  CHECK_FALSE(hrr::load_archive(arc.path(), a));
+  CHECK(a.events.size() == 2);
+
+  hrr::Archive b;
+  hrr::set_max_events(3);
+  CHECK(hrr::load_archive(arc.path(), b));
+  CHECK(b.events.size() == 3);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hrr-playback --max-events refuses an over-cap archive without a GPU.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyEvents) {
+  TmpArchive arc("events_cli", {0, 1, 2});
+  auto [ret, out] = hrr_playback_merged(arc.root, "--max-events 2");
+  CHECK(ret != 0);
+  CHECK(out.find("--max-events") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - ByteBudget charges up to its cap and refuses beyond it, leaving the
+ *     total unchanged on a refusal; release gives bytes back; a request near
+ *     UINT64_MAX does not wrap past the cap.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_ByteBudget) {
+  CHECK(hrr::ByteBudget().cap() == hrr::kDefaultMaxHostBytes);  // the default cap
+  hrr::ByteBudget b(100);
+  CHECK(b.cap() == 100);
+  CHECK(b.used() == 0);
+  CHECK(b.try_charge(60));
+  CHECK(b.try_charge(40));
+  CHECK(b.used() == 100);
+  CHECK_FALSE(b.try_charge(1));
+  CHECK(b.used() == 100);
+  b.release(30);
+  CHECK(b.try_charge(30));
+  CHECK_FALSE(b.try_charge(UINT64_MAX));
+  CHECK_FALSE(b.try_charge(UINT64_MAX - 50));
+  CHECK(b.used() == 100);
+  b.release(1000);  // over-release clamps at zero
+  CHECK(b.used() == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Many threads charging the same budget never take it past the cap.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_ByteBudgetConcurrent) {
+  hrr::ByteBudget b(1000);
+  std::atomic<uint64_t> granted{0};
+  std::vector<std::thread> ts;
+  for (int t = 0; t < 8; ++t)
+    ts.emplace_back([&] {
+      for (int i = 0; i < 1000; ++i)
+        if (b.try_charge(7)) granted.fetch_add(7);
+    });
+  for (auto& t : ts) t.join();
+  CHECK(granted.load() == b.used());
+  CHECK(b.used() <= 1000);
+  CHECK(b.used() >= 1000 - 7);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - ScopedCharge holds bytes while alive and returns them when it ends; a
+ *     refused charge holds nothing.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_ScopedCharge) {
+  hrr::ByteBudget b(100);
+  {
+    hrr::ScopedCharge a(b, 80);
+    CHECK(a.ok());
+    CHECK(b.used() == 80);
+    hrr::ScopedCharge c(b, 80);
+    CHECK_FALSE(c.ok());
+    CHECK(b.used() == 80);
+  }
+  CHECK(b.used() == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - The wall-clock watchdog calls its handler once after the limit, and not
+ *     at all when it is destroyed before the limit or when the limit is zero.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_WallClockWatchdog) {
+  using namespace std::chrono_literals;
+  std::atomic<int> fired{0};
+  {
+    hrr::WallClockWatchdog w(50ms, [&] { fired.fetch_add(1); });
+    for (int i = 0; i < 200 && fired.load() == 0; ++i)
+      std::this_thread::sleep_for(10ms);
+    CHECK(fired.load() == 1);
+  }
+  CHECK(fired.load() == 1);
+
+  std::atomic<int> early{0};
+  { hrr::WallClockWatchdog w(10s, [&] { early.fetch_add(1); }); }
+  CHECK(early.load() == 0);
+
+  std::atomic<int> off{0};
+  {
+    hrr::WallClockWatchdog w(0ms, [&] { off.fetch_add(1); });
+    std::this_thread::sleep_for(50ms);
+  }
+  CHECK(off.load() == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Host allocations are charged before they are made and released when the
+ *     recorded address is freed or recorded again (a second pass replays the
+ *     same events), so the budget does not drift upward; a refused charge ends
+ *     the whole replay (fatal_error), not just the call, and takes no charge.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(100);
+
+  REQUIRE(ctx.charge_host(60, "first"));
+  ctx.record_alloc(0x10, nullptr, 60, AllocKind::HostMalloc);
+  CHECK(ctx.host_budget.used() == 60);
+
+  // The same recorded address replayed again: the old entry's charge goes back.
+  REQUIRE(ctx.charge_host(40, "second"));
+  CHECK(ctx.host_budget.used() == 100);
+  ctx.record_alloc(0x10, nullptr, 40, AllocKind::HostMalloc);
+  CHECK(ctx.host_budget.used() == 40);
+
+  ctx.remove_alloc(0x10);
+  CHECK(ctx.host_budget.used() == 0);
+
+  // A device allocation is never charged to the host budget.
+  ctx.record_alloc(0x20, nullptr, 500, AllocKind::Device);
+  ctx.remove_alloc(0x20);
+  CHECK(ctx.host_budget.used() == 0);
+
+  // A refusal ends the replay and holds nothing.
+  CHECK_FALSE(ctx.fatal_error.load());
+  CHECK_FALSE(ctx.charge_host(101, "too big"));
+  CHECK(ctx.fatal_error.load());
+  CHECK(ctx.host_budget.used() == 0);
+
+  PlaybackContext ctx2;
+  ctx2.host_budget.set_cap(100);
+  hrr::ScopedCharge held(ctx2.host_budget, 200);
+  CHECK_FALSE(held.ok());
+  ctx2.report_host_refusal(200, "read-back");
+  CHECK(ctx2.fatal_error.load());
+  CHECK(ctx2.host_budget.used() == 0);
 }
 
 /** @} */
