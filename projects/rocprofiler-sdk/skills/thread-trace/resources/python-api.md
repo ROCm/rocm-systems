@@ -214,9 +214,10 @@ holds SQ counter samples, in `records.perf_events`. Each `PerfEvent` gives four 
 at `time` on compute unit `cu`: `events0` to `events3` are counters 0 to 3 when `bank` is 0,
 and 4 to 7 when it is 1. rocprofv3 configures the counters in the order they are listed, but
 drops a name the GPU does not have, with the warning `counter not found`, which moves the later
-ones up. Each sample counts one sampling period. The GPU sends no sample for a period in which
-all four counts are zero, though the decoder may add a zero-count record to mark the gap, so
-add the samples up for a total. The samples cover every compute unit of the shader engine, not only the traced one, unless
+ones up. Each sample counts the cycles since the previous sample of that compute unit and
+bank. The GPU sends no sample for a period in which all four counts are zero, though the
+decoder may add a zero-count record to mark the gap, so add the samples up for a total. The
+samples cover every compute unit of the shader engine, not only the traced one, unless
 `--att-perfcounter-target-only` is set.
 
 ```python
@@ -234,12 +235,13 @@ for se, records in records_by_file:
 ### Wall-clock time
 
 `records.realtime` pairs shader clock readings with a reference clock, whose frequency in Hz
-is `records.realtime_frequency` (`None` when the capture did not record it). From them, the
-shader clock's average frequency over the capture, to turn cycle counts into time:
+is `records.realtime_frequency`. When it is `None`, use the agent's timestamp frequency
+(`HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY`) as `hz`. The pairs give the shader clock's average
+frequency over the capture, which turns cycle counts into time:
 
 ```python
 for se, records in records_by_file:
-    rt, hz = records.realtime, records.realtime_frequency
+    rt, hz = records.realtime, records.realtime_frequency   # or the agent's timestamp frequency
     if len(rt) >= 2 and hz:
         seconds = (rt[-1].realtime_clock - rt[0].realtime_clock) / hz
         mhz = (rt[-1].shader_clock - rt[0].shader_clock) / seconds / 1e6
