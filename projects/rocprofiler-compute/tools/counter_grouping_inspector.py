@@ -157,9 +157,6 @@ def run_soc_detect_and_coalesce(
         filter_blocks=filter_block_list,
         membw_analysis=False,
         set_selected=None,
-        roof_only=False,
-        no_roof=True,
-        device=0,
     )
 
     soc = OmniSoC_Base(cli_args, machine_spec)
