@@ -61,14 +61,19 @@ For a larger trace, the budget can be raised explicitly:
 The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
-To profile one kernel in a multi-dispatch application, set `dispatch_name` to
-the exact normalized display name shown in quotes in RocJITsu's VM dispatch
-log:
+For a launcher that issues setup or helper kernels, `dispatch_name` identifies
+an exact normalized display name in the replay diagnostics. Every supported
+dispatch still follows the normal staging lifecycle and is forwarded to the
+backend, preserving the backend input stream. After replaying a matching
+dispatch, the adapter emits
+`[rocjitsu:perfsim] selected dispatch <id> replayed`; a report consumer can use
+that ID to distinguish the target report from helper reports. Omitting the field
+or setting it to an empty string disables the marker:
 
 ```json
 "perfsim": {
   "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
-  "dispatch_name": "_topk_topp_kernel"
+  "dispatch_name": "_fwd_kernel"
 }
 ```
 
@@ -84,15 +89,15 @@ Copy the quoted display name, not the `symbol="..."` field. Copying a mangled
 symbol can therefore miss, and overloads that normalize to the same display
 name are selected together.
 
-Nonmatching dispatches still execute normally in RocJITsu, including their
-functional memory effects. The adapter only suppresses their observer event
-staging and replay into Perfsim. Matching is exact; it is neither a prefix nor
-a regular-expression match. If `dispatch_name` is absent, every supported
-dispatch is forwarded exactly as before. If no dispatch matches the configured
-name, the adapter reports that name once when the plugin shuts down.
+Nonmatching dispatches still execute normally and their observer events are
+staged and replayed into Perfsim. Matching is exact; it is neither a prefix nor
+a regular-expression match. If `dispatch_name` is absent or empty, every
+supported dispatch is forwarded without a selected-dispatch marker. If no
+dispatch matches a configured non-empty name, the adapter reports that name
+once when the plugin shuts down.
 
 For diagnostic runs, `max_observed_workgroups` can additionally cap the number
-of distinct workgroups whose events are staged for each selected dispatch:
+of distinct workgroups whose events are staged for each dispatch:
 
 ```json
 "perfsim": {
