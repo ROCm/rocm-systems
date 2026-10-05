@@ -128,7 +128,7 @@ TEST_F(connection_pool_test, run_sync_gives_the_connection_back_after_the_call)
 {
     const auto pool = make_pool(1);
 
-    pool->run_sync([](common::connection&) { return 0; });
+    std::ignore = pool->run_sync([](common::connection&) { return 0; });
 
     EXPECT_TRUE(pool->try_acquire().has_value());
 }
