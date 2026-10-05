@@ -15,9 +15,9 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP10F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -42,9 +42,9 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -69,9 +69,9 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP10F16F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -96,9 +96,9 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2F16F32Vinterp)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -129,9 +129,9 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP10RtzF16F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -157,9 +157,9 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2RtzF16F32Vinterp)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;

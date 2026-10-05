@@ -16,6 +16,7 @@
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollPreconnect, ncclCollPreconnect);
+ASSERT_HOOK_MATCHES_PROD(g_doLaunches, doLaunches);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // group.cc's thread-local group state. ncclGroupCommJoin is inline in group.h,
@@ -41,10 +42,17 @@ ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
   return g_ncclCollPreconnect(comm, algoNeedConnect);
 }
 
+static ncclResult_t DefaultDoLaunches(struct ncclComm*, int) {
+  FailLoudUnfaked("group_fakes", "doLaunches");
+}
+std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches = DefaultDoLaunches;
+ncclResult_t doLaunches(struct ncclComm* head, int taskType) { return g_doLaunches(head, taskType); }
+
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:628
 
 void ResetGroupFakes() {
   g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
   g_ncclCollPreconnect = DefaultCollPreconnect;
+  g_doLaunches = DefaultDoLaunches;
 }

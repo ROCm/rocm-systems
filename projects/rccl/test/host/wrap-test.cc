@@ -50,7 +50,9 @@
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
+#include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/hip_fakes.h"                         // g_hipGetLastError
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
@@ -1929,6 +1931,18 @@ TEST(WrapMicrotest, UseHierarchicalAllGather_AboveThresholdReturnsFalse) {
   DeleteCommWithArch(comm);
 }
 
+// The default floor is 16 bytes per rank at any rank count.
+TEST(WrapMicrotest, UseHierarchicalAllGather_MinBytesIsPerRank) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 32;
+  comm->nRanks = 256;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/8 * 256));
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/16 * 256 - 1));
+  EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/16 * 256));
+  DeleteCommWithArch(comm);
+}
+
 TEST(WrapMicrotestIsolated, UseHierarchicalAllGather_ParamDisabledReturnsFalse) {
   RUN_ISOLATED_TEST(
       "Wrap_UseHierarchicalAllGather_ParamDisabledReturnsFalse",
@@ -2371,6 +2385,21 @@ TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_NotInitializedReturnsFa
         comm->nNodes = 16;
         comm->hierarchicalCommsInitialized = false;
         EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_MinBytesIsPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_MinBytesIsPerRank",
+      []() {
+        g_loadParam = ForceParam("RCCL_HIERARCHICAL_REDUCE_SCATTER", int64_t(1));
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 32;
+        comm->nRanks = 256;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/16 * 256 - 1));
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/16 * 256));
         DeleteCommWithArch(comm);
       });
 }
@@ -4224,6 +4253,268 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalChosenLiveMode) {
       });
 }
 
+namespace {
+// ncclCudaGraphNone() leaves graphId at the not-capturing sentinel; any other
+// id makes ncclCudaGraphValid() report an active capture.
+ncclResult_t CapturingGraphProbe(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+  graph->graphId = 1;
+#endif
+  return ncclSuccess;
+}
+
+// Rank 5 of an 8-node comm whose sub-communicators RCCL_HIERARCHICAL_LAZY_INIT deferred.
+ncclComm* MakeDeferredHierarchyComm() {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 8;
+  comm->nRanks = 8;
+  comm->rank = 5;
+  comm->bootstrap = reinterpret_cast<void*>(0x1);
+  comm->hierarchicalEligible = true;
+  return comm;
+}
+
+ncclResult_t MarkHierarchyInitialized(ncclComm* comm) {
+  comm->hierarchicalCommsInitialized = true;
+  return ncclSuccess;
+}
+
+// A readiness handshake in which every peer votes ready. *ownVote receives the
+// vote this rank published.
+auto PeersVoteReady(const ncclComm* comm, int* ownVote) {
+  return [comm, ownVote](void* bootstrap, void* data, int bytes) {
+    EXPECT_EQ(comm->bootstrap, bootstrap);
+    EXPECT_EQ(1, bytes);
+    auto* votes = static_cast<uint8_t*>(data);
+    *ownVote = votes[comm->rank];
+    for (int r = 0; r < comm->nRanks; ++r) {
+      if (r != comm->rank) votes[r] = 1;
+    }
+    return ncclSuccess;
+  };
+}
+
+ncclResult_t SelectLiveAllGather(ncclComm* comm, size_t sendcount, ncclDataType_t type, rcclCollDecision* decision) {
+  return rcclSelectAllGather(comm, nullptr, nullptr, sendcount, type, /*stream=*/nullptr, /*query=*/false,
+                             /*graphCapturingHint=*/false, decision);
+}
+}  // namespace
+
+// Every rank votes ready, so the first eligible live AllGather builds the
+// hierarchy and selects it.
+TEST(WrapMicrotestIsolated, SelectAllGather_AllRanksAgreeInitializesHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_AllRanksAgreeInitializesHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, agreement.calls);
+        EXPECT_EQ(1, ownVote);
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The floor is per rank: over 256 ranks, PyTorch DDP's startup AllGather of one
+// int64 neither builds nor selects the hierarchy, while two int64s do both.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalFloorIsPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierarchicalFloorIsPerRank",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->nNodes = 32;
+        comm->nRanks = 256;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/1, ncclInt64, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/2, ncclInt64, &decision));
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryDoesNotInitializeHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryDoesNotInitializeHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A capturing rank votes not ready, so no rank builds the hierarchy during capture.
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureDoesNotInitializeHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureDoesNotInitializeHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        ScopedHook reserve(g_reserveHierarchicalTempBuffer, [](ncclComm*) { return ncclSuccess; });
+        ScopedHook graphProbe(g_cudaGetCapturingGraph, CapturingGraphProbe);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, graphProbe.calls);
+        EXPECT_EQ(1, agreement.calls);
+        EXPECT_EQ(0, ownVote);
+        EXPECT_EQ(0, reserve.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A rank that cannot allocate the temp buffer votes not ready, so no rank splits,
+// and clears the HIP error it tolerated. The next handshake retries the allocation.
+TEST(WrapMicrotestIsolated, SelectAllGather_TempBufferFailureDefersSetup) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TempBufferFailureDefersSetup",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        bool allocationFails = true;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook reserve(g_reserveHierarchicalTempBuffer, [&](ncclComm*) {
+          return allocationFails ? ncclUnhandledCudaError : ncclSuccess;
+        });
+        ScopedHook lastError(g_hipGetLastError, []() { return hipErrorOutOfMemory; });
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(0, ownVote);
+        EXPECT_EQ(1, lastError.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        allocationFails = false;
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(2, reserve.calls);
+        EXPECT_EQ(1, ownVote);
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Once the sub-communicators exist, live and captured AllGathers select them
+// without another handshake.
+TEST(WrapMicrotestIsolated, SelectAllGather_InitializedHierarchySkipsHandshake) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_InitializedHierarchySkipsHandshake",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->hierarchicalCommsInitialized = true;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        ScopedHook graphProbe(g_cudaGetCapturingGraph, CapturingGraphProbe);
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, graphProbe.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A split child, a grown comm, or a non-uniform or non-compact layout never
+// builds the hierarchy, so it never pays for the handshake either.
+TEST(WrapMicrotestIsolated, SelectAllGather_IneligibleTopologyNeverHandshakes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_IneligibleTopologyNeverHandshakes",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->hierarchicalEligible = false;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SetupFailureIsReturned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_SetupFailureIsReturned",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, [](ncclComm*) { return ncclSystemError; });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSystemError, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, ensure.calls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// While a peer keeps capturing, the handshake backs off to the 1st, 2nd, 4th,
+// 8th... eligible call, and the setup runs on the first of those after every
+// rank is ready.
+TEST(WrapMicrotestIsolated, SelectAllGather_DeferredSetupBacksOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_DeferredSetupBacksOff",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        bool peerCapturing = true;
+        ScopedHook agreement(g_devrBootstrapAllGather, [&](void*, void* data, int) {
+          auto* votes = static_cast<uint8_t*>(data);
+          std::fill(votes, votes + comm->nRanks, uint8_t{1});
+          if (peerCapturing) votes[1] = 0;
+          return ncclSuccess;
+        });
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        auto allGather = [&]() {
+          EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        };
+        for (int call = 1; call <= 8; ++call) allGather();
+        EXPECT_EQ(4, agreement.calls) << "calls 1, 2, 4 and 8";
+        EXPECT_EQ(0, ensure.calls);
+
+        peerCapturing = false;
+        for (int call = 9; call <= 15; ++call) allGather();
+        EXPECT_EQ(4, agreement.calls) << "calls 9 to 15 skip the handshake";
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        allGather();  // call 16
+        EXPECT_EQ(5, agreement.calls);
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllGather_InsideGroupExcludesHierarchical) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_InsideGroupExcludesHierarchical",
@@ -4476,6 +4767,73 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
                                                    &noPolicy));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, noPolicy.algo)
             << "CE via symmetric windows must require CTA_POLICY_ZERO";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Hierarchical CE (branch #3.5) needs none of the hierarchical AllGather
+// sub-communicators, which are only built on 8+ nodes. A 2-node comm has none,
+// and both the report and the live decision must still name CE without touching
+// them. The control proves the decision came from the hierarchical CE branch.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                     /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                     &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailableValue = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AlltoAll twin of the test above, for rcclSelectAlltoAll branch (5).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                    /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                    &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailableValue = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
         DeleteCommWithArch(comm);
       });
 }

@@ -407,14 +407,44 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 }
 
 // =================================================================================================
-bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
-                                 amd::LaunchParams& launch_params) {
+hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
+                                       amd::LaunchParams& launch_params) {
 
   const amd::Device& device = stream->vdev()->device();
   amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
+  // All-zero dims mean "no cluster" and emit no metadata, so a zero here is malformed. The
+  // kernel's block index is computed from it, so no dispatch of such a kernel is correct.
+  if (devKernel->hasClusterAttr() &&
+      (devKernel->getClusterSize(0) == 0 || devKernel->getClusterSize(1) == 0 ||
+       devKernel->getClusterSize(2) == 0)) {
+    LogPrintfError("Kernel %s was compiled for cluster dimensions (%zu, %zu, %zu) "
+                   "with a zero dimension",
+                   kernel->name().c_str(), devKernel->getClusterSize(0),
+                   devKernel->getClusterSize(1), devKernel->getClusterSize(2));
+    return hipErrorInvalidConfiguration;
+  }
   // If cluster size from device kernel is > 1, then we need to update the cluster params.
   if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
       devKernel->getClusterSize(2) > 1) {
+    // Code-object dims bypass the hipLaunchKernelExC() checks. An oversized cluster is dropped
+    // by the SPI without signalling completion, which hangs the host, so bound it here.
+    if (device.info().clusterMaxSize_ == 0) {
+      LogPrintfError("Kernel %s requires a multi-workgroup cluster, "
+                     "but this device does not support clusters",
+                     kernel->name().c_str());
+      return hipErrorInvalidClusterSize;
+    }
+    const size_t requestedClusterSize = devKernel->getClusterSize(0) *
+                                        devKernel->getClusterSize(1) *
+                                        devKernel->getClusterSize(2);
+    if (requestedClusterSize > device.info().clusterMaxSize_) {
+      LogPrintfError("Kernel %s was compiled for a cluster of %zu workgroups (%zu, %zu, %zu), "
+                     "but this device supports at most %zu",
+                     kernel->name().c_str(), requestedClusterSize, devKernel->getClusterSize(0),
+                     devKernel->getClusterSize(1), devKernel->getClusterSize(2),
+                     device.info().clusterMaxSize_);
+      return hipErrorInvalidClusterSize;
+    }
     if (!launch_params.UpdateClusterLaunchParams(devKernel->getClusterSize(0),
                                                  devKernel->getClusterSize(1),
                                                  devKernel->getClusterSize(2))) {
@@ -426,10 +456,10 @@ bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* k
                       launch_params.local_[1], launch_params.local_[2],
                       devKernel->getClusterSize(0), devKernel->getClusterSize(1),
                       devKernel->getClusterSize(2));
-      return false;
+      return hipErrorInvalidValue;
     }
   }
-  return true;
+  return hipSuccess;
 }
 
 // =================================================================================================
@@ -443,8 +473,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   amd::Kernel* kernel = hip::asKernel(f);
 
   // Check if the kernel metadata has cluster info we need to act on.
-  if (!UpdateNumClustersFromKernel(stream, kernel, launch_params)) {
-    return hipErrorInvalidValue;
+  hipError_t clusterStatus = UpdateNumClustersFromKernel(stream, kernel, launch_params);
+  if (clusterStatus != hipSuccess) {
+    return clusterStatus;
   }
 
   size_t globalWorkOffset[3] = {0};
@@ -1032,7 +1063,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     // Not supported while stream is capturing
     hip::Stream* s = reinterpret_cast<hip::Stream*>(launch.stream);
     if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      s->InvalidateCapture();
       return hipErrorStreamCaptureUnsupported;
     }
     if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
