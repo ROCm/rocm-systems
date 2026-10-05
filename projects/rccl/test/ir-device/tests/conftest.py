@@ -275,9 +275,9 @@ def _build_gin_mpi_binary():
         GIN_MPI_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
+        f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
         f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
-        f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
         "-o", GIN_MPI_TEST_EXE,
     ]
     env = os.environ.copy()
