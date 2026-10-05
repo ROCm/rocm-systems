@@ -42,8 +42,11 @@
 #include <mutex>
 #include <set>
 #ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>    // EnumProcessModules
 #include <process.h>  // _exit
 #else
+#include <dlfcn.h>    // dlsym
 #include <unistd.h>   // _exit
 #endif
 
@@ -64,6 +67,25 @@ void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
             "effect cannot be reproduced here, so it is skipped; this replay is "
             "not a faithful reproduction of the recording.\n",
             api, reason ? reason : "(unspecified)");
+}
+
+void* hrr_runtime_symbol(const char* name) {
+#ifdef _WIN32
+    // The runtime DLL's file name carries the HIP major version, so ask every
+    // module in the process rather than hard-coding one.
+    HMODULE mods[1024];
+    DWORD needed = 0;
+    if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed))
+        return nullptr;
+    const size_t n = std::min<size_t>(needed / sizeof(HMODULE), 1024);
+    for (size_t i = 0; i < n; ++i) {
+        if (FARPROC p = GetProcAddress(mods[i], name))
+            return reinterpret_cast<void*>(p);
+    }
+    return nullptr;
+#else
+    return dlsym(RTLD_DEFAULT, name);
+#endif
 }
 
 void hrr_note_recorded_error(PlaybackContext& ctx, const char* api,

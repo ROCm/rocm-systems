@@ -117,6 +117,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
           set-safe-directory: true
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -140,8 +142,14 @@ jobs:
             # binary fails to start at all. Link them in instead.
             extra+=(-DCMAKE_EXE_LINKER_FLAGS=-static)
           fi
+          # Declarations of the HIP API come from this tree, ahead of the SDK's:
+          # the nightly SDK lags the tree, so an API added here is not in its
+          # headers yet. Only headers: the SDK still supplies the runtime library.
+          # cygpath -m gives the drive-letter form a native cmake accepts.
+          tree="$(cygpath -m "${PWD}" 2>/dev/null || echo "${PWD}")"
           cmake -S projects/hrr -B build -GNinja -Wno-dev \
             "${extra[@]}" \
+            "-DHRR_HIP_INCLUDE_DIRS=${tree}/projects/hip/include;${tree}/projects/clr/hipamd/include" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
@@ -357,7 +365,13 @@ jobs:
           # required not to introduce. The C++ half (CLR/amdhip64, the bulk of
           # the wall clock) is cached; extend to HIP only after a run proves
           # the arch-embedding check still passes on a fully cached build.
+          # Host C++ is compiled against this tree's public HIP headers (and the
+          # hip_version.h the CLR build above generated) ahead of the SDK's, so
+          # an API added to the tree builds before any nightly declares it. HIP
+          # device code keeps the SDK's headers. The SDK's libamdhip64 is only
+          # linked, never run: the integration jobs put build/clr first.
           cmake -S projects/hrr -B build/hrr -GNinja -Wno-dev \
+            "-DHRR_HIP_INCLUDE_DIRS=${GITHUB_WORKSPACE}/projects/hip/include;${GITHUB_WORKSPACE}/projects/clr/hipamd/include;${GITHUB_WORKSPACE}/build/clr/hipamd/include" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
