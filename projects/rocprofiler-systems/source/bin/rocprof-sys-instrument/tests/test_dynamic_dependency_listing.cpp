@@ -12,9 +12,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <sys/poll.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 namespace
 {
@@ -22,16 +24,20 @@ namespace detail = ::rocprofsys::instrument::detail;
 
 using ::testing::DoAll;
 using ::testing::ElementsAre;
+using ::testing::InSequence;
 using ::testing::IsNull;
 using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SetArrayArgument;
 using ::testing::StrEq;
 using ::testing::StrictMock;
+using ::testing::Truly;
 
 constexpr int  k_read_fd  = 3;
 constexpr int  k_write_fd = 4;
 constexpr auto k_pipe_fds = std::array<int, 2>{ k_read_fd, k_write_fd };
+constexpr auto k_pipe = detail::pipe_fds{ .read_fd = k_read_fd, .write_fd = k_write_fd };
+constexpr auto k_exe_path = std::string_view{ "/path/to/app" };
 
 struct gmock_posix
 {
@@ -165,5 +171,42 @@ TEST_F(dynamic_dependency_listing_test, envp_handles_empty_environ)
     const auto envp = detail::create_dependency_listing_envp();
 
     EXPECT_THAT(envp, ElementsAre(StrEq("LD_TRACE_LOADED_OBJECTS=1"), IsNull()));
+}
+
+TEST_F(dynamic_dependency_listing_test, exec_redirects_stdout_then_execs_target)
+{
+    auto       var_a = std::string{ "ROCPROFSYS_TEST_A=1" };
+    const auto envp  = std::vector<char*>{ var_a.data(), nullptr };
+    // argv must be { k_exe_path, nullptr }
+    const auto is_exe_argv = Truly([](char* const* argv) {
+        return argv[0] != nullptr && std::string_view{ argv[0] } == k_exe_path &&
+               argv[1] == nullptr;
+    });
+
+    const InSequence seq;
+    EXPECT_CALL(*g_mock, close(k_read_fd));
+    EXPECT_CALL(*g_mock, dup2(k_write_fd, STDOUT_FILENO)).WillOnce(Return(STDOUT_FILENO));
+    EXPECT_CALL(*g_mock, close(k_write_fd));
+    EXPECT_CALL(*g_mock, execve(StrEq(k_exe_path), is_exe_argv, envp.data()))
+        .WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, exit_immediately(detail::k_exec_failure_status));
+
+    EXPECT_THROW(detail::exec_with_stdout_to_pipe<mock_posix_backend>(
+                     std::string{ k_exe_path }, k_pipe, envp),
+                 child_exited);
+}
+
+TEST_F(dynamic_dependency_listing_test, exec_exits_127_without_exec_when_dup2_fails)
+{
+    const auto envp = std::vector<char*>{ nullptr };
+
+    const InSequence seq;
+    EXPECT_CALL(*g_mock, close(k_read_fd));
+    EXPECT_CALL(*g_mock, dup2(k_write_fd, STDOUT_FILENO)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, exit_immediately(detail::k_exec_failure_status));
+
+    EXPECT_THROW(detail::exec_with_stdout_to_pipe<mock_posix_backend>(
+                     std::string{ k_exe_path }, k_pipe, envp),
+                 child_exited);
 }
 }  // namespace
