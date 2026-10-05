@@ -97,6 +97,19 @@ void TestRdciHealth::Run(void) {
   result = rdc_group_gpu_add(rdc_handle, group_id, gpu_index);
   ASSERT_EQ(result, RDC_ST_OK);
 
+  // The EEPROM component alone must watch the field eeprom_check reads. Run it
+  // before any other watch so no earlier sample of the field is cached.
+  IF_VERB(STANDARD) { std::cout << "\t**Setting the EEPROM component alone....\n"; }
+  result = rdc_health_set(rdc_handle, group_id, RDC_HEALTH_WATCH_EEPROM);
+  ASSERT_EQ(result, RDC_ST_OK);
+  result = rdc_field_update_all(rdc_handle, 1);
+  ASSERT_EQ(result, RDC_ST_OK);
+  rdc_field_value ecc = {};
+  result = rdc_field_get_latest_value(rdc_handle, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, &ecc);
+  ASSERT_EQ(result, RDC_ST_OK);
+  result = rdc_health_clear(rdc_handle, group_id);
+  ASSERT_EQ(result, RDC_ST_OK);
+
   // Set every component, read the setting back, run a check, clear.
   IF_VERB(STANDARD) { std::cout << "\t**Setting health watches for all components....\n"; }
   result = rdc_health_set(rdc_handle, group_id, all_components);
@@ -140,20 +153,6 @@ void TestRdciHealth::Run(void) {
   ASSERT_EQ(result, RDC_ST_OK);
   result = rdc_health_check(rdc_handle, group_id, &response);
   ASSERT_EQ(result, RDC_ST_NOT_FOUND);
-
-  // The EEPROM component alone must watch the field eeprom_check reads.
-  // Before that fix it watched only RDC_HEALTH_EEPROM_CONFIG_VALID, which no
-  // check consumes, and this read returned RDC_ST_NOT_FOUND.
-  IF_VERB(STANDARD) { std::cout << "\t**Setting the EEPROM component alone....\n"; }
-  result = rdc_health_set(rdc_handle, group_id, RDC_HEALTH_WATCH_EEPROM);
-  ASSERT_EQ(result, RDC_ST_OK);
-  result = rdc_field_update_all(rdc_handle, 1);
-  ASSERT_EQ(result, RDC_ST_OK);
-  rdc_field_value ecc = {};
-  result = rdc_field_get_latest_value(rdc_handle, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, &ecc);
-  ASSERT_EQ(result, RDC_ST_OK);
-  result = rdc_health_clear(rdc_handle, group_id);
-  ASSERT_EQ(result, RDC_ST_OK);
 
   // A group with no GPUs has nothing to probe and keeps the pre-probe
   // behaviour: the set succeeds and watches every candidate field.
