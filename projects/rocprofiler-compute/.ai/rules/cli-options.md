@@ -12,6 +12,7 @@ Glob covers most filtering cases and is much easier for users to write.
 
 ```console
 rocprof-compute --select-kernel '*my-kernel*'
+```
 
 Regex may be offered **in addition** to glob where it is genuinely needed, never
 as the replacement.
@@ -21,7 +22,7 @@ as the replacement.
 An option that is only valid together with another option must be named with
 that option as a prefix.
 
-```console
+```text
 --roofline --roofline-bench-only
 ```
 
@@ -36,7 +37,7 @@ names since customers rarely touch them.
 
 A list of values is passed as one comma-separated argument.
 
-```console
+```text
 --roofline-data-types FP16,FP32,FP64
 ```
 
