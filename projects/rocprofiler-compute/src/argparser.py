@@ -9,7 +9,7 @@ from typing import Callable, Optional, Union
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
-ROOFLINE_MEM_LEVELS = ["HBM", "L2", "vL1D", "L0", "LDS"]
+ROOFLINE_MEM_LEVELS = ["ALL", "HBM", "L2", "vL1D", "L0", "LDS"]
 ROOFLINE_DATA_TYPES = [
     "FP4",
     "FP6",

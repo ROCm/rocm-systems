@@ -248,6 +248,9 @@ def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list
     """
     # Make mem_level a list if not already one
     levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
+    # ALL selects every level, even when listed with others
+    if "ALL" in levels_raw:
+        levels_raw = ["ALL"]
 
     # Normalize user-facing "vL1D" to CSV column name "L1" before filtering
     levels_raw = [("L1" if m == "vL1D" else m) for m in levels_raw]
