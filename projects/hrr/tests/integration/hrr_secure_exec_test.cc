@@ -56,7 +56,7 @@ HRR_TEST_CASE(Unit_HRR_BlankCaptureOutputCapturesNothing) {
       HRR_SKIP("a directory named " << blank.filename() << " already exists here");
     ScopedDir guard{blank};
 
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", value);
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
