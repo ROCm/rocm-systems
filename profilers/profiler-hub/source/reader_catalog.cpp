@@ -459,9 +459,11 @@ reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statement
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
         {
+            if(!row.tid.has_value()) continue;
+
             topology_key_t key{ .nid = row.nid,
                                 .pid = row.pid.value_or(0),
-                                .tid = row.tid.value_or(0) };
+                                .tid = row.tid.value() };
             auto&          stats = key_stats[key];
             stats.count += row.count;
             stats.merge(row.min_start, row.max_end);
