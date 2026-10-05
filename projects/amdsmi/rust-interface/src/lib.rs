@@ -10,3 +10,6 @@ mod amdsmi;
 
 pub use utils::*;
 pub use amdsmi::*;
+
+#[cfg(test)]
+mod enumeration_tests;
