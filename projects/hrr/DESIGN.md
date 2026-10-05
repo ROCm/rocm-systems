@@ -371,7 +371,7 @@ Version history, so an archive written by an older runtime can be placed:
 ### `events.bin` Layout
 
 ```
-[0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 }
+[0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 (HRR_FILE_FLAG_* bits) }
 [8..]     records, back-to-back, no padding:
             hrr_event_header (32 bytes, pack(1)):
               event_type     u16   hrr_api_id_t (0..552)
@@ -1348,13 +1348,15 @@ The event wire format (finding H5):
 
 - `hipMemcpy2D` / `hipMemcpy2DAsync` are now blob-captured (finding H3), matching the 1D
   and 3D families. They are `MANUAL_CAPTURE_APIS` / `MANUAL_PLAYBACK_APIS`: H2D snapshots
-  the pitched host `src` region (`spitch*(height-1)+width` bytes) as a blob, and at
+  the copied rows of the pitched host `src` (`width*height` bytes) as a blob, and at
   replay the captured blob is substituted for the untranslatable capture-time host VA
   and copied into the translated device `dst` with the recorded `dpitch`. D2H snapshots
   the host `dst` after the copy and validates the device result against it at replay.
   Row-padded image/tensor buffers are now handled.
-- The D2H expected output of `hipMemcpy2D`, the four `hipMemcpy3D` spellings, `hipDrvMemcpy3D` / `hipDrvMemcpy3DAsync` and the three driver 2D spellings is the host destination from its base pointer through the last copied byte, laid out with the recorded pitch and offsets: the same footprint as the driver copies' H2D source. The blob keeps that layout but holds only the copied rows: the bytes between rows and before the first copied row are zero in it, because the copy never touched them and capture never reads them, so unrelated host data cannot reach the archive and an unmapped gap (a guard page between rows) cannot fault the application. The same holds for every pitched host blob, H2D sources included. Replay re-runs the recorded copy into a scratch buffer of that size and compares only the copied rows, so bytes between rows or before the first one are never judged. Archives captured earlier hold the flat `width*height*depth` bytes for the 3D and driver copies; replay counts such a check as skipped unless the copy is dense from the base, in which case the two layouts coincide. A recorded rect whose footprint overflows `size_t` is counted as skipped too, so an archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
-- The H2D source of the four `hipMemcpy3D` spellings is recorded with the same footprint, from `srcPtr.ptr` through the last copied byte, and only for a copy the runtime accepted. Replay substitutes it only when the blob spans the recorded source rect. Otherwise (no blob, or the flat `width*height*depth` blob of an earlier archive) the copy is skipped, rather than read past the blob or issued from the capture-time host address.
+- Every pitched host blob holds only the copied rows, packed end to end: `width*height*depth` bytes, whatever the pitch and offsets. That covers the D2H expected output of `hipMemcpy2D`, the four `hipMemcpy3D` spellings, `hipDrvMemcpy3D` / `hipDrvMemcpy3DAsync` and the three driver 2D spellings, and the H2D source of the same copies. Capture never reads the bytes between rows or before the first one. Unrelated host data cannot reach the archive, an unmapped gap (a guard page between rows) cannot fault the application, and a sparse pitch costs nothing: two rows gigabytes apart record two rows.
+- `events.bin` marks such an archive with `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`. Replay then gives the host side of each pitched copy the dense layout of its blob (pitch equal to width, no offsets) and keeps the device side as recorded, so the copy moves the same bytes. A D2H check re-runs the copy into a scratch buffer of the blob's size and compares the two. Neither side of replay grows with the host pitch.
+- An archive without the flag lays a pitched host blob out from the base pointer with the recorded pitch and offsets, or holds the flat `width*height*depth` bytes (3D and driver D2H, `hipMemcpy3D` H2D). Replay keeps the recorded layout for it and compares only the copied rows. It skips a copy whose blob does not span the recorded rect, such as the flat blob of a rect that is not dense from the base, rather than read past the blob or issue it from the capture-time host address. A recorded rect whose footprint overflows `size_t` is skipped too. An archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
+- The H2D source of the four `hipMemcpy3D` spellings is recorded only for a copy the runtime accepted.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
@@ -1374,7 +1376,7 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the rect's footprint is not validated.
+- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the host rect replay reads it as is not validated.
 - **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
   tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
   so integer/index/pointer output buffers can silently false-pass; both-NaN counts as

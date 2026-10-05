@@ -1557,7 +1557,7 @@ static size_t memcpy3d_byte_count(const struct hipMemcpy3DParms* p) {
 }
 
 // Defined with the driver-copy helpers below. The runtime widens a hipMemcpy3D
-// to the same HIP_MEMCPY3D, so its host side has the same footprint.
+// to the same HIP_MEMCPY3D, so its host side is the same rect.
 static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
                                              size_t pitch_height, size_t x, size_t y,
                                              size_t z, size_t width, size_t height,
@@ -1580,8 +1580,8 @@ static void capture_memcpy3d_impl(
   if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0 &&
       a.ret == hipSuccess) {
     // H2D: host source is valid at call time, so no stream sync is needed.
-    // Replay reads the blob with the recorded pitch and position, so it spans
-    // srcPtr.ptr through the last copied byte, as the driver copies do.
+    // The blob holds the copied rows of the source rect, as the driver copies'
+    // does, and replay copies from it with the host side made dense.
     auto h = write_host_rect_blob(p->srcPtr.ptr, p->srcPtr.pitch, p->srcPtr.ysize,
                                   p->srcPos.x, p->srcPos.y, p->srcPos.z, p->extent.width,
                                   p->extent.height, p->extent.depth);
@@ -1591,11 +1591,10 @@ static void capture_memcpy3d_impl(
              a.ret == hipSuccess) {
     // D2H: real call already completed (sync API) or stream sync done below;
     // host buffer now holds GPU result — capture it as the expected output.
-    // The blob spans dstPtr.ptr through the last copied byte, laid out with the
-    // recorded pitch and position, so replay can compare exactly the copied
-    // rows. A rejected copy is skipped: nothing validated its rect, and that
-    // span can reach past the caller's buffer. The null stream is synchronised
-    // too, as in the driver 3D path below.
+    // The blob holds the copied rows of the destination rect, so replay can
+    // compare exactly those rows. A rejected copy is skipped: nothing validated
+    // its rect, and reading it can reach past the caller's buffer. The null
+    // stream is synchronised too, as in the driver 3D path below.
     if (is_async) {
       hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
       if (sync_r != hipSuccess) {
@@ -1666,20 +1665,13 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
 //   slice = pitch*pitch_height ? pitch*pitch_height : row*height
 //   first byte = z*slice + y*row + x
 //   last byte  = first + (depth-1)*slice + (height-1)*row + width - 1
-// so the blob must hold `first + relative_end` bytes. Replay substitutes the
-// blob for srcHost while keeping the recorded pitches and offsets, so a blob
-// sized by the naive width*height*depth volume makes the runtime stride off its
-// end whenever pitch > width, height > 1 or an offset is non-zero. The volume is
-// only correct for a fully dense rect, which is also why this never shrinks a
-// blob: for a copy the runtime accepted, footprint >= width*height*depth.
-//
-// D2H expected outputs use the same footprint of dstHost, so replay can re-run
-// the copy into a buffer laid out the same way and compare exactly the copied
-// rows. An older archive holds the flat volume there, which replay tells apart
-// by its size.
+// The blob holds only the copied rows (write_host_rect_blob), for the H2D
+// source and the D2H expected output alike, but the footprint still locates
+// them, and a copy whose footprint does not fit in size_t is not recorded.
+// For a copy the runtime accepted, footprint >= width*height*depth.
 //
 // Every step is checked, as replay's hrr_host_rect is: a wrapped footprint would
-// size the blob below the rows then copied into it.
+// place rows outside the buffer the copy was given.
 struct HostRect {
   size_t row, slice, first, bytes;  // bytes == 0: nothing is copied
   bool ok;                          // false: the footprint does not fit in size_t
@@ -1724,13 +1716,13 @@ static size_t drvmemcpy_host_byte_count(size_t pitch, size_t pitch_height,
   return r.ok ? r.bytes : SIZE_MAX;
 }
 
-// Blob of a host rect's footprint. The footprint also spans bytes the copy never
-// touches: everything before its first byte and the padding between rows and
-// slices. Those can hold unrelated data, or lie on an unmapped guard page, so
-// they are never read: only the copied rows are taken from `base` and every
-// other byte of the blob is zero. Replay uses the blob with the recorded pitches
-// and offsets, so an H2D copy reads back exactly those rows and a D2H check
-// compares exactly those rows; the zeros are never consumed.
+// Blob of a host rect: its copied rows packed end to end, width*height*depth
+// bytes whatever the pitches and offsets, so capture costs what the copy moves.
+// The bytes before the first row and between rows and slices are never read:
+// the copy does not touch them, they can hold unrelated data or lie on an
+// unmapped guard page, and a sparse pitch can put two rows gigabytes apart.
+// The archive header carries HRR_FILE_FLAG_PACKED_HOST_RECTS, and replay reads
+// the blob with the host side made dense: pitch == width and no offsets.
 static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
                                              size_t pitch_height, size_t x, size_t y,
                                              size_t z, size_t width, size_t height,
@@ -1743,24 +1735,26 @@ static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
     return {0, 0};
   }
   if (r.bytes == 0) return {0, 0};
-  if (r.first == 0 && r.row == width && (depth == 1 || r.slice == width * height)) {
-    return hrr_cap::writer::write_blob(base, r.bytes);  // dense: no gaps to leave out
+  // Neither product wraps: both are at most r.bytes, which fits.
+  const size_t n = width * height * depth;
+  const auto* src = static_cast<const uint8_t*>(base) + r.first;
+  if ((height == 1 || r.row == width) && (depth == 1 || r.slice == width * height)) {
+    return hrr_cap::writer::write_blob(src, n);  // dense: the rows are one run
   }
-  std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[r.bytes]());
+  std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[n]);
   if (!buf) {
     LogPrintfWarning("[HRR capture] cannot allocate %zu bytes to snapshot a pitched host copy",
-                     r.bytes);
+                     n);
     hrr_cap::writer::mark_incomplete("pitched host copy not recorded");
     return {0, 0};
   }
-  const auto* src = static_cast<const uint8_t*>(base);
+  uint8_t* out = buf.get();
   for (size_t k = 0; k < depth; ++k) {
-    for (size_t j = 0; j < height; ++j) {
-      const size_t off = r.first + k * r.slice + j * r.row;
-      std::memcpy(buf.get() + off, src + off, width);
+    for (size_t j = 0; j < height; ++j, out += width) {
+      std::memcpy(out, src + k * r.slice + j * r.row, width);
     }
   }
-  return hrr_cap::writer::write_blob(buf.get(), r.bytes);
+  return hrr_cap::writer::write_blob(buf.get(), n);
 }
 
 template <typename T>
@@ -1779,7 +1773,7 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
     }
   } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
              p->srcMemoryType != hipMemoryTypeArray) {
-    // D2H expected output, the host footprint of the destination rect.
+    // D2H expected output, the copied rows of the destination rect.
     // An array source is skipped because playback declines array-typed rects,
     // so the blob would be an expected output nothing ever validates.
     size_t n = drvmemcpy_host_byte_count(p->dstPitch, p->dstHeight, p->dstXInBytes,

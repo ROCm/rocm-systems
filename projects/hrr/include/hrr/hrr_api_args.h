@@ -81,9 +81,19 @@
 typedef struct {
     uint32_t magic;    /* HRR_MAGIC                */
     uint16_t version;  /* HRR_VERSION              */
-    uint16_t reserved; /* zero                     */
+    uint16_t reserved; /* HRR_FILE_FLAG_* bits      */
 } hrr_file_header;
 #pragma pack(pop)
+
+/* Bits of hrr_file_header.reserved in events.bin. An older writer leaves it
+ * zero, and an older reader ignores it.
+ * HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of the pitched copies
+ * (hipMemcpy2D, the hipMemcpy3D family and the driver 2D/3D copies) hold only
+ * the copied rows, packed end to end: width*height*depth bytes, whatever the
+ * pitch. Without it, a blob spans the host rect from its base pointer through
+ * the last copied byte, or holds the flat width*height*depth bytes from the
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+#define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
