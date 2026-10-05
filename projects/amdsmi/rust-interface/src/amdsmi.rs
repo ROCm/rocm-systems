@@ -3527,7 +3527,6 @@ pub fn amdsmi_get_gpu_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
     block: AmdsmiGpuBlockT,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    // The C API does not initialize the reserved fields.
     let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_ecc_count(
         processor_handle,
@@ -5634,7 +5633,6 @@ pub fn amdsmi_get_gpu_vbios_info(
 pub fn amdsmi_get_gpu_activity(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiEngineUsageT> {
-    // The C API writes the activity counters, but not the reserved fields.
     let mut info = MaybeUninit::<AmdsmiEngineUsageT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_activity(
         processor_handle,
@@ -5686,7 +5684,6 @@ pub fn amdsmi_get_gpu_activity(
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
-    // The C API does not initialize the reserved fields.
     let mut info = MaybeUninit::<AmdsmiPowerInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
@@ -5793,7 +5790,6 @@ pub fn amdsmi_get_clock_info(
     processor_handle: AmdsmiProcessorHandle,
     clk_type: AmdsmiClkTypeT,
 ) -> AmdsmiResult<AmdsmiClkInfoT> {
-    // The C API does not initialize the reserved fields.
     let mut info = MaybeUninit::<AmdsmiClkInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_clock_info(
         processor_handle,
@@ -5897,7 +5893,6 @@ pub fn amdsmi_get_gpu_vram_usage(
 pub fn amdsmi_get_gpu_total_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    // The C API accumulates into the counters and leaves reserved fields untouched.
     let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_total_ecc_count(
         processor_handle,
