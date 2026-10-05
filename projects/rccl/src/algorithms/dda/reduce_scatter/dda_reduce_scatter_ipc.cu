@@ -111,6 +111,8 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
     return false;
   }
 
+  if ((totalCount * ncclTypeSize(datatype)) > 8388608)
+
   // Check per-rank byte alignment
   if ((recvcount * ncclTypeSize(datatype)) % 16) {
     return false;
