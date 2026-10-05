@@ -1772,6 +1772,20 @@ static void svm_revoke_worker_stop(HsaKFDContext *ctx)
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 }
 
+/* Join the worker, if it is still running, and destroy the conds it waits on.
+ * The context outlives hsakmt_fmm_destroy_process_apertures(), which can be
+ * followed by another init of the apertures, so the conds stay until the
+ * context itself is freed.
+ */
+void hsakmt_kfdcontext_fini_fmm_context(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	svm_revoke_worker_stop(ctx);
+	pthread_cond_destroy(&fmm_ctx->svm_revoke_queued);
+	pthread_cond_destroy(&fmm_ctx->svm_revoke_retired);
+}
+
 /* After fork the worker does not exist in the child, so drop the queue it
  * would have drained instead of trying to join a thread that is gone.
  */
