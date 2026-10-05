@@ -2,9 +2,9 @@
 
 **JIRA:** AIPROFCOMP-865 (parent AIPROFCOMP-864)
 
-**Scope:** Fix multi-pass ratio errors on the legacy analysis YAML path.
+**Scope:** Fix multi-pass ratio errors on the existing analysis YAML structure.
 
-**Out of scope:** Full metric-library LLD (MetricLibrary, `!inherit`, Stage 4 migration, SDK collectables registry).
+**Out of scope:** Full metric-library LLD (MetricLibrary, Stage 4 migration, SDK collectables registry).
 
 Full historical plan drafts are preserved on branch
 `users/feizheng10/aiprofcomp-865-docs-backup`.
