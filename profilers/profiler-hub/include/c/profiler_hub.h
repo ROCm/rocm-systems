@@ -69,9 +69,8 @@ extern "C"
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p track_list is
      *         null.
      * @note @p track_list->tracks and every ph_track_t::track_name in it
-     *       point into memory owned by @p ctx. They remain valid only until
-     *       @p ctx is freed or another call to this function rebuilds the
-     *       track list.
+     *       point into memory owned by @p ctx. They remain valid until
+     *       @p ctx is freed.
      */
     ph_result_t ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list);
 
@@ -91,11 +90,17 @@ extern "C"
      *        copy/memory allocate) for a track within an optional time
      *        window.
      * @param ctx Context to query.
-     * @param track_id Id of a track with ph_track_t::agent_id == 0, as
-     *        returned by ph_get_track_list()/ph_get_node().
-     * @param start_ts Start of the time window (ns), or 0 for no filter.
-     * @param end_ts End of the time window (ns), or 0 for no filter.
-     * @param events Out parameter receiving the event list.
+     * @param track_id Id of a track whose category is not
+     *        PH_TRACK_CATEGORY_PMC_AGENT, as returned by
+     *        ph_get_track_list()/ph_get_node(). A PMC track yields an empty
+     *        list.
+     * @param start_ts Start of the time window (ns). With @p end_ts also 0
+     *        there is no filter.
+     * @param end_ts End of the time window (ns). With only @p end_ts 0 the
+     *        window has no upper bound. Events overlapping the window are
+     *        returned.
+     * @param events Out parameter receiving the event list; it is set to an
+     *        empty list before any other work, so it is valid on failure.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is
      *         null or @p track_id does not identify a known track,
@@ -111,7 +116,7 @@ extern "C"
      *       the same track return the same storage, so the arrays must be
      *       treated as read-only. Events of a whole track are ordered by
      *       ph_event_t::start. A request with a time window gets its own
-     *       private storage.
+     *       private storage and its events are not guaranteed to be ordered.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,
@@ -123,11 +128,16 @@ extern "C"
      * @brief Retrieves PMC/counter samples for a track within an optional
      *        time window.
      * @param ctx Context to query.
-     * @param track_id Id of a track with ph_track_t::agent_id != 0, as
-     *        returned by ph_get_track_list()/ph_get_node().
-     * @param start_ts Start of the time window (ns), or 0 for no filter.
-     * @param end_ts End of the time window (ns), or 0 for no filter.
-     * @param samples Out parameter receiving the sample list.
+     * @param track_id Id of a track whose category is
+     *        PH_TRACK_CATEGORY_PMC_AGENT, as returned by
+     *        ph_get_track_list()/ph_get_node(). Any other track yields an
+     *        empty list.
+     * @param start_ts Start of the time window (ns). With @p end_ts also 0
+     *        there is no filter.
+     * @param end_ts End of the time window (ns). With only @p end_ts 0 the
+     *        window has no upper bound.
+     * @param samples Out parameter receiving the sample list; it is set to
+     *        an empty list before any other work, so it is valid on failure.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
      *         null or @p track_id does not identify a known track,
