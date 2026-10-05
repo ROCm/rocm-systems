@@ -23,10 +23,7 @@ struct topology_key_t
     size_t pid{};
     size_t tid{};
 
-    bool operator==(const topology_key_t& other) const
-    {
-        return nid == other.nid && pid == other.pid && tid == other.tid;
-    }
+    bool operator==(const topology_key_t&) const = default;
 };
 
 struct topology_key_hash_t

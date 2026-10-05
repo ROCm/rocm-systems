@@ -5,6 +5,7 @@
 
 #include "connection.hpp"
 
+#include <concepts>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -39,7 +40,7 @@ public:
 
     /** @brief RAII handle to a leased connection; releases it back to the pool on
      * destruction. */
-    class lease
+    class [[nodiscard("dropping a lease gives the connection back immediately")]] lease
     {
     public:
         lease(lease&& other) noexcept;
@@ -73,8 +74,8 @@ public:
      *        thread. Deliberately does not touch thread_pool -- safe to
      *        call even from inside an already-running thread_pool task.
      */
-    template <typename Fn>
-    [[nodiscard]] auto run_sync(Fn&& fn) -> std::invoke_result_t<Fn&, connection&>
+    template <std::invocable<connection&> Fn>
+    [[nodiscard]] auto run_sync(Fn&& fn) -> std::invoke_result_t<Fn, connection&>
     {
         auto held = acquire();
         return std::forward<Fn>(fn)(*held);
