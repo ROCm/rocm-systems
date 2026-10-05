@@ -2148,7 +2148,8 @@
           "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
           "env_variables": {
             "NCCL_IB_SL": "",
-            "NCCL_IB_TC": ""
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": ""
           }
         },
         {
@@ -2157,7 +2158,28 @@
           "test_filter": "GinTrafficClassMPITest.ExplicitIbEnvironmentOverrides",
           "env_variables": {
             "NCCL_IB_SL": "5",
-            "NCCL_IB_TC": "96"
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": ""
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesIbTc",
+          "description": "NCCL_GIN_IB_TC overrides NCCL_IB_TC on GIN QPs only; collective network-transport QPs keep NCCL_IB_TC and both keep NCCL_IB_SL at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesIbTc",
+          "env_variables": {
+            "NCCL_IB_SL": "5",
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": "104"
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesDeviceHost",
+          "description": "NCCL_GIN_IB_TC alone overrides GIN devComm and host traffic classes on GIN QPs; collective network-transport QPs keep the host value at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesDeviceAndHost",
+          "env_variables": {
+            "NCCL_IB_SL": "",
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": "104"
           }
         }
       ]
