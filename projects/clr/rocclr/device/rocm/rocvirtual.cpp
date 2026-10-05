@@ -3250,6 +3250,9 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
   profilingBegin(cmd);
 
   if (dev().info().hmmSupported_) {
+    // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+    // work in the queue
+    releaseGpuMemoryFence(kSkipCpuWait);
     // Initialize signal for the barrier
     auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
     hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
@@ -3289,6 +3292,9 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  // ROCr orders the prefetch only by the wait signals, so a signal must cover all earlier
+  // work in the queue
+  releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(command.Count(), timestamp_);
 
@@ -3329,6 +3335,9 @@ void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& co
   std::scoped_lock lock(execution());
   profilingBegin(command);
 
+  // ROCr orders the discard only by the wait signals, so a signal must cover all earlier
+  // work in the queue
+  releaseGpuMemoryFence(kSkipCpuWait);
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
   hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 
@@ -4360,6 +4369,15 @@ void VirtualGPU::submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cm
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(cmd);
+
+  // System scope is needed here to order this packet against writes made by EARLIER
+  // packets on the same stream, not for the write performed by this one. The blit kernel
+  // already stores the value with system scope, so the value itself reaches a peer agent
+  // without any flush -- which is precisely the hazard: data left in this agent's L2 by a
+  // preceding agent-scope dispatch (e.g. fillBuffer) has not drained yet, so the value
+  // overtakes it. The system-scope acquire makes this agent's caches coherent before the
+  // packet runs. Matches submitStreamOperation(), which does the same for its blit paths.
+  addSystemScope();
 
   bool result = blitMgr().batchMemOps(cmd.getParamPtr(), cmd.paramSize(), cmd.count());
   if (!result) {
