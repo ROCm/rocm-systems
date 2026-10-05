@@ -3022,7 +3022,13 @@ static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t*
 // ================================================================================================
 hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
                            hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
-                           hip::Stream& stream, bool isAsync) {
+                           hip::Stream& stream, bool isAsync, size_t* failIdx) {
+  // Reports the entry a per-entry error refers to.
+  const auto fail = [failIdx](size_t i, hipError_t error) {
+    if (failIdx != nullptr) *failIdx = i;
+    return error;
+  };
+
   // Pre-compute memory objects once per copy to avoid repeated expensive
   // getMemoryObject calls later in validation, classification, and submission.
   std::vector<amd::Memory*> srcMemories(count, nullptr);
@@ -3032,7 +3038,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 
   for (size_t i = 0; i < count; ++i) {
     if (dsts[i] == nullptr || srcs[i] == nullptr) {
-      return hipErrorInvalidValue;
+      return fail(i, hipErrorInvalidValue);
     }
   }
 
@@ -3078,7 +3084,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
                                           /*read_write*/ true);
     }
     if (status != hipSuccess) {
-      return status;
+      return fail(i, status);
     }
   }
 
@@ -3134,7 +3140,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
           if (sMem == nullptr || dMem == nullptr ||
               (getMemoryType(sMem) == hipMemoryTypeHost &&
                getMemoryType(dMem) == hipMemoryTypeHost)) {
-            return hipErrorNotSupported;
+            return fail(i, hipErrorNotSupported);
           }
           break;
         }
@@ -3143,7 +3149,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-          return hipErrorNotSupported;
+          return fail(i, hipErrorNotSupported);
       }
 
       // ROCr would reject it asynchronously, too late to report.
@@ -3151,14 +3157,14 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         const uintptr_t alignMask = stream.device().settings().sdma_swap_alignment_ - 1;
         if (((reinterpret_cast<uintptr_t>(srcs[i]) | reinterpret_cast<uintptr_t>(dsts[i])) &
              alignMask) != 0) {
-          return hipErrorInvalidValue;
+          return fail(i, hipErrorInvalidValue);
         }
       }
 
       // An indirect packet can't be split, so ROCr rejects larger entries.
       if ((copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) &&
           sizes[i] > stream.device().settings().sdma_indirect_max_size_) {
-        return hipErrorInvalidValue;
+        return fail(i, hipErrorInvalidValue);
       }
     }
 
@@ -3319,11 +3325,8 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
   // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(
-      dsts, srcs, sizes, count,
-      attrs, attrsIdxs, numAttrs,
-      *hip::getStream(stream),
-      true);
+  hipError_t status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
+                                      *hip::getStream(stream), true, failIdx);
 
   HIP_RETURN(status);
 }

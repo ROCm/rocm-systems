@@ -222,9 +222,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
 
   SECTION("Null source element") {
     src_ptrs[1] = nullptr;
+    size_t fail_idx = 0;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, &fail_idx, stream_guard.stream()),
                     hipErrorInvalidValue);
+    REQUIRE(fail_idx == 1);
   }
 
   SECTION("Zero size first copy") {
@@ -854,7 +856,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
 }
 
 /**
- * A misaligned swap is rejected and leaves both buffers untouched.
+ * A misaligned swap is rejected, reported through failIdx, and nothing in the batch runs.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Misaligned) {
   constexpr size_t kSizeInBytes = 4096;
@@ -880,18 +882,29 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Misaligned) {
   fillBuffer(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
   fillBuffer(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
 
-  void* swapPtrA = allocA.ptr() + (misalignA ? kMisalignment : 0);
-  void* swapPtrB = allocB.ptr() + (misalignB ? kMisalignment : 0);
-  size_t size = kSizeInBytes;
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
-  size_t attrs_idxs[1] = {0};
-  size_t fail_index = 0;
+  // A valid copy ahead of the swap, so failIdx must point past it.
+  const std::vector<unsigned char> initialValuesCopy(kSizeInBytes, 7);
+  LinearAllocGuard<unsigned char> copySrc(LinearAllocs::hipMalloc, kSizeInBytes);
+  LinearAllocGuard<unsigned char> copyDst(LinearAllocs::hipMalloc, kSizeInBytes);
+  HIP_CHECK(hipMemset(copySrc.ptr(), 1, kSizeInBytes));
+  fillBuffer(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
 
-  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&swapPtrA, &swapPtrB, &size, 1, &attr, attrs_idxs, 1,
-                                      &fail_index, stream_guard.stream()),
+  void* dsts[2] = {copyDst.ptr(), allocA.ptr() + (misalignA ? kMisalignment : 0)};
+  void* srcs[2] = {copySrc.ptr(), allocB.ptr() + (misalignB ? kMisalignment : 0)};
+  size_t sizes[2] = {kSizeInBytes, kSizeInBytes};
+  hipMemcpyAttributes attrs[2] = {{hipMemcpySrcAccessOrderStream, {}, {}, 0},
+                                  {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap}};
+  size_t attrs_idxs[2] = {0, 1};
+  size_t fail_idx = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(dsts, srcs, sizes, 2, attrs, attrs_idxs, 2, &fail_idx,
+                                      stream_guard.stream()),
                   expectedError);
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
+  // An unsupported swap is rejected for the whole batch, not for one entry.
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 1 : SIZE_MAX));
+  requireBufferEquals(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
   requireBufferEquals(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
   requireBufferEquals(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
 }
@@ -1205,11 +1218,14 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_TooLarge) {
   constexpr unsigned int kFlags = hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, kFlags};
   size_t attrs_idxs[1] = {0};
+  size_t fail_idx = 1;
 
-  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, nullptr,
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, &fail_idx,
                                       stream_guard.stream()),
                   expectedError);
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 0 : SIZE_MAX));
 }
 
 /**
