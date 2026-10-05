@@ -509,6 +509,10 @@ class _ScalarBinop(_ScalarDeriver):
                     SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(src1,)),
                 ),
             )
+        elif ty.base == 'F' and op in ('min_num', 'max_num', 'minimum', 'maximum'):
+            # SALU float min/max match their VALU counterparts (RDNA4 ISA 6.8);
+            # gfx1201 captures agree, including the VALU ISA discrepancies.
+            result = _float_minmax(op, ty, src0, src1)
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
             fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
@@ -563,8 +567,14 @@ class _ScalarBinop(_ScalarDeriver):
             result_ty = result.ty or result_ty
         if ty.base in ('F', 'BF') and ty.size == 16:
             result_ty = SemaType.F32
-        stmts.append(_assign(_id('result', result_ty), result))
-        stmts.append(_assign(_cast(_dst(0), ty), _id('result', result_ty)))
+        if result.kind == SemaNodeKind.CALL and (result.call_name or '').startswith(
+            FLOAT_MINMAX_CALL
+        ):
+            # Write the selected encoding directly, without a float round trip.
+            stmts.append(_assign(_cast(_dst(0), ty), result))
+        else:
+            stmts.append(_assign(_id('result', result_ty), result))
+            stmts.append(_assign(_cast(_dst(0), ty), _id('result', result_ty)))
 
         if sem.sets_scc and sem.sets_scc != 'none' and not scc_handled_by_template:
             if sem.sets_scc == 'carry':

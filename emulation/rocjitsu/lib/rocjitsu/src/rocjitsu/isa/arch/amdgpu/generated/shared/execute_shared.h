@@ -1838,19 +1838,21 @@ inline void execute_s_max_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_max_num_f16_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = std::fmax(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
 inline void execute_s_max_num_f32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result =
-      std::fmax(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)),
-                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
@@ -1865,33 +1867,21 @@ inline void execute_s_max_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_maximum_f16_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = [&]() {
-    auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
-    auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
-    if (std::isnan(a) || std::isnan(b))
-      return std::numeric_limits<decltype(a)>::quiet_NaN();
-    if (a == b)
-      return std::signbit(a) ? b : a;
-    return a > b ? a : b;
-  }();
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Maximum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
 inline void execute_s_maximum_f32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = [&]() {
-    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0));
-    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1));
-    if (std::isnan(a) || std::isnan(b))
-      return std::numeric_limits<decltype(a)>::quiet_NaN();
-    if (a == b)
-      return std::signbit(a) ? b : a;
-    return a > b ? a : b;
-  }();
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::Maximum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
@@ -1925,19 +1915,21 @@ inline void execute_s_min_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_min_num_f16_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = std::fmin(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
 inline void execute_s_min_num_f32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result =
-      std::fmin(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)),
-                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
@@ -1952,33 +1944,21 @@ inline void execute_s_min_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_minimum_f16_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = [&]() {
-    auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
-    auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
-    if (std::isnan(a) || std::isnan(b))
-      return std::numeric_limits<decltype(a)>::quiet_NaN();
-    if (a == b)
-      return std::signbit(a) ? a : b;
-    return a < b ? a : b;
-  }();
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Minimum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>
 inline void execute_s_minimum_f32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  float result = [&]() {
-    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0));
-    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1));
-    if (std::isnan(a) || std::isnan(b))
-      return std::numeric_limits<decltype(a)>::quiet_NaN();
-    if (a == b)
-      return std::signbit(a) ? a : b;
-    return a < b ? a : b;
-  }();
-  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, std::bit_cast<uint32_t>(result));
+  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::Minimum>(
+                     compare_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
+                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
 }
 
 template <typename Inst>

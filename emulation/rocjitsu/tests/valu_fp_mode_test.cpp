@@ -2981,4 +2981,94 @@ INSTANTIATE_TEST_SUITE_P(CompareInputFlush, ValuCompareInputFlushTest,
                            return info.param.name;
                          });
 
+// SALU float min/max match their VALU counterparts (RDNA4 ISA section 6.8),
+// including the gfx1201 NaN order. Each case is a gfx1201 capture. F16 forms
+// read bits [15:0] and zero the destination's high half.
+struct SaluMinmaxCase {
+  const char *name;
+  uint16_t op;
+  uint32_t a;
+  uint32_t b;
+  uint32_t mode;
+  uint32_t expected;
+};
+
+void PrintTo(const SaluMinmaxCase &test, std::ostream *stream) { *stream << test.name; }
+
+const SaluMinmaxCase kSaluMinmaxCases[] = {
+    {"MinNumF32NegativeZero", rdna4::kSMinNumF32Sop2, 0x00000000u, 0x80000000u, 0xf0u, 0x80000000u},
+    {"MinNumF32BothQuietNans", rdna4::kSMinNumF32Sop2, 0x7fc00000u, 0xffc00000u, 0xf0u,
+     0x7fc00000u},
+    {"MinNumF32IgnoresSignalingNan", rdna4::kSMinNumF32Sop2, 0x3f800000u, 0x7f800001u, 0xf0u,
+     0x3f800000u},
+    {"MinNumF32KeepsDenormal", rdna4::kSMinNumF32Sop2, 0x80000001u, 0x00000000u, 0x30u,
+     0x80000001u},
+    {"MinNumF32FlushesDenormal", rdna4::kSMinNumF32Sop2, 0x80000001u, 0x00000000u, 0xc0u,
+     0x80000000u},
+    {"MaxNumF32PositiveZero", rdna4::kSMaxNumF32Sop2, 0x80000000u, 0x00000000u, 0xf0u, 0x00000000u},
+    // ISA discrepancy, as for V_MINIMUM_F32: the quiet src0 beats a signaling src1.
+    {"MinimumF32FirstNanWins", rdna4::kSMinimumF32Sop2, 0x7fc00000u, 0x7f800001u, 0xf0u,
+     0x7fc00000u},
+    {"MinimumF32KeepsNanPayload", rdna4::kSMinimumF32Sop2, 0x00000000u, 0xffc00456u, 0xf0u,
+     0xffc00456u},
+    {"MaximumF32QuietsSignalingNan", rdna4::kSMaximumF32Sop2, 0x7f800001u, 0x00000000u, 0xf0u,
+     0x7fc00001u},
+    {"MaximumF32FlushesDenormal", rdna4::kSMaximumF32Sop2, 0x007fffffu, 0x00000000u, 0xc0u,
+     0x00000000u},
+    {"MinNumF16FlushesDenormal", rdna4::kSMinNumF16Sop2, 0x5a5a8001u, 0x5a5a0000u, 0x30u,
+     0x00008000u},
+    {"MinNumF16KeepsDenormal", rdna4::kSMinNumF16Sop2, 0x5a5a8001u, 0x5a5a0000u, 0xc0u,
+     0x00008001u},
+    {"MaxNumF16PositiveZero", rdna4::kSMaxNumF16Sop2, 0x5a5a8000u, 0x5a5a0000u, 0xf0u, 0x00000000u},
+    {"MaxNumF16BothQuietNans", rdna4::kSMaxNumF16Sop2, 0xa5a57e00u, 0x0000fe34u, 0xf0u,
+     0x00007e00u},
+    {"MinimumF16FirstNanWins", rdna4::kSMinimumF16Sop2, 0xa5a57e00u, 0x00007c01u, 0xf0u,
+     0x00007e00u},
+    {"MinimumF16KeepsNanPayload", rdna4::kSMinimumF16Sop2, 0x00000000u, 0x0000fe34u, 0xf0u,
+     0x0000fe34u},
+    {"MaximumF16QuietsSignalingNan", rdna4::kSMaximumF16Sop2, 0x00007c01u, 0x00007e00u, 0xf0u,
+     0x00007e01u},
+    {"MaximumF16FlushesDenormal", rdna4::kSMaximumF16Sop2, 0x000003ffu, 0x00000000u, 0x30u,
+     0x00000000u},
+};
+
+class SaluMinmaxTest : public testing::TestWithParam<SaluMinmaxCase> {};
+
+TEST_P(SaluMinmaxTest, MatchesGfx1201) {
+  const SaluMinmaxCase &test = GetParam();
+  amdgpu::GpuMemory memory("salu_minmax_memory");
+  amdgpu::L2Cache cache("salu_minmax_cache");
+  cache.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+      amdgpu::ComputeUnitCore::create("salu_minmax", config, &memory, &cache);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  // s_<op> s6, s0, s1
+  const auto word = rdna4::build_sop2(test.op, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 6});
+  const std::array<uint32_t, 3> words = {word[0], 0u, 0u};
+  DecodeResult decoded = decoder->decode(words.data());
+  ASSERT_FALSE(decoded.failed());
+  std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  const uint32_t sgpr = wave->sgpr_alloc().base;
+  wave->set_mode_raw(test.mode);
+  cu->write_sgpr(sgpr + 0, test.a);
+  cu->write_sgpr(sgpr + 1, test.b);
+  cu->write_sgpr(sgpr + 6, 0xdeadbeefu);
+  ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+  EXPECT_EQ(cu->read_sgpr(sgpr + 6), test.expected);
+  wave->halt();
+}
+
+INSTANTIATE_TEST_SUITE_P(SaluMinmax, SaluMinmaxTest, testing::ValuesIn(kSaluMinmaxCases),
+                         [](const testing::TestParamInfo<SaluMinmaxCase> &info) {
+                           return info.param.name;
+                         });
+
 } // namespace

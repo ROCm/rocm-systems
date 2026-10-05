@@ -245,7 +245,8 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
             wrapped.append(f'  {vcc_write}')
         return '\n'.join(wrapped)
 
-    return '\n'.join(body_lines)
+    # Scalar blocks have no lane loop; per-instruction policies precede the body.
+    return '\n'.join([*ctx.vector_preamble, *body_lines])
 
 
 _VCC_WRITING_CALLS = frozenset(
