@@ -14,8 +14,11 @@
 /// gfx1201 captures of every min/max instruction match these rules bit for
 /// bit, in F16, F32 and F64, under every MODE setting probed. OMOD overflow
 /// was checked for both signs under all four rounding modes, with FP16_OVFL
-/// disabled and enabled. CDNA5 callers use the same rules without hardware
-/// verification.
+/// disabled and enabled.
+///
+/// Other uses apply the same stage without hardware verification: min/max on
+/// CDNA4 and CDNA5, and VOP3 CEIL/FLOOR/TRUNC/RNDNE F32/F64 on every target
+/// (CDNA1-5, RDNA1-4).
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 /// F16 occupies the low half of a 32-bit lane; F32 and F64 use 32 and 64 bits.

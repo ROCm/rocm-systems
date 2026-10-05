@@ -15,11 +15,12 @@
 /// and NaN rule. Three-source forms compose two binary selections; V_MED3_NUM
 /// selects the median, or V_MIN3_NUM if any source is NaN. Differences between
 /// gfx1201 results and the ISA pseudocode are marked "ISA discrepancy" below.
-/// The RDNA4 and CDNA5 callers use these rules. Hardware measurements cover
-/// gfx1201 only; applying its ISA discrepancies to CDNA5 remains an assumption
-/// requiring hardware verification. SALU S_MIN_NUM, S_MAX_NUM, S_MINIMUM and
-/// S_MAXIMUM share them: the ISA defines them to match their VALU counterparts,
-/// and gfx1201 captures agree.
+/// The RDNA4 and CDNA5 callers, and CDNA4's V_MINIMUM3_F32/V_MAXIMUM3_F32, use
+/// these rules. Hardware measurements cover gfx1201 only; applying its ISA
+/// discrepancies to CDNA4 and CDNA5 remains an assumption requiring hardware
+/// verification. SALU S_MIN_NUM, S_MAX_NUM, S_MINIMUM and S_MAXIMUM share them:
+/// the ISA defines them to match their VALU counterparts, and gfx1201 captures
+/// agree.
 ///
 /// Scalar and SIMD callers use the same implementation on raw encodings in
 /// unsigned lanes, so selection preserves signs and NaN payloads.
