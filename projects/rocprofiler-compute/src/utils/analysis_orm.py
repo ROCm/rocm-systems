@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "3.0.0"
+SCHEMA_VERSION = "2.3.1"
 
 
 Base = declarative_base()

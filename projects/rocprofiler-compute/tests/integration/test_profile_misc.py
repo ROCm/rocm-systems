@@ -81,17 +81,6 @@ def test_analyze_rocpd(
     for table_name, orm_obj in table_name_map.items():
         check_cols(table_name, orm_obj)
 
-    conn = sqlite3.connect(f"{db_name}.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type = 'table' AND name = 'compute_workload_roofline_data'"
-    )
-    assert cursor.fetchone() is None
-    cursor.execute("SELECT schema_version FROM compute_metadata")
-    assert cursor.fetchone() == ("3.0.0",)
-    conn.close()
-
     os.remove(f"{db_name}.db")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
