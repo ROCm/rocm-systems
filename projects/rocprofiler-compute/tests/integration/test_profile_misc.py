@@ -27,7 +27,7 @@ def test_analyze_rocpd(
     skip_unsupported_roofline_soc()
 
     workload_dir = common.get_output_dir()
-    options = ["--device", "0"]
+    options = ["--roofline-device", "0"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     db_name = "test"
@@ -144,7 +144,7 @@ def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_comput
 
 @pytest.mark.misc
 def test_device_filter(binary_handler_profile_rocprof_compute):
-    options = ["--device", "0"]
+    options = ["--roofline-device", "0"]
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
