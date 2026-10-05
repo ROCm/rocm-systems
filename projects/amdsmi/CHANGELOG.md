@@ -323,6 +323,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
+- **AI-NIC discovery now recognizes the ``1dd8:1478`` Pensando upstream bridge**.  
+  - Cards whose bridge reports ``0x1478`` were not registered, so their ionic ports were orphaned and ``amd-smi list --nic all`` and ``amd-smi metric --nic all`` showed only the UALoE endpoints. Each such card is now listed with its identity, ``ASIC_TEMP_C`` and health.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
