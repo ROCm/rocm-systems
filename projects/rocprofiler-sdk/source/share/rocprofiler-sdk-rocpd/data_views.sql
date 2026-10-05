@@ -881,8 +881,6 @@ SELECT
     PMC_I.id AS counter_id,
     PMC_E.xcc,
     PMC_E.shader_engine,
-    PMC_E.shader_array,
-    PMC_E.wgp,
     PMC_E.instance,
     PMC_E.value,
     S.timestamp,
