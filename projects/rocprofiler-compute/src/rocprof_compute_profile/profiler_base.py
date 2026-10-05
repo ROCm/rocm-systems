@@ -11,7 +11,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from argparser import PROFILE_SELECTION_CONFLICT
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -224,6 +223,10 @@ class RocProfCompute_Base:
                         "--experimental --pc-sampling"
                     )
 
+        # --set replaces filter_blocks, which would drop the PC sampling block
+        if getattr(args, "pc_sampling", False) and args.set_selected:
+            console_error("--pc-sampling cannot be used with --set.")
+
         # When --pc-sampling is set, inject "21" into filter_blocks so the
         # profiling config yaml records it and downstream code is unchanged.
         if getattr(args, "pc_sampling", False):
@@ -250,9 +253,6 @@ class RocProfCompute_Base:
                 "collect counters. Remove the tracing option(s) or add a counter block."
             )
         self._selected_frameworks: set[str] = selected_frameworks
-
-        if args.filter_blocks and args.set_selected:
-            console_error(PROFILE_SELECTION_CONFLICT)
 
         if args.no_native_tool and args.iteration_multiplexing is not None:
             console_error(

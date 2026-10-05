@@ -743,6 +743,15 @@ def test_sanitize_membw_analysis_injects_block_30(
     assert args.filter_blocks == expected_filter_blocks
 
 
+def test_sanitize_pc_sampling_rejects_set(caplog):
+    """--set would replace the PC sampling block, so the pair is rejected."""
+    args = _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[])
+    args.set_selected = "launch_stats"
+    with pytest.raises(SystemExit):
+        _make_profiler_with_args(args).sanitize()
+    assert "--pc-sampling cannot be used with --set." in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
