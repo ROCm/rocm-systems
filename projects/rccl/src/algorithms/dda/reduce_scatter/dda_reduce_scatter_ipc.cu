@@ -55,11 +55,19 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                        recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  if (dda::common::ddaAlltoAllSingleBlockGrid(recvcount, sizeof(T)) ) {
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  } else {
+    if (totalCount * sizeof(T) > 4194304) {
+       CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+    }
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;

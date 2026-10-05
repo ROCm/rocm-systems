@@ -14,21 +14,38 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc>
+template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                       const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
-
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  if constexpr (kStagingCopyInKernel) {
+    // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
+    // cudaMemcpyAsync launch overhead on ROCm.
+    const size_t copyCount = count * NRANKS;
+    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  } else {
+    if (count * sizeof(T) <= 4194304) {
+#pragma unroll NRANKS
+      for (int s = 0; s < NRANKS; ++s) {
+        const size_t off = static_cast<size_t>(s) * count;
+        copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
+      }
+      barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();	
+    } else {
+      // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
+      barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+    }
+  }
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
