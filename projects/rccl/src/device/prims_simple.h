@@ -113,7 +113,7 @@ class Primitives<T, RedOp, Fan, Direct,
     if (sysAcquire || !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS) {
       return ld_acquire_sys_global(ptr);
     }
-    return __atomic_load_n(ptr, __ATOMIC_RELAXED);
+    return ld_relaxed_sys_global(ptr);
 #elif defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
