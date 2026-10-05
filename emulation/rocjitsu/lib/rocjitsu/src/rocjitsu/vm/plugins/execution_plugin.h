@@ -78,10 +78,11 @@ public:
   /// return false after its wavefront-dispatch callback has decided that the
   /// wave is outside its observation scope. The group samples the decision once
   /// after every plugin's wavefront-dispatch callback and reuses it until halt.
-  /// Reentrant hooks during dispatch/halt and hooks without a wavefront use a
-  /// live query, so this method must remain lock-free and thread-safe. The
-  /// decision must be stable between dispatch completion and the matching halt.
-  /// Lifecycle and dispatch/workgroup/wavefront callbacks are unaffected.
+  /// Reentrant hooks during dispatch/halt, hooks without a wavefront, and hooks
+  /// on a resident wave after live plugin-group replacement use a live query,
+  /// so this method must remain lock-free and thread-safe. The decision must be
+  /// stable between dispatch completion and the matching halt. Lifecycle and
+  /// dispatch/workgroup/wavefront callbacks are unaffected.
   virtual bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront * /*wf*/) const {
     return true;
   }
