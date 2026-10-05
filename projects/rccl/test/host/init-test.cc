@@ -8928,7 +8928,7 @@ TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob)
   Rank_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
 }
 
-TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingSameHostRank_SetsHasExcludedLocalRank) {
+TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingSameHostRank_SetsHasExcludedHostRank) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   parent->peerInfo[0].hostHash = 0xAAAA;
@@ -8942,7 +8942,7 @@ TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingSameHostRank_SetsHasExc
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
 
-  EXPECT_TRUE(parent->hasExcludedLocalRank) << "excluded rank 1 is on same host as rank 0";
+  EXPECT_TRUE(parent->hasExcludedHostRank) << "excluded rank 1 is on same host as rank 0";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
 
@@ -8960,7 +8960,7 @@ TEST_F(InitMicrotest, InitChildComm_ShrinkDefault_ExcludingSameHostRank_DoesNotS
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
 
-  EXPECT_FALSE(parent->hasExcludedLocalRank)
+  EXPECT_FALSE(parent->hasExcludedHostRank)
     << "a NCCL_SHRINK_DEFAULT excluded rank is healthy and still enters the destroy barrier";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
@@ -8979,7 +8979,7 @@ TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingOnlyRemoteHostRank_Does
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
 
-  EXPECT_FALSE(parent->hasExcludedLocalRank) << "excluded rank 3 is on a different host from rank 0";
+  EXPECT_FALSE(parent->hasExcludedHostRank) << "excluded rank 3 is on a different host from rank 0";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
 
@@ -8997,7 +8997,7 @@ TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_MultiExcludeHitsLocalOnSecondEnt
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 2, &out));
 
-  EXPECT_TRUE(parent->hasExcludedLocalRank) << "rank 3 shares host with rank 0; loop must continue past rank 1";
+  EXPECT_TRUE(parent->hasExcludedHostRank) << "rank 3 shares host with rank 0; loop must continue past rank 1";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
 

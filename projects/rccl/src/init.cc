@@ -4260,18 +4260,20 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
-    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && comm->nNodes > 1 &&
-        !comm->hasExcludedLocalRank) {
+    if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && ncclPxnDisable(comm) == 0 &&
+        !comm->hasExcludedHostRank) {
       int* hostRanks;
       int hostRank = 0;
       int nHostRanks = 0;
       // Wait for all host-local ranks before stopping the proxy threads, to ensure that PXN connection establishment
-      // can complete if some ranks were to try destroying the communicator early.  Skip when nNodes == 1 because PXN
-      // is only used for multi-node communication, and on single-node configs the barrier can deadlock if processes
-      // reach destroy at different times.  Skip when hasExcludedLocalRank is set because an NCCL_SHRINK_ABORT excluded
-      // a local peer, which has aborted and will never reach this barrier.  As an optimization, filter
-      // comm->localRanks to the local host only, since on MNNVL systems it can include other hosts, while PXN is
-      // strictly host-local.
+      // can complete if some ranks were to try destroying the communicator early.  The barrier only exists to protect
+      // PXN, so skip it when PXN is disabled for this comm; it is a cross-process rendezvous with no cancellation, and
+      // running it when nothing depends on it is how the single-node teardown deadlock happens.  ncclPxnDisable() is
+      // derived from arch, nRanks and env, so every rank agrees on it -- which matters here, because a barrier that
+      // some ranks enter and others skip is exactly what hangs.  Skip when hasExcludedHostRank is set because an
+      // NCCL_SHRINK_ABORT excluded a peer on this host, which has aborted and will never arrive.  As an optimization,
+      // filter comm->localRanks to the local host only, since on MNNVL systems it can include other hosts, while PXN
+      // is strictly host-local.
       NCCLCHECKGOTO(ncclCalloc(&hostRanks, comm->localRanks), ret, fail);
       for (int i = 0; i < comm->localRanks; i++) {
         if (comm->peerInfo[comm->localRankToRank[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
@@ -4777,7 +4779,7 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     if ((flags & NCCL_SHRINK_ABORT) && comm->peerInfo) {
       for (int i = 0; i < excludeRanksCount; i++) {
         if (comm->peerInfo[excludeRanksList[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
-          comm->hasExcludedLocalRank = true;
+          comm->hasExcludedHostRank = true;
           break;
         }
       }
