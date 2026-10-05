@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 
 namespace
 {
@@ -136,7 +137,7 @@ TEST_F(connection_pool_test, run_sync_gives_the_connection_back_when_the_callabl
 {
     const auto pool = make_pool(1);
 
-    EXPECT_THROW(pool->run_sync([](common::connection&) -> int {
+    EXPECT_THROW(std::ignore = pool->run_sync([](common::connection&) -> int {
         throw std::runtime_error("read failed");
     }),
                  std::runtime_error);
