@@ -79,11 +79,14 @@ def main() -> int:
     ]
     # A session of its own, so a timeout also kills the workloads the suite
     # spawned: they hold the pipe open and would block the read forever.
+    # A workload may print bytes that are not UTF-8; a strict decode would
+    # raise here and lose the results of a suite that had finished.
     with subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        errors="replace",
         start_new_session=True,
     ) as process:
         try:

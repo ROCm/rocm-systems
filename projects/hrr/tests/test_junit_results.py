@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
 from run_catch2 import top_level_results  # noqa: E402
 from summarize_junit import summarize_xml  # noqa: E402
@@ -66,6 +69,43 @@ class TopLevelResultsTest(unittest.TestCase):
         self.assertEqual(summary["counts"], {"PASS": 2, "FAIL": 1, "SKIP": 1})
         self.assertEqual(summary["failed"], ["Sections"])
         self.assertEqual(summary["total"], 4)
+
+
+class RunCatch2Test(unittest.TestCase):
+    def test_reports_a_suite_whose_output_is_not_utf8(self):
+        # A workload can print bytes that are not UTF-8 (0x82 on gfx1151 and
+        # gfx90a runners); the summary must still come from the JUnit file.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "results.xml.in").write_text(JUNIT)
+            suite = tmp / "suite.py"
+            suite.write_text(textwrap.dedent("""\
+                import shutil, sys
+                from pathlib import Path
+                out = next(a[len("junit::out="):] for a in sys.argv
+                           if a.startswith("junit::out="))
+                shutil.copy(Path(__file__).with_name("results.xml.in"), out)
+                sys.stdout.buffer.write(b"workload says \\x81\\x82\\n")
+                sys.exit(42)
+                """))
+            run = subprocess.run(
+                [
+                    sys.executable,
+                    str(HERE / "run_catch2.py"),
+                    "--xml",
+                    str(tmp / "results.xml"),
+                    "--",
+                    sys.executable,
+                    str(suite),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        output = run.stdout.decode("utf-8", "replace")
+        self.assertEqual(run.returncode, 42, output)
+        self.assertIn("FAIL: Sections", output)
+        self.assertIn("in section 'second':", output)
+        self.assertIn("2 passed, 1 failed, 1 skipped", output)
 
 
 if __name__ == "__main__":
