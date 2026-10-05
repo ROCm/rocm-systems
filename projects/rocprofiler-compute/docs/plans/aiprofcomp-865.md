@@ -1,4 +1,4 @@
-# AIPROFCOMP-865 — Single-pass packable and collectables
+# AIPROFCOMP-865 — Single-pass packable and unpackable
 
 **JIRA:** AIPROFCOMP-865 (parent AIPROFCOMP-864)
 
@@ -15,11 +15,10 @@ Full historical plan drafts are preserved on branch
 
 | Term | Meaning |
 |------|---------|
-| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). |
-| **SPP (Single-pass packable)** | Collection + analyze contract: every metric whose PMC set fits one hardware bucket gets a co-located perfmon replay, and its expression is same-pass–bound at analyze time. |
-| **SLOT_LIMIT** | Metric whose full PMC set cannot fit one hardware bucket under `perfmon_config` slot limits, even with global repack. |
-| **POLICY_GAP** | Metric that is multi-bucket under the old shipping layout but **is** packable in one bucket with SPP (fixed by Phase 1, not Phase 2). |
-| **Same-pass bind** | SPP analyze half: bind each packable metric’s expression to counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
+| **SPP (Single-pass packable)** | Metric whose PMC set fits one hardware bucket. **Collection:** co-located perfmon replay (PMC duplication across passes allowed when unions conflict). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
+| **SPU (Single-pass unpackable)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
+| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). Used to solve **SPU** parents. |
+| **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (fixed by Phase 1, not Phase 2). |
 | **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). |
 | **COLLECT_SUM / COLLECT_RATIO** | Analyze composites for sum-of-subcollectables and ratio-of-collectables parents. |
 
@@ -38,10 +37,10 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 | YAML metrics scanned | 408 |
 | Metrics with profile PMCs | **374** |
 | Single-bucket today | **283** |
-| Multi-bucket (impacted) | **75** packable (**POLICY_GAP**) + **16** **SLOT_LIMIT** |
+| Multi-bucket (impacted) | **75** packable (**POLICY_GAP** → SPP) + **16** **SPU** |
 | Derived metrics with no profile PMCs | 34 |
 
-**Normative intent:** for \(M = A/B\), collect all PMCs for \(A\) and \(B\) in the same replay when possible. Exceptions: intentional >100% (e.g. VALU dual-issue), **SLOT_LIMIT** (Phase 2), or HW defect — not silent analyze-time caps.
+**Normative intent:** for \(M = A/B\), collect all PMCs for \(A\) and \(B\) in the same replay when possible. Exceptions: intentional >100% (e.g. VALU dual-issue), **SPU** (Phase 2), or HW defect — not silent analyze-time caps.
 
 ---
 
@@ -50,19 +49,18 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 ```
 408 YAML metrics (gfx942 default)
 ├── 374 with profile PMCs
-│   ├── 358 single-pass (all packable)     ← Phase 1 SPP (~14 passes + same-pass bind)
-│   └── 16 SLOT_LIMIT                      ← Phase 2 collectables
+│   ├── 358 SPP (single-pass packable)     ← Phase 1 (~14 passes + same-pass bind)
+│   └── 16 SPU (single-pass unpackable)    ← Phase 2 collectables
 └── 34 with no profile PMCs                ← out of packing scope
 ```
 
 | Goal | Detail |
 |------|--------|
-| Packable metrics | Full PMC set in **one** replay (duplication across passes allowed when unions conflict) |
-| Analyze contract (SPP) | Same-pass bind so duplicated hub counters are not cross-pass merged |
-| SLOT_LIMIT parents | Decompose into single-pass subcollectables; compose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO` |
+| SPP metrics | Full PMC set in **one** replay + same-pass bind at analyze |
+| SPU parents | Decompose into collectables; recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO` |
 | Escape hatch | `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE=1` restores legacy merged-pass analyze |
 
-**SPP is collection + post-analysis.** Packing without same-pass bind still yields wrong ratios under PMC duplication; bind without packing still leaves packable metrics multi-bucket. Phase 1 ships both. Phase 2 is only SLOT_LIMIT collectables / composites.
+**SPP is collection + post-analysis.** Packing without same-pass bind still yields wrong ratios under PMC duplication; bind without packing still leaves packable metrics multi-bucket. Phase 1 ships both. Phase 2 is only SPU collectables / composites.
 
 ---
 
@@ -77,35 +75,37 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 
 Algorithm (normative sketch):
 
-1. Build unique **packable** PMC unions (skip SLOT_LIMIT parents).
+1. Build unique **SPP** PMC unions (skip SPU parents).
 2. Largest-first: ensure some bucket contains each union’s full set (duplicate PMCs across passes when needed).
-3. Run **SLOT_LIMIT fill** so residual SLOT PMCs appear somewhere (+0 extra passes on gfx942).
+3. Run **SPU residual fill** so residual SPU PMC pieces appear somewhere (+0 extra passes on gfx942).
 4. Optional harden: TCC series affinity / ACCUM slot charging where required.
 
 **Locked decisions:**
 
 - Default path is SPP packing; optional `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` during migration.
-- Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics — packing covers them.
+- Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics — packing covers them (they are SPP).
 - Priority policy YAML is not required for the packable guarantee.
-- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SLOT_LIMIT == **16**, SLOT extra passes == **0**.
+- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SPU count == **16**, SPU extra passes == **0**.
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
-#### Analyze — same-pass bind
+#### Analyze — same-pass bind (part of SPP)
 
 When packing duplicates hub counters across passes:
 
 1. Preserve per-pass PMC columns as `{counter}@pass:{key}` shadows at load time.
-2. Bind each packable metric’s expression to a co-located pass (`PassLayout` / `pass_provenance.py`).
+2. Bind each SPP metric’s expression to a co-located pass (`PassLayout` / `pass_provenance.py`).
 3. Wire CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
 
 Without this bind, SPP layouts can produce impossible percent averages/maxes (e.g. CPC Utilization avg ≫ 100%).
 
 **Primary bind code:** `pass_provenance.py`, `file_io` / `utils_analysis` shadow columns, analyze CLI+DB bind paths.
 
-### 4.2 Phase 2 design — Collectables (SLOT_LIMIT only)
+### 4.2 Phase 2 design — Collectables (SPU only)
 
-When \(M = (A+B)/C\) cannot fit one bucket:
+SPU parents cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`.
+
+When \(M = (A+B)/C\) is SPU:
 
 1. Collect submetrics in separate single-pass replays: \(M_0 = A/C_0\), \(M_1 = B/C_1\).
 2. Recombine in analyze: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\) via `WEIGHTED_AVG`, or use `COLLECT_SUM` / `COLLECT_RATIO` where appropriate.
@@ -121,13 +121,13 @@ _weighted_avg:
     weight_counter: TCC_EA0_WRREQ_sum
 ```
 
-Submetrics are normal single-pass metrics. Parents are analyze-time composites (collectable graph / `apply_composite_metrics()`).
+Submetrics are normal single-pass (SPP) metrics. Parents are analyze-time composites (collectable graph / `apply_composite_metrics()`).
 
-gfx942: **16** SLOT_LIMIT parents ≈ **10** unique PMC sets (panel mirrors share sets).
+gfx942: **16** SPU parents ≈ **10** unique PMC sets (panel mirrors share sets).
 
-#### gfx942 SLOT_LIMIT conversion summary
+#### gfx942 SPU conversion summary
 
-All **16** former SLOT_LIMIT parents (**10** unique PMC sets) are analyze-time composites under SPP. Sub-collectables are single-bucket; offline eval reports `slot_limit_metrics: 0`.
+All **16** former SPU parents (**10** unique PMC sets) are analyze-time composites. Sub-collectables are single-bucket; offline eval reports `slot_limit_metrics: 0` (tool key for the SPU residual count).
 
 | Unique set | Composite |
 |------------|-----------|
@@ -143,7 +143,7 @@ All **16** former SLOT_LIMIT parents (**10** unique PMC sets) are analyze-time c
 
 Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py --arch gfx942` → `slot_limit_metrics: 0`, `packable_multi: 0`, passes: 14.
 
-**Primary code:** `collectable.py`, `weighted_avg.py`, aggregation/expression/evaluation_pipeline composite path; gfx942 SLOT YAML conversions.
+**Primary code:** `collectable.py`, `weighted_avg.py`, aggregation/expression/evaluation_pipeline composite path; gfx942 SPU YAML conversions.
 
 ---
 
@@ -151,12 +151,12 @@ Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py -
 
 | Layer | Check |
 |-------|--------|
-| Offline packing | `eval_single_pass_packable.py` / inspector: `packable_multi == 0`, pass count, SLOT fill +0 |
-| Same-pass bind | Unit tests (`test_pass_provenance`, DB bind tests); health report P0 ratios ≤ 100% where expected |
-| Collectables | WA / `COLLECT_RATIO` unit tests; gfx942 `slot_limit_metrics == 0` after Phase 2 |
+| Offline packing | `eval_single_pass_packable.py` / inspector: `packable_multi == 0`, pass count, SPU residual fill +0 |
+| SPP analyze (same-pass bind) | Unit tests (`test_pass_provenance`, DB bind tests); health report P0 ratios ≤ 100% where expected |
+| SPU collectables | WA / `COLLECT_RATIO` unit tests; gfx942 `slot_limit_metrics == 0` after Phase 2 |
 | Health report | SPP vs legacy health runners + `generate_metric_health_report.py` on gfx942 (and other arches as needed) |
 | Hardware spot-check | gfx942 CPX/SPX: P0 HBM / WGM / CPC ratios sane (avg/max ≤ 100% where expected) |
 | Regression workload | MI-PATH `ns3d*` (AIPROFCOMP-265 class): SPP (packing + bind) vs legacy packing / legacy pass merge |
 | Multi-arch | Re-baseline gfx908, gfx90a, gfx950, gfx115x, gfx1250 offline after Phase 1 |
 
-**Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2 (collectables / `WEIGHTED_AVG` / `COLLECT_*` only).
+**Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2 (SPU collectables / `WEIGHTED_AVG` / `COLLECT_*` only).
