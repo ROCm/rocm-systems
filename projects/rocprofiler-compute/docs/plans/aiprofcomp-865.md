@@ -170,7 +170,19 @@ Offline gate: `PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py -
    - `packable_multi == 0`, pass count ≈ **14**, SPU residual fill **+0** on gfx942.
    - After Phase 2: `slot_limit_metrics == 0`.
 
-3. **End-to-end / multi-arch regression (3 workloads)** — Health runners + report for both Phase 1 and Phase 2 stacks (e.g. vcopy, mini-nbody, mega_kernel). Cover gfx908 / gfx90a / gfx942 / gfx950 / gfx115x / gfx1250 as available. **CPX mode only on MI300 (gfx942).**
+3. **End-to-end / multi-arch regression (3 workloads)** — Run health runners + report on both Phase 1 and Phase 2 stacks across gfx908 / gfx90a / gfx942 / gfx950 / gfx115x / gfx1250 as available. **CPX mode only on MI300 (gfx942).**
+
+   Workloads:
+
+   - `vcopy`
+   - `nbody` (`mini-nbody`)
+   - `mega_kernel`
+
+   Each run should cover:
+
+   - **(a) High-level metric validation** — panel / SoL-style sanity (avg/max ≤ 100% where expected; no impossible ratios).
+   - **(b) Delta comparison before/after** — SPP (and Phase 2 where applicable) vs legacy packing / legacy pass-merge baselines (`compare_spp_legacy_medians` / health-report deltas).
+
 
 4. **Blocking-ticket validation** — Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
 
