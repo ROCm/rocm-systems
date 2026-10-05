@@ -28,6 +28,14 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     assert not filtered.empty, "No matrixTranspose entries in counter CSV"
 
     filtered = filtered.copy()
+    assert (
+        filtered[counter_column]
+        .str.contains(
+            r"\[XCC: \d+, Instance: \d+, SE: \d+, SA: \d+, WGP: \d+\]$",
+            regex=True,
+        )
+        .all()
+    )
     filtered["base_counter"] = filtered[counter_column].str.replace(
         r"\[.*\]$", "", regex=True
     )
@@ -111,6 +119,34 @@ def test_validate_spm_rocpd(spm_json_data, rocpd_data):
     ).fetchone()[0]
 
     assert rocpd_spm_count > 0
+
+    info_columns = {
+        row[1] for row in rocpd_data.execute(f"PRAGMA table_info({pmc_table})")
+    }
+    event_columns = {
+        row[1] for row in rocpd_data.execute(f"PRAGMA table_info({pmc_event_table})")
+    }
+    assert {"xcc", "shader_engine", "shader_array", "wgp", "instance"}.issubset(
+        info_columns
+    )
+    assert not {"xcc", "shader_engine", "shader_array", "wgp", "instance"} & event_columns
+
+    topology = rocpd_data.execute(
+        f"SELECT p.shader_engine, p.shader_array, p.wgp "
+        f"FROM {pmc_event_table} e "
+        f"JOIN {pmc_table} p ON e.pmc_id = p.id AND e.guid = p.guid "
+        f"WHERE e.sample_id IS NOT NULL"
+    ).fetchall()
+    assert topology
+    assert all(
+        shader_engine is not None
+        and shader_array is not None
+        and wgp is not None
+        and 0 <= shader_engine < 256
+        and shader_array >= 0
+        and wgp >= 0
+        for shader_engine, shader_array, wgp in topology
+    )
 
 
 def test_validate_spm_external_correlation_rocpd(rocpd_data):

@@ -8,6 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. `rocpd_pmc_event` keeps the sample value and points at that id.
+
 ### Resolved issues
 
 ### Known issues

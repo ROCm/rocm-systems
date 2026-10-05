@@ -502,15 +502,86 @@ def insert_minimal_data(
             (_SAMPLE_SPM_ID, guid, _TRACK_SPM_ID, _T_START + 50_000, _EVT_KERNEL_1, "{}"),
         )
 
-        conn.executemany(
-            f"INSERT INTO {tbl('rocpd_pmc_event')} "
-            "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            [
-                (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
-                (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
-            ],
-        )
+        if ver >= (3, 0, 5):
+            # One info row per location. Event rows store only that pmc id.
+            _PMC_LOC_SE0 = 0x7100000000000001
+            _PMC_LOC_SE1 = 0x7100000000000002
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_info_pmc')} "
+                "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+                "component, value_type, block, expression, is_constant, is_derived, "
+                "spm_support, xcc, shader_engine, shader_array, wgp, instance, extdata) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        _PMC_LOC_SE0,
+                        guid,
+                        _NID,
+                        _PID,
+                        _AGENT_ID,
+                        "GPU",
+                        "SQ_WAVES",
+                        "SQ_WAVES",
+                        _SQ_WAVES_DESC,
+                        "rocm",
+                        "ABS",
+                        "SQ",
+                        "",
+                        0,
+                        0,
+                        1,
+                        0,  # xcc
+                        0,  # shader_engine
+                        1,  # shader_array
+                        2,  # wgp
+                        0,  # instance
+                        "{}",
+                    ),
+                    (
+                        _PMC_LOC_SE1,
+                        guid,
+                        _NID,
+                        _PID,
+                        _AGENT_ID,
+                        "GPU",
+                        "SQ_WAVES",
+                        "SQ_WAVES",
+                        _SQ_WAVES_DESC,
+                        "rocm",
+                        "ABS",
+                        "SQ",
+                        "",
+                        0,
+                        0,
+                        1,
+                        0,
+                        1,
+                        0,
+                        3,
+                        0,
+                        "{}",
+                    ),
+                ],
+            )
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value) "
+                "VALUES (?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_LOC_SE0, 16.0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_LOC_SE1, 16.0),
+                ],
+            )
+        else:
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
+                ],
+            )
 
     # HIP event barrier data was introduced in schema 3.0.4.
     if ver >= (3, 0, 4):
