@@ -451,6 +451,9 @@ class Runtime {
 
   hsa_status_t VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryHandle);
 
+  // [va, va + size) lies in one vmem mapping, and agent has execute access.
+  hsa_status_t CheckExecutableMapping(const void* va, size_t size, hsa_agent_t agent);
+
   hsa_status_t VMemoryHandleMap(void* va, size_t size, size_t in_offset,
                                 hsa_amd_vmem_alloc_handle_t memoryHandle, uint64_t flags);
 
