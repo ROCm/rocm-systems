@@ -522,16 +522,6 @@ jobs:
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
 
-      - name: Upload simulator corpus diagnostics
-        if: ${{ always() && matrix.run_simulator_corpus && steps.authorize_uploads.outputs.allowed == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rocjitsu-corpus-diagnostics-${{ matrix.name }}
-          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Compare plain and translated gfx1250 simulator runs
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
         timeout-minutes: 45
@@ -580,17 +570,6 @@ jobs:
             --expectations "${ROCJITSU_SOURCE_DIR}/tests/corpus/gfx1250_b0_a0_semantic_rewrites.json" \
             --artifact-directory .pytest-artifacts/gfx1250-semantic-qualification \
             --expected-runtime-translations 2
-
-      - name: Upload gfx1250 semantic qualification logs
-        if: ${{ always() && matrix.name == 'release' && steps.authorize_uploads.outputs.allowed == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: gfx1250-semantic-qualification-${{ matrix.name }}
-          path: |
-            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/**/logs
-            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/translation-diffs
-          if-no-files-found: ignore
-          retention-days: 7
 
       - name: Extract pinned gfx1250 packaged HSACOs
         id: extract_dbt
@@ -735,17 +714,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Debugging aid only. The pinned extraction is reproducible, so retain
-      # translator logs but never upload the extracted HSACOs.
-      - name: Upload gfx1250 DBT diagnostic logs
-        if: always() && matrix.run_simulator_corpus && steps.authorize_uploads.outputs.allowed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: gfx1250-dbt-logs-${{ matrix.name }}
-          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
-          if-no-files-found: ignore
-          retention-days: 7
-
       # Finish existing HIP/DBT coverage before starting Vulkan-only setup.
       - name: Install Mesa RADV for Vulkan compute CTS
         id: install_vulkan_dependencies
@@ -802,13 +770,3 @@ jobs:
         env:
           ROCJITSU_CORPUS_DIR: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
         run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1201 --case ci
-
-      - name: Upload Vulkan CTS diagnostics
-        if: ${{ always() && matrix.name == 'release' && steps.authorize_uploads.outputs.allowed == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rocjitsu-vulkan-cts-release
-          path: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}/.pytest-artifacts/vulkan-*
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
