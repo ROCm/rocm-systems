@@ -25,6 +25,10 @@ that option as a prefix.
 --roofline --roofline-bench-only
 ```
 
+If an option already exists with the same meaning in another mode, keep its
+name. Don't add a prefix. For example, `-b/--block` filters by block or metric
+id in `profile`, `analyze`, and `--list-metrics`.
+
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
 
