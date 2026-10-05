@@ -34,7 +34,8 @@ public:
         frontend_lifetime_(std::move(frontend_lifetime)) {
     address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
                                      registration.page_table_generation,
-                                     std::move(registration.request_mutex));
+                                     std::move(registration.request_mutex),
+                                     std::move(registration.page_table_cache_state));
     address_space_->set_process_client_pid(vmid_, registration.client_pid);
     address_space_->set_process_mem_fd(vmid_, registration.client_mem_fd);
     address_space_->set_process_passthrough(vmid_, registration.passthrough);

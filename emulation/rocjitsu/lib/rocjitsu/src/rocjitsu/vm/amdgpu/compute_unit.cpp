@@ -1434,7 +1434,10 @@ template <bool EnableAsync>
       return;
     }
     const AddressSpaceHandle address_space = active->address_space();
-    if (snapshot && snapshot->compute_unit == this) {
+    if (GpuVmAccessBatchGuard::active()) {
+      vm_access = address_space ? gpu_vm_->borrow_snapshot(address_space)
+                                : gpu_vm_->borrow_snapshot_vmid(vmid);
+    } else if (snapshot && snapshot->compute_unit == this) {
       auto &cached = *snapshot;
       if (cached.owner != gpu_vm_ || cached.address_space != address_space || cached.vmid != vmid ||
           !cached.access || !cached.access->is_current()) {

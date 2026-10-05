@@ -18,14 +18,20 @@ class RequestMtypeResolver {
 public:
   RequestMtypeResolver(GpuVm *gpu_vm, uint32_t vmid, VmMtypeCache &cache,
                        std::optional<Mtype> instruction_mtype = std::nullopt)
-      : access_(vmid != 0 && gpu_vm != nullptr ? gpu_vm->snapshot_vmid(vmid) : std::nullopt),
-        mtype_cache_(cache), fallback_(instruction_mtype.value_or(Mtype::RW)),
-        combine_(instruction_mtype.has_value()) {}
+      : mtype_cache_(cache), fallback_(instruction_mtype.value_or(Mtype::RW)),
+        combine_(instruction_mtype.has_value()) {
+    bind_access(gpu_vm, vmid);
+  }
+
+  RequestMtypeResolver(const RequestMtypeResolver &) = delete;
+  RequestMtypeResolver &operator=(const RequestMtypeResolver &) = delete;
+  RequestMtypeResolver(RequestMtypeResolver &&) = delete;
+  RequestMtypeResolver &operator=(RequestMtypeResolver &&) = delete;
 
   Mtype fallback() const { return fallback_; }
 
   Mtype at(uint64_t addr) {
-    if (!access_)
+    if (access_ == nullptr)
       return fallback_;
     const std::optional<Mtype> mtype = access_->query_mtype(addr, mtype_cache_);
     if (!mtype)
@@ -34,7 +40,19 @@ public:
   }
 
 private:
-  std::optional<GpuVmAccess> access_;
+  void bind_access(GpuVm *gpu_vm, uint32_t vmid) {
+    if (vmid == 0 || gpu_vm == nullptr)
+      return;
+    if (GpuVmAccessBatchGuard::active()) {
+      access_ = gpu_vm->borrow_snapshot_vmid(vmid);
+      return;
+    }
+    owned_access_ = gpu_vm->snapshot_vmid(vmid);
+    access_ = owned_access_ ? &*owned_access_ : nullptr;
+  }
+
+  std::optional<GpuVmAccess> owned_access_;
+  const GpuVmAccess *access_ = nullptr;
   VmMtypeCache &mtype_cache_;
   Mtype fallback_;
   bool combine_;
