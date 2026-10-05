@@ -13,7 +13,11 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import build_parser
+from argparser import (
+    DEPRECATED_OPTIONS,
+    build_parser,
+    warn_deprecated_options,
+)
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
@@ -245,6 +249,37 @@ def test_pc_sampling_analyze_options():
         with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
     mock_error.assert_called_once()
+
+
+# =============================================================================
+# Deprecated option names
+# =============================================================================
+
+
+def test_deprecated_options_are_real_options():
+    option_strings = {
+        option for parser in all_parsers() for option in parser._option_string_actions
+    }
+    assert set(DEPRECATED_OPTIONS) <= option_strings
+
+
+@pytest.mark.parametrize(
+    ("argv", "workload", "warned"),
+    [
+        (["profile", "--retain-rocpd-output"], [], ["--retain-rocpd-output"]),
+        (["profile", "--retain-rocpd-output=1"], [], ["--retain-rocpd-output"]),
+        # Options of the workload belong to the workload
+        (["profile", "-n", "x", "--", "./app", "--retain-rocpd-output"],
+         ["--", "./app", "--retain-rocpd-output"], []),
+        (["--list-metrics", "gfx950"], [], []),
+    ],
+    ids=["deprecated", "equals_form", "workload_options", "not_deprecated"],
+)  # fmt: skip
+def test_warn_deprecated_options(argv, workload, warned, caplog):
+    warn_deprecated_options(argv, workload)
+    for option in warned:
+        assert f"{option} is deprecated" in caplog.text
+    assert caplog.text.count("is deprecated") == len(warned)
 
 
 # =============================================================================

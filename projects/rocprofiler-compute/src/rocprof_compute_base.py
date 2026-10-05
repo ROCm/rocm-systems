@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from argparser import build_parser
+from argparser import (
+    build_parser,
+    warn_deprecated_options,
+)
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -268,6 +271,10 @@ class RocProfCompute:
             experimental_requested,
         )
         self.__args = self.__parser.parse_args()
+        # The workload command after "--" may have options of its own
+        warn_deprecated_options(
+            sys.argv[1:], getattr(self.__args, "remaining", None) or []
+        )
 
         if self.__args.mode == "profile":
             self.handle_profile_args()
