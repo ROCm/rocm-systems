@@ -14,6 +14,7 @@
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 #include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
+#include "hrr_payload_bounds.h"
 #include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
@@ -53,6 +54,7 @@
 // Kernel-launch handlers use this to wait for their submission turn and then
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
+thread_local size_t   hrr_dispatch_index = 0;
 
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
                            const char* reason) {
@@ -1682,15 +1684,31 @@ hipError_t playback_hipGetSymbolSize(PlaybackContext& ctx,
 // the resolved device address, which is what the symbol spelling decays to
 // inside the runtime anyway.
 
-static hipGraphNode_t* dep_array(PlaybackContext& ctx, const uint8_t* bytes,
-                                 uint8_t present, uint32_t n,
-                                 std::vector<hipGraphNode_t>& out) {
-    if (!present || n == 0) return nullptr;
+// Resolve a recorded dependency list into live nodes for the hand-written
+// graph handlers. The record holds its dependencies inline, so a count above
+// what the field holds is a malformed record: it is refused with the API name
+// and the event index, and nothing is read past the field. Returns false then;
+// on success *ptr is the array to hand to HIP (null when there are none).
+static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* bytes,
+                      size_t field_bytes, uint8_t present, uint32_t n,
+                      std::vector<hipGraphNode_t>& out, hipGraphNode_t** ptr) {
+    *ptr = nullptr;
+    out.clear();
+    if (!present || n == 0) return true;
+    if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
+        fprintf(stderr,
+                "[HRR] %s: event %zu records %u dependencies but its record holds "
+                "at most %zu; refusing the call\n",
+                api, hrr_dispatch_index, n,
+                hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
+        return false;
+    }
     out.resize(n);
-    std::memcpy(out.data(), bytes, n * sizeof(hipGraphNode_t));
+    std::memcpy(out.data(), bytes, static_cast<size_t>(n) * sizeof(hipGraphNode_t));
     for (auto& node : out)
         node = ctx.translate_graph_node(reinterpret_cast<uint64_t>(node));
-    return out.data();
+    *ptr = out.data();
+    return true;
 }
 
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
@@ -1728,9 +1746,13 @@ hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
     }
 
     std::vector<hipGraphNode_t> deps;
-    hipGraphNode_t* dep_ptr = dep_array(ctx, a->pDependencies_bytes,
-                                        a->pDependencies_present,
-                                        a->pDependencies_n, deps);
+    hipGraphNode_t* dep_ptr = nullptr;
+    if (!dep_array(ctx, "hipGraphAddMemcpyNodeToSymbol", a->pDependencies_bytes,
+                   sizeof(a->pDependencies_bytes), a->pDependencies_present,
+                   a->pDependencies_n, deps, &dep_ptr)) {
+        ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemcpyNodeToSymbol");
+        return hipSuccess;
+    }
     hipGraphNode_t node = nullptr;
     hipError_t r = hipGraphAddMemcpyNode1D(
         &node, ctx.translate_graph(a->graph), dep_ptr, deps.size(),
@@ -1775,9 +1797,13 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     }
 
     std::vector<hipGraphNode_t> deps;
-    hipGraphNode_t* dep_ptr = dep_array(ctx, a->pDependencies_bytes,
-                                        a->pDependencies_present,
-                                        a->pDependencies_n, deps);
+    hipGraphNode_t* dep_ptr = nullptr;
+    if (!dep_array(ctx, "hipGraphAddMemcpyNodeFromSymbol", a->pDependencies_bytes,
+                   sizeof(a->pDependencies_bytes), a->pDependencies_present,
+                   a->pDependencies_n, deps, &dep_ptr)) {
+        ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemcpyNodeFromSymbol");
+        return hipSuccess;
+    }
     hipGraphNode_t node = nullptr;
     hipError_t r = hipGraphAddMemcpyNode1D(
         &node, ctx.translate_graph(a->graph), dep_ptr, deps.size(), dst,
@@ -4746,11 +4772,20 @@ hipError_t playback_hipIpcOpenMemHandle(PlaybackContext& ctx, const uint8_t* pl)
 // would be silently dropped, which is the class of bug the node map exists to
 // prevent, so the caller marks the graph incomplete instead.
 static bool translate_node_deps(PlaybackContext& ctx, const char* api,
-                                const uint8_t* bytes, uint32_t n,
-                                uint8_t present,
+                                const uint8_t* bytes, size_t field_bytes,
+                                uint32_t n, uint8_t present,
                                 std::vector<hipGraphNode_t>& out) {
     out.clear();
     if (!present || n == 0) return true;
+    // The record holds its dependencies inline; a larger count is malformed.
+    if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
+        fprintf(stderr,
+                "[HRR] %s: event %zu records %u dependencies but its record holds "
+                "at most %zu; refusing the call\n",
+                api, hrr_dispatch_index, n,
+                hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
+        return false;
+    }
     out.resize(n);
     std::memcpy(out.data(), bytes, static_cast<size_t>(n) * sizeof(hipGraphNode_t));
     for (auto& node : out) {
@@ -4857,8 +4892,8 @@ hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage) ||
         !translate_node_deps(ctx, "hipGraphAddKernelNode",
-                             a->pDependencies_bytes, a->pDependencies_n,
-                             a->pDependencies_present, deps)) {
+                             a->pDependencies_bytes, sizeof(a->pDependencies_bytes),
+                             a->pDependencies_n, a->pDependencies_present, deps)) {
         ctx.mark_graph_incomplete(a->graph, "hipGraphAddKernelNode");
         return hipSuccess;
     }
@@ -5000,8 +5035,8 @@ hipError_t playback_hipGraphAddBatchMemOpNode(PlaybackContext& ctx,
                                     sizeof(*a), a->nodeParams_bytes,
                                     a->nodeParams_present, bnp, ops) ||
         !translate_node_deps(ctx, "hipGraphAddBatchMemOpNode",
-                             a->dependencies_bytes, a->dependencies_n,
-                             a->dependencies_present, deps)) {
+                             a->dependencies_bytes, sizeof(a->dependencies_bytes),
+                             a->dependencies_n, a->dependencies_present, deps)) {
         ctx.mark_graph_incomplete(a->hGraph, "hipGraphAddBatchMemOpNode");
         return hipSuccess;
     }
@@ -5063,8 +5098,8 @@ hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx,
     std::vector<hipGraphNode_t> deps;
     if (!a->pNodeParams_present ||
         !translate_node_deps(ctx, "hipGraphAddMemAllocNode",
-                             a->pDependencies_bytes, a->pDependencies_n,
-                             a->pDependencies_present, deps)) {
+                             a->pDependencies_bytes, sizeof(a->pDependencies_bytes),
+                             a->pDependencies_n, a->pDependencies_present, deps)) {
         ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemAllocNode");
         return hipSuccess;
     }
@@ -5154,8 +5189,8 @@ hipError_t playback_hipDrvGraphAddMemcpyNode(PlaybackContext& ctx,
     std::memcpy(&copy, a->copyParams_bytes, sizeof(copy));
     if (!translate_drv_memcpy3d(ctx, "hipDrvGraphAddMemcpyNode", copy) ||
         !translate_node_deps(ctx, "hipDrvGraphAddMemcpyNode",
-                             a->dependencies_bytes, a->dependencies_n,
-                             a->dependencies_present, deps)) {
+                             a->dependencies_bytes, sizeof(a->dependencies_bytes),
+                             a->dependencies_n, a->dependencies_present, deps)) {
         ctx.mark_graph_incomplete(a->hGraph, "hipDrvGraphAddMemcpyNode");
         return hipSuccess;
     }
