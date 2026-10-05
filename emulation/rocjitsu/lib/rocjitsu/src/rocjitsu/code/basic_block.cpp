@@ -49,9 +49,16 @@ bool is_unconditional_branch(const Instruction &inst) {
 }
 
 bool uses_zero_filled_text_padding(rj_code_arch_t arch) {
-  // Zero is not an instruction in these ISAs. Both toolchains use zero-filled
+  // Zero is not an instruction in these ISAs. Their toolchains use zero-filled
   // alignment after bodies whose symbol-derived range extends to the next
   // aligned body.
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+bool permits_implicit_text_termination(rj_code_arch_t arch) {
+  // RDNA3 alignment holes do not establish that an unterminated path ends.
+  // Keep its missing fallthroughs visible to CFG consumers.
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
@@ -417,14 +424,14 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
                      range.start_offset + range.size - next_offset >= sizeof(uint32_t);
             });
         const bool reaches_zero_padding =
-            decode_gap && uses_zero_filled_text_padding(arch) && next_offset < section_end &&
+            decode_gap && permits_implicit_text_termination(arch) && next_offset < section_end &&
             section_end - next_offset >= sizeof(uint32_t) && padding_permitted &&
             inst_data[next_offset / sizeof(uint32_t)] == 0;
         // Running off the end of `.text` is the same boundary as running into padding: there is no
         // next instruction either way. Requiring padding to be present would make the result
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
-        const bool reaches_section_end = uses_zero_filled_text_padding(arch) &&
+        const bool reaches_section_end = permits_implicit_text_termination(arch) &&
                                          i >= decoded.size() && next_offset >= section_end;
         if (can_fall_through && (reaches_zero_padding || reaches_section_end)) {
           current->has_terminator_ = true;

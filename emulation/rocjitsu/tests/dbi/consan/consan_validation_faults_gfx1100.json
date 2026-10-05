@@ -1094,6 +1094,153 @@
           }
         }
       ]
+    },
+    "rocblas-sgemm-square-64": {
+      "faults": [
+        {
+          "id": "drop-initial-publication-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The reviewed gfx1100 kernel selected by this fault dispatches one 128-thread workgroup (four wave32 waves) with 16 KiB LDS for RocblasGemmTest.Square_64x64, M=N=K=64, alpha=1, beta=0. The first publication block is bypassed only when K>>4 is zero; K=64 makes that condition false, so the selected initial-publication s_barrier is reached unconditionally for this command. LDS producer stores are followed by two LDS completion waits, the singleton s_barrier, and ds_load_b128 consumers. Producer addresses are 16*thread_id; consumer addresses are 16*(thread_id%16), so peer waves consume data produced by lanes 0..15 of wave 0. Removing this barrier exposes cross-wave publication while preserving the waits. The exact site selector binds this proof to the reviewed code object; rediscover and review the site if its identity changes. Select the singleton barrier by exact site, without a paired-sequence selector. Calibration policy: evaluate Default presets default/high/higher/max in ascending order and stop at the first operating point with at least 6/8 admitted and reached detections; SuperCollider uses sleep=15 with the same threshold. Every operating point requires its own clean comparator. Timeout, bad output alone, trap, or signal does not count as detection."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3b148d41a0df9e19|kernel=Cijk_Ailk_Bljk_SB_MT64x64x16_SN_1LDSB0_AMAS3_BL1_BS1_EPS1_GLVWA4_GLVWB4_GRVW4_GSU1_GSUASB_ISA1100_IU1_K1_KLA_LBSPPA0_LBSPPB0_LPA0_LPB0_LRVW4_MIAV0_MMFGLC_NLCA1_NLCB1_PGR1_PLR1_SIA1_SS0_SU0_SUM0_SUS0_SVW4_TT4_8_TLDS0_UMLDSA0_UMLDSB0_USFGROn1_VAW1_VSn1_VW4_VWB4_WSGRA0_WSGRB0_WS32_WG16_8_1_WGM1|kind=barrier|pc=0x00000000002002d8|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "drop-initial-publication-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The reviewed gfx1100 kernel selected by this fault dispatches one 128-thread workgroup (four wave32 waves) with 16 KiB LDS for RocblasGemmTest.Square_64x64, M=N=K=64, alpha=1, beta=0. The first publication block is bypassed only when K>>4 is zero; K=64 makes that condition false, so the selected initial-publication s_barrier is reached unconditionally for this command. LDS producer stores are followed by two LDS completion waits, the singleton s_barrier, and ds_load_b128 consumers. Producer addresses are 16*thread_id; consumer addresses are 16*(thread_id%16), so peer waves consume data produced by lanes 0..15 of wave 0. Removing this barrier exposes cross-wave publication while preserving the waits. The exact site selector binds this proof to the reviewed code object; rediscover and review the site if its identity changes. Select the singleton barrier by exact site, without a paired-sequence selector. Calibration policy: evaluate Default presets default/high/higher/max in ascending order and stop at the first operating point with at least 6/8 admitted and reached detections; SuperCollider uses sleep=15 with the same threshold. Every operating point requires its own clean comparator. Timeout, bad output alone, trap, or signal does not count as detection."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3b148d41a0df9e19|kernel=Cijk_Ailk_Bljk_SB_MT64x64x16_SN_1LDSB0_AMAS3_BL1_BS1_EPS1_GLVWA4_GLVWB4_GRVW4_GSU1_GSUASB_ISA1100_IU1_K1_KLA_LBSPPA0_LBSPPB0_LPA0_LPB0_LRVW4_MIAV0_MMFGLC_NLCA1_NLCB1_PGR1_PLR1_SIA1_SS0_SU0_SUM0_SUS0_SVW4_TT4_8_TLDS0_UMLDSA0_UMLDSB0_USFGROn1_VAW1_VSn1_VW4_VWB4_WSGRA0_WSGRB0_WS32_WG16_8_1_WGM1|kind=barrier|pc=0x00000000002002d8|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "drop-initial-publication-sc-sleep15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The reviewed gfx1100 kernel selected by this fault dispatches one 128-thread workgroup (four wave32 waves) with 16 KiB LDS for RocblasGemmTest.Square_64x64, M=N=K=64, alpha=1, beta=0. The first publication block is bypassed only when K>>4 is zero; K=64 makes that condition false, so the selected initial-publication s_barrier is reached unconditionally for this command. LDS producer stores are followed by two LDS completion waits, the singleton s_barrier, and ds_load_b128 consumers. Producer addresses are 16*thread_id; consumer addresses are 16*(thread_id%16), so peer waves consume data produced by lanes 0..15 of wave 0. Removing this barrier exposes cross-wave publication while preserving the waits. The exact site selector binds this proof to the reviewed code object; rediscover and review the site if its identity changes. Select the singleton barrier by exact site, without a paired-sequence selector. Calibration policy: evaluate Default presets default/high/higher/max in ascending order and stop at the first operating point with at least 6/8 admitted and reached detections; SuperCollider uses sleep=15 with the same threshold. Every operating point requires its own clean comparator. Timeout, bad output alone, trap, or signal does not count as detection."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3b148d41a0df9e19|kernel=Cijk_Ailk_Bljk_SB_MT64x64x16_SN_1LDSB0_AMAS3_BL1_BS1_EPS1_GLVWA4_GLVWB4_GRVW4_GSU1_GSUASB_ISA1100_IU1_K1_KLA_LBSPPA0_LBSPPB0_LPA0_LPB0_LRVW4_MIAV0_MMFGLC_NLCA1_NLCB1_PGR1_PLR1_SIA1_SS0_SU0_SUM0_SUS0_SVW4_TT4_8_TLDS0_UMLDSA0_UMLDSB0_USFGROn1_VAW1_VSn1_VW4_VWB4_WSGRA0_WSGRB0_WS32_WG16_8_1_WGM1|kind=barrier|pc=0x00000000002002d8|mnemonic=s_barrier|occurrence=0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

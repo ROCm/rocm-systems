@@ -577,7 +577,7 @@ class ConSanValidationTest(unittest.TestCase):
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
             workloads["pytorch-torch-mode"]["targets"],
-            ("gfx950", "gfx1250", "gfx1201"),
+            ("gfx950", "gfx1100", "gfx1250", "gfx1201"),
         )
         self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120)
         self.assertEqual(
@@ -6177,15 +6177,17 @@ class ConSanValidationTest(unittest.TestCase):
             "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
             rdna_fault["environment"],
         )
-        for target in ("gfx942", "gfx950"):
+        for target in ("gfx942", "gfx950", "gfx1100"):
             with self.subTest(target=target):
-                cdna_fault = validation._fault_template(target, workload)["faults"][0]
+                singleton_fault = validation._fault_template(target, workload)[
+                    "faults"
+                ][0]
                 self.assertNotIn(
                     "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
-                    cdna_fault["environment"],
+                    singleton_fault["environment"],
                 )
                 self.assertEqual(
-                    cdna_fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+                    singleton_fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
                     "REPLACE_FROM_INVENTORY",
                 )
 

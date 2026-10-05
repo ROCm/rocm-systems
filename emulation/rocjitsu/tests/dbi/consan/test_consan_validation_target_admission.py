@@ -11,6 +11,91 @@ import consan_validation_faults as validation_faults
 
 
 class ConSanValidationTargetAdmissionTest(unittest.TestCase):
+    def test_gfx1100_rocblas_fault_uses_the_native_singleton_publication(self) -> None:
+        catalog = Path(__file__).with_name('consan_validation_faults_gfx1100.json')
+        workload = validation._workload_for_target('gfx1100', 'rocblas-sgemm-square-64')
+        for suffix, profile in (
+            ('default', 'default'),
+            ('high', 'default'),
+            ('sc-sleep15', 'supercollider'),
+        ):
+            with self.subTest(suffix=suffix):
+                fault = validation_faults._load_fault(
+                    catalog, 'gfx1100', workload, f'drop-initial-publication-{suffix}'
+                )
+                environment = fault['environment']
+                self.assertEqual(environment['RJ_CONSAN_FAULT_DROP_BARRIER'], '1')
+                identity = environment['RJ_CONSAN_FAULT_SITE_IDENTITY']
+                self.assertIn('fnv1a64:3b148d41a0df9e19|', identity)
+                self.assertIn('|pc=0x00000000002002d8|mnemonic=s_barrier|', identity)
+                self.assertNotIn(
+                    'RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY', environment
+                )
+                self.assertEqual(fault['profiles'][profile]['minimum_detections'], 6)
+                self.assertEqual(len(fault['profiles'][profile]['trials']), 8)
+
+    def test_gfx1100_admits_initial_torch_workloads(self) -> None:
+        workspace = Path('/workspace')
+        python = workspace / 'consan-pytorch-venv/bin/python'
+        for workload_id in (
+            'pytorch-torch-mode',
+            'pytorch-torch-sort',
+            'pytorch-norm-softmax',
+        ):
+            with self.subTest(workload=workload_id):
+                workload = validation._workload_for_target('gfx1100', workload_id)
+                self.assertEqual(workload.kind, 'pytorch')
+                with mock.patch.dict(
+                    'os.environ', {'CONSAN_VALIDATION_PYTORCH_PYTHON': str(python)}
+                ):
+                    command = validation._workload_command(
+                        workspace,
+                        'gfx1100',
+                        workload,
+                        'clean',
+                        workspace / 'result.json',
+                    )
+                self.assertEqual(command[0], str(python))
+                self.assertIn(workload_id.removeprefix("pytorch-"), command)
+                self.assertIn('--repetitions', command)
+                self.assertEqual(command[command.index('--repetitions') + 1], '1')
+
+    def test_rocblas_sgemm_uses_the_selected_native_target(self) -> None:
+        workspace = Path("/workspace")
+        workload_id = "rocblas-sgemm-square-64"
+        for target in ("gfx1100", "gfx950"):
+            with self.subTest(target=target):
+                workload = validation._workload_for_target(target, workload_id)
+                executable = workspace / (
+                    f"rocjitsu-test-corpus-build/kernels-{target}-rocblas/cases/"
+                    "rocblas/rocblas_sgemm"
+                )
+                manifest = {
+                    row["id"]: row for row in validation._manifest(target)["workloads"]
+                }
+                self.assertEqual(
+                    workspace / manifest[workload_id]["relative_path"], executable
+                )
+                self.assertEqual(
+                    validation._input_files(workspace, target, workload)["executable"],
+                    executable,
+                )
+                for phase in ("clean", "overhead", "fault"):
+                    with self.subTest(phase=phase):
+                        self.assertEqual(
+                            validation._workload_command(
+                                workspace,
+                                target,
+                                workload,
+                                phase,
+                                workspace / "result.json",
+                            ),
+                            [
+                                str(executable),
+                                "--gtest_filter=RocblasGemmTest.Square_64x64",
+                            ],
+                        )
+
     def test_gfx1100_admits_registered_native_gtests(self) -> None:
         expected = {
             "d128-block": (

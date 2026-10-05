@@ -419,6 +419,60 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
   }
 }
 
+TEST_F(ReachableCfg, Rdna3FullConstructionSkipsTrailingSymbolAlignment) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr std::array words{build_s_nop(0, arch), build_s_endpgm(arch), 0u, 0u,
+                             build_s_nop(0, arch), build_s_endpgm(arch)};
+  TestCodeObject object;
+  object.add_text(words);
+  auto decoder = Decoder::create(arch);
+  constexpr std::array<uint64_t, 2> entries{0, 16};
+  const auto full = BasicBlock::build(object, *decoder, arch, error_.emitter(), entries,
+                                      ExternalEntryPolicy::ExplicitOnly);
+  ASSERT_TRUE(full.succeeded()) << error_.message();
+  ASSERT_EQ(offsets(full.value()), (std::vector<uint64_t>{0, 16}));
+  EXPECT_EQ(full.value()[0]->end_offset(), 8u);
+  EXPECT_TRUE(full.value()[0]->successors().empty());
+  EXPECT_FALSE(full.value()[0]->has_implicit_terminator());
+
+  constexpr std::array<Range, 1> ranges{{{0, 16}}};
+  const auto selected =
+      BasicBlock::build(object, *decoder, arch, error_.emitter(), std::span(entries).first(1),
+                        ExternalEntryPolicy::ExplicitOnly, {}, ranges);
+  ASSERT_TRUE(selected.succeeded()) << error_.message();
+  ASSERT_EQ(offsets(selected.value()), (std::vector<uint64_t>{0}));
+  EXPECT_EQ(selected.value()[0]->end_offset(), 8u);
+}
+
+TEST_F(ReachableCfg, Rdna3PaddingDoesNotHideMissingSuccessors) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  for (const bool branch_into_padding : {false, true}) {
+    SCOPED_TRACE(branch_into_padding);
+    const std::array words{branch_into_padding ? build_s_branch(0, arch) : build_s_nop(0, arch), 0u,
+                           build_s_endpgm(arch)};
+    TestCodeObject object;
+    object.add_text(words);
+    auto decoder = Decoder::create(arch);
+    const auto full = BasicBlock::build(object, *decoder, arch, error_.emitter());
+    ASSERT_TRUE(full.succeeded()) << error_.message();
+    ASSERT_EQ(offsets(full.value()), (std::vector<uint64_t>{0, 8}));
+    EXPECT_FALSE(full.value()[0]->has_implicit_terminator());
+    EXPECT_EQ(full.value()[0]->successor_issue(),
+              branch_into_padding ? Issue::MissingBranchTarget : Issue::MissingFallthrough);
+  }
+}
+
+TEST_F(ReachableCfg, Rdna3FullConstructionRejectsNonzeroInvalidEncoding) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  const std::array words{build_s_endpgm(arch), kInvalid, build_s_endpgm(arch)};
+  TestCodeObject object;
+  object.add_text(words);
+  auto decoder = Decoder::create(arch);
+  const auto full = BasicBlock::build(object, *decoder, arch, error_.emitter());
+  EXPECT_TRUE(full.failed());
+  EXPECT_FALSE(error_.message().empty());
+}
+
 TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
   for (auto arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
