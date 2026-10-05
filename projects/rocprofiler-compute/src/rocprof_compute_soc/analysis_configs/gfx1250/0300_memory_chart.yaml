@@ -309,7 +309,7 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu), 0)
+          value: ROUND(SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
         SGPR:
