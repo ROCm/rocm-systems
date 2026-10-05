@@ -77,3 +77,27 @@ def test_validate_profile_mode_arguments(options, error, caplog):
     with pytest.raises(SystemExit):
         instance._validate_profile_mode_arguments()
     assert error in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("options", "error"),
+    [
+        (["--list-available-metrics", "--speed-of-light"],
+         "Cannot use --list-available-metrics with -b/--block, --speed-of-light, "
+         "--memory-chart or --roofline."),
+        (["--list-metrics", "gfx950", "--roofline"],
+         "Cannot use --list-metrics with -b/--block, --speed-of-light, "
+         "--memory-chart or --roofline."),
+        (["--list-blocks", "gfx950", "-b", "2"],
+         "Cannot use --list-blocks with -b/--block, --speed-of-light, "
+         "--memory-chart or --roofline."),
+    ],
+    ids=["list_available_metrics", "list_metrics", "list_blocks"],
+)  # fmt: skip
+def test_validate_list_option_exclusions(options, error, caplog):
+    """The error names the options the user can actually pass."""
+    instance = make_rpc_with_args(parse_profile_args(options))
+    instance.handle_profile_args()
+    with pytest.raises(SystemExit):
+        instance._validate_list_option_exclusions()
+    assert error in caplog.text
