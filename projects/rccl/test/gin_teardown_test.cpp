@@ -23,6 +23,9 @@ extern int rcclTestHipMemMapCount;
 extern int rcclTestHipMemUnmapCount;
 extern "C" void DevRuntimeTests_SetGinRegisterFail(int fail);
 extern "C" struct ncclDevrMemory* DevRuntimeTests_GinRegisterMemHeadAtCall();
+extern "C" void DevRuntimeTests_SetStreamCreateFail(int fail);
+extern "C" void DevRuntimeTests_ResetGinDevCommFreeCalls();
+extern "C" int DevRuntimeTests_GinDevCommFreeCalls();
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
@@ -216,6 +219,88 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// GIN devComm leak-on-late-failure coverage.
+//
+// ncclGinDevCommSetup allocates GIN contexts/signals and links an
+// ncclGinStateDevComm onto the devComm list. If a later stage of
+// ncclDevrCommCreateInternal fails (stream/mem/window/barrier), the fail path
+// must release them via ncclGinDevCommFree, otherwise they leak. We force the
+// first fallible step after setup -- cudaStreamCreateWithFlags -- to fail and
+// assert the free ran. A control case (GIN not requested, so setup never ran)
+// asserts the ginContextCount guard does not free spuriously.
+class GinDevCommCreateFailTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  std::unique_ptr<ncclPeerInfo> peerStorage;
+  ncclComm* comm = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();
+    comm = commStorage.get();
+
+    comm->nRanks = 1;
+    comm->rank = 0;
+    comm->cudaDev = 0;
+    comm->localRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    comm->symmetricSupport = 1;  // keep ncclDevrInitOnce on the branch that sets a non-zero lsaSize
+    comm->globalRmaProxySupport = false;
+    comm->config.numRmaCtx = 0;
+    comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+    peerStorage = std::make_unique<ncclPeerInfo>();
+    peerStorage->totalGlobalMem = 1 << 20;
+    comm->peerInfo = peerStorage.get();
+
+    ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+    DevRuntimeTests_ResetGinDevCommFreeCalls();
+  }
+
+  void TearDown() override {
+    DevRuntimeTests_SetStreamCreateFail(0);
+    DevRuntimeTests_ResetGinDevCommFreeCalls();
+  }
+
+  // reqs reaching GIN setup without any signal/counter resources, so the
+  // sharedRes->ginState signal-shadow sizing is skipped (no sharedRes needed).
+  static ncclDevCommRequirements makeGinReqs() {
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+    reqs.ginSignalCount = 0;
+    reqs.ginCounterCount = 0;
+    reqs.barrierCount = 0;
+    reqs.railGinBarrierCount = 0;
+    reqs.worldGinBarrierCount = 0;
+    return reqs;
+  }
+};
+
+// GIN setup succeeded (ginContextCount != 0); a later stage fails. The fail path
+// must release the GIN devComm exactly once.
+TEST_F(GinDevCommCreateFailTest, FreesGinDevCommWhenLateStageFails) {
+  ncclDevCommRequirements reqs = makeGinReqs();
+  ncclDevComm devComm;
+
+  DevRuntimeTests_SetStreamCreateFail(1);
+  EXPECT_NE(ncclDevrCommCreateInternal(comm, &reqs, &devComm, /*isInternal=*/false, /*deviceCodeVersion=*/0),
+            ncclSuccess);
+  EXPECT_EQ(DevRuntimeTests_GinDevCommFreeCalls(), 1);
+}
+
+// GIN not requested, so ncclGinDevCommSetup never ran and ginContextCount stays
+// 0. The same late-stage failure must NOT call ncclGinDevCommFree.
+TEST_F(GinDevCommCreateFailTest, DoesNotFreeWhenGinNotSetUp) {
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  ncclDevComm devComm;
+
+  DevRuntimeTests_SetStreamCreateFail(1);
+  EXPECT_NE(ncclDevrCommCreateInternal(comm, &reqs, &devComm, /*isInternal=*/false, /*deviceCodeVersion=*/0),
+            ncclSuccess);
+  EXPECT_EQ(DevRuntimeTests_GinDevCommFreeCalls(), 0);
 }
 
 // rcclSkipCuMemFree / rcclSkipLsaFlatAddressFree are memoized per process.
