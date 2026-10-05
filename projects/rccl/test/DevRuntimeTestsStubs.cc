@@ -205,24 +205,11 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-
-// On success the real ncclGinDevCommSetup records a non-zero ginContextCount and
-// a valid ginHandles[0]; both gate ncclGinDevCommFree in ncclDevCommDestroy and
-// on the create-failure path. Mirror that contract so the leak-release path is
-// reachable. DevRuntimeTests_GinDevCommFreeCalls counts the matching frees.
-static int devRuntimeTestGinDevCommFreeCalls = 0;
-extern "C" void DevRuntimeTests_ResetGinDevCommFreeCalls() { devRuntimeTestGinDevCommFreeCalls = 0; }
-extern "C" int DevRuntimeTests_GinDevCommFreeCalls() { return devRuntimeTestGinDevCommFreeCalls; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm* devComm,
+ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
                                  uint32_t) {
-  devComm->ginContextCount = 1;
-  devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
   return ncclSuccess;
 }
-ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) {
-  devRuntimeTestGinDevCommFreeCalls++;
-  return ncclSuccess;
-}
+ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                              ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
   ginRegisterMemHeadAtCall = comm ? comm->devrState.memHead : nullptr;
@@ -297,23 +284,16 @@ extern "C" ncclTeam_t ncclTeamCftMultimem(ncclComm_t) { return ncclTeam_t{}; }
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
-// The real builders fully populate the out-requirement; the create path's
-// sizing loop then reads its fields (and writes through outBufferHandle). Zero
-// it so stack-garbage pointers do not cause wild writes when driving the full
-// ncclDevrCommCreateInternal.
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t* out) {
-  if (out) *out = {};
+                                                        ncclDevResourceRequirements_t*) {
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t* out) {
-  if (out) *out = {};
+                                                        ncclDevResourceRequirements_t*) {
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t* out) {
-  if (out) *out = {};
+                                                        ncclDevResourceRequirements_t*) {
   return ncclSuccess;
 }
 
@@ -416,13 +396,7 @@ HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, 
 // throwaway streams for its teardown bookkeeping; none carry real work on the
 // host, so a non-null opaque handle and success returns are sufficient.
 // ---------------------------------------------------------------------------
-// Injectable failure for the first fallible step after ncclGinDevCommSetup in
-// ncclDevrCommCreateInternal. Forcing it exercises the create fail path, which
-// must release the GIN contexts setup allocated via ncclGinDevCommFree.
-static int devRuntimeTestStreamCreateFail = 0;
-extern "C" void DevRuntimeTests_SetStreamCreateFail(int fail) { devRuntimeTestStreamCreateFail = fail; }
 HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
-  if (devRuntimeTestStreamCreateFail) return hipErrorInvalidValue;
   if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
   return hipSuccess;
 }
