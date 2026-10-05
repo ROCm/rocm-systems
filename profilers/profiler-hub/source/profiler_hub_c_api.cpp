@@ -155,8 +155,14 @@ ph_get_track_events(ph_ctx_t         ctx,
         return PH_RESULT_INVALID_CONTEXT;
     }
 
+    if(events == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
     return guard_call([ctx, track_id, start_ts, end_ts, events]() {
-        if(events == nullptr || !ctx->has_track(track_id))
+        if(!ctx->has_track(track_id))
         {
             return PH_RESULT_INVALID_ARGUMENT;
         }
@@ -179,8 +185,14 @@ ph_get_track_samples(ph_ctx_t          ctx,
         return PH_RESULT_INVALID_CONTEXT;
     }
 
+    if(samples == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *samples = ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     return guard_call([ctx, track_id, start_ts, end_ts, samples]() {
-        if(samples == nullptr || !ctx->has_track(track_id))
+        if(!ctx->has_track(track_id))
         {
             return PH_RESULT_INVALID_ARGUMENT;
         }

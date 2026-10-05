@@ -14,6 +14,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 
@@ -25,7 +26,21 @@ env_size(const char* name, size_t fallback)
 {
     const char* value = std::getenv(name);
     if(value == nullptr || value[0] == '\0') return fallback;
-    return static_cast<size_t>(std::strtoull(value, nullptr, 10));
+
+    char*      end    = nullptr;
+    const auto parsed = std::strtoull(value, &end, 10);
+    if(end == value || *end != '\0') return fallback;
+    return static_cast<size_t>(parsed);
+}
+
+std::uint32_t
+to_list_size(size_t size)
+{
+    if(size > std::numeric_limits<std::uint32_t>::max())
+    {
+        throw std::length_error("result has more elements than the C API can report");
+    }
+    return static_cast<std::uint32_t>(size);
 }
 
 profiler_hub::reader_types::event_filter_t
@@ -72,7 +87,7 @@ size_t
 ph_ctx::default_thread_pool_size()
 {
     const auto hw = std::thread::hardware_concurrency();
-    return env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2));
+    return std::max<size_t>(1, env_size("PH_POOL_THREADS", std::max<size_t>(1, hw / 2)));
 }
 
 size_t
@@ -182,9 +197,8 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection&                 
     std::scoped_lock lock{ m_track_results_mutex };
     auto&            stored = m_track_events_results.emplace_back(std::move(result));
 
-    return ph_event_list_t{ .list_size =
-                                static_cast<std::uint32_t>(stored.c_events.size()),
-                            .events = stored.c_events.data() };
+    return ph_event_list_t{ .list_size = to_list_size(stored.c_events.size()),
+                            .events    = stored.c_events.data() };
 }
 
 std::vector<ph_event_t>
@@ -332,7 +346,8 @@ ph_ctx::build_sorted_track_events(
     if(track->category == profiler_hub::reader_types::track_kind_t::thread &&
        track->event_count >= env_size("PH_READ_MIN_EVENTS", 1000000))
     {
-        return build_thread_track_events(conn, track, env_size("PH_READ_PARTS", 8));
+        return build_thread_track_events(
+            conn, track, std::max<size_t>(1, env_size("PH_READ_PARTS", 8)));
     }
 
     const auto events = conn.reader().get_events_for_track(track, {});
@@ -398,9 +413,8 @@ ph_ctx::get_cached_track_samples(
             });
     });
 
-    return ph_sample_list_t{ .list_size =
-                                 static_cast<std::uint32_t>(entry->samples.size()),
-                             .samples = entry->samples.data() };
+    return ph_sample_list_t{ .list_size = to_list_size(entry->samples.size()),
+                             .samples   = entry->samples.data() };
 }
 
 ph_event_list_t
@@ -421,7 +435,7 @@ ph_ctx::get_cached_track_events(const profiler_hub::reader_types::track_info_ptr
             });
     });
 
-    return ph_event_list_t{ .list_size = static_cast<std::uint32_t>(entry->events.size()),
+    return ph_event_list_t{ .list_size = to_list_size(entry->events.size()),
                             .events    = entry->events.data() };
 }
 
@@ -446,7 +460,7 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection&                
     std::scoped_lock lock{ m_track_results_mutex };
     auto&            stored = m_track_samples_results.emplace_back(std::move(c_samples));
 
-    return ph_sample_list_t{ .list_size = static_cast<std::uint32_t>(stored.size()),
+    return ph_sample_list_t{ .list_size = to_list_size(stored.size()),
                              .samples   = stored.data() };
 }
 
@@ -528,7 +542,8 @@ ph_ctx::initialize_track_list()
                                        // agent+queue category tracks)
                                ? static_cast<std::uint32_t>(track->thread_info->thread_id)
                                : 0,
-            .event_count = static_cast<std::uint32_t>(track->event_count),
+            .event_count = static_cast<std::uint32_t>(std::min<size_t>(
+                track->event_count, std::numeric_limits<std::uint32_t>::max())),
             .agent_id    = static_cast<std::uint32_t>(track->agent_id),
             .category    = to_c_track_category(track->category),
             .queue_id    = static_cast<std::uint32_t>(track->queue_id),
