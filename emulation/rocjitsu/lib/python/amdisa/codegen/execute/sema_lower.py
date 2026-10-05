@@ -1116,31 +1116,35 @@ def _lower_dst_write(
     # conversion to host float and back. These forms only exist on targets
     # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_minmax_bits = _is_float_minmax(selection_node)
-    if writes_minmax_bits:
+    writes_bits = _is_float_minmax(selection_node)
+    if writes_bits:
         _, rhs = _float_minmax_selection(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
         )
         needs_bitcast = 0
-    elif selection_node is not rhs_node and _is_integral_rounding(selection_node):
-        # The rounding operation already returns F32/F64. Apply output modifiers
-        # to those bits using GPU MODE, independently of the host rounding mode.
-        dtype = f'f{selection_node.ty.size}'
-        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+    elif selection_node is not rhs_node and (
+        result := _destination_result(selection_node, ctx)
+    ):
+        # The operation has already rounded its result to the destination
+        # format. Apply output modifiers to those bits using GPU MODE,
+        # independently of the host rounding mode.
+        dtype, bits, transcendental = result
+        declaration = vop3_modifiers.output_policy_decl(
+            dtype, output_fields, transcendental=transcendental
+        )
         if declaration not in ctx.vector_preamble:
             ctx.vector_preamble.append(declaration)
-        rounded = _lower_expr(selection_node, ctx)
-        bits = f'std::bit_cast<uint{selection_node.ty.size}_t>({rounded})'
         rhs = vop3_modifiers.apply_output(dtype, bits)
         needs_bitcast = 0
+        writes_bits = True
     else:
         rhs = _lower_expr(rhs_node, ctx)
         needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
     binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
-    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_minmax_bits:
+    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_bits:
         if ctx.mode_arithmetic and _contains_mode_arithmetic(rhs_node):
             rhs = (
                 f'amdgpu::fp_mode::finish_arithmetic_f16({rhs}, '
@@ -2110,6 +2114,68 @@ def _is_integral_rounding(node: SemaNode) -> bool:
         node.kind in (SemaNodeKind.FLOOR, SemaNodeKind.TRUNC)
         or (node.kind == SemaNodeKind.CALL and node.call_name in ('ceil', 'rndne'))
     )
+
+
+# F16 operations evaluated by the transcendental unit.
+_F16_TRANSCENDENTAL_CALLS = (
+    'log',
+    'log2',
+    'exp',
+    'exp2',
+    'rcp',
+    'rsq',
+    'sqrt',
+    'sin',
+    'cos',
+)
+
+
+def _destination_result(
+    node: SemaNode, ctx: LoweringContext
+) -> tuple[str, str, bool] | None:
+    """Return (dtype, bits, transcendental) for a result rounded to its format.
+
+    gfx1201 applies OMOD, then CLAMP, to the result after rounding it to its
+    destination format. Returns None for operations that keep another path.
+    """
+    if _is_integral_rounding(node):
+        rounded = _lower_expr(node, ctx)
+        return (
+            f'f{node.ty.size}',
+            f'std::bit_cast<uint{node.ty.size}_t>({rounded})',
+            False,
+        )
+    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
+    if node.ty == SemaType.F64:
+        if node.kind == SemaNodeKind.CALL and node.call_name == 'std::bit_cast<double>':
+            # The conversion helper already returns F64 register bits.
+            return 'f64', _lower_expr(node.children[1], ctx), False
+        if mode_arithmetic and not any(
+            n.kind == SemaNodeKind.LDEXP for n in node.walk()
+        ):
+            # The arithmetic helper rounds and flushes in the guest MODE.
+            return 'f64', f'std::bit_cast<uint64_t>({_lower_expr(node, ctx)})', False
+        return None
+    if node.ty != SemaType.F16:
+        return None
+    # F16 encodings occupy the low half of a 32-bit lane.
+    value = _lower_expr(node, ctx)
+    transcendental = False
+    if mode_arithmetic:
+        half = (
+            f'amdgpu::fp_mode::finish_arithmetic_f16({value}, '
+            'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
+        )
+    else:
+        transcendental = any(
+            _contains_call(node, call) for call in _F16_TRANSCENDENTAL_CALLS
+        )
+        half = (
+            f'util::f32_to_f16_mode({value}, wf.fp16_ovfl())'
+            if ctx.mode_sensitive_f16_dst
+            else f'util::f32_to_f16({value})'
+        )
+    return 'f16', f'static_cast<uint32_t>({half})', transcendental
 
 
 def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:

@@ -615,11 +615,12 @@ const std::vector<ArithmeticCase> kCases{
      {{6, 0x3c01u}},
      0xf4u,
      FE_TONEAREST},
-    {"Gfx950MulF16ScaleBeforeNarrow",
+    // OMOD scales the rounded half: 65504 * 2 overflows before div:2.
+    {"Gfx950MulF16RoundBeforeScale",
      ROCJITSU_CODE_ARCH_CDNA4,
      {0xd1220006u, 0x18020300u},
      {{0, 0x7bffu}, {1, 0x4000u}},
-     {{6, 0x7bffu}},
+     {{6, 0x7c00u}},
      0x44u,
      FE_TONEAREST},
     {"Gfx950MulF32ScaleRoundZero",
@@ -921,9 +922,10 @@ std::vector<ArithmeticCase> ldexp_f16_mode_cases() {
       add("NegativeOutput" + suffix, 0x8400u, 0xffffu, (denorm & 2u) ? 0x8200u : 0x8000u,
           denorm << 6);
     }
-    // Output scaling must precede narrowing to half, including overflow rescue.
+    // OMOD scales the result after rounding it to half, so div:2 cannot rescue
+    // an overflow (gfx1201 captures).
     if (encoding.words[1] != 0) {
-      add("OmodOverflowRescue", 0x7bffu, 1, 0x7bffu, 0);
+      add("OmodAfterOverflow", 0x7bffu, 1, 0x7c00u, 0);
       cases.back().words[1] |= 3u << 27; // div:2
     }
   }
@@ -2426,6 +2428,94 @@ std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
   return cases;
 }
 
+// gfx1201 applies OMOD, then CLAMP, after rounding a result to its destination
+// format. Each case is a captured gfx1201 lane. F16 destinations keep the
+// 0xa5a5 high half the capture initialized them with.
+std::vector<ArithmeticCase> rounded_result_modifier_cases() {
+  constexpr uint32_t kHigh = 0xa5a5a5a5u;
+  constexpr uint16_t V0 = 256, V1 = 257, V2 = 258, V4 = 260;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const std::string &name, uint16_t op, rdna4::Vop3BuilderFields fields,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources,
+                       std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+    fields.vdst = 6;
+    const auto words = rdna4::build_vop3(op, fields);
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     std::move(expected),
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto f16 = [&](const std::string &name, uint16_t op, uint8_t omod, uint32_t a, uint32_t b,
+                       uint32_t result, uint32_t mode) {
+    add(name, op, {.src0 = V0, .src1 = V1, .omod = omod}, {{0, a}, {1, b}, {6, kHigh}},
+        {{6, result}}, mode);
+  };
+  const auto f64 = [&](const std::string &name, uint16_t op, rdna4::Vop3BuilderFields fields,
+                       std::vector<uint64_t> inputs, uint64_t result, uint32_t mode) {
+    std::vector<std::pair<uint32_t, uint32_t>> sources;
+    for (uint32_t i = 0; i < inputs.size(); ++i) {
+      sources.emplace_back(2 * i, uint32_t(inputs[i]));
+      sources.emplace_back(2 * i + 1, uint32_t(inputs[i] >> 32));
+    }
+    add(name, op, fields, std::move(sources), {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
+        mode);
+  };
+
+  // A zero or subnormal rounded result becomes +0; halving -min_normal keeps
+  // its sign. The emulator previously scaled the wide sum before narrowing.
+  f16("AddF16Mul2SubnormalSum", rdna4::kVAddF16Vop3, 1, 0x966883ffu, 0xe8b70000u, 0xa5a50000u,
+      0xf0u);
+  f16("AddF16Mul4SubnormalSum", rdna4::kVAddF16Vop3, 2, 0xae7c8981u, 0xac15077du, 0xa5a50000u, 0u);
+  f16("AddF16Div2NegativeMinNormal", rdna4::kVAddF16Vop3, 3, 0x3c548400u, 0xffc00000u, 0xa5a58000u,
+      0xffu);
+  f16("LdexpF16Div2NegativeMinNormal", rdna4::kVLdexpF16Vop3, 3, 0x954b8400u, 0x35cd0000u,
+      0xa5a58000u, 0u);
+  f16("LdexpF16Mul4SubnormalResult", rdna4::kVLdexpF16Vop3, 2, 0x63c80400u, 0xde3dffffu,
+      0xa5a50000u, 0u);
+  f64("AddF64Div2NegativeMinNormal", rdna4::kVAddF64Vop3, {.src0 = V0, .src1 = V2, .omod = 3},
+      {0x8010000000000000u, 0u}, 0x8000000000000000u, 0xf0u);
+  f64("AddF64Mul4SubnormalSum", rdna4::kVAddF64Vop3, {.src0 = V0, .src1 = V2, .omod = 2},
+      {0x800fffffffffffffu, 0u}, 0u, 0xffu);
+
+  // Integral rounding of a half: OMOD overflow follows MODE, here toward zero.
+  f16("TruncF16Mul4OverflowTowardZero", rdna4::kVTruncF16Vop3, 2, 0x6a017bffu, 0u, 0xa5a57bffu,
+      0xffu);
+  f16("RndneF16Mul2OverflowTowardZero", rdna4::kVRndneF16Vop3, 1, 0x2d4c7bffu, 0u, 0xa5a57bffu,
+      0xffu);
+
+  // TRANS results: halving -min_normal keeps its sign, and OMOD overflow gives
+  // infinity even under round-toward-zero.
+  f16("RcpF16Div2NegativeMinNormal", rdna4::kVRcpF16Vop3, 3, 0xf8c2f226u, 0u, 0xa5a58000u, 0xf0u);
+  f16("SinF16Div2NegativeMinNormal", rdna4::kVSinF16Vop3, 3, 0xcafc813cu, 0u, 0xa5a58000u, 0xffu);
+  f16("RcpF16Mul4OverflowTowardZero", rdna4::kVRcpF16Vop3, 2, 0xb0d70400u, 0u, 0xa5a57c00u, 0xffu);
+  f16("RcpF16Mul4NegativeOverflowTowardZero", rdna4::kVRcpF16Vop3, 2, 0x474983ffu, 0u, 0xa5a5fc00u,
+      0xffu);
+
+  // Integer-to-F64 conversions take OMOD and CLAMP on the converted value.
+  f64("CvtF64I32Clamp", rdna4::kVCvtF64I32Vop3, {.clamp = 1, .src0 = V0}, {0xffffffffu}, 0u, 0xf0u);
+  f64("CvtF64I32Div2", rdna4::kVCvtF64I32Vop3, {.src0 = V0, .omod = 3}, {1u}, 0x3fe0000000000000u,
+      0u);
+  f64("CvtF64U32Mul2", rdna4::kVCvtF64U32Vop3, {.src0 = V0, .omod = 1}, {1u}, 0x4000000000000000u,
+      0xffu);
+
+  // DIV_FMAS scales its rounded result, then clamps. VCC is clear, so the
+  // fused result is not rescaled.
+  add("DivFmasF32Mul2", rdna4::kVDivFmasF32Vop3, {.src0 = V0, .src1 = V1, .src2 = V2, .omod = 1},
+      {{0, 0x7f7fffffu}, {1, 1u}, {2, 0u}}, {{6, 0x357fffffu}}, 0xf0u);
+  add("DivFmasF32ClampNan", rdna4::kVDivFmasF32Vop3,
+      {.clamp = 1, .src0 = V0, .src1 = V1, .src2 = V2}, {{0, 0x7f800000u}, {1, 0u}, {2, 0u}},
+      {{6, 0u}}, 0u);
+  f64("DivFmasF64Mul2NegativeSubnormal", rdna4::kVDivFmasF64Vop3,
+      {.src0 = V0, .src1 = V2, .src2 = V4, .omod = 1}, {0x800fffffffffffffu, 1u, 0u}, 0u, 0xffu);
+  f64("DivFmasF64ClampNan", rdna4::kVDivFmasF64Vop3,
+      {.clamp = 1, .src0 = V0, .src1 = V2, .src2 = V4},
+      {0x7ff0000000000000u, 0x8000000000000000u, 0u}, 0u, 0xf0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2533,6 +2623,23 @@ TEST_P(ValuIntegralRoundingModeTest, ModifiersOnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuIntegralRoundingModeTest,
                          testing::ValuesIn(integral_rounding_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(rounded_result_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
