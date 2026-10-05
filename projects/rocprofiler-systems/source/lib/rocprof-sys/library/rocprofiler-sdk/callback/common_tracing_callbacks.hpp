@@ -18,11 +18,13 @@ namespace detail
 {
 inline auto
 // NOLINTNEXTLINE(readability-function-size)
-iterate_args_callback(auto /*kind*/, std::int32_t /*operation*/, std::uint32_t arg_number,
-                      const void* const /*arg_value_addr*/,
-                      std::int32_t /*arg_indirection_count*/, const char* arg_type,
-                      const char* arg_name, const char*             arg_value_str,
-                      std::int32_t /*arg_dereference_count*/, void* data)
+iterate_args_callback([[maybe_unused]] auto kind, [[maybe_unused]] std::int32_t operation,
+                      std::uint32_t                      arg_number,
+                      [[maybe_unused]] const void* const arg_value_addr,
+                      [[maybe_unused]] std::int32_t      arg_indirection_count,
+                      const char* arg_type, const char* arg_name,
+                      const char*                   arg_value_str,
+                      [[maybe_unused]] std::int32_t arg_dereference_count, void* data)
 {
     auto* func_args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
@@ -111,14 +113,15 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
 
     auto const call_stack = Externals::get_backtrace_json(backtrace_data);
 
-    Externals::metadata_add_string(Category<Externals>::k_name);
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_string(Category<Externals>::k_name);
 
-    Externals::metadata_add_thread_info(
+    metadata_registry.add_thread_info(
         { Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}" });
 
     const std::string args_str = get_args_string(args);
 
-    Externals::buffer_storage_store(typename Externals::region_sample{
+    Externals::get_buffer_storage().store(typename Externals::region_sample{
         record.thread_id, name, record.correlation_id.internal,
         SdkBackend::get_parent_stack_id(record.correlation_id), begin_timestamp,
         end_timestamp, call_stack.dump(), args_str, Category<Externals>::k_name });

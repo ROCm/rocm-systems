@@ -13,6 +13,7 @@
 #include "common/path.hpp"
 #include "common/string_utility.hpp"
 
+#include <algorithm>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>
@@ -423,14 +424,14 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
         if(fmt_opts.alphabetical)
         {
-            std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
+            std::ranges::sort(_data, [](auto _lhs, auto _rhs) {
                 return _lhs->get_name() < _rhs->get_name();
             });
         }
         else
         {
             _settings->ordering();
-            std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
+            std::ranges::sort(_data, [](auto _lhs, auto _rhs) {
                 auto const _lomni = _lhs->get_categories().count("rocprofsys") > 0;
                 auto const _romni = _rhs->get_categories().count("rocprofsys") > 0;
                 if(_lomni && !_romni)
@@ -585,7 +586,8 @@ update_choices(const std::shared_ptr<settings>& _settings)
         printf("[rocprof-sys-avail] # of component found: %zu\n", _info.size());
     }
 
-    _info.erase(std::remove_if(_info.begin(), _info.end(),
+    _info.erase(
+        std::ranges::remove_if(_info,
                                [](const auto& itr) {
                                    if(!itr.is_available())
                                    {
@@ -603,8 +605,9 @@ update_choices(const std::shared_ptr<settings>& _settings)
                                        }
                                    }
                                    return false;
-                               }),
-                _info.end());
+                               })
+            .begin(),
+        _info.end());
 
     std::vector<std::string> _component_choices = {};
     _component_choices.reserve(_info.size());

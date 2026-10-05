@@ -11,7 +11,7 @@ on the ones it should not.
 Usage:
     ./skills/run_evals.py                      # routing only, no tools
     ./skills/run_evals.py --mode behavioral    # also grade what the agent did
-    ./skills/run_evals.py --skill memory       # one skill
+    ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
     ./skills/run_evals.py --list               # validate datasets, run nothing
 
 Exits 0 when every case passes, 1 on a failure, and 77 when the `claude` CLI
@@ -20,6 +20,7 @@ is missing so a caller can treat that as skipped rather than broken.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -111,12 +112,15 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
 
 
 def build_workspace(root: Path) -> Path:
-    """Copy every skill into a scratch workspace so the agent can discover them."""
+    """Install every skill into a scratch workspace with install-skills.sh."""
     workspace = root / "workspace"
-    skills_dir = workspace / ".claude" / "skills"
-    skills_dir.mkdir(parents=True)
-    for skill in sorted(SKILLS_ROOT.glob("*/SKILL.md")):
-        shutil.copytree(skill.parent, skills_dir / skill.parent.name)
+    workspace.mkdir(parents=True)
+    subprocess.run(
+        [str(SKILLS_ROOT / "install-skills.sh"), "--agent", "claude"],
+        env={**os.environ, "HOME": str(workspace)},
+        stdout=subprocess.DEVNULL,
+        check=True,
+    )
     return workspace
 
 

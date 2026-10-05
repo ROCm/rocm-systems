@@ -2183,6 +2183,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -3170,6 +3175,50 @@
           "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
           "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
           "timeout": 300
+        }
+      ]
+    },
+    "mpi_8rank_single_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "DDA_ForeignCurrentDevice_8Ranks",
+          "description": "AllReduce issued with another device current runs on the communicator's device and leaves the caller's current device unchanged",
+          "test_filter": "DdaMPI_AllReduce.ForeignCurrentDeviceUngrouped"
+        },
+        {
+          "name": "DDA_StreamAlternation_8Ranks",
+          "description": "Consecutive AllReduces alternating between two streams on one communicator stay ordered; a missing done-event edge lets them overlap and corrupt the result",
+          "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
+        },
+        {
+          "name": "DDA_CapturedForkJoin_8Ranks",
+          "description": "A captured AllReduce keeps its done event inside the graph: a copy forked off comm->doneEvent and joined back adds exactly one node and one edge",
+          "test_filter": "DdaMPI_AllReduce.CapturedForkJoinStaysInsideGraph"
+        },
+        {
+          "name": "DDA_CapturedReplayOrdered_8Ranks",
+          "description": "A collective issued after a graph replay stays ordered behind it through an event the application records outside the capture",
+          "test_filter": "DdaMPI_AllReduce.CapturedReplayOrderedByAppEvent"
+        },
+        {
+          "name": "DDA_CapturedForkedStreamsSerialized_8Ranks",
+          "description": "Two AllReduces captured on pre-forked streams of one graph are serialized through deviceStream: every pair of their work nodes is ordered",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnForkedStreamsSerializedInGraph"
+        },
+        {
+          "name": "DDA_CapturedJoinsSerialEvent_8Ranks",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0: a captured AllReduce waits on deviceStream.serialEvent and records it into the graph exactly once",
+          "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
         }
       ]
     },
@@ -4421,6 +4470,14 @@
           }
         },
         {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        },
+        {
           "name": "GIN_RailConnection_Create",
           "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
           "test_filter": "GinMPIDeviceTests.RailConnection_Create",
@@ -4912,6 +4969,12 @@
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
       "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
+      "enabled": true
+    },
+    {
+      "name": "MPI Tests (8-rank, single-node)",
+      "description": "MPI unit tests that need eight ranks on one node, one rank per process",
+      "config": "mpi_8rank_single_node",
       "enabled": true
     },
     {

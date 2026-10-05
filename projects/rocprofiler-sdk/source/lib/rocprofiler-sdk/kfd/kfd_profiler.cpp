@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 // NOTE: this vendored header carries the *active* (profiler ABI v6, stream ABI
-// v3) dispatch-log UAPI: AMDKFD_IOC_PROFILER at 0x28 with the single OPEN_STREAM
+// v4) dispatch-log UAPI: AMDKFD_IOC_PROFILER at 0x28 with the single OPEN_STREAM
 // op. It deliberately conflicts with the older lib/rocprofiler-sdk/details/
 // kfd_ioctl.h (VERSION_NUM 1, ioctl 0x86, no dlog ops). The two must never be
 // included in the same translation unit. This file includes ONLY the dlog UAPI.
@@ -106,7 +106,7 @@ constexpr const char* kTopologyNodesPath = "/sys/class/kfd/kfd/topology/nodes";
 // Presence of dispatch_log_stream_format is the definitive per-GPU support check
 // for the stream reader (CPU nodes and unsupported GPU archs do not have it).
 // The legacy GFX9-only dispatch_log_format is deliberately NOT consulted: this
-// reader speaks stream ABI v3 and must test the stream-specific contract. gpu_id
+// reader speaks stream ABI v4 and must test the stream-specific contract. gpu_id
 // == 0 denotes a CPU-only node and is skipped.
 std::unordered_set<uint32_t>
 discover_stream_dispatch_log_gpus(const char* nodes_path)

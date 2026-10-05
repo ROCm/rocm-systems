@@ -19,6 +19,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
@@ -323,7 +324,7 @@ experiment::stop()
             _prog_vals.emplace_back(_num);
         }
     }
-    std::sort(_prog_vals.begin(), _prog_vals.end());
+    std::ranges::sort(_prog_vals);
     for(auto const itr : _prog_vals)
     {
         _prog_stats += itr;
