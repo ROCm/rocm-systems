@@ -58,6 +58,8 @@
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.Fp8Avg", "description": "FP8 E4M3 avg (PreMulSum scalar carried as float); discriminates where the device fp8 type is FNUZ", "test_filter": "AllReduce.Fp8Avg", "timeout": 300},
+        {"name": "AllReduce.OneRankAvgTailElements", "description": "Single-rank oneRankReduce avg tail, including both FP8 types", "test_filter": "AllReduce.OneRankAvgTailElements"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
@@ -133,7 +135,7 @@
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },

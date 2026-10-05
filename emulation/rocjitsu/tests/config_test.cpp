@@ -103,6 +103,26 @@ bool replace_exactly_once(std::string &text, std::string_view from, std::string_
   return true;
 }
 
+TEST(SoCTest, SelectsSdmaPacketDialect) {
+  const std::array cases = {
+      std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA5, amdgpu::SdmaPacketDialect::Gfx1250},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+  };
+  for (const auto &[arch, expected] : cases) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    SoC soc("soc", nullptr, arch);
+    EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), expected);
+  }
+}
+
 TEST(ConfigLoaderTest, LoadCdna2Config) {
   auto loaded =
       config::load_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", rocjitsu::kEmbeddedSchema);
