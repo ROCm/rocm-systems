@@ -31,3 +31,5 @@ mod tests {
         let _: fn(&AmdsmiLinkTopologyT) -> AmdsmiLinkStatusT = |topology| topology.link_status;
     }
 }
+#[cfg(test)]
+mod enumeration_tests;

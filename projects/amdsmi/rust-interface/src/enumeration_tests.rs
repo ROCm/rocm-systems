@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+use crate as amdsmi;
 use amdsmi::{AmdsmiEnumerationInfoT, AmdsmiProcessorHandle, AmdsmiStatusT};
 use std::ffi::CStr;
 use std::ptr::{addr_of_mut, null_mut, NonNull};
