@@ -481,6 +481,7 @@ def _evaluate_kernel_tables(
         workload.roofline_peaks,
         kernel_pmc_df,
         debug=False,
+        pass_layout=getattr(workload, "pmc_pass_layout", None),
     )
     return kernel_dfs
 
