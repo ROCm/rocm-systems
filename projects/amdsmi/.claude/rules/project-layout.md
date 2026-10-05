@@ -103,7 +103,7 @@ Python runner details: [tests/python/README.md](../../tests/python/README.md).
 | Python unit | `tests/python/unit/` | `tests/python/unit_tests.py` | No |
 | Python functional | `tests/python/functional/` | `tests/python/integration_test.py` | Yes |
 | Python CLI | `tests/python/cli/` | `tests/python/cli_unit_test.py` | Yes (installed `amd-smi`) |
-| Go/CGO | `go/amdsmi/`, `tests/go/` | `python3 -B tests/go/run_tests.py`; tooling/workflow tests via `unittest discover` | No |
+| Go/CGO | `go/amdsmi/`, `tests/go/` | `python3 -B tests/go/run_tests.py`; tooling tests via `unittest discover` | No |
 | Packaging guards | `tests/python/test_*_guard.py`, `test_packaging_scriptlets.py`, `test_abi_compat.py` | `python3` (stdlib only) | No |
 | Package-manager harnesses | `tests/run_amdsmi_*.py` | `sudo python3` | No |
 | Build driver | `tests/amdsmi_build/` | `sudo python3 tests/amdsmi_build/run_amdsmi_build.py` | No |
@@ -127,9 +127,19 @@ historical installed path still works.
 Pre-commit gates: `tests/amd_smi_test/check_test_conventions.py` (layout/naming),
 `tests/check_license_headers.py`.
 
-Go's runner owns the `amdsmi_mock` tag and fixture linking. The existing
-`amdsmi-build.yml` Go job runs Go 1.20.14/1.24.1 fixture and native/staged checks;
-Go 1.24.1 adds cgocheck2 and `--asan` (GCC, incompatible with `--race`).
+Go's runner owns the `amdsmi_mock` tag and fixture linking. Commands live in
+[go/README.md](../../go/README.md#repository-tests). Python runner tests cover
+parsing, environment/cache safety, and real default/ASAN/vet/example subprocesses;
+contract guards retain partial-enum, explicit-exclusion, and module checks.
+Go 1.20 is the toolchain floor, separate from `Init`'s native header/library
+version check; preserve both requirements.
+
+The repository-root `.github/workflows/amdsmi-go.yml` configures CPU-only Go
+1.20.14/1.24.1 fixture and native/staged checks. Go 1.24.1 adds explicit cgocheck2
+and `--asan` runs (GCC, incompatible with `--race`); this is not a Go 1.20 ASAN
+exclusion. `.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
+The pinned actionlint hook checks both workflows instead of Python substring
+assertions. Do not infer a hosted CI pass from the configuration alone.
 
 # Build & Packaging
 

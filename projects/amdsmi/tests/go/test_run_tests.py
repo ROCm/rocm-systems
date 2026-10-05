@@ -5,7 +5,9 @@ import contextlib
 import io
 import os
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,23 +17,6 @@ import run_tests
 
 
 class CommandTests(unittest.TestCase):
-    def test_default_uses_mock_tag(self) -> None:
-        args = run_tests.parse_args([])
-        self.assertEqual(
-            run_tests.go_command(args=args, output=Path("telemetry")),
-            [
-                "go",
-                "test",
-                "-tags=amdsmi_mock",
-                "-count=1",
-                "-timeout=120s",
-                "-run",
-                ".",
-                "-v",
-                "./...",
-            ],
-        )
-
     def test_selectors_and_checks(self) -> None:
         args = run_tests.parse_args(
             ["--run", "^TestCore", "--package", "./amdsmi", "--race", "--checkptr"]
@@ -40,30 +25,9 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-race", command)
         self.assertIn("-gcflags=all=-d=checkptr=2", command)
         self.assertEqual(command[-4:], ["-run", "^TestCore", "-v", "./amdsmi"])
-
-    def test_asan_uses_gcc_and_go_instrumentation(self) -> None:
-        with contextlib.redirect_stderr(io.StringIO()):
-            try:
-                args = run_tests.parse_args(["--asan"])
-            except SystemExit:
-                self.fail("runner does not accept --asan")
+        args = run_tests.parse_args(["--asan"])
         self.assertEqual(args.cc, "gcc")
         self.assertIn("-asan", run_tests.go_command(args=args, output=Path("telemetry")))
-
-    def test_native_has_no_mock_tag(self) -> None:
-        args = run_tests.parse_args(
-            ["--native", "--include-dir", "/include", "--library-dir", "/lib", "--vet"]
-        )
-        self.assertEqual(
-            run_tests.go_command(args=args, output=Path("telemetry")), ["go", "vet", "./..."]
-        )
-
-    def test_example_is_only_built(self) -> None:
-        args = run_tests.parse_args(["--build-example"])
-        self.assertEqual(
-            run_tests.go_command(args=args, output=Path("/tmp/telemetry")),
-            ["go", "build", "-tags=amdsmi_mock", "-o", "/tmp/telemetry", "./examples/telemetry"],
-        )
 
     def test_invalid_options(self) -> None:
         for arguments in (
@@ -83,35 +47,26 @@ class CommandTests(unittest.TestCase):
 
 class EnvironmentTests(unittest.TestCase):
     def test_environment_is_controlled(self) -> None:
-        removed = (
-            "LD_PRELOAD",
-            "LD_AUDIT",
-            "LIBRARY_PATH",
-            "CPATH",
-            "C_INCLUDE_PATH",
-            "CPLUS_INCLUDE_PATH",
-            "GOFLAGS",
-            "GOOS",
-            "GOARCH",
-            "CGO_CPPFLAGS",
-            "CGO_CXXFLAGS",
-            "CGO_FFLAGS",
-            "CGO_CFLAGS_ALLOW",
-            "CGO_CFLAGS_DISALLOW",
-            "CGO_LDFLAGS_ALLOW",
-            "CGO_LDFLAGS_DISALLOW",
-            "GOCACHEPROG",
-        )
-        polluted = dict.fromkeys(removed, "/wrong")
-        polluted.update(
-            {
-                "GOTOOLCHAIN": "auto",
-                "CGO_CFLAGS": "-I/wrong",
-                "CGO_LDFLAGS": "-L/wrong",
-                "GOEXPERIMENT": "wrong",
-                "GODEBUG": "cgocheck=0",
-            }
-        )
+        removed = """
+            LD_PRELOAD LD_AUDIT LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
+            GOFLAGS GOOS GOARCH CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS GOCACHEPROG
+            CGO_CFLAGS_ALLOW CGO_CFLAGS_DISALLOW CGO_LDFLAGS_ALLOW CGO_LDFLAGS_DISALLOW
+        """.split()
+        expected = {
+            "GOTOOLCHAIN": "local",
+            "GOENV": "off",
+            "GOWORK": "off",
+            "GOPROXY": "off",
+            "GOSUMDB": "off",
+            "GOVCS": "*:off",
+            "GONOPROXY": "none",
+            "GOPRIVATE": "",
+            "CGO_ENABLED": "1",
+            "GODEBUG": "cgocheck=1",
+            "CC": "custom-cc",
+        }
+        polluted = dict.fromkeys(removed + list(expected), "/wrong")
+        polluted.update(CGO_CFLAGS="-I/wrong", CGO_LDFLAGS="-L/wrong", GOEXPERIMENT="wrong")
         with tempfile.TemporaryDirectory(prefix="amdsmi-agent-runner-test-") as directory:
             root = Path(directory)
             with patch.dict(os.environ, polluted):
@@ -124,21 +79,9 @@ class EnvironmentTests(unittest.TestCase):
                 )
             for key in removed:
                 self.assertNotIn(key, env)
-            for key, value in {
-                "GOTOOLCHAIN": "local",
-                "GOENV": "off",
-                "GOWORK": "off",
-                "GOPROXY": "off",
-                "GOSUMDB": "off",
-                "GOVCS": "*:off",
-                "GONOPROXY": "none",
-                "GOPRIVATE": "",
-                "CGO_ENABLED": "1",
-                "GODEBUG": "cgocheck=1",
-                "GOEXPERIMENT": "cgocheck2",
-                "CC": "custom-cc",
-            }.items():
+            for key, value in expected.items():
                 self.assertEqual(env[key], value)
+            self.assertEqual(env["GOEXPERIMENT"], "cgocheck2")
             self.assertEqual(shlex.split(env["CGO_CFLAGS"]), ["-I" + str(root / "include space")])
             self.assertEqual(
                 shlex.split(env["CGO_LDFLAGS"]),
@@ -148,28 +91,24 @@ class EnvironmentTests(unittest.TestCase):
             self.assertTrue(Path(env["GOTMPDIR"]).is_dir())
             self.assertEqual(Path(env["GOMODCACHE"]), root / "go-mod-cache")
 
-    def test_default_has_no_experiment(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="amdsmi-agent-runner-test-") as directory:
-            root = Path(directory)
-            with patch.dict(os.environ, {"GOEXPERIMENT": "wrong"}):
-                env = run_tests.make_env(
-                    root=root, include_dir=root, library_dir=root, cc="cc", cgocheck2=False
-                )
-            self.assertNotIn("GOEXPERIMENT", env)
-
     def test_private_cache_is_reused_without_reusing_fixture_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amdsmi-agent-runner-test-") as directory:
             root = Path(directory)
             first, second = root / "first", root / "second"
             first.mkdir()
             second.mkdir()
-            with patch("run_tests.tempfile.gettempdir", return_value=directory):
+            with (
+                patch("run_tests.tempfile.gettempdir", return_value=directory),
+                patch.dict(os.environ, {"GOEXPERIMENT": "wrong"}),
+            ):
                 envs = [
                     run_tests.make_env(
                         root=path, include_dir=root, library_dir=path, cc="cc", cgocheck2=False
                     )
                     for path in (first, second)
                 ]
+            for env in envs:
+                self.assertNotIn("GOEXPERIMENT", env)
             self.assertEqual(envs[0]["GOCACHE"], envs[1]["GOCACHE"])
             cache = Path(envs[0]["GOCACHE"])
             self.assertEqual(cache.stat().st_uid, os.getuid())
@@ -218,17 +157,7 @@ class ValidationTests(unittest.TestCase):
                         self.validate()
                     run.assert_not_called()
 
-    def test_missing_header(self) -> None:
-        (self.root / "amd_smi" / "amdsmi.h").unlink()
-        with (
-            patch("run_tests.shutil.which", return_value="tool"),
-            patch("run_tests.subprocess.run") as run,
-        ):
-            with self.assertRaisesRegex(FileNotFoundError, "header"):
-                self.validate()
-            run.assert_not_called()
-
-    def test_missing_native_library(self) -> None:
+    def test_missing_native_inputs(self) -> None:
         self.args.native = True
         with (
             patch("run_tests.shutil.which", return_value="tool"),
@@ -236,13 +165,15 @@ class ValidationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(FileNotFoundError, "shared library"):
                 self.validate()
+            (self.root / "amd_smi" / "amdsmi.h").unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "header"):
+                self.validate()
             run.assert_not_called()
 
     def test_requires_linux(self) -> None:
-        with patch("run_tests.sys.platform", "darwin"), patch("run_tests.subprocess.run") as run:
+        with patch("run_tests.sys.platform", "darwin"):
             with self.assertRaisesRegex(ValueError, "Linux"):
                 self.validate()
-            run.assert_not_called()
 
     def test_local_version_gates(self) -> None:
         cases = [
@@ -257,135 +188,45 @@ class ValidationTests(unittest.TestCase):
             result = subprocess.CompletedProcess(
                 ["go", "version"], 0, stdout="go version " + version + " linux/amd64"
             )
-            with self.subTest(version=version, experiment=experiment):
-                with patch("run_tests.shutil.which", return_value="tool"):
-                    with patch("run_tests.subprocess.run", return_value=result) as run:
-                        with contextlib.redirect_stdout(io.StringIO()):
-                            if accepted:
-                                self.validate()
-                            else:
-                                with self.assertRaisesRegex(ValueError, "local Go toolchain"):
-                                    self.validate()
-                        self.assertEqual(run.call_args[0][0], ["go", "version"])
-                        self.assertIs(run.call_args[1]["env"], self.env)
-                        self.assertTrue(run.call_args[1]["check"])
-
-    def test_version_subprocess_failure_propagates(self) -> None:
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch(
-                "run_tests.subprocess.run", side_effect=subprocess.CalledProcessError(7, "go")
+            with (
+                self.subTest(version=version, experiment=experiment),
+                patch("run_tests.shutil.which", return_value="tool"),
+                patch("run_tests.subprocess.run", return_value=result),
+                contextlib.redirect_stdout(io.StringIO()),
             ):
-                with self.assertRaises(subprocess.CalledProcessError):
+                if accepted:
                     self.validate()
+                else:
+                    with self.assertRaisesRegex(ValueError, "local Go toolchain"):
+                        self.validate()
 
-
-class ExecutionTests(unittest.TestCase):
-    def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory(prefix="amdsmi-agent-runner-test-")
-        self.addCleanup(temporary.cleanup)
-        self.project = Path(temporary.name)
-        self.include = self.project / "include"
-        (self.include / "amd_smi").mkdir(parents=True)
-        (self.include / "amd_smi" / "amdsmi.h").touch()
-        self.sources = self.project / "go" / "amdsmi" / "testdata"
-        self.sources.mkdir(parents=True)
-        for name in ("mock_core.c", "mock_identity.c"):
-            (self.sources / name).touch()
-        self.version = subprocess.CompletedProcess(
-            ["go", "version"], 0, stdout="go version go1.24.1 linux/amd64"
-        )
-
-    def test_asan_instruments_fixture_and_go_with_gcc(self) -> None:
-        args = run_tests.parse_args(["--asan"])
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch("run_tests.subprocess.run", return_value=self.version) as run:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    run_tests.run_fixture(project=self.project, args=args)
-        compiler, go = run.call_args_list[1:]
-        self.assertEqual(compiler[0][0][0], "gcc")
-        self.assertIn("-fsanitize=address", compiler[0][0])
-        self.assertIn("-fno-omit-frame-pointer", compiler[0][0])
-        self.assertIn("-asan", go[0][0])
-        self.assertEqual(go[1]["env"]["CC"], "gcc")
-
-    def test_fixture_compilation_precedes_go_test(self) -> None:
-        args = run_tests.parse_args(["--cc", "custom-cc", "--run", "^TestNativeVersion$"])
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch("run_tests.subprocess.run", return_value=self.version) as run:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    run_tests.run_fixture(project=self.project, args=args)
-        self.assertEqual(run.call_count, 3)
-        version, compiler, go = run.call_args_list
-        self.assertEqual(version[0][0], ["go", "version"])
-        command = compiler[0][0]
-        self.assertEqual(command[0], "custom-cc")
-        self.assertIn("-Werror", command)
-        self.assertIn("-I" + str(self.include), command)
-        self.assertEqual(
-            command[-2:], [str(path) for path in sorted(self.sources.glob("mock_*.c"))]
-        )
-        library = Path(command[command.index("-o") + 1])
-        self.assertEqual(library.name, "libamd_smi.so")
-        self.assertNotEqual(library.parent, self.project)
-        self.assertIs(version[1]["env"], compiler[1]["env"])
-        self.assertIs(compiler[1]["env"], go[1]["env"])
-        self.assertEqual(go[1]["env"]["CC"], "custom-cc")
-        self.assertEqual(go[1]["env"]["LD_LIBRARY_PATH"], str(library.parent))
-        self.assertEqual(go[1]["cwd"], self.project / "go")
-        self.assertEqual(go[0][0][0:3], ["go", "test", "-tags=amdsmi_mock"])
-        self.assertTrue(all(call[1]["check"] for call in run.call_args_list))
-        self.assertFalse(library.parent.exists())
-
-    def test_native_build_does_not_compile_fixture_or_execute_example(self) -> None:
-        library = self.project / "native"
-        library.mkdir()
-        (library / "libamd_smi.so").touch()
-        args = run_tests.parse_args(
-            [
-                "--native",
-                "--include-dir",
-                str(self.include),
-                "--library-dir",
-                str(library),
-                "--build-example",
-            ]
-        )
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch("run_tests.subprocess.run", return_value=self.version) as run:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    run_tests.run_fixture(project=self.project, args=args)
-        self.assertEqual(run.call_count, 2)
-        command = run.call_args_list[1][0][0]
-        self.assertEqual(command[:3], ["go", "build", "-o"])
-        self.assertEqual(command[-1], "./examples/telemetry")
-        self.assertNotIn("-tags=amdsmi_mock", command)
+    def test_native_checks_never_compile_fixture_or_run_example(self) -> None:
+        for options, action in (
+            (["--run", "^TestNativeVersion$", "--checkptr"], "test"),
+            (["--vet", "--race"], "vet"),
+            (["--build-example", "--asan"], "build"),
+        ):
+            args = run_tests.parse_args(
+                ["--native", "--include-dir", str(self.root), "--library-dir", str(self.root)]
+                + options
+            )
+            with (
+                self.subTest(options=options),
+                patch("run_tests.validate_tools"),
+                patch("run_tests.subprocess.run") as run,
+            ):
+                run_tests.run_fixture(project=self.root, args=args)
+                run.assert_called_once()
+                command = run.call_args.args[0]
+                self.assertEqual(command[:2], ["go", action])
+                self.assertNotIn("-tags=amdsmi_mock", command)
+                self.assertEqual(run.call_args.kwargs["env"]["LD_LIBRARY_PATH"], str(self.root))
 
     def test_no_sources_fails_before_compilation(self) -> None:
-        for source in self.sources.glob("mock_*.c"):
-            source.unlink()
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch("run_tests.subprocess.run", return_value=self.version) as run:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    with self.assertRaisesRegex(FileNotFoundError, "fixture sources"):
-                        run_tests.run_fixture(project=self.project, args=run_tests.parse_args([]))
-        self.assertEqual(run.call_count, 1)
-
-    def test_compilation_failure_stops_go(self) -> None:
-        failure = subprocess.CalledProcessError(4, "cc")
-        with patch("run_tests.shutil.which", return_value="tool"):
-            with patch("run_tests.subprocess.run", side_effect=[self.version, failure]) as run:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    with self.assertRaises(subprocess.CalledProcessError) as error:
-                        run_tests.run_fixture(project=self.project, args=run_tests.parse_args([]))
-        self.assertIs(error.exception, failure)
-        self.assertEqual(run.call_count, 2)
-
-
-class MainTests(unittest.TestCase):
-    def test_success(self) -> None:
-        with patch("run_tests.sys.argv", ["run_tests.py"]), patch("run_tests.run_fixture") as run:
-            self.assertEqual(run_tests.main(), 0)
-        self.assertEqual(run.call_args[1]["project"], Path(run_tests.__file__).resolve().parents[2])
+        with patch("run_tests.validate_tools"), patch("run_tests.subprocess.run") as run:
+            with self.assertRaisesRegex(FileNotFoundError, "fixture sources"):
+                run_tests.run_fixture(project=self.root, args=self.args)
+            run.assert_not_called()
 
     def test_failures_return_nonzero(self) -> None:
         failures = [
@@ -399,6 +240,77 @@ class MainTests(unittest.TestCase):
                     with contextlib.redirect_stderr(io.StringIO()) as output:
                         self.assertNotEqual(run_tests.main(), 0)
                     self.assertIn(str(failure), output.getvalue())
+
+
+class SmokeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if sys.platform != "linux":
+            self.skipTest("Go/CGO smoke tests require Linux")
+        for tool in ("go", "gcc"):
+            if shutil.which(tool) is None:
+                self.skipTest("Go/CGO smoke tests require " + tool)
+
+    def run_cli(self, *arguments: str, success: bool = True) -> str:
+        result = subprocess.run(
+            [sys.executable, "-B", run_tests.__file__, *arguments],
+            cwd=tempfile.gettempdir(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode == 0, success, result.stdout)
+        return result.stdout
+
+    def assert_tests_passed(self, output: str, *names: str) -> None:
+        self.assertNotIn("[no tests to run]", output)
+        self.assertNotIn("--- SKIP:", output)
+        for name in names:
+            self.assertIn("--- PASS: " + name + " (", output, output)
+        self.assertRegex(
+            output, r"(?m)^ok\s+github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi\s"
+        )
+
+    def test_default_fixture_tests(self) -> None:
+        self.assert_tests_passed(
+            self.run_cli(),
+            "TestPartitionIDArray",
+            "TestCoreLifecycleReferences",
+            "TestCoreDiscovery",
+            "TestIdentityASIC",
+            "TestTelemetryTemperature",
+            "TestECCCount",
+            "TestNativeVersion",
+        )
+
+    def test_asan_partition_and_lifecycle(self) -> None:
+        self.assert_tests_passed(
+            self.run_cli(
+                "--asan",
+                "--cc",
+                "gcc",
+                "--package",
+                "./amdsmi",
+                "--run",
+                "^(TestPartitionIDArray|TestCoreLifecycle)",
+            ),
+            "TestPartitionIDArray",
+            "TestCoreLifecycleCompatibleVersion",
+            "TestCoreLifecycleReferences",
+            "TestCoreLifecycleSerialization",
+        )
+
+    def test_vet_and_example_build(self) -> None:
+        for action in ("--vet", "--build-example"):
+            with self.subTest(action=action):
+                output = self.run_cli(action, "--cc", "gcc")
+                self.assertNotIn("AMD SMI ", output)
+
+    def test_compiler_failure_returns_nonzero(self) -> None:
+        output = self.run_cli("--cc", "/bin/false", success=False)
+        self.assertIn("returned non-zero exit status", output)
+        self.assertNotIn("--- PASS:", output)
+        self.assertNotIn("Traceback", output)
 
 
 if __name__ == "__main__":

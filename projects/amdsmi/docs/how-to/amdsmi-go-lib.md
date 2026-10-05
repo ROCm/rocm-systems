@@ -22,6 +22,10 @@ installed at `share/amd_smi/go/README.md` alongside the matching module sources.
 | AMD SMI 27.1 public development header and matching shared library | Matching `libamd_smi.so`, not `libamdsmi.so` |
 | Compilation and mock tests need no GPU/root | Go adds no root requirement |
 
+Go 1.20 is the Go language/toolchain floor, not the native library version.
+The separate `Init` check compares the loaded AMD SMI library with the compiled
+C header; it does not inspect the Go version.
+
 Other operating systems and `CGO_ENABLED=0` are unsupported. The production
 file's `linux && cgo` constraint excludes the binding in those configurations,
 which is why Go reports that build constraints exclude all Go files.
@@ -63,12 +67,13 @@ go build ./...
 ```
 
 The local `v0.0.0` requirement is only a replacement key. For remote consumption,
-pin an immutable published revision containing this module and pair it with the
-native 27.1 release for compilation. Any v0 module tag must have the form
+select `github.com/ROCm/rocm-systems/projects/amdsmi/go@<immutable-revision>`
+at a published revision containing this module and pair it with the native 27.1
+release for compilation. Any v0 module tag must have the form
 `projects/amdsmi/go/v0.X.Y`; this convention does not assert that a tag exists.
 Native major 27 does not determine the Go module version. Use a local replacement
-for unpublished source changes. The installed module guide gives the separate
-network-enabled acquisition command.
+for unpublished source changes. The [repository module guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#source-pairing-and-consumption)
+gives the separate network-enabled acquisition command.
 
 ## Lifecycle and data handling
 
@@ -141,19 +146,16 @@ Use the repository's `tests/go/run_tests.py` runner for mock checks; the
 `amdsmi_mock` tag is not a standalone test setup or a production option.
 Raw `go test -tags=amdsmi_mock` does not build or link the required fixture.
 The installed source directory excludes those tests and fixtures. See the
-[Go test design](../conceptual/test-design.md#go-checks) for commands and CI coverage.
+[repository module test guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#repository-tests) for commands and the
+[Go test design](../conceptual/test-design.md#go-checks) for coverage.
 
 ## Legacy Go interface
 
 The existing `goamdsmi` API and shim remain unchanged. The new module is additive,
 not a source-compatible replacement; it does not include legacy CPU or setter APIs.
 Use the new module for new read-only GPU integrations; existing consumers keep
-their current API and shim path.
+their current repository-integrated API and shim build.
 The following instructions apply only to the legacy interface.
-
-```{seealso}
-Refer to the [Go library API reference](../reference/amdsmi-go-api.md).
-```
 
 ### Prerequisites
 
@@ -204,30 +206,18 @@ driver and make sure that any resources held by AMD SMI are released.
 
 ### Usage
 
-For an example on using the AMD SMI Go API, refer to this implementation
+For an example using the legacy AMD SMI Go API, refer to this implementation
 [https://github.com/amd/amd_smi_exporter/tree/master](https://github.com/amd/amd_smi_exporter/tree/master).
-
-```{seealso}
-Refer to the [Go library API reference](../reference/amdsmi-go-api.md).
-```
 
 #### Add AMD SMI library to your project
 
-To include the AMD SMI Go API in your project, update your Makefile or Go module configuration
-to fetch the appropriate version of the AMD SMI library.
-
-```shell
-# Add to go.mod
-go get github.com/ROCm/rocm-systems/projects/amdsmi@develop
-```
-
-Then import it:
-
-```go
-import "github.com/ROCm/rocm-systems/projects/amdsmi"
-```
-
-When using a Makefile, ensure you're fetching the latest AMD SMI repository
-with Go API support. See
+The legacy project root has no Go module metadata and cannot be fetched as a
+standalone module. Existing legacy applications should keep their integrated
+repository/shim build and its import and link setup. For a Makefile example, see
 [https://github.com/amd/amd_smi_exporter/blob/master/src/Makefile](https://github.com/amd/amd_smi_exporter/blob/master/src/Makefile)
-for an example implementation.
+for the legacy integrated build.
+
+New read-only GPU applications should follow [Build and consume the module](#build-and-consume-the-module)
+using `github.com/ROCm/rocm-systems/projects/amdsmi/go` at an immutable published
+revision. Its `amdsmi` package uses `Init` and `ShutDown`, not the legacy
+`GO_gpu_init` and `GO_gpu_shutdown` API.

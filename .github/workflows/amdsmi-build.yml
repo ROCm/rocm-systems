@@ -16,11 +16,15 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
@@ -45,75 +49,6 @@ defaults:
     shell: bash
 
 jobs:
-  go-tests:
-    name: Go ${{ matrix.go }} (CPU only)
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ['1.20.14', '1.24.1']
-    env:
-      BUILD_DIR: ${{ runner.temp }}/amdsmi-go-build
-    defaults:
-      run:
-        shell: bash
-        working-directory: projects/amdsmi
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            projects/amdsmi
-            .github/workflows
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: ${{ matrix.go }}
-          cache: false
-
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config python3 libdrm-dev libssl-dev \
-            libnl-3-dev libnl-genl-3-dev libmnl-dev
-
-      - name: Go tooling and API contract
-        run: |
-          python3 -B -m unittest discover -s tests/go -p 'test_*.py' -v
-          python3 -B tests/go/test_api_contract.py
-
-      - name: Go mock tests and example
-        run: |
-          python3 -B tests/go/run_tests.py
-          python3 -B tests/go/run_tests.py --race
-          python3 -B tests/go/run_tests.py --checkptr
-          python3 -B tests/go/run_tests.py --vet
-          python3 -B tests/go/run_tests.py --build-example
-
-      - name: Go extended safety checks
-        if: ${{ matrix.go == '1.24.1' }}
-        run: |
-          python3 -B tests/go/run_tests.py --cgocheck2
-          python3 -B tests/go/run_tests.py --asan
-
-      - name: Build native library
-        run: |
-          cmake -S . -B "$BUILD_DIR" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_ESMI_LIB=OFF -DBUILD_SHARED_LIBS=ON \
-            -DBUILD_CLI=OFF -DBUILD_TESTS=OFF -DENABLE_LDCONFIG=OFF
-          cmake --build "$BUILD_DIR" --parallel 2
-
-      - name: Native version, example and staged consumer
-        run: |
-          native=(python3 -B tests/go/run_tests.py --native \
-            --include-dir "$PWD/include" --library-dir "$BUILD_DIR/src")
-          "${native[@]}" --run '^TestNativeVersion$'
-          "${native[@]}" --vet
-          "${native[@]}" --build-example
-          python3 -B tests/go/test_install.py --build-dir "$BUILD_DIR"
-
   manylinux-build:
     name: Build (Manylinux Gate)
     runs-on: ubuntu-24.04

@@ -16,6 +16,10 @@ legacy shim dependency is used. Native dependencies are still required.
 | Package import | `github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi` |
 | Native library | `libamd_smi` (`-lamd_smi`), not `libamdsmi` |
 
+Go 1.20 is the language/toolchain floor declared by the Go module. The native
+AMD SMI 27.1 dependency is separate: `Init` checks the loaded library against
+the compiled C header, not against the Go version. Both requirements apply.
+
 Other operating systems and `CGO_ENABLED=0` are unsupported. The production
 file requires `linux && cgo`, so Go reports that build constraints exclude all
 Go files when either condition is missing.
@@ -27,7 +31,8 @@ for native requirements.
 import "github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
 ```
 
-Production bindings live in [amdsmi/amdsmi_interface.go](amdsmi/amdsmi_interface.go).
+Production bindings remain in the single [amdsmi/amdsmi_interface.go](amdsmi/amdsmi_interface.go)
+file to match the required Host source layout.
 The common read-only names, signatures, and fields follow the Host declarations.
 Spellings such as `Id`, `Gpu`, `Fw`, and `Clk` are retained deliberately for
 shared source compatibility. BM-only names use conventional Go initialisms,
@@ -198,12 +203,26 @@ python3 -B tests/go/run_tests.py --build-example
 
 The external-package contract test checks common names, types, fields, and
 initialization; it does not verify Host runtime behavior.
+Python tooling tests cover option parsing, environment isolation, cache safety,
+and contract/install guards. Runner smoke tests use real subprocesses for the
+default fixture suite, ASAN partition/lifecycle cases, vet, and example builds.
+Missing Linux, Go, or GCC prerequisites produce visible local skips; CI provides
+the required tools. Contract guards still check partial-enum coverage, explicit
+exclusions, and the module declaration.
+
 `--cgocheck2` requires Go 1.21+. `--asan` instruments the Go binary and C fixture
 with AddressSanitizer, selects GCC, and cannot be combined with `--race`.
-The existing AMD SMI build workflow runs tooling/workflow tests, API contracts,
-default/race/checkptr fixtures, vet, and example builds on Go 1.20.14 and 1.24.1;
-Go 1.24.1 also runs cgocheck2 and ASAN. Both versions build the native shared
-library and run the native and staged checks below without GPU access.
+The dedicated repository-root `.github/workflows/amdsmi-go.yml` configures
+CPU-only `ubuntu-24.04` jobs for Go 1.20.14 and 1.24.1, with tooling tests, API
+contracts, default/race/checkptr fixtures, vet, and example builds. Go 1.24.1
+adds explicit cgocheck2 and ASAN runs; this selection does not declare ASAN
+unsupported on Go 1.20. Both versions build the native shared library and run
+the native and staged checks below without GPU access. The existing
+`.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
+
+The pinned actionlint pre-commit hook checks both workflows, including Actions
+expression contexts, instead of Python substring assertions. These are
+configured checks, not evidence that a hosted CI run has passed.
 
 Native checks require a fresh matching build;
 only the version test executes native code, without initialization or GPU access.

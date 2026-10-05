@@ -28,14 +28,18 @@ for interacting with AMD GPUs.
 
 ## Coding Style ##
 
-We use [pre-commit](https://pre-commit.com/) hooks to enforce formatting.
+We use [pre-commit](https://pre-commit.com/) 3.0 or later to enforce formatting.
 Install and run with:
 
 ```bash
-pip install pre-commit
+pip install --upgrade 'pre-commit>=3.0'
 pre-commit install
 pre-commit run --files ./**/*
 ```
+
+The pinned actionlint hook validates Actions expressions as well as workflow YAML.
+Its managed Go 1.25.0 environment is separate from the bindings' Go 1.20 minimum;
+the first hook setup needs network access to provision the tool and dependencies.
 
 ### C/C++ ###
 

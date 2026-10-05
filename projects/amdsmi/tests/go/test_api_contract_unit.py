@@ -19,20 +19,18 @@ typedef enum {
 """
 MEMBERS = ["AMDSMI_TEST_FIRST", "AMDSMI_TEST_ALIAS", "AMDSMI_TEST_LAST"]
 MODULE = "module github.com/ROCm/rocm-systems/projects/amdsmi/go\n\ngo 1.20\n"
-ENUM_OWNERS = {
-    "amdsmi_interface.go": (
-        ("amdsmi_status_t", "Status"),
-        ("amdsmi_vram_type_t", "VramType"),
-        ("amdsmi_fw_block_t", "FwBlock"),
-        ("amdsmi_temperature_type_t", "TemperatureType"),
-        ("amdsmi_temperature_metric_t", "TemperatureMetric"),
-        ("amdsmi_clk_type_t", "ClkType"),
-        ("amdsmi_memory_type_t", "MemoryType"),
-        ("amdsmi_memory_partition_type_t", "MemoryPartitionType"),
-        ("amdsmi_accelerator_partition_type_t", "AcceleratorPartitionType"),
-        ("amdsmi_gpu_block_t", "GpuBlock"),
-        ("amdsmi_ras_err_state_t", "RASState"),
-    )
+ENUM_TYPES = {
+    "amdsmi_status_t": "Status",
+    "amdsmi_vram_type_t": "VramType",
+    "amdsmi_fw_block_t": "FwBlock",
+    "amdsmi_temperature_type_t": "TemperatureType",
+    "amdsmi_temperature_metric_t": "TemperatureMetric",
+    "amdsmi_clk_type_t": "ClkType",
+    "amdsmi_memory_type_t": "MemoryType",
+    "amdsmi_memory_partition_type_t": "MemoryPartitionType",
+    "amdsmi_accelerator_partition_type_t": "AcceleratorPartitionType",
+    "amdsmi_gpu_block_t": "GpuBlock",
+    "amdsmi_ras_err_state_t": "RASState",
 }
 ALLOWED_CALLS = set(
     """
@@ -224,13 +222,13 @@ class ProjectTests(unittest.TestCase):
         header_path = self.project / "include" / "amd_smi" / "amdsmi.h"
         header_path.parent.mkdir(parents=True)
         header = []
-        for filename, enums in ENUM_OWNERS.items():
-            source = []
-            for native_type, go_type in enums:
-                member = native_type.upper() + "_VALUE"
-                header.append("typedef enum { " + member + " } " + native_type + ";")
-                source.append(bindings([member], go_type))
-            (self.package / filename).write_text("\n".join(source), encoding="utf-8")
+        source = []
+        for native_type, go_type in ENUM_TYPES.items():
+            member = native_type.upper() + "_VALUE"
+            header.append("typedef enum { " + member + " } " + native_type + ";")
+            source.append(bindings([member], go_type))
+        self.constants = self.package / "constants.go"
+        self.constants.write_text("\n".join(source), encoding="utf-8")
         header_path.write_text("\n".join(header), encoding="utf-8")
         (self.project / "go" / "go.mod").write_text(MODULE, encoding="utf-8")
         self.calls_source = "\n".join("C." + name + "()" for name in sorted(ALLOWED_CALLS))
@@ -261,8 +259,7 @@ class ProjectTests(unittest.TestCase):
                 self.assertIn("Go API contract checks passed", result.stdout)
 
     def test_cli_reports_failures_without_tracebacks(self) -> None:
-        owner = self.package / "amdsmi_interface.go"
-        owner.unlink()
+        self.constants.unlink()
         result = self.run_cli("--available-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.run_cli()
@@ -276,27 +273,25 @@ class ProjectTests(unittest.TestCase):
         self.assertIn("go.mod", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_checks_every_enum_in_its_owner_file(self) -> None:
+    def test_checks_every_required_enum(self) -> None:
         self.assertTrue(
             callable(getattr(contract, "check_project", None)),
             "project contract validator is missing",
         )
         contract.check_project(project=self.project, available_only=False)
-        for filename, enums in ENUM_OWNERS.items():
-            path = self.package / filename
-            source = path.read_text(encoding="utf-8")
-            for native_type, _ in enums:
-                member = native_type.upper() + "_VALUE"
-                path.write_text(source.replace("C." + member, "0"), encoding="utf-8")
-                with self.subTest(owner=filename, native_type=native_type):
+        source = self.constants.read_text(encoding="utf-8")
+        for native_type in ENUM_TYPES:
+            member = native_type.upper() + "_VALUE"
+            self.constants.write_text(source.replace("C." + member, "0"), encoding="utf-8")
+            for available_only in (False, True):
+                with self.subTest(native_type=native_type, available_only=available_only):
                     with self.assertRaisesRegex(ValueError, "constant binding: " + member):
-                        contract.check_project(project=self.project, available_only=False)
-                path.write_text(source, encoding="utf-8")
+                        contract.check_project(project=self.project, available_only=available_only)
+            self.constants.write_text(source, encoding="utf-8")
 
     def test_enum_declarations_can_move_between_package_files(self) -> None:
-        owner = self.package / "amdsmi_interface.go"
-        source = owner.read_text(encoding="utf-8")
-        owner.unlink()
+        source = self.constants.read_text(encoding="utf-8")
+        self.constants.unlink()
         blocks = source.split("\n\n")
         for index, block in enumerate(blocks):
             (self.package / ("constants_" + str(index) + ".go")).write_text(block, encoding="utf-8")
@@ -345,12 +340,11 @@ class ProjectTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "constant binding"):
                         contract.check_project(project=self.project, available_only=available_only)
 
-    def test_copied_owner_is_checked_after_original_declarations_removed(self) -> None:
-        owner = self.package / "amdsmi_interface.go"
+    def test_copied_constants_are_checked_after_original_declarations_removed(self) -> None:
         copied = self.package / "copied.go"
-        source = owner.read_text(encoding="utf-8")
+        source = self.constants.read_text(encoding="utf-8")
         copied.write_text(source, encoding="utf-8")
-        owner.write_text("package amdsmi\n", encoding="utf-8")
+        self.constants.write_text("package amdsmi\n", encoding="utf-8")
         contract.check_project(project=self.project, available_only=False)
         for invalid in (
             source.replace("AMDSMI_STATUS_T_VALUE Status = C.AMDSMI_STATUS_T_VALUE", ""),
@@ -363,9 +357,8 @@ class ProjectTests(unittest.TestCase):
                     contract.check_project(project=self.project, available_only=False)
 
     def test_test_only_constants_cannot_supply_required_enum(self) -> None:
-        owner = self.package / "amdsmi_interface.go"
-        source = owner.read_text(encoding="utf-8")
-        owner.unlink()
+        source = self.constants.read_text(encoding="utf-8")
+        self.constants.unlink()
         for relative in ("constants_test.go", "mock_bridge_linux.go", "testdata/constants.go"):
             path = self.package / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,19 +411,20 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "constant binding: AMDSMI_INIT_AMD_CPUS"):
             contract.check_project(project=self.project, available_only=False)
 
-    def test_available_only_skips_missing_owners_but_final_requires_them(self) -> None:
-        for filename in ENUM_OWNERS:
-            path = self.package / filename
-            source = path.read_text(encoding="utf-8")
-            path.unlink()
-            with self.subTest(owner=filename):
-                try:
-                    contract.check_project(project=self.project, available_only=True)
-                except (FileNotFoundError, ValueError) as error:
-                    self.fail("available-only rejected absent owner: " + str(error))
-                with self.assertRaisesRegex(ValueError, "missing direct constant binding:"):
+    def test_available_only_skips_missing_enums_but_final_requires_them(self) -> None:
+        source = self.constants.read_text(encoding="utf-8")
+        for native_type, go_type in ENUM_TYPES.items():
+            member = native_type.upper() + "_VALUE"
+            self.constants.write_text(
+                source.replace(bindings([member], go_type), ""), encoding="utf-8"
+            )
+            with self.subTest(native_type=native_type):
+                contract.check_project(project=self.project, available_only=True)
+                with self.assertRaisesRegex(
+                    ValueError, "missing direct constant binding: " + member
+                ):
                     contract.check_project(project=self.project, available_only=False)
-            path.write_text(source, encoding="utf-8")
+            self.constants.write_text(source, encoding="utf-8")
 
     def test_project_checks_module_in_both_modes(self) -> None:
         (self.project / "go" / "go.mod").write_text(

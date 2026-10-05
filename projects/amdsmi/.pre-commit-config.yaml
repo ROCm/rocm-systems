@@ -28,6 +28,7 @@ exclude: |
     | esmi_ib_library/
     | ualoe_lib/
     | third_party/
+minimum_pre_commit_version: '3.0.0'
 fail_fast: false
 
 repos:
@@ -66,6 +67,14 @@ repos:
     rev: 0.26.0
     hooks:
     -   id: gersemi
+
+-   repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # v1.7.12
+    hooks:
+    -   id: actionlint
+        language_version: '1.25.0'
+        files: ^\.github/workflows/(amdsmi-(build|go)|lstt-formatting)\.yml$
+        args: ['-shellcheck=']
 
 -   repo: local
     hooks:
