@@ -25,8 +25,8 @@ coverage_pct: 97.4
 - Snapshot commit: `04d3c2d97a7`
 - Contract tests: 617
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 501
-- Declared HIP runtime APIs directly exercised by contract tests: 488
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 502
+- Declared HIP runtime APIs directly exercised by contract tests: 489
 - Intentionally uncovered, allowlisted APIs: 13
 - Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
