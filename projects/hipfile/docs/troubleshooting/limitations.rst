@@ -32,7 +32,7 @@ local NVMe physical volume keeps the direct path and qualifies for the
 fastpath. If any member resides on a non-NVMe physical volume, the volume falls
 back to compatibility mode.
 
-Note that this applies to LVM's own RAID implementation only. MD software RAID
+This applies to LVM's own RAID implementation only. MD software RAID
 is a separate block layer and is not supported, even when every member device
 is a local NVMe.
 
