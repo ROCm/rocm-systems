@@ -1672,6 +1672,15 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   CATCH;
 }
 
+// For use by tools only - not in library export table.
+hsa_status_t hsa_amd_enable_high_precision_timestamps() {
+  TRY;
+  IS_OPEN();
+  core::Runtime::runtime_singleton_->flag().set_enable_high_precision_timestamps(true);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
                                                    void* data) {
   TRY;

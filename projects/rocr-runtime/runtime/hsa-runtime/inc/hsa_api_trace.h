@@ -123,6 +123,10 @@ hsa_status_t hsa_amd_queue_intercept_create(
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue);
 
+// Enables multi-sample GPU/CPU clock correlation for the rest of the process.
+// For use by profiling tools only.
+hsa_status_t hsa_amd_enable_high_precision_timestamps();
+
 typedef void (*hsa_amd_runtime_queue_notifier)(const hsa_queue_t* queue, hsa_agent_t agent,
                                                void* data);
 hsa_status_t hsa_amd_runtime_queue_create_register(hsa_amd_runtime_queue_notifier callback,
@@ -291,6 +295,7 @@ struct AmdExtTable {
   decltype(hsa_amd_svm_discard_and_prefetch_batch_async)* hsa_amd_svm_discard_and_prefetch_batch_async_fn;
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_fn;
   decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_fn;
+  decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
 };
 
 // Table to export HSA Core Runtime Apis

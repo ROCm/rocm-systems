@@ -2324,7 +2324,7 @@ void KFDQMTest::QueueLatency(int gpuNode) {
 
     /* GpuCounter overhead*/
     do {
-        hsaKmtGetClockCounters(gpuNode, &ts[i]);
+        hsaKmtGetClockCounters(gpuNode, &ts[i], false);
     } while (++i < slots);
     overhead = ts[slots-1].GPUClockCounter - ts[0].GPUClockCounter;
     overhead /= 2 * (slots - 1);
@@ -2337,7 +2337,7 @@ void KFDQMTest::QueueLatency(int gpuNode) {
                     0,
                     true,
                     1));
-        hsaKmtGetClockCounters(gpuNode, &ts[i]);
+        hsaKmtGetClockCounters(gpuNode, &ts[i], false);
         queue.SubmitPacket();
         queue.Wait4PacketConsumption(event);
     } while (++i < slots);
@@ -2903,7 +2903,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
                 ASSERT_SUCCESS_GPU(CreateQueueTypeEvent(false, false, gpuNode, &event[i]), gpuNode);
 
                 /* Get the timestamp directly. The first member of HsaClockCounters and TimeStamp is GPU clock counter.*/
-                hsaKmtGetClockCounters(gpuNode, reinterpret_cast<HsaClockCounters*>(&ts[0]));
+                hsaKmtGetClockCounters(gpuNode, reinterpret_cast<HsaClockCounters*>(&ts[0]), false);
                 /* Let sDMA have some workload first.*/
                 queue[i].PlacePacket(SDMATimePacket(&ts[1]));
                 queue[i].PlacePacket(

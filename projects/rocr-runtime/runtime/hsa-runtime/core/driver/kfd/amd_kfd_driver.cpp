@@ -1003,7 +1003,12 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
+  const bool precise_timestamps =
+      core::Runtime::runtime_singleton_ != nullptr &&
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps();
+
+  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter, precise_timestamps)) !=
+      HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
