@@ -4,8 +4,12 @@
 """Build a platform/family table from Catch2 JUnit files.
 
 CI names the files unit-<os>.xml and integration-<family>.xml. Catch2 also
-emits one <testcase> per SECTION, so counts here use only top-level cases
-(names without '/'), matching run_catch2.py.
+emits one <testcase> per SECTION, named "Case/Section", and a failure inside a
+section is attached to that record only. Counts here are per top-level case
+(the part before the first '/'), a case failing if any of its records fails and
+being skipped if any is skipped, matching run_catch2.py. The two scripts are
+checked out separately by the workflow, so the grouping is repeated rather than
+imported; test_summarize_junit.py asserts they agree.
 """
 
 from __future__ import annotations
@@ -41,20 +45,33 @@ def case_result(case: ET.Element) -> str:
     return "PASS"
 
 
+def group_cases(root: ET.Element) -> dict[str, list[ET.Element]]:
+    groups: dict[str, list[ET.Element]] = {}
+    for case in root.iterfind(".//testcase"):
+        name = case.attrib.get("name")
+        if name:
+            groups.setdefault(name.split("/", 1)[0], []).append(case)
+    return groups
+
+
+def group_result(records: list[ET.Element]) -> str:
+    results = {case_result(record) for record in records}
+    for result in ("FAIL", "SKIP"):
+        if result in results:
+            return result
+    return "PASS"
+
+
 def summarize_xml(path: Path) -> dict[str, object]:
-    cases = [
-        case
-        for case in ET.parse(path).iterfind(".//testcase")
-        if "/" not in case.attrib.get("name", "/")
-    ]
+    groups = group_cases(ET.parse(path).getroot())
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
     failed: list[str] = []
-    for case in cases:
-        result = case_result(case)
+    for name, records in groups.items():
+        result = group_result(records)
         counts[result] += 1
         if result == "FAIL":
-            failed.append(case.attrib["name"])
-    return {"counts": counts, "failed": failed, "total": len(cases)}
+            failed.append(name)
+    return {"counts": counts, "failed": failed, "total": len(groups)}
 
 
 def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
@@ -150,7 +167,7 @@ def render(directory: Path, errors: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", type=Path, default=Path("."))
     parser.add_argument(
@@ -158,7 +175,7 @@ def main() -> int:
         type=Path,
         help="Append markdown to this file (GITHUB_STEP_SUMMARY).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.dir.is_dir():
         print(f"not a directory: {args.dir}", file=sys.stderr)
         return 1
