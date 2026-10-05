@@ -269,9 +269,6 @@ private:
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   uint64_t doorbell_signal_value_;
-  // CPU fallback for error_reason_; not std::atomic, since it may point at GPU memory.
-  int64_t error_reason_storage_ = 0;
-  GpuMemoryHandle error_reason_mem_ = nullptr;
   std::thread aql_to_pm4_thread_;
   std::thread fault_monitor_thread_;
   std::atomic<bool> thread_stop_;

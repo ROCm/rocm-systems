@@ -1333,7 +1333,7 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
     }
   }
 #else
-  // KMD event registration unavailable on Linux; fault detection polls error_reason_.
+  // No KMD events on Linux; returning 0 makes ComputeQueue fall back to stall detection.
   pr_debug("RegisterEvent: KMD event registration not available on Linux\n");
 #endif
   return 0;
