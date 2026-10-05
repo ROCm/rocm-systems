@@ -23,19 +23,41 @@ An option that is only valid together with another option must be named with
 that option as a prefix.
 
 ```text
---roofline --roofline-bench-only
+--pc-sampling --pc-sampling-method stochastic
 ```
 
 If an option already exists with the same meaning in another mode,
 keep its name. Don't add a prefix. For example, an `--example-ids`
 filter in `profile` is also `--example-ids` in `analyze`.
 
+Options that belong to one feature share its name as a prefix even when they can
+be used on their own, such as `--roofline-device` and `--roofline-sort`.
+
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
 
 User-facing options are named for what they enable, not what they disable: use
 `--roofline`, not `--no-roofline`. Debug and developer options may use disabling
-names since customers rarely touch them.
+names since customers rarely touch them. `--no-native-tool` is such an exception;
+mark these as "(advanced)" in their help.
+
+## Renaming and Deprecation
+
+A renamed option must keep its old name working for now. The old name:
+
+- works the same as the new name, so keep the same `dest`
+- is listed in the help as a deprecated alias of the new name
+- prints a warning that names the new option whenever it is used
+
+An option deprecated without a rename starts its help with `DEPRECATED:` and what
+to do instead, and also prints a warning when used.
+
+Every rename also needs these updates:
+
+- add the new name to `CHANGELOG.md` under "Changed"
+- add the old name to `CHANGELOG.md` under "Upcoming changes", since it will be removed later
+- use the new name in the docs, tests, and `skills/`
+- check the output of `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 
 ## Arguments
 
@@ -46,6 +68,13 @@ A list of values is passed as one comma-separated argument.
 ```
 
 ## Help Messages
+
+Always set `metavar` so the help shows what the option takes. Never leave it
+empty (`metavar=""`).
+
+- If the value is required, use `metavar="<arg>"`.
+- If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
+  The help adds the `[]` automatically.
 
 For an option that takes an argument, the help message follows these rules:
 
