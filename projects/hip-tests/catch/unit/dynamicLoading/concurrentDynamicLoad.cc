@@ -167,8 +167,8 @@ static void* churner_fn(void* arg) {
   for (int iter = 0; iter < ctx->iters; ++iter) {
     void* handle = dlopen("./libLazyLoad.so", RTLD_LAZY);
     if (!handle) {
-      /* dlopen can transiently fail (e.g., another churner holds the
-       * linker lock).  Log but do not hard-fail the test. */
+      /* Catch2 assertions are not thread safe, so the success count is the only
+       * signal a churner can report. */
       continue;
     }
 
@@ -239,12 +239,9 @@ HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
 
   pthread_barrier_destroy(&barrier);
 
-  /* The churners should have succeeded at dlopen at least once across all
-   * iterations; if never, the .so was simply not found — warn but allow. */
-  if (dlopen_success_count.load() == 0) {
-    WARN("libLazyLoad.so could not be opened during any churner iteration; "
-         "the concurrent-unload half of the test did not execute.");
-  }
+  /* dlclose drives __hipUnregisterFatBinary. With no successful dlopen the racing
+   * erase never ran, so a clean result would be wrong. */
+  REQUIRE(dlopen_success_count.load() > 0);
 
   /* Primary assertion: no kernel produced wrong results and no crash. */
   REQUIRE(g_failure.load() == false);

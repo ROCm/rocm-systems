@@ -3969,14 +3969,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-  } else if (ptr != nullptr &&
-             PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-    attributes->type = hipMemoryTypeManaged;
-    attributes->hostPointer = const_cast<void*>(ptr);
-    attributes->devicePointer = const_cast<void*>(ptr);
-    attributes->isManaged = true;
-    attributes->allocationFlags = 0;
-    attributes->device = hip::getCurrentDevice() ? hip::getCurrentDevice()->deviceId() : 0;
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
@@ -4037,8 +4029,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
-      if (memObj) {  // checks for host type or device type
-        *reinterpret_cast<uint32_t*>(data) = getMemoryType(memObj);
+      if (memObj) {
+        *reinterpret_cast<uint32_t*>(data) =
+            IsManagedMemory(memObj->getMemFlags()) ? hipMemoryTypeManaged : getMemoryType(memObj);
         break;
       }
       hipArray* arr = static_cast<hipArray*>(ptr);
@@ -4064,9 +4057,6 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-      } else if (ptr != nullptr &&
-                 PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeManaged;
       } else {
         // Unregistered host memory (allocated on stack, heap etc.)
         *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeUnregistered;
