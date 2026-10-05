@@ -95,11 +95,13 @@ def main() -> int:
         print(f"  {key}: {val}")
     print()
     if args.arch == "gfx942":
+        # Phase 1 SPP: 14 passes, packable_multi==0, SLOT fill +0.
+        # Phase 2: SLOT_LIMIT parents are analyze composites (0 HW PMC parents).
         ok = (
             spp["packable_multi"] == 0
             and spp["passes"] == 14
             and spp["slot_additional_passes"] == 0
-            and spp["slot_limit_metrics"] == 16
+            and spp["slot_limit_metrics"] == 0
         )
         print(f"gfx942 gates: {'PASS' if ok else 'FAIL'}")
         if not ok:
