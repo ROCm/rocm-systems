@@ -4,14 +4,6 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-if(NOT WIN32 AND NOT DEFINED __HIP_ENABLE_PCH)
-  set(__HIP_ENABLE_PCH ON CACHE BOOL "enable/disable pre-compiled hip headers")
-endif()
-
-if(${__HIP_ENABLE_PCH})
-  add_definitions(-D__HIP_ENABLE_PCH)
-endif()
-
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})

@@ -920,10 +920,9 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
 }
 
 // Helper: get the actual device binary from a successfully loaded hipModule_t.
-// The caller passes an in-memory image (which may be a fat binary bundle, not
-// a raw ELF).  The runtime unbundles/extracts the device ELF internally and
-// stores it in the amd::Program.  We read it back from there so we always
-// capture the processed ELF, not the raw (possibly bundled) input image.
+// The module may come from an in-memory image or from a file (possibly a
+// bundle); either way the runtime stores the extracted device ELF in the
+// amd::Program, and we read it back from there.
 // It also seeds the launch-path hash cache (g_prog_hash) for this program.
 static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   amd::Program* prog = as_amd(reinterpret_cast<cl_program>(module));
@@ -1005,52 +1004,11 @@ hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* image,
 hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
   hipError_t r = g_real_table.hipModuleLoad_fn(module, fname);
   if (r == hipSuccess) {
-    hrr_cap::Hash128 h{0, 0};
-    // Read the file from disk and snapshot it as a code object so the replay
-    // can load it by hash. Without this, fname is a capture-time address and
-    // is useless at replay time.
-    if (fname) {
-      if (FILE* fh = fopen(fname, "rb")) {
-        fseek(fh, 0, SEEK_END);
-        long sz = ftell(fh);
-        rewind(fh);
-        if (sz > 0) {
-          std::vector<uint8_t> buf(static_cast<size_t>(sz));
-          if (fread(buf.data(), 1, buf.size(), fh) == buf.size())
-            h = hrr_cap::writer::write_code_object(buf.data(), buf.size());
-        }
-        fclose(fh);
-      }
-    }
-    // Seed the launch-path cache — keyed by the program's device-image span,
-    // valued with the file's hash — so a kernel from this module resolves to
-    // the same code object the module event records.
-    if (amd::Program* prog = as_amd(reinterpret_cast<cl_program>(*module))) {
-      const uint8_t* image = nullptr;
-      size_t size = 0;
-      if (program_binary_span(prog, image, size)) {
-        // The file snapshot is the preferred hash, but it is not always
-        // available: fname can be null, unreadable, or truncated. Replay refuses
-        // a module event with no hash, so fall back to the extracted device
-        // image, which is what the LoadData/LoadDataEx shims record. A failed
-        // span read is not cached: remember_program_hash refuses (nullptr,0),
-        // so a later successful read can still populate the entry. A non-loadable
-        // image still seeds {0,0} against a real span so the launch path does
-        // not re-warn on every kernel.
-        if (!h.lo && !h.hi) {
-          h = hash_program_image(prog, image, size);
-          if (h.lo || h.hi)
-            LogPrintfWarning("[HRR capture] hipModuleLoad(\"%s\"): could not snapshot the file;"
-                             " recorded the module's extracted device image instead",
-                             fname ? fname : "(null)");
-        }
-        remember_program_hash(prog, image, size, h);
-      }
-    }
+    hrr_cap::Hash128 h = write_module_code_object(*module);
     hrr_args_hipModuleLoad a{};
     a.ret        = static_cast<int32_t>(r);
     a.module     = reinterpret_cast<uint64_t>(*module);
-    a.fname      = 0;  // not a valid cross-process address; hash identifies the file
+    a.fname      = 0;  // not a valid cross-process address; hash identifies the code object
     a.co_hash_lo = h.lo;
     a.co_hash_hi = h.hi;
     a.module_id  = 0;

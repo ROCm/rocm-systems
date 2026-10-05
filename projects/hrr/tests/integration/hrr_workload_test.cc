@@ -3298,6 +3298,31 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
     }
     hipModule_t mod_file = nullptr;
     HRR_HIP_CHECK(hipModuleLoad(&mod_file, tmp_co.string().c_str()));
+    {
+      // Regression guard for a launch from a file-loaded module. Replay
+      // resolves the launch by its own code-object hash, so this does not
+      // check what the hipModuleLoad event itself loaded.
+      hipFunction_t fn_file = nullptr;
+      HRR_HIP_CHECK(hipModuleGetFunction(&fn_file, mod_file, "rtc_fill"));
+      int* d_file = nullptr;
+      HRR_HIP_CHECK(hipMalloc(&d_file, SZ));
+      // Replay compares D2H buffers under a float tolerance, so a small
+      // integer would also pass against a buffer the kernel never wrote.
+      // 0x3F800000 is 1.0f, which is outside the tolerance of an unwritten buffer.
+      int  val   = 0x3F800000;
+      int  n     = N;
+      void* args[] = { &d_file, &val, &n };
+      int blocks = (N + 255) / 256;
+      HRR_HIP_CHECK(hipModuleLaunchKernel(fn_file,
+        blocks, 1, 1,   // grid
+        256,    1, 1,   // block
+        0, s, args, nullptr));
+      std::vector<int> h_file(N);
+      HRR_HIP_CHECK(hipMemcpyAsync(h_file.data(), d_file, SZ, hipMemcpyDeviceToHost, s));
+      HRR_HIP_CHECK(hipStreamSynchronize(s));
+      for (int i = 0; i < N; ++i) REQUIRE(h_file[i] == val);
+      HRR_HIP_CHECK(hipFree(d_file));
+    }
     HRR_HIP_CHECK(hipModuleUnload(mod_file));
     // Ignore remove errors: on Windows the ROCm driver may keep the file
     // open after hipModuleUnload, making fs::remove throw.  The temp
@@ -3318,6 +3343,113 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
   delete[] h;
+}
+
+// ---------------------------------------------------------------------------
+// Workload Z2 — hipModuleLoad of an offload bundle file
+// ---------------------------------------------------------------------------
+// Compiles rtc_fill with HIPRTC, loads the ELF once with hipModuleLoadData,
+// then wraps the same ELF in an uncompressed clang offload bundle (a host entry
+// plus one entry for this device), writes it to a file and loads that with
+// hipModuleLoad. Unit_HRR_ModuleLoadBundleRoundtrip checks that both module
+// events record the same code object, the device ELF, and not the bundle file.
+// D2H blob value = 0x3F800000 (1.0f), written by rtc_fill from the bundle.
+// ---------------------------------------------------------------------------
+static void hrr_append_u64_le(std::vector<char>& bytes, uint64_t value) {
+  for (unsigned i = 0; i < sizeof(value); ++i)
+    bytes.push_back(static_cast<char>(value >> (i * 8)));
+}
+
+TEST_CASE("Unit_HRR_ModuleLoadBundle_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+
+  hiprtcProgram prog = nullptr;
+  HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, k_fill_src, "rtc_fill.hip",
+                                   0, nullptr, nullptr));
+  hiprtcResult compile_rc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (compile_rc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HRR_HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HRR_HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HRR_HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+  REQUIRE(co.size() >= 4);
+  REQUIRE(std::string(co.data(), 4) == "\x7f" "ELF");
+
+  // The in-memory ELF: the reference the bundle load is compared against.
+  hipModule_t mod_data = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod_data, co.data()));
+
+  // Same layout as clang-offload-bundler --type=o: magic, entry count, then
+  // (offset, size, id length, id) per entry; the host entry is empty and the
+  // device ELF starts on the next 4 KiB boundary.
+  hipDeviceProp_t props{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  constexpr uint64_t kElfOffset = 4096;
+  static const char kMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  std::vector<char> bundle(kMagic, kMagic + sizeof(kMagic) - 1);
+  auto add_entry = [&bundle](const std::string& id, uint64_t size) {
+    hrr_append_u64_le(bundle, kElfOffset);
+    hrr_append_u64_le(bundle, size);
+    hrr_append_u64_le(bundle, id.size());
+    bundle.insert(bundle.end(), id.begin(), id.end());
+  };
+  hrr_append_u64_le(bundle, 2);
+  add_entry("host-x86_64-unknown-linux-gnu-", 0);
+  add_entry(std::string("hipv4-amdgcn-amd-amdhsa--") + props.gcnArchName, co.size());
+  REQUIRE(bundle.size() <= kElfOffset);
+  bundle.resize(kElfOffset, '\0');
+  bundle.insert(bundle.end(), co.begin(), co.end());
+
+  {
+    namespace fs = std::filesystem;
+    // Unique per run for the same reason as the ModuleAPI workload above.
+    auto tmp_bundle = fs::temp_directory_path() /
+                      (std::string("hrr_rtc_fill_bundle_") +
+                       std::to_string(reinterpret_cast<uintptr_t>(&bundle)) + ".co");
+    {
+      std::ofstream f(tmp_bundle, std::ios::binary);
+      REQUIRE(f.is_open());
+      f.write(bundle.data(), static_cast<std::streamsize>(bundle.size()));
+    }
+    hipModule_t mod_file = nullptr;
+    HRR_HIP_CHECK(hipModuleLoad(&mod_file, tmp_bundle.string().c_str()));
+    hipFunction_t fn = nullptr;
+    HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod_file, "rtc_fill"));
+    // 1.0f as an int, so an unwritten buffer fails replay's float-tolerant
+    // D2H comparison (see the ModuleAPI workload).
+    int  val   = 0x3F800000;
+    int  n     = N;
+    void* args[] = { &d, &val, &n };
+    int blocks = (N + 255) / 256;
+    HRR_HIP_CHECK(hipModuleLaunchKernel(fn,
+      blocks, 1, 1,   // grid
+      256,    1, 1,   // block
+      0, s, args, nullptr));
+    std::vector<int> h(N);
+    HRR_HIP_CHECK(hipMemcpyAsync(h.data(), d, SZ, hipMemcpyDeviceToHost, s));
+    HRR_HIP_CHECK(hipStreamSynchronize(s));
+    for (int i = 0; i < N; ++i) REQUIRE(h[i] == val);
+    HRR_HIP_CHECK(hipModuleUnload(mod_file));
+    std::error_code ec;
+    fs::remove(tmp_bundle, ec);
+  }
+
+  HRR_HIP_CHECK(hipModuleUnload(mod_data));
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
 }
 
 // ---------------------------------------------------------------------------
