@@ -4230,6 +4230,289 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LiveModeProbesCapturingGraph) {
 }
 
 // ===========================================================================
+// rcclCandSearch / rcclCandSearchRecord -- rccl_decision.h.
+//
+// Header-only inline; plain (non-isolated) microtests exercise the tracking
+// logic directly without going through rcclSelectAllReduce.
+// ===========================================================================
+
+TEST(WrapMicrotest, CandSearchRecord_FirstEligibleSetsFallback) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 3;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand);
+  EXPECT_TRUE(s.bestFallbackFound);
+  EXPECT_EQ(NCCL_ALGO_TREE, s.bestFallback.algo);
+  EXPECT_EQ(3, s.bestFallback.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_AllMaskMatchesAnythingAndSetsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 7;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
+  EXPECT_TRUE(s.bestPreferredFound);
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
+  EXPECT_EQ(7, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_MismatchedFamilySkipsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE;
+  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
+  EXPECT_TRUE(s.bestFallbackFound)  << "fallback must still be recorded on mask miss";
+  EXPECT_FALSE(s.bestPreferredFound) << "preferred must NOT be set on mask miss";
+}
+
+TEST(WrapMicrotest, CandSearchRecord_MatchingFamilySetsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 5;
+  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand);
+  EXPECT_TRUE(s.bestPreferredFound);
+  EXPECT_EQ(NCCL_ALGO_TREE, out.algo);
+  EXPECT_EQ(5, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_SubsequentCallsIgnoredAfterPreferredFound) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 2;
+  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 9;
+  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo) << "first preferred match must not be overwritten";
+  EXPECT_EQ(2, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_FallbackNotOverwrittenByLaterEligible) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 1;
+  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 8;
+  rcclCandSearch s{RCCL_BACKEND_SYMMETRIC, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
+  EXPECT_EQ(NCCL_ALGO_RING, s.bestFallback.algo) << "first eligible candidate wins fallback";
+  EXPECT_EQ(1, s.bestFallback.nMaxChannels);
+  EXPECT_FALSE(s.bestPreferredFound) << "SYMMETRIC was never offered so preferred must not be set";
+}
+
+// ===========================================================================
+// rcclAllReducePreferredBackends -- rccl_wrap.cc.
+//
+// Unit tests for the flag->mask translation. Plain (non-isolated) microtests;
+// g_loadParam controls RCCL_PARAM values. MakeSelectComm() gives a zeroed
+// comm with default CTAPolicy (NCCL_CTA_POLICY_DEFAULT = 0).
+// ===========================================================================
+
+TEST(WrapMicrotest, AllReducePreferredBackends_DefaultReturnsAll) {
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_ALL, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_CTAPolicyZeroReturnsCeAndGinSdma) {
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(rcclBackendMask_t(RCCL_BACKEND_CE | RCCL_BACKEND_GIN_SDMA),
+            rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricReturnsSymmetric) {
+  g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+  g_loadParam = nullptr;
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaReturnsDda) {
+  g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+  g_loadParam = nullptr;
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricTakesPriorityOverCTAZero) {
+  g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm))
+      << "FORCE_SYMMETRIC check precedes CTAPolicy_ZERO check";
+  DeleteCommWithArch(comm);
+  g_loadParam = nullptr;
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaTakesPriorityOverCTAZero) {
+  g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm))
+      << "FORCE_DDA check precedes CTAPolicy_ZERO check";
+  DeleteCommWithArch(comm);
+  g_loadParam = nullptr;
+}
+
+// ===========================================================================
+// rcclSelectAllReduce -- preferred-backend mask integration tests.
+//
+// Drive rcclCandSearch / rcclAllReducePreferredBackends end-to-end: force
+// flags control which mask is returned; the scan selects the preferred
+// backend when eligible, or warns and falls back otherwise.
+//
+// All use WrapMicrotestIsolated because RCCL_PARAM statics are process-global.
+// Fallback tests capture stderr to verify the WARN fires.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricChoosesSymkWhenEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceSymmetricChoosesSymkWhenEligible",
+      []() {
+        g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/4));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ(std::string::npos, warn.find("preferred backend"))
+            << "no fallback warn expected when preferred is found";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricFallsBackWhenSymkIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceSymmetricFallsBackWhenSymkIneligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+        // g_isSymmetricKernelRequested defaults false -> symk ineligible
+        // g_ceAvailable defaults false -> CE ineligible -> plain-kernel fallback
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol  = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 1; });
+        ncclComm* comm = MakeSelectComm();
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when preferred mask cannot be satisfied";
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "plain-kernel fallback must be used";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaChoosesDdaWhenEligible",
+      []() {
+        g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
+        EXPECT_EQ(std::string::npos, warn.find("preferred backend"))
+            << "no fallback warn expected when preferred is found";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        // g_allReduceShouldTakeDdaPath defaults false -> DDA ineligible
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when FORCE_DDA preferred mask cannot be satisfied";
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo)
+            << "CE_REGISTERED must be chosen as fallback";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinSdmaEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinSdmaEligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        // CE disabled (RCCL_CE_ALLREDUCE not set, g_ceAvailable defaults false)
+        // GIN_SDMA not reachable -> no preferred candidate -> warn + plain-kernel fallback
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol  = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 1; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when CTAPolicy_ZERO mask cannot be satisfied";
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "plain-kernel fallback must be used";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
 // rcclSelectAllGather -- rccl_wrap.cc:1031-1202. Same overall shape as
 // rcclSelectAllReduce, different priority order: DDA -> Hierarchical -> CE
 // (force-scratch + registered) -> symmetric (reported) -> Direct -> plain
