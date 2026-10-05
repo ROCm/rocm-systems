@@ -127,6 +127,55 @@ TEST(RaceDetector, FlatLdsLoadRequiresBothCounterWaits) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
+  for (uint64_t lds_mask : {0u, 1u, 2u, 5u}) {
+    SCOPED_TRACE(lds_mask);
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        1, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA4));
+    auto &wave = detector.getWaveRaceState(0);
+    const std::array<uint32_t, 32> addresses{64, 128, 256};
+    for (uint32_t reg : {1u, 2u})
+      wave.registerLdsEvent(reg, MemoryEventType::LDS_TO_VGPR, {reg}, /*execMask=*/3,
+                            /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf,
+                            kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED,
+                            lds_mask);
+    const auto &events = detector.events();
+    ASSERT_EQ(events.totalAllocated(), 2);
+    for (const EventId event : {EventId{0}, EventId{1}}) {
+      EXPECT_EQ(events.execMask(event), 3u);
+      EXPECT_EQ(events.ldsIntervals(event).contains(64), (lds_mask & 1) != 0);
+      EXPECT_EQ(events.ldsIntervals(event).contains(128), (lds_mask & 2) != 0);
+      EXPECT_FALSE(events.ldsIntervals(event).contains(256)); // Outside EXEC.
+      EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
+      EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
+    }
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
+    wait.add(amdgpu::WaitCounterType::DSCNT, 1);
+    wave.dispatch(wait);
+    EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
+    for (int lane : {0, 1}) {
+      wave.checkVgprRead(1, lane, 0xf);
+      EXPECT_TRUE(violations.empty());
+    }
+    for (int lane : {0, 1}) {
+      wave.checkVgprRead(2, lane, 0xf);
+      ASSERT_EQ(violations.size(), 1u);
+      EXPECT_EQ(violations.front().lane, lane);
+      violations.clear();
+    }
+    wait.updates.clear();
+    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
+    wait.add(amdgpu::WaitCounterType::DSCNT, 0);
+    wave.dispatch(wait);
+    wave.checkVgprReadLanes(2, 3, 0xf);
+    EXPECT_TRUE(violations.empty());
+  }
+}
+
 TEST(RaceDetector, FlatLdsLoadDoesNotUseSameWaveLdsOrdering) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);

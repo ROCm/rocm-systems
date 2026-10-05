@@ -224,9 +224,9 @@ void WaveRaceState::registerLdsEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask) {
   IntervalSet intervals;
-  forEachActiveLane(execMask, waveSize, [&](int lane) {
+  forEachActiveLane(execMask & ldsLaneMask, waveSize, [&](int lane) {
     int addr = static_cast<int>(laneBaseAddresses[lane]);
     intervals.append(addr, addr + bytesPerLane);
   });
