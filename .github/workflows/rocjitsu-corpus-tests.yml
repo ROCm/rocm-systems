@@ -471,9 +471,11 @@ jobs:
       - name: Run corpus tests
         # Keep the HIP corpus signal even if an independent test step fails.
         if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
-        # Clean runs on this change completed in 4-13 minutes. The sanitizer
-        # rerun budget is capped at 20 minutes within this step-level failsafe.
-        timeout-minutes: 60
+        # A clean sanitizer sweep currently takes about 38 minutes. Each target
+        # may then consume its own 20-minute failed-test rerun budget, so leave
+        # enough headroom for two independently flaky targets before the
+        # step-level failsafe stops the whole corpus.
+        timeout-minutes: 90
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:

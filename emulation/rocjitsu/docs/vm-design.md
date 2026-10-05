@@ -31,11 +31,10 @@ execution.
 | `amdgpu/sdma_ring_consumer.h/cpp` | `SdmaRingConsumer`: per-queue ring cursor, fetch, retry, execution, and retirement publication |
 | `amdgpu/sdma_packet_processor.h/cpp` | SdmaPacketProcessor: SDMA packet decoding and effects over caller-owned typed continuation state |
 | `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
-| `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
-| `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
-| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: standalone ring traversal helper; production compute queues execute in CommandProcessor |
+| `amdgpu/aql/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
+| `amdgpu/pm4/pm4_packet_processor.h/cpp` | Production PM4 fetch, opcode effects, register updates, IB traversal, and cursor publication |
+| `amdgpu/pm4/pm4.h` | PM4 opcodes, registers, scratch leases, and persistent submission state |
 | `amdgpu/dispatch_entry.h` | ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication |
-| `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
 | `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
 | `amdgpu/compute_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the unified compute command processor |
 
@@ -182,12 +181,12 @@ its published read pointer. These front ends must not duplicate scheduling,
 ring fetch, packet decoding, retry, or cursor-publication state. The command
 processor serves compute queues only and has no SDMA implementation or state.
 
-The AQL command processor, restricted PM4 compute-queue path, and SDMA
-scheduler use the same compile-time packet-processor interface and
+The AQL command processor and SDMA scheduler use the same compile-time
+packet-processor interface and
 `PacketProcessResult` envelope, not a common execution engine. SDMA may suspend
 after a partial effect, so its ring consumer owns an opaque typed continuation
 that only `SdmaPacketProcessor`
-interprets; AQL and PM4 block only before committing an effect and can restart
+interprets; AQL blocks only before committing an effect and can restart
 the same request. The common `required_bytes` field requests more head-packet
 input; `retirement_bytes` reports the eventual cursor advance and can include a
 protocol-defined skipped extent, which the ring owner must bound against its ring
@@ -195,13 +194,32 @@ and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publicat
 and completion remain outside packet processors. Guest-controlled AQL validation failures are
 reported through the typed packet/admission result and fault only their queue;
 internal invariant violations remain exceptions.
-The firmware-free PM4 path supports a restricted compute-queue packet subset,
+The firmware-free PM4 path supports the modeled compute-queue packet subset,
 rather than general PM4. MES maps its MQD and address space, but submits the
 queue through `GpuQueueRegistry` to a selected command processor. The binding
 retains only a CP registration token; the CP-owned queue controller retains the
-VM snapshot, ring traversal, packet processor, and retry-safe cursor publication.
-The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service runs
-outside the AQL queue lock and uses bounded queue turns for event-loop fairness.
+VM snapshot and retry-safe cursor publication state. The production packet
+processor in `pm4/` performs ring traversal, opcode effects, register updates,
+and nested IB traversal over that CP-owned state. CP supplies cache flushing,
+dispatch admission, retry scheduling, and synchronous fault cancellation
+callbacks. Temporary unavailability retains command and cursor-publication state
+for retry; cancellation stops resident waves before submission resources are
+released. A snapshot captured before GART publication is unready and must be
+released before retrying, so the next turn can capture the published binding.
+Once ready, the snapshot stays pinned through execution and retirement publication.
+For native rings, CP captures `command_access`, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending publication even when
+execution is suspended. The processor traverses packets and nested IBs, captures
+access for submitted streams as needed, and commits/publishes packet retirement
+through `read_pointer_journal`. The retry callback sets `command_retry_pending`,
+which CP clears before resuming. Dispatch admission appends to `dispatches.entries`;
+CP retires these entries before packet processing continues. On terminal publication
+failure, the processor sets `publication_faulted` before invoking cancellation.
+The cancellation callback marks the queue faulted, cancels pending work, and notifies
+failed submissions while preserving the publication failure.
+The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service
+uses bounded queue turns for event-loop fairness and retains CP queue
+serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
 while a consumed ring cursor, dispatch completion, or queue-idle signal still
