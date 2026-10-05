@@ -7,8 +7,8 @@
 // fabricate the symbol directly and only need a minimal ELF carrying the body
 // words in an executable .text (plus an optional .rela.text).
 //
-// Instruction encodings below are gfx90a ground truth captured from
-// `llvm-mc -arch=amdgcn -mcpu=gfx90a -show-encoding`.
+// Instruction encodings below are ground truth captured from
+// `llvm-mc -arch=amdgcn -mcpu=<gfx90a|gfx1200> -show-encoding`.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -39,6 +39,15 @@ constexpr uint32_t kScratchLoadHi = 0x00000000;  // ... (word 1)
 constexpr uint32_t kSScratchLoadLo = 0xc0140000; // s_scratch_load_dword (SMEM, word 0)
 constexpr uint32_t kSScratchLoadHi = 0x00000000; // ... (word 1)
 
+// gfx1200 encodings. RDNA4 global memory instructions (VGLOBAL) are 96-bit.
+constexpr uint32_t kGfx12GlobalStoreW0 = 0xee068002; // global_store_b32 v0, v1, s[2:3] (word 0)
+constexpr uint32_t kGfx12GlobalStoreW1 = 0x00800000; // ... (word 1)
+constexpr uint32_t kGfx12GlobalStoreW2 = 0x00000000; // ... (word 2)
+constexpr uint32_t kGfx12SSetpcS30S31 = 0xbe80481e;  // s_setpc_b64 s[30:31]
+constexpr uint32_t kGfx12ScratchLoadW0 = 0xed05007c; // scratch_load_b32 v1, off, off offset:16
+constexpr uint32_t kGfx12ScratchLoadW1 = 0x00000001; // ... (word 1)
+constexpr uint32_t kGfx12ScratchLoadW2 = 0x00001000; // ... (word 2)
+
 // .text placement. Virtual address and file offset differ so the body's value
 // range (used by the relocation check) is distinct from its file offset.
 constexpr uint64_t kTextAddr = 0x1000;
@@ -56,11 +65,13 @@ uint32_t add_name(std::vector<uint8_t> &names, std::string_view name) {
   return offset;
 }
 
-// Build a minimal gfx90a ET_DYN ELF: one executable .text holding @p body, an
-// optional .rela.text whose entries' r_offset values are @p reloc_voffsets
-// (in the same virtual-address space as st_value), and a .shstrtab.
+// Build a minimal ET_DYN ELF for the target @p e_flags names: one executable
+// .text holding @p body, an optional .rela.text whose entries' r_offset values
+// are @p reloc_voffsets (in the same virtual-address space as st_value), and a
+// .shstrtab.
 std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
-                              const std::vector<uint64_t> &reloc_voffsets = {}) {
+                              const std::vector<uint64_t> &reloc_voffsets = {},
+                              uint32_t e_flags = EF_AMDGPU_MACH_AMDGCN_GFX90A) {
   const bool has_rela = !reloc_voffsets.empty();
   const uint16_t shstrtab_index = static_cast<uint16_t>(has_rela ? 3 : 2);
   const uint16_t section_count = static_cast<uint16_t>(has_rela ? 4 : 3);
@@ -98,7 +109,7 @@ std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX90A;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -340,6 +351,51 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
   EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("overflow"), std::string::npos) << err;
+}
+
+// A probe that writes memory on RDNA4 needs a 12-byte instruction, since every
+// global store there is one and there are no scalar stores.
+TEST(ProbeCallableTest, AcceptsATwelveByteInstruction) {
+  const std::vector<uint32_t> body{kGfx12GlobalStoreW0, kGfx12GlobalStoreW1, kGfx12GlobalStoreW2,
+                                   kGfx12SSetpcS30S31};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                             /*num_arg_dwords=*/0, &err);
+  ASSERT_TRUE(callable.has_value()) << err;
+  EXPECT_EQ(callable->body_words, body);
+}
+
+// RDNA4 scratch instructions are 12 bytes too, so once the width is accepted
+// the scratch check alone is what keeps them out of a probe body.
+TEST(ProbeCallableTest, RejectsATwelveByteScratchAccess) {
+  const std::vector<uint32_t> body{kGfx12ScratchLoadW0, kGfx12ScratchLoadW1, kGfx12ScratchLoadW2,
+                                   kGfx12SSetpcS30S31};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                    /*num_arg_dwords=*/0, &err)
+                   .has_value());
+  EXPECT_NE(err.find("scratch"), std::string::npos) << err;
+}
+
+// The body ends one word into a 12-byte store. Decoding must stop at the body's
+// end rather than read the two missing words from past it.
+TEST(ProbeCallableTest, RejectsAnInstructionRunningPastTheBody) {
+  const std::vector<uint32_t> body{kGfx12GlobalStoreW0};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                    /*num_arg_dwords=*/0, &err)
+                   .has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("truncated"), std::string::npos) << err;
 }
 
 //==============================================================================
