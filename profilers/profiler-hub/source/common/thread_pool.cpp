@@ -87,6 +87,16 @@ thread_pool::~thread_pool()
         worker.request_stop();
     }
     m_queue_cv.notify_all();
+    m_workers.clear();
+
+    for(const auto& block : m_queue)
+    {
+        {
+            const std::scoped_lock lock{ block->mutex };
+            block->state = task_state::cancelled;
+        }
+        block->cv.notify_all();
+    }
 }
 
 thread_pool::task_handle
