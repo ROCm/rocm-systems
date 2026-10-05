@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 619 | 619 | 0 |
-| **total** | **619** | **619** | **0** |
+| `contract` | 621 | 621 | 0 |
+| **total** | **621** | **621** | **0** |
 
 ## Tier: `contract`
 
