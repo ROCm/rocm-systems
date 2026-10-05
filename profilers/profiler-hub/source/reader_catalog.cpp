@@ -278,6 +278,7 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         track_utility.emplace(track_info_ptr->id, track_info_ptr);
         track_to_db_id.emplace(track_info_ptr, sample_track_id);
         track_to_topology.emplace(track_info_ptr, no_topology);
+        sample_track_by_db_id.emplace(sample_track_id, track_info_ptr);
     }
 
     // PMC/counter tracks: one row per (nid,agent_id,pmc_id), already grouped

@@ -69,8 +69,11 @@ private:
     {
         if(row.track_id.has_value())
         {
-            const auto it = m_catalog.track_utility.find(row.track_id.value());
-            if(it != m_catalog.track_utility.end() && it->second) return it->second;
+            const auto it = m_catalog.sample_track_by_db_id.find(row.track_id.value());
+            if(it != m_catalog.sample_track_by_db_id.end() && it->second)
+            {
+                return it->second;
+            }
         }
 
         const topology_key_t topology{ row.nid,
