@@ -73,7 +73,7 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -88,14 +88,14 @@ overflow::sample(int _sig)
 
     _perf_event->stop();
 
-    for(auto itr : *_perf_event)
+    for(auto const itr : *_perf_event)
     {
         if(itr.is_sample())
         {
             auto _sample_ip = itr.get_ip();
             auto _data      = callchain_t{};
             _data.emplace_back(_sample_ip);
-            for(auto ditr : itr.get_callchain())
+            for(auto const ditr : itr.get_callchain())
             {
                 if(ditr != _sample_ip)
                 {
@@ -154,13 +154,13 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    m_index                  = causal::experiment::get_index();
-    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_index                        = causal::experiment::get_index();
+    m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
-    auto _set_current_selection = [](auto _stack) {
+    auto const _set_current_selection = [](auto _stack) {
         // save the former selection count
-        auto _former_count = _select_count;
+        auto const _former_count = _select_count;
         // get the current selection count
         _select_count = causal::set_current_selection(_stack);
         // if the selection count was reduced, reset select zeros.
