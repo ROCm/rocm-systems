@@ -3904,10 +3904,10 @@ static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
     return r.ok ? r.extent : SIZE_MAX;
 }
 
-// Resolve the H2D source blob for a driver copy or a hipMemcpy3D. Returns nullptr when there is
-// nothing faithful to substitute: no blob recorded, or a blob smaller than the
-// recorded source rect (an archive captured before the blob-footprint fix).
-// Skipping matches replay_memcpy2d's H2D policy: never fall back to the stale
+// Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D.
+// Returns nullptr when there is nothing faithful to substitute: no blob
+// recorded, or a blob smaller than the recorded source rect (an archive captured
+// before the blob-footprint fix, or a damaged one). Never fall back to the stale
 // capture-time host VA, and never hand the runtime a short buffer to stride off.
 static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
                                           uint64_t hash_lo, uint64_t hash_hi,
@@ -4170,7 +4170,7 @@ hipError_t playback_hipMemcpy3DBatchAsync(PlaybackContext& ctx,
 //
 // H2D: the recorded host `src` VA is meaningless at replay; substitute the
 //      captured blob (laid out with the recorded `spitch`) and copy into the
-//      translated device `dst`.
+//      translated device `dst`. A blob that does not span that rect is skipped.
 // D2H: read the device `src` back with the recorded pitches and validate the
 //      copied rows against the captured expected-output blob.
 // ---------------------------------------------------------------------------
@@ -4185,18 +4185,15 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
     const size_t height = static_cast<size_t>(a->height);
 
     if (kind == hipMemcpyHostToDevice) {
+        // The runtime reads `height` rows `spitch` apart from the blob, so it
+        // must reach spitch * (height - 1) + width bytes, as capture records it.
+        const size_t need = drvmemcpy_host_bytes(spitch, /*pitch_height=*/0, 0, 0, 0,
+                                                 width, height, /*depth=*/1);
+        const void* blob = drvmemcpy_h2d_src_blob(
+            ctx, is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", a->blob_hash_lo,
+            a->blob_hash_hi, need);
+        if (!blob) return hipSuccess;
         void* dst = ctx.translate_ptr(a->dst);
-        size_t blob_sz = 0;
-        const void* blob = (a->blob_hash_lo || a->blob_hash_hi)
-                               ? ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz)
-                               : nullptr;
-        if (!blob) {
-            // No captured source data — nothing faithful to write. Skip rather
-            // than copy from a stale capture-time host VA.
-            fprintf(stderr, "[HRR] hipMemcpy2D%s H2D: no blob to substitute — skipped\n",
-                    is_async ? "Async" : "");
-            return hipSuccess;
-        }
         hipError_t r = hipSuccess;
         if (is_async)
             r = hipMemcpy2DAsync(dst, dpitch, blob, spitch, width, height,
