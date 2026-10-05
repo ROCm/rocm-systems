@@ -4198,6 +4198,34 @@ TEST(CommandProcessorTest, RetryNotificationsCoalesceWithoutSuppressingDoorbells
   EXPECT_EQ(cp->doorbell_handle_count_for_test() - passes_before, 3u);
 }
 
+TEST(CommandProcessorTest, FreshStallPullsPendingRecheckEarlier) {
+  VmFixture f("cdna4", 1, 2, 64, 104, 256, 1, 100000);
+  constexpr uint64_t kPersistentSignal = 0x7000;
+  constexpr uint64_t kFreshSignal = 0x7100;
+  constexpr uint64_t kFreshReadPointer = 0xf0110000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kPersistentSignal + kSignalValueOffset, 1);
+  f.mem()->write64(kFreshSignal + kSignalValueOffset, 1);
+  auto tick = [&] { return f.engine->context(f.cp()->partition_id()).current_tick(); };
+  test::AqlQueue blocked(f.mem(), f.cp());
+  test::AqlQueue fresh(f.mem(), f.cp(), 0xf0100000, 4096, kFreshReadPointer, 0xf0110008, 0xf0110010,
+                       false, 2);
+  blocked.barrier_and(kPersistentSignal);
+  while (tick() < 20000)
+    ASSERT_TRUE(f.engine->step());
+
+  const auto start = tick();
+  fresh.barrier_and();
+  fresh.barrier_and(kFreshSignal);
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.mem()->read64(kFreshReadPointer), 1u);
+  f.mem()->write64(kFreshSignal + kSignalValueOffset, 0);
+  for (uint32_t step = 0; step < 16 && f.mem()->read64(kFreshReadPointer) < 2; ++step)
+    ASSERT_TRUE(f.engine->step());
+  EXPECT_EQ(f.mem()->read64(kFreshReadPointer), 2u);
+  EXPECT_LE(tick() - start, 2u);
+}
+
 TEST(CommandProcessorTest, PendingRetryDoesNotSurviveEngineShutdown) {
   VmFixture f("cdna4", 1, 2);
   auto *cp = f.cp();
