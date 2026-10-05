@@ -7,7 +7,6 @@
 #include "track_read_options.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <mutex>
@@ -54,23 +53,17 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
 size_t
 ph_ctx::default_thread_pool_size()
 {
-    const auto hw = std::thread::hardware_concurrency();
-    return std::max<size_t>(1,
-                            profiler_hub::parse_size(std::getenv("PH_POOL_THREADS"),
-                                                     std::max<size_t>(1, hw / 2)));
+    return std::max<size_t>(1, std::thread::hardware_concurrency() / 2);
 }
 
 size_t
 ph_ctx::default_connection_count()
 {
-    return std::max<size_t>(1,
-                            profiler_hub::parse_size(std::getenv("PH_CONNECTIONS"), 8));
+    return 8;
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ existing_trace_path(trace_path) }
-, m_read_options{ profiler_hub::track_read_options::from_env(
-      [](const char* name) { return std::getenv(name); }) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {
     profiler_hub::storage_t version_probe{ m_file_path, "" };
@@ -99,6 +92,9 @@ ph_ctx::~ph_ctx()
     for(auto* future : live)
     {
         std::ignore = future->m_handle.cancel();
+    }
+    for(auto* future : live)
+    {
         future->m_handle.wait();
         delete future;
     }
