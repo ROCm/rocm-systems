@@ -164,6 +164,7 @@ def test_events_without_a_manifest_are_reported_as_unfinalized(tmp_path):
     assert not proc.finalized
     assert proc.pid == 13, "pid must fall back to the directory name"
     assert any("died before finalizing" in w for w in report.warnings)
+    assert "not finalized (no manifest)" in inspect_archive.render(report)
 
 
 def test_stale_root_manifest_is_flagged_and_not_believed(tmp_path):
@@ -594,6 +595,10 @@ def test_the_reader_comes_from_hrr_playback_first(tmp_path, monkeypatch):
     monkeypatch.delenv("HRR_PLAYBACK")
     assert inspect_archive._find_playback(None) == str(rocm / "bin" / "hrr-playback")
 
+    # PATH last, and only when ROCm has none.
+    (rocm / "bin" / "hrr-playback").unlink()
+    assert inspect_archive._find_playback(None) == "/usr/bin/hrr-playback"
+
 
 def test_preflight_sees_the_reader_hrr_playback_names(tmp_path):
     """Preflight said there was no reader while verify went on to use the one
@@ -652,6 +657,24 @@ def test_an_unusable_playback_path_is_an_error_not_a_skip(tmp_path, capsys):
 
     assert rc == inspect_archive.EXIT_USAGE
     assert "not an executable file" in capsys.readouterr().err
+
+    # A gate parsing --json gets JSON for this too, not prose on stderr.
+    rc = inspect_archive.main(
+        ["--archive", str(tmp_path), "--playback", str(tmp_path / "no-such-binary"), "--json"]
+    )
+    assert rc == inspect_archive.EXIT_USAGE
+    assert json.loads(capsys.readouterr().out)["verdict"] == "usage error"
+
+
+def test_an_archive_path_that_is_a_file_is_a_usage_error(tmp_path, capsys):
+    """Not an empty capture: exit 1 would read as "nothing recorded"."""
+    events = tmp_path / "events.bin"
+    events.write_bytes(b"")
+
+    rc = inspect_archive.main(["--archive", str(events), "--no-playback"])
+
+    assert rc == inspect_archive.EXIT_USAGE
+    assert f"not a directory: {events}" in capsys.readouterr().err
 
 
 def test_blob_count_including_code_objects_is_not_a_discrepancy(tmp_path):
