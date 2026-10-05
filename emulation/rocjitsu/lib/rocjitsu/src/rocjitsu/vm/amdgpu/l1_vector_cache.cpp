@@ -76,6 +76,7 @@ void L1VectorCache::set_l2(L2Cache *l2) {
 void L1VectorCache::set_gpu_vm(GpuVm *gpu_vm) {
   invalidate_all_lines();
   gpu_vm_ = gpu_vm;
+  mtype_cache_ = {};
 }
 
 VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
@@ -272,7 +273,7 @@ VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, u
                                     std::span<const uint64_t> element_lane_masks,
                                     uint32_t swizzle_unit) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, mtype);
   uint32_t stride = num_elems * elem_size;
   // Scratch and buffer swizzling: consecutive units of a lane sit
   // addr_stride bytes apart. Addresses are materialized per element, so this honours
@@ -352,7 +353,7 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
                                      std::span<const uint64_t> element_lane_masks,
                                      uint32_t swizzle_unit) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, mtype);
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;

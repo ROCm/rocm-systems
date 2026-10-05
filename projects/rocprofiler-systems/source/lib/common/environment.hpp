@@ -274,7 +274,7 @@ public:
     template <typename Tp>
     static auto get_env_choice(const char* env_id, Tp value_default, std::set<Tp> choices)
     {
-        auto value = get_env(env_id, value_default);
+        auto const value = get_env(env_id, value_default);
         if(choices.find(value) == choices.end())
         {
             const char* raw = fetch_raw_env(env_id);
@@ -293,9 +293,9 @@ public:
 template <typename EnvType = posix_env>
 struct ROCPROFSYS_INTERNAL_API env_config
 {
-    std::string m_env_name  = {};
-    std::string m_env_value = {};
-    int         m_override  = 0;
+    std::string m_env_name;
+    std::string m_env_value;
+    int         m_override = 0;
 
     /// @brief Apply the stored setenv command.
     /// @return The backend setenv result, or -1 when @c m_env_name is empty.
@@ -377,11 +377,13 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 {
     auto key = fmt::format("{}=", env_variable);
 
-    env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
-                                  [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.starts_with(key);
-                                  }),
-                   env_list.end());
+    env_list.erase(
+        std::ranges::remove_if(env_list,
+                               [&key](const std::string& entry) {
+                                   return std::string_view{ entry }.starts_with(key);
+                               })
+            .begin(),
+        env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
@@ -415,7 +417,7 @@ get_default_lib_search_paths()
 inline std::string
 discover_llvm_libdir_for_ompt()
 {
-    auto strip = [](std::string value_to_strip) {
+    auto const strip = [](std::string value_to_strip) {
         if(!value_to_strip.empty() && value_to_strip.back() == '/')
         {
             value_to_strip.pop_back();
@@ -432,12 +434,12 @@ discover_llvm_libdir_for_ompt()
     std::vector<std::string> candidates;
     candidates.reserve(number_of_candidates);
 
-    auto push_unique = [&](const std::string& candidate) {
+    auto const push_unique = [&](const std::string& candidate) {
         if(candidate.empty())
         {
             return;
         }
-        if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+        if(std::ranges::find(candidates, candidate) == candidates.end())
         {
             candidates.emplace_back(candidate);
         }
@@ -461,13 +463,13 @@ discover_llvm_libdir_for_ompt()
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
 
-    auto has_libomptarget = [](const std::string& dir) {
+    auto const has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
         return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
-    auto result = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    auto const result = std::ranges::find_if(candidates, has_libomptarget);
     if(result != candidates.end())
     {
         LOG_DEBUG("Using LLVM libdir: {}", *result);
@@ -507,8 +509,8 @@ is_python_interpreter(std::string_view executable)
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
-    return std::all_of(version_digits.begin(), version_digits.end(),
-                       [](unsigned char c) { return std::isdigit(c); });
+    return std::ranges::all_of(version_digits,
+                               [](unsigned char c) { return std::isdigit(c); });
 }
 
 /// @brief Discover the PyTorch library directory for a given Python interpreter.
@@ -672,7 +674,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
         return std::string_view{ entry }.starts_with(_key);
     };
 
-    auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
+    auto const first = std::find_if(_environ.begin(), _environ.end(), matches_key);
     if(first == _environ.end())
     {
         _environ.emplace_back(fmt::format("{}={}", _env_var, _env_val_str));
@@ -734,7 +736,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
         return;
     }
 
-    auto torch_libpath = discover_torch_libpath(std::string{ executable });
+    auto const torch_libpath = discover_torch_libpath(std::string{ executable });
     if(torch_libpath.empty())
     {
         return;
@@ -745,7 +747,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
 
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
-    auto is_ld_path = [&](const std::string& entry) {
+    auto const is_ld_path = [&](const std::string& entry) {
         return std::string_view{ entry }.starts_with(ld_prefix);
     };
 
@@ -796,7 +798,7 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_PAPI_EVENTS: uses perf::EVENT_NAME or net:::interface:metric syntax
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
-    auto get_delimiter = [](std::string_view key) -> char {
+    auto const get_delimiter = [](std::string_view key) -> char {
         if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
            key == env_vars::ROCM_EVENTS)
         {
@@ -825,9 +827,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// Parses an environment entry string into key and value components.
     /// @param entry String in "KEY=VALUE" format
     /// @return Optional pair of (key, value) views, or nullopt if no '=' found
-    auto parse_entry = [](std::string_view entry)
+    auto const parse_entry = [](std::string_view entry)
         -> std::optional<std::pair<std::string_view, std::string_view>> {
-        auto eq_pos = entry.find('=');
+        auto const eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos)
         {
             return std::nullopt;
@@ -841,8 +843,8 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// @param delim The delimiter to use when joining parts
     /// @return String in "KEY=part1<delim>part2<delim>..." format, or "KEY="
     ///         when @p parts is empty.
-    auto join_parts = [](std::string_view key, const std::vector<std::string>& parts,
-                         char delim) {
+    auto const join_parts = [](std::string_view                key,
+                               const std::vector<std::string>& parts, char delim) {
         std::string result;
         result.reserve(key.size() + 1);
         result.append(key);
@@ -910,7 +912,7 @@ consolidate_env_entries(std::vector<std::string>& envp)
     std::vector<std::string> result;
     result.reserve(key_order.size());
 
-    for(auto key : key_order)
+    for(auto const key : key_order)
     {
         const auto& data = key_map[key];
         result.emplace_back(join_parts(key, data.parts, data.delim));

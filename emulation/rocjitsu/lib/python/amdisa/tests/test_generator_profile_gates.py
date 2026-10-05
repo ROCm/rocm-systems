@@ -1631,6 +1631,27 @@ def test_readlane_family_uses_source_vgpr_operand_type():
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_VGPR'
 
 
+@pytest.mark.parametrize(
+    'name,semantic_class,expected_type',
+    [
+        ('V_READFIRSTLANE_B32', 'vector_readfirstlane', 'OPR_SREG'),
+        ('V_READLANE_B32', 'vector_readlane', 'OPR_SREG'),
+        ('V_DIV_SCALE_F32', 'vector_div_scale', 'OPR_SREG_NOVCC'),
+    ],
+)
+def test_readlane_family_vcc_destination_policy_is_scoped(
+    name, semantic_class, expected_type
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SREG', 'OPR_SREG_NOVCC'])
+    sem = InstructionSemantics(name, semantic_class)
+    vdst = Operand('vdst', 32, 'OPR_SREG_NOVCC', False, True, False, False, 0)
+    src = Operand('src1', 32, 'OPR_SREG_NOVCC', True, False, False, False, 1)
+
+    assert codegen._constructor_operand_type(sem, vdst) == expected_type
+    assert codegen._constructor_operand_type(sem, src) == 'OPR_SREG_NOVCC'
+
+
 def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -1671,6 +1692,15 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
     assert 'lane &= wf.kernel_wave_size() - 1;' not in body
     assert 'read_scalar_selected_lane(src0, lane)' in body
     assert 'src1.encoding_value_' not in body
+
+    inst = Instruction('V_READFIRSTLANE_B32', 'ENC_VOP1', 2, operands[:2])
+    sem = InstructionSemantics('V_READFIRSTLANE_B32', 'vector_readfirstlane')
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP1')
+
+    assert 'uint64_t exec = wf.exec();' in body
+    assert 'exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0' in body
+    assert 'read_scalar_selected_lane(src0, lane)' in body
+    assert 'read_lane(src0, lane)' not in body
 
     operands = [
         Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
@@ -3562,7 +3592,7 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
                 'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
             )
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
-            assert 'amdgpu::pseudo_scalar::execute_f16(' in body
+            assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
             assert 'wf.fp_denorm_mode_f16_f64()' in body
 

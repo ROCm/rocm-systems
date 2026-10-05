@@ -4135,8 +4135,11 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     per_xcc_host_buffer_size = 2 * per_xcc_buffer_share;
   }
 
-  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering)
-  per_xcc_host_buffer_size = std::max(per_xcc_host_buffer_size, 2 * session.sample_size());
+  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering). Host
+  // buffers must hold whole samples: the overflow clamp writes up to the free space, and a
+  // partial sample would misalign every record read after it. AlignUp would work as well.
+  per_xcc_host_buffer_size = std::max(AlignDown(per_xcc_host_buffer_size, session.sample_size()),
+                                      2 * session.sample_size());
   trap_buffer_size = std::max(trap_buffer_size, session.sample_size());
 
   // Total host buffer ~= 2 * buffer_size (reasonable overhead, not num_xcc multiplier)
@@ -4249,7 +4252,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
           ? pcs_data->device_data_base
           : (pcs_stochastic_data_.session ? pcs_stochastic_data_.device_data_base : nullptr);
 
-  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, deviceAllocSize) !=
+  /* A stride of 0 tells the trap handler to use the buffer base directly.  A single-XCC
+     agent allocates one buffer, so the base is the only valid address. */
+  const uint32_t per_xcc_size =
+      (properties_.NumXcc > 1) ? static_cast<uint32_t>(deviceAllocSize) : 0;
+
+  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size) !=
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
@@ -4290,10 +4298,14 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
           : pcs_stochastic_data_.device_data_base;  // Preserve if still active
 
   uint32_t per_xcc_size = 0;
-  if (hosttrap_buffers && pcs_hosttrap_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
-  if (stochastic_buffers && pcs_stochastic_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  if (properties_.NumXcc > 1) {
+    if (hosttrap_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
+    if (stochastic_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  }
 
   hsa_status_t tma_status = UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size);
   if (tma_status != HSA_STATUS_SUCCESS) {

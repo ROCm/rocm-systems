@@ -9,11 +9,15 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
+from amdisa.codegen.execute import float_compare
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
+from amdisa.sema_derive import FLOAT_COMPARE_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -131,6 +135,7 @@ class LoweringContext:
     mode_sensitive_f16_dst: bool = True
     mode_arithmetic: bool = True
     dx9_zero_fma: bool = False
+    flush_nearest_f32: bool = False
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
 
@@ -210,6 +215,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         'V_FMA_DX9_ZERO_F32',
         'V_FMAC_DX9_ZERO_F32',
     )
+    ctx.flush_nearest_f32 = block.instruction_name in FLUSH_NEAREST_F32_OPS
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -1830,6 +1836,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_apply_omod(node, ctx)
     if callee == 'apply_clamp':
         return _lower_apply_clamp(node, ctx)
+    if callee.startswith(FLOAT_COMPARE_CALL):
+        return _lower_float_compare(node, ctx)
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
@@ -1910,8 +1918,13 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         operation_name = pseudo_scalar_operations[operation]
         mode_suffix = 'f32' if precision == 'f32' else 'f16_f64'
         fp16_ovfl = ', wf.fp16_ovfl()' if precision == 'f16' else ''
+        helper = (
+            'amdgpu::transcendental::execute_pseudo_f16'
+            if precision == 'f16'
+            else 'amdgpu::pseudo_scalar::execute_f32'
+        )
         return (
-            f'amdgpu::pseudo_scalar::execute_{precision}('
+            f'{helper}('
             f'amdgpu::pseudo_scalar::Operation::{operation_name}, {args[0]}, '
             f'(inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, '
             f'wf.fp_round_mode_{mode_suffix}(), wf.fp_denorm_mode_{mode_suffix}(), '
@@ -1953,6 +1966,44 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             return f'static_cast<uint32_t>(util::f32_to_f16_mode({fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
         return f'static_cast<uint32_t>(util::f32_to_f16_mode({bf8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
 
+    if (
+        len(args) == 1
+        and callee in ('rcp', 'rsq', 'sqrt', 'sin', 'cos')
+        and node.ty == SemaType.F16
+    ):
+        return (
+            f'amdgpu::transcendental::map_f16<amdgpu::transcendental::HalfOperation::{callee.upper()}>('
+            f'{args[0]}, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
+    if len(args) == 1 and callee in ('rcp', 'rsq', 'sqrt') and node.ty == SemaType.F32:
+        return (
+            f'amdgpu::transcendental::{callee}_f32({args[0]}, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
+    if len(args) == 1 and callee in ('sin', 'cos') and node.ty == SemaType.F32:
+        return (
+            f'amdgpu::transcendental::{callee}_f32({args[0]}, '
+            'wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
+    if (
+        len(args) == 1
+        and callee in ('log', 'log2', 'exp', 'exp2')
+        and node.ty in (SemaType.F16, SemaType.F32)
+    ):
+        function = 'log' if callee.startswith('log') else 'exp'
+        if node.ty == SemaType.F16:
+            logarithm = 'true' if function == 'log' else 'false'
+            return (
+                f'amdgpu::transcendental::log_exp_f16<{logarithm}>({args[0]}, '
+                'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+                'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+            )
+        return (
+            f'amdgpu::transcendental::{function}_f32({args[0]}, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
@@ -1980,6 +2031,40 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return f'/* recursive: {callee}({args_str}) */'
 
     return f'{callee}({args_str})'
+
+
+def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower a floating VOPC relation to comparison::evaluate on raw encodings.
+
+    CALL children: [ID(name), src0, src1], each a typed cast of a register
+    read, possibly wrapped in apply_src_mod by enrichment. The relation applies
+    ABS/NEG to the encoding itself, so the wrappers are reduced to the
+    instruction's modifier fields.
+    """
+    op = (node.call_name or '').removeprefix(FLOAT_COMPARE_CALL)
+    has_abs = has_neg = False
+    dtype = None
+    reads = []
+    for src in node.children[1:3]:
+        if src.kind == SemaNodeKind.CALL and src.call_name == 'apply_src_mod':
+            has_neg |= src.children[3].lit_value == '1'
+            has_abs |= src.children[4].lit_value == '1'
+            src = src.children[1]
+        if src.ty and src.ty.base == 'F':
+            dtype = f'f{src.ty.size}'
+        while src.kind == SemaNodeKind.CAST:
+            src = src.children[0]
+        if dtype is None or src.kind != SemaNodeKind.INSTOPERAND:
+            raise ValueError(f'unexpected {node.call_name} source: {src}')
+        lane = float_compare.lane_type(dtype)
+        reads.append(f'static_cast<{lane}>({_lower_expr(src, ctx)})')
+    declaration = float_compare.policy_decl(dtype)
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    modifiers = None
+    if has_abs or has_neg:
+        modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
+    return float_compare.evaluate_expr(dtype, op, *reads, modifiers=modifiers)
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
@@ -2070,9 +2155,9 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
         )
     else:
-        # DX9 FMA disables output denormals independently of MODE, so those
-        # bits cannot suppress its output modifiers.
-        force_output_flush = ctx.dx9_zero_fma
+        # DX9 FMA and these transcendentals disable output denormals regardless of MODE,
+        # so those bits cannot suppress their output modifiers.
+        force_output_flush = ctx.dx9_zero_fma or ctx.flush_nearest_f32
         denorm_expr = '0' if force_output_flush else 'wf.fp_denorm_mode_f32()'
         omod_expr = (
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
@@ -2113,6 +2198,11 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
+    if node.ty == SemaType.F16 and any(
+        _contains_call(node.children[1], op)
+        for op in ('log', 'log2', 'exp', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
+    ):
+        return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         f' const uint32_t effective_omod = {omod_expr};'
