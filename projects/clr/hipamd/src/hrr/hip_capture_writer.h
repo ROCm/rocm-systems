@@ -86,6 +86,10 @@ bool is_incomplete();
 // the archive is well-formed; what is missing is the ability to re-execute
 // this particular call. Thread-safe; the warning fires once per (api, reason)
 // per process.
+//
+// The note belongs to the next write_event_raw() on the calling thread, and is
+// listed only if that event is recorded: the shim calls it just before writing
+// the event. Both strings must stay valid until then.
 void note_unreplayable(const char* api, const char* reason);
 
 // Write a buffer as a content-addressed blob. Returns hash.
