@@ -327,18 +327,25 @@ jobs:
             # aliases; these tests cover lifecycle and teardown races only.
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
+          ROCM_PATH="$(rocm-sdk path --root)"
+          # TODO: Use clang/clang++ directly; amdclang is not required for host builds.
+          # Keep the SDK compiler for now to preserve the existing sanitizer setup.
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
+          else
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang")
           fi
           if [[ -n "${{ matrix.cxx_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
+          else
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++")
           fi
 
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           fi
-          ROCM_PATH=`rocm-sdk path --root` \
+          ROCM_PATH="${ROCM_PATH}" \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
@@ -427,8 +434,12 @@ jobs:
         run: |
           STATIC_ASAN_BUILD_DIR="${ROCJITSU_BUILD_DIR}-asan-static-launch-preload"
           CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
-          ROCM_PATH="$(rocm-sdk path --root)" \
+          ROCM_PATH="$(rocm-sdk path --root)"
+          # TODO: Use clang/clang++ directly; amdclang is not required for host builds.
+          ROCM_PATH="${ROCM_PATH}" \
             cmake -B "${STATIC_ASAN_BUILD_DIR}" -G Ninja \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
             -DRJ_ENABLE_ASAN=1 \
