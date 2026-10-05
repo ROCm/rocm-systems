@@ -2354,9 +2354,8 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
 // for the setup handshake.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSetupUnilateralConnectFailureReported) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
 
     // The out-of-range device this test relies on is not out of range under
     // subnet-aware routing: IbCastConnectImpl runs IbCastFindDevBySubnet before its
@@ -2453,9 +2452,8 @@ TEST_F(NetIbMPITest, CastSetupUnilateralConnectFailureReported) {
 // failing this test at the first EXPECT.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSetupPeerFailurePropagates) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
 
     net_ = &netIbCast;
     // Same shape as the sibling test: recorded non-fatally, reduced, then asserted on

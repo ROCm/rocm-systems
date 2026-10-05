@@ -189,8 +189,8 @@ protected:
 // dma-buf (cuMem/UBR) scratchpad: the write+read flush must complete cleanly with
 // correct data.
 TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
     if (SkipAgreedAcrossRanks(!cuMemEnabledEnv()))
         GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
     AssertInitAndGetDevices(nullptr);
@@ -206,8 +206,8 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
 // Legacy peermem (ibv_reg_mr) scratchpad. Confirms Option 2a keeps the peermem
 // RO=0 read path working (never regressed).
 TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
     if (SkipAgreedAcrossRanks(cuMemEnabledEnv()))
         GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
     AssertInitAndGetDevices(nullptr);
@@ -224,8 +224,8 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
 // Feature disabled: ncclIbIflush falls back to reading the received buffer
 // directly (upstream-NCCL behaviour). Exercises the else branch.
 TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
     if (SkipAgreedAcrossRanks(scratchpadFlushEnabled()))
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
     AssertInitAndGetDevices(nullptr);
