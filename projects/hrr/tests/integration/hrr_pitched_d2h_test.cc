@@ -19,6 +19,8 @@
  * Replay has to compare exactly those rows. The first width*height*depth bytes
  * of either buffer are mostly bytes the copy never touched, which fails a
  * correct replay, and they miss the later rows, which passes a wrong one.
+ * Two dense copies whose copied run starts past the host base pointer cover the
+ * case where the rows are contiguous but still not at the start of the blob.
  *
  * The same rects serve pitched host-to-device copies through all four
  * hipMemcpy3D spellings and through hipMemcpy2D and hipMemcpy2DAsync, whose
@@ -628,6 +630,152 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HGapRoundtrip) {
   }
   require_replay(cap.path, 0, 1, 0);
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Dense host rects that do not start at the base pointer: a hipDrvMemcpy3D of
+// one row at the kDst* offsets, and a hipMemcpy3D whose host rows and slices are
+// packed (pitch == width, ysize == height) into slices 1 and 2 of its buffer.
+// The copied bytes are one contiguous run, but it starts `first` bytes in, so
+// the blob still spans the host buffer from its base with zero before the run.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr uint8_t kDenseFill[] = {0x71, 0x72};
+constexpr int kDenseCopies = 2;
+
+// hipDrvMemcpy3D: one row at the 3D destination offsets.
+constexpr size_t kDenseRowFirst = kFirst3D;
+constexpr size_t kDenseRowExtent = kDenseRowFirst + kWidth;
+
+// hipMemcpy3D: kDepth packed slices from host slice 1.
+constexpr size_t kPackedSlice = kWidth * kHeight;
+constexpr size_t kPackedFirst = kPackedSlice;
+constexpr size_t kPackedExtent = kPackedFirst + kDepth * kPackedSlice;
+
+// The hipDrvMemcpy3D host buffer after its copy: `fill` except the one row.
+std::vector<uint8_t> expected_dense_row(uint8_t fill) {
+  std::vector<uint8_t> host(kHostBytes, fill);
+  for (size_t x = 0; x < kWidth; ++x)
+    host[kDenseRowFirst + x] =
+        dev_byte(kSrcZ * kDevSlice + kSrcY * kDevPitch + kSrcX + x) ^ fill;
+  return host;
+}
+
+// The hipMemcpy3D host buffer after its copy: `fill` in slice 0, then the
+// window's rows packed end to end.
+std::vector<uint8_t> expected_packed(uint8_t fill) {
+  std::vector<uint8_t> host(kPackedExtent, fill);
+  for (size_t z = 0; z < kDepth; ++z)
+    for (size_t y = 0; y < kHeight; ++y)
+      for (size_t x = 0; x < kWidth; ++x)
+        host[kPackedFirst + z * kPackedSlice + y * kWidth + x] =
+            dev_byte((kSrcZ + z) * kDevSlice + (kSrcY + y) * kDevPitch + kSrcX + x) ^ fill;
+  return host;
+}
+
+// `host` with every byte before `first` zeroed: the blob capture records for a
+// dense copy whose run starts at `first`, cut at `extent`.
+std::vector<uint8_t> dense_blob(std::vector<uint8_t> host, size_t first, size_t extent) {
+  host.resize(extent);
+  std::fill(host.begin(), host.begin() + static_cast<std::ptrdiff_t>(first), 0);
+  return host;
+}
+
+}  // namespace
+
+TEST_CASE("Unit_HRR_DenseOffsetD2H_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kDevBytes));
+  std::vector<uint8_t> image(kDevBytes);
+  auto load = [&](uint8_t fill) {
+    for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i) ^ fill;
+    HRR_HIP_CHECK(hipMemcpy(dev, image.data(), kDevBytes, hipMemcpyHostToDevice));
+  };
+
+  HIP_MEMCPY3D drv3d{};
+  drv3d.srcMemoryType = hipMemoryTypeDevice;
+  drv3d.srcDevice = reinterpret_cast<hipDeviceptr_t>(dev);
+  drv3d.srcXInBytes = kSrcX;
+  drv3d.srcY = kSrcY;
+  drv3d.srcZ = kSrcZ;
+  drv3d.srcPitch = kDevPitch;
+  drv3d.srcHeight = kDevRows;
+  drv3d.dstMemoryType = hipMemoryTypeHost;
+  drv3d.dstXInBytes = kDstX;
+  drv3d.dstY = kDstY;
+  drv3d.dstZ = kDstZ;
+  drv3d.dstPitch = kHostPitch;
+  drv3d.dstHeight = kHostRows;
+  drv3d.WidthInBytes = kWidth;
+  drv3d.Height = 1;
+  drv3d.Depth = 1;
+
+  load(kDenseFill[0]);
+  std::vector<uint8_t> h0(kHostBytes, kDenseFill[0]);
+  drv3d.dstHost = h0.data();
+  HRR_HIP_CHECK(hipDrvMemcpy3D(&drv3d));
+  REQUIRE(byte_diff(h0, expected_dense_row(kDenseFill[0])) == "");
+
+  load(kDenseFill[1]);
+  std::vector<uint8_t> h1(kPackedExtent, kDenseFill[1]);
+  hipMemcpy3DParms p3d{};
+  p3d.srcPtr = make_hipPitchedPtr(dev, kDevPitch, kDevPitch, kDevRows);
+  p3d.srcPos = make_hipPos(kSrcX, kSrcY, kSrcZ);
+  p3d.dstPtr = make_hipPitchedPtr(h1.data(), kWidth, kWidth, kHeight);
+  p3d.dstPos = make_hipPos(0, 0, 1);
+  p3d.extent = make_hipExtent(kWidth, kHeight, kDepth);
+  p3d.kind = hipMemcpyDeviceToHost;
+  HRR_HIP_CHECK(hipMemcpy3D(&p3d));
+  REQUIRE(byte_diff(h1, expected_packed(kDenseFill[1])) == "");
+
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_DenseOffsetD2H_Direct. Each expected blob must span the
+ *     host buffer from the pointer the copy was given through its last copied
+ *     byte, with zero before the first copied byte rather than the buffer's
+ *     fill, and the copied bytes after it.
+ *   - Replay with HIP_HRR_D2H_EXACT=1: both checks must pass. Comparing the
+ *     first width*height*depth bytes of each side compares the device bytes at
+ *     the base of the allocation with the zeros, and fails.
+ *   - Editing a blob byte before the first copied byte must not be reported;
+ *     editing its last byte must fail exactly that check.
+ */
+HRR_TEST_CASE(Unit_HRR_DenseOffsetD2HRoundtrip) {
+#ifdef _WIN32
+  HRR_SKIP("dense offset D2H HRR roundtrip is disabled on Windows");
+#endif
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_dense_offset_d2h"};
+  hrr_capture_direct("Unit_HRR_DenseOffsetD2H_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const fs::path row = d2h_blob<hrr_args_hipDrvMemcpy3D>(arc, HRR_API_HIPDRVMEMCPY3D);
+  const fs::path packed = d2h_blob<hrr_args_hipMemcpy3D>(arc, HRR_API_HIPMEMCPY3D);
+  CHECK(byte_diff(read_file(row), dense_blob(expected_dense_row(kDenseFill[0]),
+                                             kDenseRowFirst, kDenseRowExtent)) == "");
+  CHECK(byte_diff(read_file(packed), dense_blob(expected_packed(kDenseFill[1]), kPackedFirst,
+                                                kPackedExtent)) == "");
+  require_replay(cap.path, 0, kDenseCopies, 0);
+
+  // One capture serves every edit, so the edits run in turn, not as sections.
+  const std::pair<fs::path, std::pair<size_t, size_t>> edits[] = {
+      {row, {kDenseRowFirst, kDenseRowExtent}}, {packed, {kPackedFirst, kPackedExtent}}};
+  for (const auto& [blob, span] : edits) {
+    INFO("Expected blob: " << blob.string());
+    {
+      ScopedBlobEdit before(blob, span.first - 1);
+      require_replay(cap.path, 0, kDenseCopies, 0);
+    }
+    ScopedBlobEdit last(blob, span.second - 1);
+    require_replay(cap.path, 1, kDenseCopies - 1, 1);
+  }
 }
 
 // ---------------------------------------------------------------------------
