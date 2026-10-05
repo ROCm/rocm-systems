@@ -509,7 +509,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipModuleEnumerateFunctions = 487,
   HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites = 488,
   HIP_API_ID_hipKernelSetAttributeForDevice = 489,
-  HIP_API_ID_LAST = 489,
+  HIP_API_ID_hipDeviceGetHostAtomicCapabilities = 490,
+  HIP_API_ID_LAST = 490,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -589,6 +590,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetDevResource: return "hipDeviceGetDevResource";
     case HIP_API_ID_hipDeviceGetExecutionCtx: return "hipDeviceGetExecutionCtx";
     case HIP_API_ID_hipDeviceGetGraphMemAttribute: return "hipDeviceGetGraphMemAttribute";
+    case HIP_API_ID_hipDeviceGetHostAtomicCapabilities: return "hipDeviceGetHostAtomicCapabilities";
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
     case HIP_API_ID_hipDeviceGetLuid: return "hipDeviceGetLuid";
     case HIP_API_ID_hipDeviceGetMemPool: return "hipDeviceGetMemPool";
@@ -1072,6 +1074,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetDevResource", name) == 0) return HIP_API_ID_hipDeviceGetDevResource;
   if (strcmp("hipDeviceGetExecutionCtx", name) == 0) return HIP_API_ID_hipDeviceGetExecutionCtx;
   if (strcmp("hipDeviceGetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceGetGraphMemAttribute;
+  if (strcmp("hipDeviceGetHostAtomicCapabilities", name) == 0) return HIP_API_ID_hipDeviceGetHostAtomicCapabilities;
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
   if (strcmp("hipDeviceGetLuid", name) == 0) return HIP_API_ID_hipDeviceGetLuid;
   if (strcmp("hipDeviceGetMemPool", name) == 0) return HIP_API_ID_hipDeviceGetMemPool;
@@ -1746,6 +1749,14 @@ typedef struct hip_api_data_s {
       hipGraphMemAttributeType attr;
       void* value;
     } hipDeviceGetGraphMemAttribute;
+    struct {
+      unsigned int* capabilities;
+      unsigned int capabilities__val;
+      const hipAtomicOperation* operations;
+      hipAtomicOperation operations__val;
+      unsigned int count;
+      int device;
+    } hipDeviceGetHostAtomicCapabilities;
     struct {
       size_t* pValue;
       size_t pValue__val;
@@ -4673,6 +4684,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceGetGraphMemAttribute.device = (int)device; \
   cb_data.args.hipDeviceGetGraphMemAttribute.attr = (hipGraphMemAttributeType)attr; \
   cb_data.args.hipDeviceGetGraphMemAttribute.value = (void*)value; \
+};
+// hipDeviceGetHostAtomicCapabilities[('unsigned int*', 'capabilities'), ('const hipAtomicOperation*', 'operations'), ('unsigned int', 'count'), ('int', 'device')]
+#define INIT_hipDeviceGetHostAtomicCapabilities_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetHostAtomicCapabilities.capabilities = (unsigned int*)capabilities; \
+  cb_data.args.hipDeviceGetHostAtomicCapabilities.operations = (const hipAtomicOperation*)operations; \
+  cb_data.args.hipDeviceGetHostAtomicCapabilities.count = (unsigned int)count; \
+  cb_data.args.hipDeviceGetHostAtomicCapabilities.device = (int)device; \
 };
 // hipDeviceGetLimit[('size_t*', 'pValue'), ('hipLimit_t', 'limit')]
 #define INIT_hipDeviceGetLimit_CB_ARGS_DATA(cb_data) { \
@@ -7625,6 +7643,11 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDeviceGetGraphMemAttribute[('int', 'device'), ('hipGraphMemAttributeType', 'attr'), ('void*', 'value')]
     case HIP_API_ID_hipDeviceGetGraphMemAttribute:
       break;
+// hipDeviceGetHostAtomicCapabilities[('unsigned int*', 'capabilities'), ('const hipAtomicOperation*', 'operations'), ('unsigned int', 'count'), ('int', 'device')]
+    case HIP_API_ID_hipDeviceGetHostAtomicCapabilities:
+      if (data->args.hipDeviceGetHostAtomicCapabilities.capabilities) data->args.hipDeviceGetHostAtomicCapabilities.capabilities__val = *(data->args.hipDeviceGetHostAtomicCapabilities.capabilities);
+      if (data->args.hipDeviceGetHostAtomicCapabilities.operations) data->args.hipDeviceGetHostAtomicCapabilities.operations__val = *(data->args.hipDeviceGetHostAtomicCapabilities.operations);
+      break;
 // hipDeviceGetLimit[('size_t*', 'pValue'), ('hipLimit_t', 'limit')]
     case HIP_API_ID_hipDeviceGetLimit:
       if (data->args.hipDeviceGetLimit.pValue) data->args.hipDeviceGetLimit.pValue__val = *(data->args.hipDeviceGetLimit.pValue);
@@ -9683,6 +9706,16 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetGraphMemAttribute.device);
       oss << ", attr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetGraphMemAttribute.attr);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetGraphMemAttribute.value);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetHostAtomicCapabilities:
+      oss << "hipDeviceGetHostAtomicCapabilities(";
+      if (data->args.hipDeviceGetHostAtomicCapabilities.capabilities == NULL) oss << "capabilities=NULL";
+      else { oss << "capabilities="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetHostAtomicCapabilities.capabilities__val); }
+      if (data->args.hipDeviceGetHostAtomicCapabilities.operations == NULL) oss << ", operations=NULL";
+      else { oss << ", operations="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetHostAtomicCapabilities.operations__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetHostAtomicCapabilities.count);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetHostAtomicCapabilities.device);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetLimit:

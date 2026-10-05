@@ -3379,3 +3379,12 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
   return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
   CATCH;
 }
+
+hipError_t hipDeviceGetHostAtomicCapabilities(unsigned int* capabilities,
+                                              const hipAtomicOperation* operations,
+                                              unsigned int count, int device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetHostAtomicCapabilities_fn(capabilities, operations,
+                                                                           count, device);
+  CATCH;
+}

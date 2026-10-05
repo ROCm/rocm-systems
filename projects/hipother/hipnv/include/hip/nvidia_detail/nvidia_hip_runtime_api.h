@@ -14,6 +14,7 @@
 
 #include <driver_types.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define CUDA_9000 9000
 #define CUDA_10000 10000
@@ -3895,6 +3896,77 @@ inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
   }
   return hipErrorNotSupported;
 #endif  // CUDA_VERSION >= CUDA_11000
+}
+
+#if CUDA_VERSION >= CUDA_13000
+// Returns 0 for an out-of-domain operation.
+inline static int hipAtomicOperationToCUatomicOperation(hipAtomicOperation op,
+                                                        CUatomicOperation* cuOp) {
+  switch (op) {
+    case hipAtomicOperationIntegerAdd: *cuOp = CU_ATOMIC_OPERATION_INTEGER_ADD; return 1;
+    case hipAtomicOperationIntegerMin: *cuOp = CU_ATOMIC_OPERATION_INTEGER_MIN; return 1;
+    case hipAtomicOperationIntegerMax: *cuOp = CU_ATOMIC_OPERATION_INTEGER_MAX; return 1;
+    case hipAtomicOperationIntegerIncrement:
+      *cuOp = CU_ATOMIC_OPERATION_INTEGER_INCREMENT;
+      return 1;
+    case hipAtomicOperationIntegerDecrement:
+      *cuOp = CU_ATOMIC_OPERATION_INTEGER_DECREMENT;
+      return 1;
+    case hipAtomicOperationAnd: *cuOp = CU_ATOMIC_OPERATION_AND; return 1;
+    case hipAtomicOperationOr: *cuOp = CU_ATOMIC_OPERATION_OR; return 1;
+    case hipAtomicOperationXOR: *cuOp = CU_ATOMIC_OPERATION_XOR; return 1;
+    case hipAtomicOperationExchange: *cuOp = CU_ATOMIC_OPERATION_EXCHANGE; return 1;
+    case hipAtomicOperationCAS: *cuOp = CU_ATOMIC_OPERATION_CAS; return 1;
+    case hipAtomicOperationFloatAdd: *cuOp = CU_ATOMIC_OPERATION_FLOAT_ADD; return 1;
+    case hipAtomicOperationFloatMin: *cuOp = CU_ATOMIC_OPERATION_FLOAT_MIN; return 1;
+    case hipAtomicOperationFloatMax: *cuOp = CU_ATOMIC_OPERATION_FLOAT_MAX; return 1;
+    default: return 0;
+  }
+}
+#endif  // CUDA_VERSION >= CUDA_13000
+
+inline static hipError_t hipDeviceGetHostAtomicCapabilities(
+    unsigned int* capabilities, const hipAtomicOperation* operations, unsigned int count,
+    int device) {
+  if (capabilities == NULL || operations == NULL || count == 0) {
+    return hipErrorInvalidValue;
+  }
+
+#if CUDA_VERSION >= CUDA_13000
+  // Device first, so a call that is wrong in both ways matches the AMD backend's error.
+  CUdevice cuDevice;
+  CUresult deviceStatus = cuDeviceGet(&cuDevice, device);
+  if (deviceStatus != CUDA_SUCCESS) {
+    return hipCUResultTohipError(deviceStatus);
+  }
+
+  // Translated explicitly, not reinterpreted, so enum drift cannot mistranslate silently.
+  CUatomicOperation* cuOperations =
+      (CUatomicOperation*)malloc(count * sizeof(CUatomicOperation));
+  if (cuOperations == NULL) {
+    return hipErrorOutOfMemory;
+  }
+
+  for (unsigned int i = 0; i < count; ++i) {
+    if (!hipAtomicOperationToCUatomicOperation(operations[i], &cuOperations[i])) {
+      free(cuOperations);
+      return hipErrorInvalidValue;
+    }
+  }
+
+  CUresult status =
+      cuDeviceGetHostAtomicCapabilities(capabilities, cuOperations, count, cuDevice);
+  free(cuOperations);
+  return hipCUResultTohipError(status);
+#else
+  // Still validate, so the hipErrorInvalidValue contract matches the supported path.
+  for (unsigned int i = 0; i < count; ++i) {
+    if ((int)operations[i] < 0 || (int)operations[i] >= (int)hipAtomicOperationMax) {
+      return hipErrorInvalidValue;
+    }
+  }
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13000
 }
 
 inline static hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {

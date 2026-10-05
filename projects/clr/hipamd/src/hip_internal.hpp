@@ -775,6 +775,54 @@ namespace hip {
     return static_cast<int>(hipGPUDirectRDMAWritesOrderingNone);  // i.e. 0
   }
 
+  /// Capability bitmask for one atomic operation over a link, described only by whether it
+  /// advertises atomics (\p linkAtomics) and whether it is cache coherent (\p coherentLink).
+  /// Taking link facts rather than a device keeps host and P2P callers on one classification.
+  ///
+  /// A coherent link runs every operation natively. PCIe defines only three AtomicOps -
+  /// FetchAdd, Swap, CAS - so the rest report zero. See "How ROCm uses PCIe atomics".
+  ///
+  /// Not reported: Scalar128 and Vector32x4 (backend surfaces nothing), Reduction (link info
+  /// does not answer it). Scalar32/64 always travel together because ROCclr ORs ROCr's two
+  /// width flags into pcie_atomics_, so a 32-bit-only link is over-reported.
+  inline unsigned int ihipAtomicCapability(hipAtomicOperation op, bool linkAtomics,
+                                           bool coherentLink) {
+    if (!linkAtomics && !coherentLink) {
+      return 0u;
+    }
+
+    // Sign bits describe which operand forms an operation has - a property of the operation,
+    // not the link. atomicInc/atomicDec exist only in an unsigned form; floats have no sign.
+    constexpr unsigned int kWidths = hipAtomicCapabilityScalar32 | hipAtomicCapabilityScalar64;
+    constexpr unsigned int kInteger =
+        hipAtomicCapabilitySigned | hipAtomicCapabilityUnsigned | kWidths;
+    constexpr unsigned int kUnsignedOnly = hipAtomicCapabilityUnsigned | kWidths;
+    constexpr unsigned int kFloat = kWidths;
+
+    switch (op) {
+      // The three PCIe AtomicOps: native on any link that has atomics at all.
+      case hipAtomicOperationIntegerAdd:
+      case hipAtomicOperationExchange:
+      case hipAtomicOperationCAS:
+        return kInteger;
+      case hipAtomicOperationIntegerMin:
+      case hipAtomicOperationIntegerMax:
+      case hipAtomicOperationAnd:
+      case hipAtomicOperationOr:
+      case hipAtomicOperationXOR:
+        return coherentLink ? kInteger : 0u;
+      case hipAtomicOperationIntegerIncrement:
+      case hipAtomicOperationIntegerDecrement:
+        return coherentLink ? kUnsignedOnly : 0u;
+      case hipAtomicOperationFloatAdd:
+      case hipAtomicOperationFloatMin:
+      case hipAtomicOperationFloatMax:
+        return coherentLink ? kFloat : 0u;
+      default:
+        return 0u;
+    }
+  }
+
   /// Get ROCclr queue associated with hipStream
   /// Note: This follows the CUDA spec to sync with default streams
   ///       and Blocking streams

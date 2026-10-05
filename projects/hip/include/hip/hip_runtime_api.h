@@ -705,6 +705,42 @@ enum hipFlushGPUDirectRDMAWritesScope {
   hipFlushGPUDirectRDMAWritesToAllDevices = 200  ///< Visible to all HIP devices
 };
 
+/**
+ * Atomic operations that can be queried with #hipDeviceGetHostAtomicCapabilities.
+ */
+typedef enum hipAtomicOperation {
+  hipAtomicOperationIntegerAdd = 0,        ///< Integer addition
+  hipAtomicOperationIntegerMin = 1,        ///< Integer minimum
+  hipAtomicOperationIntegerMax = 2,        ///< Integer maximum
+  hipAtomicOperationIntegerIncrement = 3,  ///< Integer increment with wraparound
+  hipAtomicOperationIntegerDecrement = 4,  ///< Integer decrement with wraparound
+  hipAtomicOperationAnd = 5,               ///< Bitwise AND
+  hipAtomicOperationOr = 6,                ///< Bitwise OR
+  hipAtomicOperationXOR = 7,               ///< Bitwise XOR
+  hipAtomicOperationExchange = 8,          ///< Exchange
+  hipAtomicOperationCAS = 9,               ///< Compare-and-swap
+  hipAtomicOperationFloatAdd = 10,         ///< Floating point addition
+  hipAtomicOperationFloatMin = 11,         ///< Floating point minimum
+  hipAtomicOperationFloatMax = 12,         ///< Floating point maximum
+  hipAtomicOperationMax = 13               ///< Sentinel, one past the last valid operation
+} hipAtomicOperation;
+
+/**
+ * Capabilities an atomic operation may have over a link, returned as a bitmask by
+ * #hipDeviceGetHostAtomicCapabilities. A zero bitmask means the link does not perform
+ * the operation natively.
+ */
+typedef enum hipAtomicOperationCapability {
+  hipAtomicCapabilitySigned = 1 << 0,      ///< Supported for signed integer operands
+  hipAtomicCapabilityUnsigned = 1 << 1,    ///< Supported for unsigned integer operands
+  hipAtomicCapabilityReduction = 1 << 2,   ///< Supported as a reduction, i.e. without
+                                           ///< returning the previous value
+  hipAtomicCapabilityScalar32 = 1 << 3,    ///< Supported on a 32-bit scalar operand
+  hipAtomicCapabilityScalar64 = 1 << 4,    ///< Supported on a 64-bit scalar operand
+  hipAtomicCapabilityScalar128 = 1 << 5,   ///< Supported on a 128-bit scalar operand
+  hipAtomicCapabilityVector32x4 = 1 << 6   ///< Supported on a vector of four 32-bit operands
+} hipAtomicOperationCapability;
+
 #if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
 
 #ifndef GENERIC_GRID_LAUNCH
@@ -2554,6 +2590,25 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceI
  */
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
                                              enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
+ * @brief Queries atomic operations supported between a device and the host
+ *
+ * @p capabilities and @p operations must both hold @p count entries. For each operation the
+ * corresponding entry is a bitmask of #hipAtomicOperationCapability values describing how the
+ * link between @p device and the host performs it natively; zero means it is emulated.
+ *
+ * Refines #hipDeviceAttributeHostNativeAtomicSupported into a per-operation answer.
+ *
+ * @param [out] capabilities Capability bitmask for each requested operation
+ * @param [in]  operations   Operations to query, see #hipAtomicOperation
+ * @param [in]  count        Number of entries in @p operations and @p capabilities
+ * @param [in]  device       Device to query
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
+ */
+hipError_t hipDeviceGetHostAtomicCapabilities(unsigned int* capabilities,
+                                              const hipAtomicOperation* operations,
+                                              unsigned int count, int device);
 /**
  * @brief Returns the default memory pool of the specified device
  *

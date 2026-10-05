@@ -48,6 +48,15 @@ device:
   Unit_hipDeviceFlushGPUDirectRDMAWrites_Negative_AttributeQuery:
     <<: *level_2
     tags: [query]
+  Unit_hipDeviceGetHostAtomicCapabilities_Positive_AllOperations:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetHostAtomicCapabilities_Negative_Parameters:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetHostAtomicCapabilities_Negative_InvalidOperation:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceComputeCapability_Negative:
     <<: *level_2
     tags: [query, P0]

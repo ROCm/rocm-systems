@@ -5057,6 +5057,16 @@ static hipError_t hipLibraryGetManagedLayer(void** dptr, size_t* bytes, hipLibra
   return _r;
 }
 
+// api_id = 514
+static hipError_t hipDeviceGetHostAtomicCapabilitiesLayer(unsigned int* capabilities,
+                                                          const hipAtomicOperation* operations,
+                                                          unsigned int count, int device) {
+  auto* _rec = HipGetActiveRecordExt(514u);
+  auto _r = g_next.hipDeviceGetHostAtomicCapabilities_fn(capabilities, operations, count, device);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5573,8 +5583,9 @@ const char* const kHipApiNamesExt[] = {
   "hipKernelGetFunction",
   "hipLibraryGetGlobal",
   "hipLibraryGetManaged",
+  "hipDeviceGetHostAtomicCapabilities",
 };
-const size_t kHipApiNamesCountExt = 514;
+const size_t kHipApiNamesCountExt = 515;
 
 #include <cstring>
 
@@ -6095,6 +6106,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipKernelGetFunction_fn = hipKernelGetFunctionLayer;
   g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
   g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
+  g_wrapper_tbl.hipDeviceGetHostAtomicCapabilities_fn = hipDeviceGetHostAtomicCapabilitiesLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 
