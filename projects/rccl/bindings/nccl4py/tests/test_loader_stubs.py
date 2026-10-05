@@ -1,27 +1,31 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Loader / stub tests for the RCCL fork of nccl4py.
+"""Loader tests for the RCCL fork of nccl4py.
 
-Verifies that:
-
-* ``import nccl.bindings`` does not raise even though several
-  NCCL >= 2.29 host-side symbols are absent from ``librccl.so``.
-* Calling each of the following at runtime raises
-  :class:`NotImplementedError` and the C symbol name appears in the
-  message::
+Verifies that ``import nccl.bindings`` does not raise, and that each of
+the following resolves in ``librccl.so`` and rejects a null
+communicator with ``ncclInvalidArgument`` (no crash, no
+:class:`NotImplementedError`)::
 
     ncclCommGrow    -> nccl.bindings.comm_grow
     ncclCommRevoke  -> nccl.bindings.comm_revoke
     ncclPutSignal   -> nccl.bindings.put_signal
     ncclWaitSignal  -> nccl.bindings.wait_signal
 
-The Python wrappers check the ``dlsym`` slot before dereferencing any
-pointer argument, so dummy zero values are sufficient for all opaque
-handles.
+Each call's argument checks reject the null ``Comm`` before any other
+pointer is used, so zero values are safe for the remaining arguments.
 """
 
 import pytest
+
+
+def _assert_invalid_argument(call):
+    import nccl.bindings as b
+
+    with pytest.raises(b.NCCLError) as exc:
+        call()
+    assert exc.value.status == b.Result.InvalidArgument
 
 
 def test_import_bindings_does_not_raise():
@@ -46,33 +50,26 @@ def test_import_top_level_with_ep_bindings():
     assert version.nccl_ep.version is not None
 
 
-def test_comm_grow_raises_not_implemented():
+def test_comm_grow_rejects_null_comm():
     import nccl.bindings as b
 
-    with pytest.raises(NotImplementedError, match="ncclCommGrow"):
-        b.comm_grow(0, 0, 0, 0, 0)
+    # n_ranks=0 fails the rank-count check before the comm is read.
+    _assert_invalid_argument(lambda: b.comm_grow(b.Comm(0), 0, 0, 0, 0))
 
 
-def test_comm_revoke_raises_not_implemented():
+def test_comm_revoke_rejects_null_comm():
     import nccl.bindings as b
 
-    with pytest.raises(NotImplementedError, match="ncclCommRevoke"):
-        b.comm_revoke(0, 0)
+    _assert_invalid_argument(lambda: b.comm_revoke(b.Comm(0), 0))
 
 
-def test_put_signal_raises_not_implemented():
+def test_put_signal_rejects_null_comm():
     import nccl.bindings as b
 
-    with pytest.raises(NotImplementedError, match="ncclPutSignal"):
-        b.put_signal(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    _assert_invalid_argument(lambda: b.put_signal(0, 0, 0, 0, b.Window(0), 0, 0, 0, 0, b.Comm(0), 0))
 
 
-def test_wait_signal_raises_not_implemented():
+def test_wait_signal_rejects_null_comm():
     import nccl.bindings as b
 
-    # Signature: wait_signal(int n_desc, intptr_t signal_descs,
-    #                        intptr_t comm, intptr_t stream).
-    # n_desc=0 + signal_descs=0 is safe: the dlsym slot is checked before
-    # the pointer is dereferenced, so the call never reaches librccl.
-    with pytest.raises(NotImplementedError, match="ncclWaitSignal"):
-        b.wait_signal(0, 0, 0, 0)
+    _assert_invalid_argument(lambda: b.wait_signal(0, 0, b.Comm(0), 0))

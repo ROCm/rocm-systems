@@ -3648,6 +3648,22 @@ typedef union rocprofiler_hip_api_args_t
         hipModule_t    mod;
     } hipModuleEnumerateFunctions;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    struct
+    {
+        enum hipFlushGPUDirectRDMAWritesTarget target;
+        enum hipFlushGPUDirectRDMAWritesScope  scope;
+    } hipDeviceFlushGPUDirectRDMAWrites;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
+    struct
+    {
+        hipKernel_t      kernel;
+        hipFuncAttribute attr;
+        int              value;
+        int              device;
+    } hipKernelSetAttributeForDevice;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
