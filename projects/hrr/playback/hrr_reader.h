@@ -233,6 +233,21 @@ FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
 // normal case for a capture with no external producer.
 std::vector<std::string> find_region_streams(const std::string& archive_dir);
 
+// Largest file read_file_capped() and the readers below will load whole. A blob
+// or code object above it is refused instead of allocated; the archive chose
+// the size, so the replayer must not. Default kDefaultMaxFileBytes (4 GiB);
+// 0 refuses every file. Set once at start-up, before any reader thread runs.
+constexpr uint64_t kDefaultMaxFileBytes = 4ull << 30;
+uint64_t max_file_bytes();
+void set_max_file_bytes(uint64_t bytes);
+
+// Read a whole file into `data`, refusing one larger than max_file_bytes().
+// Returns false if the file cannot be opened or read, or is too large; *error
+// (when given) then says which, naming the path and, for a refusal, the size.
+// An empty `data` with a true return is a zero-byte file.
+bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
+                      std::string* error = nullptr);
+
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                std::vector<uint8_t>& data);

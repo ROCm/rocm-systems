@@ -13,7 +13,8 @@
 
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
-#include "hrr_reader.h"   // hrr::hash_hex
+#include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
+#include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
 // hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>. That header redeclares
@@ -188,15 +189,12 @@ static std::string co_path(const std::string& archive_dir,
 }
 
 static std::vector<uint8_t> read_file(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return {};
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) { fclose(f); return {}; }
-    std::vector<uint8_t> buf(static_cast<size_t>(sz));
-    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) { fclose(f); return {}; }
-    fclose(f);
+    std::vector<uint8_t> buf;
+    std::string err;
+    if (!hrr::read_file_capped(path, buf, &err)) {
+        fprintf(stderr, "[HRR] %s\n", err.c_str());
+        return {};
+    }
     return buf;
 }
 
@@ -3784,20 +3782,26 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
 // hipSuccess (see hip_capture_generated.cpp).  Replay drives the API trace
 // faster than the original CPU often did relative to GPU completion, so the
 // same call can transiently return hipErrorNotReady (600).  Spin until
-// hipSuccess to match the captured observable return.
-static hipError_t replay_query_until_success(hipError_t (*once)(void*), void* arg) {
-    int spin = 0;
-    for (;;) {
-        hipError_t r = once(arg);
-        if (r == hipSuccess)
-            return hipSuccess;
-        if (r != hipErrorNotReady)
-            return r;
-        if (++spin < 1000)
-            std::this_thread::yield();
-        else
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
+// hipSuccess to match the captured observable return, but only for
+// ctx.max_query_attempts attempts: an archive whose recorded work never
+// completes on this machine must end the replay, not spin it forever.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                             hipError_t (*once)(void*), void* arg) {
+    hipError_t r = hipSuccess;
+    const bool done = hrr::retry_bounded(ctx.max_query_attempts, [&] {
+        r = once(arg);
+        return r != hipErrorNotReady;
+    });
+    if (done)
+        return r;
+    fprintf(stderr,
+            "[HRR] Fatal: %s still returned hipErrorNotReady after %llu attempts "
+            "(--max-query-attempts); the recorded work did not complete\n",
+            api, (unsigned long long)ctx.max_query_attempts);
+    // Fatal for the whole replay, even under --continue-on-error: each further
+    // query of an archive like this would spend the full bound again.
+    ctx.fatal_error.store(true, std::memory_order_release);
+    return hipErrorNotReady;
 }
 
 struct replay_event_query_ctx {
@@ -3812,7 +3816,7 @@ static hipError_t replay_event_query_once(void* p) {
 hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(pl);
     replay_event_query_ctx c{ctx.translate_event(a->event)};
-    return replay_query_until_success(replay_event_query_once, &c);
+    return replay_query_until_success(ctx, "hipEventQuery", replay_event_query_once, &c);
 }
 
 struct replay_stream_query_ctx {
@@ -3832,13 +3836,13 @@ static hipError_t replay_stream_query_spt_once(void* p) {
 hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery", replay_stream_query_once, &c);
 }
 
 hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_spt_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery_spt", replay_stream_query_spt_once, &c);
 }
 
 // ---------------------------------------------------------------------------
