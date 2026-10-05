@@ -17,7 +17,7 @@ and was run on an MI250 CDNA2 accelerator:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n ipc --no-roof -- ./ipc
+   $ rocprof-compute profile -n ipc -- ./ipc
 
 The results shown in this section are *generally* applicable to CDNA
 accelerators, but may vary between generations and specific products.
