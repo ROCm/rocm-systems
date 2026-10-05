@@ -884,6 +884,8 @@ hipCtx_t hrr_live_ctx(uint64_t recorded);
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+// Index of the event being dispatched, for diagnostics from handlers.
+extern thread_local size_t   hrr_dispatch_index;
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)

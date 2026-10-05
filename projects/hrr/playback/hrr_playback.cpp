@@ -623,6 +623,7 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
   hrr_dispatch_seq = ev.header().sequence_id;
+  hrr_dispatch_index = idx;
   auto order = needs_ordering(etype);
 
   // Wait for our turn in global capture order.

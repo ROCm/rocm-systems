@@ -77,6 +77,7 @@ if(TARGET hrr-playback)
   set(HRR_HANDLER_TEST_SOURCES
     hrr_query_retry_test.cc
     hrr_host_budget_test.cc
+    hrr_graph_deps_test.cc
   )
 
   add_executable(hrr-handler-tests
