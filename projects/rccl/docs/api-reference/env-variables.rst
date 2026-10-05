@@ -287,7 +287,11 @@ collected in the following table.
     * - | ``NCCL_PAT_ENABLE``
         | Controls the PAT algorithm for AllGather and ReduceScatter. RCCL defaults
           this to ``0``, whereas upstream NCCL defaults it to ``2``. PAT is therefore
-          never a candidate in RCCL unless requested explicitly.
+          not a candidate in RCCL unless requested explicitly, with one exception:
+          selection also honors ``comm->forcePatEnable``, which RCCL sets at init on
+          the inter-node communicator of hierarchical collectives whenever this
+          variable is not explicitly ``0`` and AINIC is not in use. On that
+          communicator PAT is a candidate with this variable unset.
       - | ``0``: Disabled (default in RCCL).
         | ``1``: Enabled.
         | ``2``: Automatic (upstream NCCL default); enabled only when the topology
@@ -296,7 +300,13 @@ collected in the following table.
     * - | ``NCCL_LL128_C2C``
         | Widens the LL128 eligibility check to PXN-class inter-node connections on
           devices with compute capability 90 or above. When disabled, LL128 is
-          restricted to PXB and below so that no C2C link is used by LL128.
+          restricted to PXB and below so that no C2C link is used by LL128. This
+          gates the unified cost model only. RCCL's default legacy selector does not
+          read it: the AMD branch of ``ncclTopoTuneModel`` gates LL128 on the GPU
+          architecture, ``topo->ll128Enabled``, ``PATH_PXB`` and ``PATH_NVL``, and
+          ``ncclParamLl128C2c`` is consulted only in the non-HIP branch. Setting this
+          variable does not widen default-path LL128 eligibility on AMD Instinct
+          accelerators.
       - | ``1``: Allow LL128 up to ``PATH_PXN`` (default).
         | ``0``: Restrict LL128 to ``PATH_PXB``.
 
