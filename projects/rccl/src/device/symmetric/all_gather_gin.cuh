@@ -172,6 +172,7 @@ static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   ncclTeam rail = ncclTeamRail(handler.comm);
   ncclGin gin(handler.comm, (int)(blockIdx.x % handler.comm.ginContextCount));
   constexpr int chunkSize = ncclSymkAllGather_RailRing_ChunkSize;
+  uint32_t lsaRank = ncclTeamLsa(handler.comm).rank;
   ncclGinSignal_t railSignals = handler.ginSyncHandle.railSignals + blockIdx.x * rail.nRanks;
   ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, multimem);
   int nextPeer = (rail.rank + 1) % rail.nRanks;
@@ -188,32 +189,40 @@ static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
 
   handler.template forEachWorkNoFusion<uint8_t>([&] __device__(size_t nElts, size_t nAllElts, ncclSymPtr<uint8_t> input,
                                                                ncclSymPtr<uint8_t> output) {
+    // Rotate by LSA rank with pattern 0 1 3 2 4 5 7 6 to diversify addresses.
+    uint32_t startOffsetMultiplier = lsaRank ^ ((lsaRank >> 1) & 1);
+    size_t startOffset =
+      nElts > 0 ? ((size_t)startOffsetMultiplier * ncclSymkMcPerRankOffsetBytes % nElts) / chunkSize * chunkSize : 0;
+    auto advanceOffset = [&](size_t chunkElts, size_t& offset, size_t& remainingElts) {
+      offset += chunkElts;
+      if (offset == nElts) offset = 0;
+      remainingElts -= chunkElts;
+    };
+
     if (threadIdx.x < ringThreads) {
       ncclCoopWarpSpan warps(0, 1, 0);
       for (int step = 0; step < rail.nRanks - 1; step++) {
         int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
         int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
         size_t remainingElts = nElts;
-        size_t offset = 0;
+        size_t offset = startOffset;
         if (dataPeer == rail.rank) {
           while (remainingElts) {
-            size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
             // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, input + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
-            offset += chunkElts;
-            remainingElts -= chunkElts;
+            advanceOffset(chunkElts, offset, remainingElts);
           }
         } else {
           while (remainingElts) {
-            size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
             // Wait for ready signal from next peer before sending
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
             // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, output + dgrank * nAllElts + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
-            offset += chunkElts;
-            remainingElts -= chunkElts;
+            advanceOffset(chunkElts, offset, remainingElts);
             localSignalValue++;
           }
         }
@@ -228,25 +237,23 @@ static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
         int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
         int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
         size_t remainingElts = nElts;
-        size_t offset = 0;
+        size_t offset = startOffset;
         if (dataPeer == rail.rank) {
           while (remainingElts) {
-            size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
             // Put self rank's data
             bcastLsa(handler, warps.num_threads(), warps.thread_rank(), input + offset,
                      output + dgrank * nAllElts + offset, chunkElts, multimemTag);
-            offset += chunkElts;
-            remainingElts -= chunkElts;
+            advanceOffset(chunkElts, offset, remainingElts);
           }
         } else {
           while (remainingElts) {
-            size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
             // Wait for signal from other peers before putting their data
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
             bcastLsa(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
                      output + dgrank * nAllElts + offset, chunkElts, multimemTag);
-            offset += chunkElts;
-            remainingElts -= chunkElts;
+            advanceOffset(chunkElts, offset, remainingElts);
             localSignalValue++;
           }
         }
