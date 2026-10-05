@@ -571,8 +571,8 @@ add_executable(
     completion_tracker_test.cpp
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
-    pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
+    packet_processor_contract_test.cpp
     pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
@@ -592,6 +592,7 @@ add_executable(
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
+    kfd_events_test.cpp
     decode_smoke_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
