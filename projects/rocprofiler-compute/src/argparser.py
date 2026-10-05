@@ -933,11 +933,12 @@ Examples:
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",
-        type=str,
-        metavar="<specs>",
+        metavar="<name:value>",
+        action=CommaListAction,
         help=(
-            "Specify the specs to correct, as comma-separated name:value pairs.\n"
-            'For example: --specs-correction="num_xcd:4,cu_per_gpu:64".'
+            "Correct system specs, given as name:value pairs.\n"
+            "For example: --specs-correction num_xcd:4,cu_per_gpu:64.\n"
+            "Run -s/--specs to see the spec names."
         ),
     )
 

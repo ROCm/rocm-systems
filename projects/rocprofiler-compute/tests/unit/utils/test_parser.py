@@ -1101,16 +1101,16 @@ class TestCorrectSysInfo:
     def test_single_pair_overrides_spec(self, monkeypatch) -> None:
         """One name:value pair updates the spec object and the returned frame."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert mspec.num_xcd == "4"
         assert len(sys_info) == 1
         assert sys_info["num_xcd"].item() == "4"
 
     def test_multiple_pairs_override_every_spec(self, monkeypatch) -> None:
-        """Comma-separated pairs are all applied."""
+        """Every pair is applied."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4", "cu_per_gpu:64"])
 
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
@@ -1118,7 +1118,7 @@ class TestCorrectSysInfo:
     def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
         """Spaces around names and values do not break the override."""
         sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), " num_xcd : 4 , cu_per_gpu:64 "
+            make_mi350_machine_specs(monkeypatch), [" num_xcd : 4 ", "cu_per_gpu:64"]
         )
 
         assert sys_info["num_xcd"].item() == "4"
@@ -1131,7 +1131,8 @@ class TestCorrectSysInfo:
         analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
         after the correction, so dropping columns here would break analysis.
         """
-        sys_info = correct_sys_info(make_mi350_machine_specs(monkeypatch), "num_xcd:4")
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert sys_info["ip_blocks"].item().startswith("SQ|LDS|")
         assert sys_info["gpu_arch"].item() == "gfx950"
@@ -1141,7 +1142,7 @@ class TestCorrectSysInfo:
     def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
         """A fragment with no ':' is skipped; valid pairs still apply."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4", "garbage"])
 
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "256"
@@ -1149,7 +1150,7 @@ class TestCorrectSysInfo:
     def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
         """Only the first ':' separates name from value."""
         sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), "command:./vcopy -n 1:2"
+            make_mi350_machine_specs(monkeypatch), ["command:./vcopy -n 1:2"]
         )
 
         assert sys_info["command"].item() == "./vcopy -n 1:2"
@@ -1167,7 +1168,7 @@ class TestCorrectSysInfo:
         )
 
         with pytest.raises(SystemExit):
-            correct_sys_info(make_mi350_machine_specs(monkeypatch), "not_a_spec:1")
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), ["not_a_spec:1"])
 
         assert "not_a_spec" in str(error_calls[0])
         assert "--specs" in str(error_calls[0])
