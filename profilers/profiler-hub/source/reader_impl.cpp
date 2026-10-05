@@ -487,7 +487,7 @@ reader_t::impl::visit_track_events_in_id_range(
 
     statements_for(*m_read_statements, type)
         .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
-        .for_each([&](const data_storage::schema_v3::timeline_event_result& row) {
+        .for_each([&](const data_storage::schema_v3::event_range_result& row) {
             std::string_view name;
             if(row.display_name_id.has_value())
             {

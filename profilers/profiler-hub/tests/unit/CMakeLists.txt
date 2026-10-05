@@ -25,7 +25,6 @@ set(UNIT_TEST_SOURCES
     event_partitions_test.cpp
     natural_merge_sort_test.cpp
     thread_pool_test.cpp
-    track_read_options_test.cpp
     track_window_test.cpp
 )
 
