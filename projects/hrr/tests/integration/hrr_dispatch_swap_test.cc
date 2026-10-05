@@ -361,7 +361,7 @@ std::string dispatch_tool_path() {
 
 std::string capture_workload(const fs::path& cap, const char* direct_case, bool with_tool,
                              bool preload_tool = false) {
-  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   if (with_tool) proc.setEnv("ROCPROFILER_REGISTER_LIBRARY", dispatch_tool_path());
   if (preload_tool) proc.setEnv("LD_PRELOAD", dispatch_tool_path());
