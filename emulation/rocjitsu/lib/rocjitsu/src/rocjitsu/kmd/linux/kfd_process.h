@@ -540,6 +540,7 @@ public:
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
     amdgpu::QueueHandle queue_handle;
+    std::optional<uint32_t> pm4_target_xcc;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 

@@ -11,7 +11,7 @@ The first domains are:
 - `driver_memcpy`: driver-style directed 1D synchronous and stream-ordered copy contracts
 - `driver_memcpy_2d`: driver-style struct-based 2D synchronous and stream-ordered copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
-- `device`: portable current-device property contracts
+- `device`: portable current-device property contracts, plus GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
