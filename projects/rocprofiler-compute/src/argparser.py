@@ -24,6 +24,29 @@ ROOFLINE_DATA_TYPES = [
     "I64",
 ]
 
+# Deprecated options and what to do instead. A renamed option keeps its old
+# name as an extra option string until the old name is removed.
+DEPRECATED_OPTIONS = {
+    "--roof-only": "Use --roofline instead.",
+    "--bench-only": "Use --roofline-bench-only instead.",
+    "--device": "Use --roofline-device instead.",
+    "--sort": "Use --roofline-sort instead.",
+    "--mem-level": "Use --roofline-mem-level instead.",
+    "--roofline-data-type": "Use --roofline-data-types instead.",
+    "--retain-rocpd-output": ".db files will be retained automatically.",
+}
+
+
+def warn_deprecated_options(argv: list[str], workload: list[str]) -> None:
+    """Warn about each deprecated option in argv, except in the trailing workload."""
+    for arg in argv[: len(argv) - len(workload)]:
+        option = arg.split("=", 1)[0]
+        if option in DEPRECATED_OPTIONS:
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"{DEPRECATED_OPTIONS[option]}"
+            )
+
 
 def validate_block(value: str) -> str:
     if METRIC_ID_RE.match(value):
@@ -174,8 +197,8 @@ Examples:
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n my_bench --bench-only
+\trocprof-compute profile -n vcopy_roof --roofline -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n my_bench --roofline-bench-only
 ---------------------------------------------------------------------------------
         """,  # noqa: E501
         prog="rocprof-compute",
@@ -356,7 +379,7 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-blocks <arch> to see\n"
             "all valid block ids and aliases.\n"
-            "Cannot be used with --set, --roof-only or --bench-only."
+            "Cannot be used with --set, --roofline or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -373,7 +396,7 @@ Examples:
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "For available sets, see --list-sets.\n"
-            "Cannot be used with --block, --roof-only or --bench-only."
+            "Cannot be used with --block, --roofline or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -433,6 +456,7 @@ Examples:
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
+        "--roofline",
         "--roof-only",
         dest="roof_only",
         required=False,
@@ -440,10 +464,12 @@ Examples:
         action="store_true",
         help=(
             "Profile roofline data only.\n"
-            "Cannot be used with --block, --set or --bench-only."
+            "Cannot be used with --block, --set or --roofline-bench-only.\n"
+            "Deprecated alias: --roof-only."
         ),
     )
     roofline_group.add_argument(
+        "--roofline-bench-only",
         "--bench-only",
         dest="bench_only",
         required=False,
@@ -453,10 +479,12 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with --block, --set, --roof-only or --no-roof."
+            "Cannot be used with --block, --set, --roofline or --no-roof.\n"
+            "Deprecated alias: --bench-only."
         ),
     )
     roofline_group.add_argument(
+        "--roofline-device",
         "--device",
         dest="device",
         metavar="<id>",
@@ -464,7 +492,9 @@ Examples:
         default=0,
         type=int,
         help=(
-            "Target GPU device ID per amd-smi for roofline benchmarking (Default: 0)."
+            "Target GPU device ID per amd-smi for roofline benchmarking "
+            "(Default: 0).\n"
+            "Deprecated alias: --device."
         ),
     )
 
@@ -804,6 +834,7 @@ Examples:
     ## Roofline Command Line Options (analyze: visualization)
     roofline_group_analyze = analyze_parser.add_argument_group("Roofline Options")
     roofline_group_analyze.add_argument(
+        "--roofline-sort",
         "--sort",
         dest="sort",
         required=False,
@@ -813,11 +844,13 @@ Examples:
         choices=["kernels", "dispatches"],
         help=(
             "Overlay top kernels or top dispatches (Default: kernels).\n"
-            "Values: kernels, dispatches"
+            "Values: kernels, dispatches\n"
+            "Deprecated alias: --sort."
         ),
     )
     roofline_group_analyze.add_argument(
         "-m",
+        "--roofline-mem-level",
         "--mem-level",
         dest="mem_level",
         required=False,
@@ -827,11 +860,13 @@ Examples:
         default=["ALL"],
         help=(
             "Filter by memory level (Default: ALL).\n"
-            f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}"
+            f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}\n"
+            "Deprecated alias: --mem-level."
         ),
     )
     roofline_group_analyze.add_argument(
         "-R",
+        "--roofline-data-types",
         "--roofline-data-type",
         dest="roofline_data_type",
         required=False,
@@ -841,7 +876,8 @@ Examples:
         default=["FP32"],
         help=(
             "Choose datatypes to view roofline HTMLs for (Default: FP32).\n"
-            f"Values: {', '.join(ROOFLINE_DATA_TYPES)}"
+            f"Values: {', '.join(ROOFLINE_DATA_TYPES)}\n"
+            "Deprecated alias: --roofline-data-type."
         ),
     )
 

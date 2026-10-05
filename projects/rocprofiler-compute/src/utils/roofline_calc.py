@@ -243,7 +243,7 @@ def sanitize_ai_value(value: Union[SupportsFloat, str, None]) -> float:
 
 def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
     """
-    Ensure cache level requests through --mem-level roofline analysis option
+    Ensure cache level requests through --roofline-mem-level roofline analysis option
     are supported on the architecture, and have been normalized.
     """
     # Make mem_level a list if not already one
@@ -262,8 +262,8 @@ def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list
 
     if levels_raw != ["ALL"] and levels != levels_raw:
         console_warning(
-            f"Cache levels requested with --mem-level for {gpu_model} are not valid- "
-            "unsupported cache levels will not be displayed."
+            f"Cache levels requested with --roofline-mem-level for {gpu_model} "
+            "are not valid- unsupported cache levels will not be displayed."
         )
 
     # An empty list means the mem_level was originally ALL, or the user requested
