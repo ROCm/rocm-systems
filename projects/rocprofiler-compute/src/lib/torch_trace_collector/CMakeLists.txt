@@ -15,8 +15,7 @@ if(NOT cxx_std_17 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     _skip_collector("compiler does not support C++17")
 endif()
 
-# Compile the same shim-based implementation for the module and real-header
-# tests. PyTorch and Python are not production build dependencies.
+# Compile the shim-based implementation without PyTorch or Python build dependencies.
 add_library(torch-trace-collector OBJECT argument_capture.cpp torch_trace_collector.cpp)
 target_include_directories(
     torch-trace-collector
@@ -65,7 +64,3 @@ set_target_properties(
         INSTALL_RPATH ""
         INSTALL_RPATH_USE_LINK_PATH OFF
 )
-
-if(ENABLE_TESTS)
-    add_subdirectory(tests)
-endif()

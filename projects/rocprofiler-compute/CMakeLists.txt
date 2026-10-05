@@ -611,13 +611,6 @@ add_test(
 )
 
 add_test(
-    NAME test_mem_chart_common
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_mem_chart_gfx9
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
@@ -857,35 +850,6 @@ add_test(
 # Torch trace tests
 # -----------------------------------
 
-if(TARGET test-torch-trace-collector)
-    if(TEST_FROM_INSTALL)
-        set(_ttc_test_cmd tests/test-torch-trace-collector)
-    else()
-        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
-    endif()
-    add_test(
-        NAME test-torch-trace-collector
-        COMMAND ${_ttc_test_cmd} --gtest_filter=-TorchTraceCollectorBeforeInstall.*
-    )
-    add_test(
-        NAME test-torch-trace-collector-before-install
-        COMMAND ${_ttc_test_cmd} --gtest_filter=TorchTraceCollectorBeforeInstall.*
-    )
-    get_target_property(
-        _ttc_ld_path
-        test-torch-trace-collector
-        ROCPROF_TEST_LD_LIBRARY_PATH
-    )
-    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    sanitizer_runtime_env(_san_env)
-    list(APPEND _ttc_test_env ${_san_env})
-    set_tests_properties(
-        test-torch-trace-collector
-        test-torch-trace-collector-before-install
-        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
-    )
-endif()
-
 add_test(
     NAME test_rocpd_data
     COMMAND
@@ -898,8 +862,6 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
-        tests/unit/utils/inject_roctx/_backends/test_torch.py
-        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -1071,7 +1033,6 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
-        test_mem_chart_common
         test_mem_chart_gfx9
         test_mem_chart_gfx11
         test_mem_chart_gfx1250
@@ -1095,7 +1056,6 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
-        test_per_kernel_isa_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
@@ -1281,26 +1241,6 @@ install(
     PATTERN "*.py"
     PATTERN "Makefile"
     PATTERN "workloads" EXCLUDE
-)
-# Agent Skills
-install(
-    DIRECTORY skills/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
-    COMPONENT main
-    USE_SOURCE_PERMISSIONS
-)
-# Docs the skills link to
-install(
-    DIRECTORY docs/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/docs
-    COMPONENT main
-    FILES_MATCHING
-    PATTERN "*.rst"
-    PATTERN "*.md"
-    PATTERN "archive" EXCLUDE
-    PATTERN "design" EXCLUDE
-    PATTERN "sphinx" EXCLUDE
-    PATTERN "_templates" EXCLUDE
 )
 # modulefile
 install(

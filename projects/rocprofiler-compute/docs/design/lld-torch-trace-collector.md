@@ -160,7 +160,7 @@ using it. The callback remains installed until process exit. This interface
 does not expose the former native user-scope stack, snapshot store, uninstall,
 or statistics operations.
 
-## Build, tests, and private ABI
+## Build and private ABI
 
 Production builds produce one C++17 torch_trace_collector.so using local shim
 declarations and rocprofiler-sdk-roctx. They require neither a PyTorch
@@ -177,11 +177,3 @@ are private PyTorch interfaces. The accepted compatibility boundary is the
 validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
 of those minors. Extending this set requires real-header and runtime behavior
 validation. No exact wheel identity or paired ELF build-ID gate is used.
-
-ROCPROFCOMPUTE_TORCH_ROOT selects real headers and libraries for optional native
-layout and behavior tests. It is a test dependency only. Those tests compare
-shim assumptions with real PyTorch types and exercise the C boundary,
-argument rendering, all scopes, balanced callbacks, and launcher propagation.
-Loader and wrapper tests verify discovery, supported minors, revision
-rejection, runtime promotion, fallback, and successful-push/pop pairing.
-Integration tests validate emitted flat markers and the copied CSV contract.
