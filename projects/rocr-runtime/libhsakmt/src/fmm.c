@@ -255,15 +255,11 @@ typedef struct {
 
 	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
 	 * default, so deregistration stays the no-op it was until the path has
-	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
+	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in. When it is on,
+	 * the NO_ACCESS revoke is queued on a worker thread instead of issued
+	 * on the deregistering thread.
 	 */
 	bool svm_host_unregister;
-
-	/* DEBUG/TEMPORARY: hand the NO_ACCESS revoke to a worker thread instead
-	 * of issuing it on the deregistering thread. HSA_SVM_HOST_UNREGISTER_ASYNC
-	 * opts in, and only does anything when the path above is on.
-	 */
-	bool svm_host_unregister_async;
 } svm_t;
 
 /*
@@ -420,7 +416,6 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
 	ctx->fmm_context->svm.svm_host_unregister = false;
-	ctx->fmm_context->svm.svm_host_unregister_async = false;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
@@ -1624,7 +1619,7 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	struct svm_revoke_work *prev, *w, *next;
 	bool wait;
 
-	if (!fmm_ctx->svm.svm_host_unregister_async)
+	if (!fmm_ctx->svm.svm_host_unregister)
 		return;
 
 	do {
@@ -3701,7 +3696,6 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
-	char *svmHostUnregisterAsyncStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
@@ -3746,18 +3740,12 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
 	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
 	 * deregistering an SVM-API host range stays the no-op it has always
-	 * been and register only sets the coherency flags.
+	 * been and register only sets the coherency flags. When it is on, the
+	 * NO_ACCESS revoke is queued on a worker thread.
 	 */
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
 	fmm_ctx->svm.svm_host_unregister =
 		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
-
-	/* Not gated on the path being on: every use of this sits behind
-	 * svm_host_unregister already.
-	 */
-	svmHostUnregisterAsyncStr = getenv("HSA_SVM_HOST_UNREGISTER_ASYNC");
-	fmm_ctx->svm.svm_host_unregister_async =
-		(svmHostUnregisterAsyncStr && strcmp(svmHostUnregisterAsyncStr, "0"));
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -5370,14 +5358,13 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			nr = svm_api_range_put_locked(fmm_ctx, address, &rr,
 						      &gpu_mask, &gpu_all);
 			for (i = 0; i < nr; i++) {
-				/* Asynchronous mode hands the ioctl to the
-				 * worker and returns; the queue keeps it
-				 * ordered against a later grant for the same
-				 * pages. Fall back to issuing it here if the
-				 * worker or the queue entry cannot be had.
+				/* Hand the ioctl to the worker and return; the
+				 * queue keeps it ordered against a later grant
+				 * for the same pages. Fall back to issuing it
+				 * here if the worker or the queue entry cannot
+				 * be had.
 				 */
-				if (fmm_ctx->svm.svm_host_unregister_async &&
-				    svm_revoke_enqueue_locked(ctx, rr[i].addr,
+				if (svm_revoke_enqueue_locked(ctx, rr[i].addr,
 							      rr[i].size,
 							      gpu_mask, gpu_all))
 					continue;
