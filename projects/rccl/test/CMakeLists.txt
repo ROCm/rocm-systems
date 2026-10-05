@@ -372,6 +372,7 @@ if(BUILD_TESTS)
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
+      Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp
@@ -767,6 +768,7 @@ if(BUILD_TESTS)
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
+      transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -783,7 +785,7 @@ if(BUILD_TESTS)
 
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
-    # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
+    # ncclCudaHostCallocDebug<>, ncclDebugLevelMask) at load time. Without this,
     # those interposed-but-mismatched definitions corrupt the heap during a
     # full ncclCommInit* in this binary. The test still imports librccl's
     # internal (Debug-visible) symbols normally.
@@ -979,7 +981,9 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
+      transport/NetIbMPI/OptRecvCompletionTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp

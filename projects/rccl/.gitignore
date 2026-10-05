@@ -45,3 +45,4 @@ examples/**/rmsnorm_lsa
 examples/**/rmsnorm_multimem
 examples/**/rmsnorm_gin
 examples/**/rmsnorm_hybrid
+docs/examples/**/ring_exchange
