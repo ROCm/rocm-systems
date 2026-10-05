@@ -24,6 +24,7 @@
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
 #include "hrr_replay_limits.h" // bounds on archive-driven waits and retries
+#include "hrr_jit_options.h"   // which JIT options carry a pointer
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,

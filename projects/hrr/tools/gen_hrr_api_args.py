@@ -505,6 +505,48 @@ UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {
     "hipUserObjectCreate": _HOST_CALLBACK_REASON,
 }
 
+
+# APIs replay refuses that capture does not annotate.
+#
+# These are refused by the playback handler only. UNREPLAYABLE_PLAYBACK_APIS also
+# makes the capture shim call writer::note_unreplayable(), which changes the
+# generated capture file, and that file lives outside projects/hrr. The
+# playback-only table keeps this rule's output inside projects/hrr: the capture
+# side does not warn at record time about these, replay still refuses them by
+# name.
+PLAYBACK_ONLY_UNREPLAYABLE_APIS: Dict[str, str] = {
+    "hipLinkAddFile": (
+        "the recorded path names a file the archive chose, and replay would "
+        "open whatever that names on this machine; an archive must not decide "
+        "which file the replayer reads"),
+}
+
+# Filled in by generate_playback_shim: APIs the generator itself refused because
+# an argument would reach HIP as a raw cast of an archive integer (see
+# RawSlotError). Keyed by API name; the value is the reason in the handler.
+AUTO_UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {}
+
+# Generated handlers for APIs that take a JIT/link option array. Their option
+# values are `void*`: for some options an integer, for others a pointer into the
+# capturing process. A handler for one of these refuses when any recorded option
+# carries a pointer (hrr_jit_options.h). The handler reads the arrays from the
+# locals _d_options and _d_options_n that the deref table declares. The other
+# option-array APIs are not generated: hipLinkAddData is hand-written and
+# refuses every non-null option value, hipLinkAddFile is refused outright, and
+# hipModuleLoadDataEx and the hipLibraryLoad* calls never pass the options on.
+JIT_OPTION_ARRAY_APIS: Set[str] = {"hipLinkCreate"}
+
+# Generated handlers whose record carries an attribute union by value
+# (hipKernelNodeAttrValue). One member of it, the access policy window, holds a
+# host pointer (base_ptr) from the capturing process with no translation, and
+# the union cannot be translated member by member without knowing which one the
+# attribute id selects. The handler refuses the call when the id selects the
+# window and passes every other attribute through. Maps the API to
+# (attribute-id field, the enumerator that selects the window).
+ATTR_UNION_WINDOW_APIS: Dict[str, Tuple[str, str]] = {
+    "hipGraphKernelNodeSetAttribute": ("attr", "hipKernelNodeAttributeAccessPolicyWindow"),
+}
+
 # ---------------------------------------------------------------------------
 # APIs that get an inline no-op playback body (return hipSuccess; immediately)
 # rather than an extern declaration.  Used for:
@@ -3028,6 +3070,70 @@ def _apply_arg_bridge(bridge: Dict[str, object],
     return pre, args
 
 
+class RawSlotError(Exception):
+    """An argument would reach a HIP call as a raw cast of an archive integer.
+
+    The archive is untrusted input. A pointer or an opaque handle in a record is
+    an address from the capturing process: handing it to HIP unchanged lets the
+    archive choose what the runtime dereferences. Every such slot is either
+    translated through the context maps or the API is refused as unreplayable;
+    _playback_arg raises this for the second case and generate_playback_shim
+    turns it into a refusing handler.
+    """
+
+
+# Enumerations that are not in _ENUM_TYPES, so the struct records them as an
+# 8-byte placeholder, but are still plain numbers: casting the recorded value
+# back is a conversion. Listing them here keeps the raw-slot rule from refusing
+# their APIs without changing the generated header's layout.
+_NUMERIC_ENUMS_RECORDED_AS_WIDE = {
+    "hipFlushGPUDirectRDMAWritesTarget",
+    "hipFlushGPUDirectRDMAWritesScope",
+}
+
+_C_ARITHMETIC_TYPE_RE = re.compile(
+    r'(?:(?:unsigned|signed|short|long|char|int|float|double|bool|_Bool)(?: |$))+'
+    r'|(?:u?int(?:8|16|32|64)_t|size_t|ssize_t|ptrdiff_t|intptr_t|uintptr_t)')
+
+
+def _raw_slot_kind(raw_type: str) -> Optional[str]:
+    """What a raw `(T)a->field` cast of this parameter type would hand to HIP.
+
+    Returns None when the cast is a numeric conversion (an integer, a float, an
+    enum, a by-value struct carried as bytes), and "pointer", "handle" or
+    "composite" when the recorded integer would be taken as an address, an
+    opaque handle or a struct this generator cannot rebuild.
+    """
+    t = raw_type.strip()
+    t_nc = re.sub(r'\b(const|volatile|restrict|struct|enum)\b', '', t).strip()
+    t_nc = re.sub(r'\s+', ' ', t_nc)
+    if '*' in t_nc:
+        return "pointer"
+    base = t_nc.split()[0]
+    if base in ("dim3", "uint3") or base in BY_VALUE_STRUCTS:
+        return None
+    # Plain C arithmetic types, spelled with any of the integer keywords.
+    if _C_ARITHMETIC_TYPE_RE.fullmatch(t_nc):
+        return None
+    if base == "hipDevice_t":  # an int ordinal, not a pointer
+        return None
+    if base in _HANDLE_TYPES or base in _NON_CASTABLE_TYPES:
+        return "handle"
+    if base in _ENUM_TYPES or base in _NUMERIC_ENUMS_RECORDED_AS_WIDE:
+        return None
+    for key, _mapped in _SCALAR_MAP:
+        if t_nc == key:
+            return None
+    return "composite"
+
+
+def _raw_slot_error(entry: ApiEntry, name: str, t: str, kind: str) -> RawSlotError:
+    return RawSlotError(
+        f"argument {name} ({t.strip()}) is a {kind} recorded as an address from "
+        f"the capturing process; replay has no translation for it, so passing it "
+        f"to HIP would let the archive choose what the runtime dereferences")
+
+
 def _playback_arg(entry: ApiEntry, p: Param, name: str,
                   pre_lines: List[str]) -> str:
     """Return the expression to pass to the real HIP API during playback."""
@@ -3057,9 +3163,21 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     d = deref_for_param(entry.name, name)
     if d is not None and d.playback == "auto":
         if d.string:
-            # The recorded characters are already NUL-terminated inside the
-            # event, so the string is read straight out of the payload.
-            return (f"(a->{d.present_field} ? ({t})a->{d.bytes_field}"
+            # The record holds a fixed-size character field. Nothing makes the
+            # archive's bytes end in a NUL, so the string is copied into a local
+            # buffer of the field's size and the last byte is forced to NUL:
+            # whatever the archive recorded, the callee reads inside the buffer.
+            # The local is as big as the record's field; a field of another size
+            # would make the copy below read past the record or stop short.
+            pre_lines.append(f'  static_assert(sizeof(a->{d.bytes_field}) == {d.max_count}, '
+                             f'"{entry.name}: {d.bytes_field} is not {d.max_count} bytes");')
+            pre_lines.append(f"  char _str_{name}[{d.max_count}]{{}};")
+            pre_lines.append(f"  if (a->{d.present_field}) {{")
+            pre_lines.append(f"    std::memcpy(_str_{name}, a->{d.bytes_field},"
+                             f" sizeof(_str_{name}));")
+            pre_lines.append(f"    _str_{name}[sizeof(_str_{name}) - 1] = '\\0';")
+            pre_lines.append(f"  }}")
+            return (f"(a->{d.present_field} ? ({t})_str_{name}"
                     f" : ({t})nullptr)")
         if d.is_array:
             pre_lines.append(f"  {d.ctype} _d_{name}[{d.max_count}]{{}};")
@@ -3184,9 +3302,10 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
         pre_lines.append(f"  {t} _s_{name}{{}};")
         return f"_s_{name}"
 
-    # Function pointer types — cast from stored field (stored as 0, best effort)
+    # Function pointer types are a capture-process address: there is nothing to
+    # translate them to, so an API taking one is refused.
     if base in ('hipStreamCallback_t', 'hipHostFn_t'):
-        return f"({t})a->{name}"
+        raise _raw_slot_error(entry, name, t, "function pointer")
 
     # Unhandled non-const pointer to a non-void scalar type — treat as output pointer.
     # The captured value is the original process address (invalid at replay).
@@ -3198,8 +3317,35 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
         pre_lines.append(f"  {inner} _out_{name}{{}};")
         return f"&_out_{name}"
 
-    # Scalar / enum / int-like handle — cast from stored field
+    # Anything left is a numeric slot (integer, float, enum) and a cast of the
+    # recorded value is a conversion. A pointer, handle or struct would be an
+    # archive integer reaching HIP as an address: refuse the API instead.
+    kind = _raw_slot_kind(t)
+    if kind is not None:
+        raise _raw_slot_error(entry, name, t, kind)
     return f"({t})a->{name}"
+
+
+def _refusing_playback_shim(entry: ApiEntry, reason: str) -> str:
+    """Playback handler that refuses the API by name instead of calling it."""
+    sname = f"hrr_args_{entry.name}"
+    fname = f"playback_{entry.name}"
+    gparam = _graph_param(entry)
+    # Unlike ERROR_STUB_PLAYBACK_APIS this returns an error, so by default
+    # the replay stops right here. Under --continue-on-error it goes on,
+    # and the graph that should hold this node is now short one: marking
+    # it makes the later instantiate refuse it instead of running a graph
+    # missing work.
+    mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
+            f"  ctx.mark_graph_incomplete(a->{gparam}, \"{entry.name}\");\n"
+            if gparam else "  (void)payload;\n")
+    return (f"static hipError_t {fname}"
+            f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+            f"{mark}"
+            f"  hrr_note_unreplayable(ctx, \"{entry.name}\",\n"
+            f"                        \"{reason}\");\n"
+            f"  return hipErrorNotSupported;\n"
+            f"}}\n")
 
 
 def generate_playback_shim(entry: ApiEntry) -> str:
@@ -3247,23 +3393,9 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # and attributable beats letting the real API fail somewhere inside the
     # runtime with a bare error code, which is what these used to do.
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
-        reason = UNREPLAYABLE_PLAYBACK_APIS[entry.name]
-        gparam = _graph_param(entry)
-        # Unlike ERROR_STUB_PLAYBACK_APIS this returns an error, so by default
-        # the replay stops right here. Under --continue-on-error it goes on,
-        # and the graph that should hold this node is now short one: marking
-        # it makes the later instantiate refuse it instead of running a graph
-        # missing work.
-        mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
-                f"  ctx.mark_graph_incomplete(a->{gparam}, \"{entry.name}\");\n"
-                if gparam else "  (void)payload;\n")
-        return (f"static hipError_t {fname}"
-                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
-                f"{mark}"
-                f"  hrr_note_unreplayable(ctx, \"{entry.name}\",\n"
-                f"                        \"{reason}\");\n"
-                f"  return hipErrorNotSupported;\n"
-                f"}}\n")
+        return _refusing_playback_shim(entry, UNREPLAYABLE_PLAYBACK_APIS[entry.name])
+    if entry.name in PLAYBACK_ONLY_UNREPLAYABLE_APIS:
+        return _refusing_playback_shim(entry, PLAYBACK_ONLY_UNREPLAYABLE_APIS[entry.name])
 
     # No-op playback APIs: emit a one-time warning then return hipSuccess.
     # The static bool ensures the message fires once per process, not once per event,
@@ -3384,47 +3516,75 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     pre_lines: List[str] = []
     call_args: List[str] = []
     unnamed = 0
-    for p in entry.params:
-        name = p.name or f"p{unnamed}"
-        if not p.name: unnamed += 1
+    try:
+        for p in entry.params:
+            name = p.name or f"p{unnamed}"
+            if not p.name: unnamed += 1
 
-        # Destination already translated (and null-checked) above
-        if skip_dst and name == skip_dst:
-            call_args.append(f"({p.raw_type.strip()})_live_{skip_dst}")
-            continue
-        # For alloc-free: replace the pointer arg with the translated live ptr
-        if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
-            call_args.append("_live_ptr")
-            continue
-        # For skip-if-unmapped: reuse the destination translated above
-        if skip_param and name == skip_param:
-            call_args.append("_live_dst")
-            continue
-        # For handle-destroy: replace the handle arg with the live handle
-        if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
-            hdl_type = _HANDLE_DESTROY_APIS[entry.name][1]
-            translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')
-            if translate_fn:
-                call_args.append(f"({hdl_type}){translate_fn}(_rec_hdl)")
-            else:
-                call_args.append(f"({hdl_type})a->{name}")
-            continue
+            # Destination already translated (and null-checked) above
+            if skip_dst and name == skip_dst:
+                call_args.append(f"({p.raw_type.strip()})_live_{skip_dst}")
+                continue
+            # For alloc-free: replace the pointer arg with the translated live ptr
+            if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
+                call_args.append("_live_ptr")
+                continue
+            # For skip-if-unmapped: reuse the destination translated above
+            if skip_param and name == skip_param:
+                call_args.append("_live_dst")
+                continue
+            # For handle-destroy: replace the handle arg with the live handle
+            if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
+                hdl_type = _HANDLE_DESTROY_APIS[entry.name][1]
+                translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')
+                if translate_fn:
+                    call_args.append(f"({hdl_type}){translate_fn}(_rec_hdl)")
+                else:
+                    raise _raw_slot_error(entry, name, hdl_type, "handle")
+                continue
 
-        # The element count of a deref'd array is however many elements the
-        # event actually carries, which is not the recorded count when the
-        # array overflowed the inline capacity.
-        array_owner = next((d for d in deref_specs(entry.name)
-                            if d.is_array and d.count == name
-                            and d.playback == "auto"), None)
-        if array_owner is not None:
-            call_args.append(f"({p.raw_type.strip()})_d_{array_owner.param}_n")
-            continue
+            # The element count of a deref'd array is however many elements the
+            # event actually carries, which is not the recorded count when the
+            # array overflowed the inline capacity.
+            array_owner = next((d for d in deref_specs(entry.name)
+                                if d.is_array and d.count == name
+                                and d.playback == "auto"), None)
+            if array_owner is not None:
+                call_args.append(f"({p.raw_type.strip()})_d_{array_owner.param}_n")
+                continue
 
-        call_args.append(_playback_arg(entry, p, name, pre_lines))
+            call_args.append(_playback_arg(entry, p, name, pre_lines))
+    except RawSlotError as err:
+        # An argument would reach HIP as a raw cast of an archive integer and
+        # there is no translation for it: refuse the API by name.
+        AUTO_UNREPLAYABLE_PLAYBACK_APIS[entry.name] = str(err)
+        return _refusing_playback_shim(entry, str(err))
 
     # Emit pre-call locals
     for pl in pre_lines:
         lines.append(pl)
+
+    if entry.name in ATTR_UNION_WINDOW_APIS:
+        id_field, enumerator = ATTR_UNION_WINDOW_APIS[entry.name]
+        lines.append(f"  if (a->{id_field} == {enumerator}) {{")
+        lines.append(f'    hrr_note_unreplayable(ctx, "{entry.name}",')
+        lines.append('        "the access policy window carries a base pointer from the capturing "')
+        lines.append('        "process that replay cannot translate");')
+        lines.append("    return hipErrorNotSupported;")
+        lines.append("  }")
+
+    # A JIT/link option array carries values the runtime may dereference
+    # (log buffers, symbol tables). Those are capture-process pointers with no
+    # translation, so a record that has one is refused, naming the API.
+    if entry.name in JIT_OPTION_ARRAY_APIS:
+        lines.append("  if (hrr::jit_options_carry_pointer(_d_options, _d_options_n)) {")
+        lines.append(f'    hrr_note_unreplayable(ctx, "{entry.name}",')
+        lines.append('        "a JIT or link option carries a pointer (a log buffer or a symbol "')
+        lines.append('        "table) that points into the capturing process; replay cannot supply "')
+        lines.append('        "one, and passing the recorded value would let the archive choose "')
+        lines.append('        "what the runtime writes to");')
+        lines.append("    return hipErrorNotSupported;")
+        lines.append("  }")
 
     # Build the call
     args_str = ", ".join(call_args)

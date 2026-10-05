@@ -17,6 +17,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <string>
 
 namespace hrr {
 
@@ -29,6 +31,18 @@ constexpr size_t inline_capacity(size_t field_bytes, size_t elem_size) {
 // larger than the field is a malformed record, not a request to read beyond it.
 constexpr bool inline_count_fits(uint64_t count, size_t field_bytes, size_t elem_size) {
   return count <= inline_capacity(field_bytes, elem_size);
+}
+
+// A string held in a fixed-size character field of a record. The archive need
+// not have put a NUL in the field, so the text is whatever precedes the first
+// NUL within `field_bytes`, or all of the field when there is none. The result
+// is a std::string, which is NUL-terminated inside its own buffer, so a callee
+// that reads it as a C string stays inside it.
+inline std::string bounded_cstr(const uint8_t* field, size_t field_bytes) {
+  const void* nul = std::memchr(field, '\0', field_bytes);
+  const size_t n = nul ? static_cast<size_t>(static_cast<const uint8_t*>(nul) - field)
+                       : field_bytes;
+  return std::string(reinterpret_cast<const char*>(field), n);
 }
 
 }  // namespace hrr
