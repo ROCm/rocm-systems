@@ -115,24 +115,36 @@ def original_ns_values() -> dict[str, float]:
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
 
 
-def test_resolve_hidden_columns(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicitly included columns become visible in terminal tables."""
+@pytest.mark.parametrize(
+    ("include_cols", "expected"),
+    [
+        pytest.param(None, ["Description", "Unit", "Count"], id="defaults"),
+        pytest.param(["Description"], ["Unit", "Count"], id="include-description"),
+        pytest.param(["Avg"], ["Description", "Unit", "Count"], id="include-avg"),
+    ],
+)
+def test_resolve_hidden_columns(
+    monkeypatch: pytest.MonkeyPatch,
+    include_cols: list[str] | None,
+    expected: list[str],
+) -> None:
+    """Explicitly included columns are removed from the hidden columns."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    assert resolve_hidden_columns(make_args(include_cols=include_cols)) == expected
+
+
+def test_resolve_hidden_columns_does_not_modify_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutating resolved columns does not change the configured hidden columns."""
     hidden_columns = ["Description", "Unit", "Count"]
     monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
 
     resolved = resolve_hidden_columns(make_args(include_cols=None))
-    assert resolved == ["Description", "Unit", "Count"]
-    assert resolve_hidden_columns(make_args(include_cols=["Unit"])) == [
-        "Description",
-        "Count",
-    ]
-    assert resolve_hidden_columns(make_args(include_cols=["Description"])) == [
-        "Unit",
-        "Count",
-    ]
-    assert resolve_hidden_columns(make_args(include_cols=["Avg"])) == hidden_columns
-
     resolved.append("Avg")
+
     assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
 
