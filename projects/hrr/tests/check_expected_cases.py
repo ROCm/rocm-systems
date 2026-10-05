@@ -70,13 +70,13 @@ def read_manifest(path: str) -> list[str]:
         sys.exit(f"error: manifest {path} not found; create it with --update")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--binary", required=True, help="Catch2 test executable")
     ap.add_argument("--manifest", required=True, help="expected-cases file")
     ap.add_argument("--update", action="store_true",
                     help="rewrite the manifest from the binary instead of checking")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     actual = listed_cases(args.binary)
 
