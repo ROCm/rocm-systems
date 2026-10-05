@@ -75,7 +75,7 @@ public:
      *        call even from inside an already-running thread_pool task.
      */
     template <std::invocable<connection&> Fn>
-    [[nodiscard]] auto run_sync(Fn&& fn) -> std::invoke_result_t<Fn, connection&>
+    [[nodiscard]] auto with_connection(Fn&& fn) -> std::invoke_result_t<Fn, connection&>
     {
         auto held = acquire();
         return std::forward<Fn>(fn)(*held);

@@ -79,7 +79,7 @@ TEST_F(populate_reader_catalog_test, fills_the_shared_catalog_like_a_standalone_
     EXPECT_EQ(catalog->nodes.size(), standalone.get_all_nodes().size());
     EXPECT_EQ(catalog->processes.size(), standalone.get_all_processes().size());
     EXPECT_EQ(catalog->threads.size(), standalone.get_all_threads().size());
-    EXPECT_FALSE(catalog->string_utility.empty());
+    EXPECT_FALSE(catalog->strings_by_id.empty());
 }
 
 TEST_F(populate_reader_catalog_test, works_with_a_single_worker_and_a_single_connection)

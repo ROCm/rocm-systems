@@ -23,7 +23,8 @@ namespace
 {
 
 void
-run_all(common::thread_pool& workers, const std::vector<std::function<void()>>& jobs)
+run_all_and_rethrow(common::thread_pool&                      workers,
+                    const std::vector<std::function<void()>>& jobs)
 {
     std::mutex         error_mutex;
     std::exception_ptr first_error;
@@ -69,14 +70,14 @@ populate_reader_catalog(common::thread_pool&     workers,
 {
     using category_t = reader_t::catalog_category_t;
 
-    const auto job = [&](std::function<void(common::connection&)> step) {
+    const auto make_step_task = [&](std::function<void(common::connection&)> step) {
         return std::function<void()>{ [&connections, step = std::move(step)] {
-            connections.run_sync(step);
+            connections.with_connection(step);
         } };
     };
 
-    const auto chain = [&](std::vector<category_t> categories) {
-        return job(
+    const auto make_sequential_task = [&](std::vector<category_t> categories) {
+        return make_step_task(
             [&catalog, categories = std::move(categories)](common::connection& conn) {
                 for(const auto category : categories)
                 {
@@ -85,29 +86,30 @@ populate_reader_catalog(common::thread_pool&     workers,
             });
     };
 
-    run_all(workers, { job([](common::connection& conn) {
-                conn.reader().ensure_track_topology_indexes();
-            }) });
+    run_all_and_rethrow(workers, { make_step_task([](common::connection& conn) {
+                            conn.reader().ensure_track_topology_indexes();
+                        }) });
 
-    run_all(workers,
-            {
-                chain({
-                    category_t::string_list,
-                    category_t::nodes,
-                    category_t::processes,
-                    category_t::threads,
-                    category_t::agents,
-                }),
-            });
+    run_all_and_rethrow(workers,
+                        {
+                            make_sequential_task({
+                                category_t::string_list,
+                                category_t::nodes,
+                                category_t::processes,
+                                category_t::threads,
+                                category_t::agents,
+                            }),
+                        });
 
-    run_all(workers,
-            {
-                chain({ category_t::tracks }),
-                chain({ category_t::code_objects, category_t::kernel_symbols }),
-                chain({ category_t::streams }),
-                chain({ category_t::queues }),
-                chain({ category_t::pmc_infos }),
-            });
+    run_all_and_rethrow(workers,
+                        {
+                            make_sequential_task({ category_t::tracks }),
+                            make_sequential_task(
+                                { category_t::code_objects, category_t::kernel_symbols }),
+                            make_sequential_task({ category_t::streams }),
+                            make_sequential_task({ category_t::queues }),
+                            make_sequential_task({ category_t::pmc_infos }),
+                        });
 }
 
 }  // namespace profiler_hub

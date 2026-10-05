@@ -120,22 +120,22 @@ struct reader_catalog_t
     reader_types::queue_info_list_t         queues;
     reader_types::pmc_info_list_t           pmc_infos;
 
-    std::unordered_map<size_t, std::string> string_utility;
+    std::unordered_map<size_t, std::string> strings_by_id;
 
-    std::unordered_map<size_t, reader_types::node_info_ptr_t>    node_utility;
-    std::unordered_map<size_t, reader_types::process_info_ptr_t> process_utility;
-    std::unordered_map<size_t, reader_types::thread_info_ptr_t>  thread_utility;
-    std::unordered_map<size_t, reader_types::agent_info_ptr_t>   agent_utility;
+    std::unordered_map<size_t, reader_types::node_info_ptr_t>    nodes_by_id;
+    std::unordered_map<size_t, reader_types::process_info_ptr_t> processes_by_id;
+    std::unordered_map<size_t, reader_types::thread_info_ptr_t>  threads_by_id;
+    std::unordered_map<size_t, reader_types::agent_info_ptr_t>   agents_by_id;
     std::unordered_map<size_t, reader_types::kernel_symbol_info_ptr_t>
-        kernel_symbol_utility;
-    std::unordered_map<size_t, reader_types::code_object_info_ptr_t> code_object_utility;
+                                                                     kernel_symbols_by_id;
+    std::unordered_map<size_t, reader_types::code_object_info_ptr_t> code_objects_by_id;
 
     // Track lookup maps (populated by build_tracks()).
     std::
         unordered_map<topology_key_t, reader_types::track_info_ptr_t, topology_key_hash_t>
-                                                                       topology_to_track;
-    std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> track_to_topology;
-    std::unordered_map<reader_types::track_info_ptr_t, size_t>         track_to_db_id;
+                                                                       track_by_topology;
+    std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> topology_by_track;
+    std::unordered_map<reader_types::track_info_ptr_t, size_t>         db_id_by_track;
     std::unordered_map<size_t, reader_types::track_info_ptr_t> sample_track_by_db_id;
 
 private:
