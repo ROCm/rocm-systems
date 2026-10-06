@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Passive hardware discovery records and topology relationships.
 //!
 //! An endpoint describes hardware discovered in one generation-consistent
@@ -43,7 +45,7 @@ pub struct PciInfo {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
     pub(crate) level: u32,
-    pub(crate) size: u32,
+    pub(crate) size_bytes: u64,
     pub(crate) kind: u32,
 }
 
@@ -54,10 +56,10 @@ impl CacheInfo {
         self.level
     }
 
-    /// Returns the cache capacity in bytes reported by native topology.
+    /// Returns the cache capacity in bytes.
     #[must_use]
-    pub const fn size(&self) -> u32 {
-        self.size
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
     }
 }
 
@@ -257,6 +259,16 @@ pub struct GpuInfo {
     pub sdma_firmware_version: u32,
     /// GPU queue transports qualified by the current backend.
     pub queues: GpuQueueCapabilities,
+}
+
+/// Presentation metadata obtained by the active native provider. This is
+/// separate from the stable compute target and endpoint identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GpuPresentation {
+    /// Optional marketing name for display to applications.
+    pub product_name: Option<String>,
+    /// ASIC family from a qualified provider source, falling back to topology.
+    pub asic_family_id: u32,
 }
 
 /// Kind-specific capabilities attached to one passive endpoint.

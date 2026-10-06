@@ -61,6 +61,7 @@ struct ncclIbQpCreateAttr {
   bool isQpSharingEnabled;
   int  cqDepthMultiplier;
   int  qpSharingGroupIdx;
+  int  qpIdx;               // Per-device QP ordinal (for intra-group UDMA alternation)
 };
 
 // Per-QP connection metatdata
@@ -114,12 +115,14 @@ struct ncclIbConnectionMetadata {
   int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
   int      senderIbDevIdx;      // sender's IB device index
+  bool     optRecvCompletion;
 };
 
 // Initialize QP sharing fields to defaults (sharing disabled)
 static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
   attr->isQpSharingEnabled = false;
   attr->qpSharingGroupIdx = -1;
+  attr->qpIdx = 0;
   attr->cqDepthMultiplier = 1;
 }
 

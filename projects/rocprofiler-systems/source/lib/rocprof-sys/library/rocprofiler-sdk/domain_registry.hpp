@@ -6,6 +6,7 @@
 #include "common/string_utility.hpp"
 #include "common/version.hpp"
 
+#include "library/rocprofiler-sdk/buffered/kernel_dispatch.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/event_dropped_events.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/event_page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/event_page_migrate.hpp"
@@ -14,10 +15,14 @@
 #include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/page_migrate.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
+#include "library/rocprofiler-sdk/buffered/memory_allocation.hpp"
+#include "library/rocprofiler-sdk/buffered/memory_copy.hpp"
+#include "library/rocprofiler-sdk/buffered/scratch_memory.hpp"
 
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/compiler_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
+#include "library/rocprofiler-sdk/callback/hip_stream.hpp"
 #include "library/rocprofiler-sdk/callback/hipfile_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/amd_ext_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
@@ -128,10 +133,22 @@ struct registry
 private:
     consteval static auto collect_buffered_domains()
     {
-        constexpr auto k_buffered_domains_size = 8;
+        constexpr auto k_buffered_domains_size = 12;
         simple_static_vector<buffered_domain_definition<SdkBackend>,
                              k_buffered_domains_size>
             result;
+
+        result.add(buffered::k_kernel_dispatch<SdkBackend, Externals>);
+        result.add(buffered::k_memory_copy<SdkBackend, Externals>);
+        result.add(buffered::k_scratch_memory<SdkBackend, Externals>);
+
+        constexpr auto k_memory_allocation_min_version =
+            version{ .major = 0, .minor = 6, .patch = 0 };
+        if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
+                     k_memory_allocation_min_version)
+        {
+            result.add(buffered::k_memory_allocation<SdkBackend, Externals>);
+        }
 
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      version{ .major = 1, .minor = 2, .patch = 2 })
@@ -151,7 +168,7 @@ private:
 
     consteval static auto collect_callback_domains()
     {
-        constexpr auto k_callback_domains_size = 11;
+        constexpr auto k_callback_domains_size = 12;
         simple_static_vector<callback_domain_definition<SdkBackend>,
                              k_callback_domains_size>
             result;
@@ -163,6 +180,14 @@ private:
         result.add(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
+
+        constexpr auto k_hip_stream_min_version =
+            version{ .major = 0, .minor = 7, .patch = 0 };
+        if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
+                     k_hip_stream_min_version)
+        {
+            result.add(callback::k_hip_stream<SdkBackend, Externals>);
+        }
 
         constexpr auto k_rocdecode_min_version =
             version{ .major = 0, .minor = 6, .patch = 0 };

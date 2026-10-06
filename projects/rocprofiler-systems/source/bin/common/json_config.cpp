@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include "common/env_vars.hpp"
@@ -230,10 +231,25 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& domains = config["domains"];
 
-        // GPU domain (AMD SMI metrics)
+        // GPU domain (AMD SMI and hipFile metrics)
         if(domains.contains("gpu"))
         {
             const auto& gpu = domains["gpu"];
+            // hipFile telemetry is independent of AMD SMI being enabled.
+            if(gpu.contains("hipfile"))
+            {
+                const auto& hipfile = gpu["hipfile"];
+                resolve_enabled(result, hipfile, "enabled", env_vars::USE_HIPFILE);
+                if(hipfile.contains("metrics"))
+                {
+                    auto enabled = collect_enabled_entry_names(hipfile["metrics"]);
+                    if(!enabled.empty())
+                    {
+                        result[std::string{ env_vars::HIPFILE_METRICS }] =
+                            join_with(enabled, ',');
+                    }
+                }
+            }
             if(gpu.contains("enabled") && gpu["enabled"].get<bool>())
             {
                 result[std::string{ env_vars::USE_AMD_SMI }]          = "true";
@@ -585,8 +601,8 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "hipfile", "hipfile_api" },
     } };
 
-    auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                           [&](const entry& e) { return e.first == shorthand; });
+    auto it = std::ranges::find_if(shortcuts,
+                                   [&](const entry& e) { return e.first == shorthand; });
     if(it != shortcuts.end())
     {
         return std::string{ it->second };
@@ -642,8 +658,8 @@ expand_parallel_runtimes(const std::string& runtimes_str)
 
     for(const auto& token : split_csv_lowercase(runtimes_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(it != shortcuts.end())
         {
             result[std::string{ it->second }] = "true";
@@ -671,8 +687,8 @@ expand_gpu_metrics(const std::string& metrics_str)
     std::string result;
     for(const auto& token : split_csv_lowercase(metrics_str))
     {
-        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
-                               [&](const entry& e) { return e.first == token; });
+        auto it = std::ranges::find_if(shortcuts,
+                                       [&](const entry& e) { return e.first == token; });
         if(!result.empty())
         {
             result += ',';
@@ -892,6 +908,16 @@ export_domain_gpu(nlohmann::json&                           config,
     if(auto v = lookup(env_map, env_vars::USE_PROCESS_SAMPLING))
     {
         gpu["process_sampling"]["enabled"] = is_truthy(*v);
+    }
+
+    // hipFile infinty storage I/O telemetry is independent of AMD SMI.
+    if(auto hipfile_enabled = lookup(env_map, env_vars::USE_HIPFILE))
+    {
+        gpu["hipfile"]["enabled"] = is_truthy(*hipfile_enabled);
+    }
+    if(auto metrics = lookup(env_map, env_vars::HIPFILE_METRICS))
+    {
+        csv_to_json_enabled_flags(gpu["hipfile"]["metrics"], *metrics);
     }
 
     auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);

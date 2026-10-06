@@ -79,9 +79,9 @@ print_environment_impl(const std::vector<std::string>&              env,
 {
     std::vector<std::string_view> entries;
     entries.reserve(env.size());
-    std::copy(env.begin(), env.end(), std::back_inserter(entries));
-    std::sort(entries.begin(), entries.end());
-    entries.erase(std::unique(entries.begin(), entries.end()), entries.end());
+    std::ranges::copy(env, std::back_inserter(entries));
+    std::ranges::sort(entries);
+    entries.erase(std::ranges::unique(entries).begin(), entries.end());
 
     auto is_updated = [&](std::string_view entry) {
         return is_updated_key(env_key(entry));
@@ -90,9 +90,9 @@ print_environment_impl(const std::vector<std::string>&              env,
         return !is_updated(entry) && entry.starts_with(rocprofsys_prefix);
     };
 
-    const bool has_updated = std::any_of(entries.begin(), entries.end(), is_updated);
+    const bool has_updated = std::ranges::any_of(entries, is_updated);
     const bool has_general =
-        include_general_vars && std::any_of(entries.begin(), entries.end(), is_general);
+        include_general_vars && std::ranges::any_of(entries, is_general);
     if(!has_updated && !has_general)
     {
         return;
@@ -676,8 +676,7 @@ domain_topic_table()
 bool
 shown_for_tool(const std::vector<std::string_view>& tools, std::string_view tool_name)
 {
-    return tools.empty() ||
-           std::find(tools.begin(), tools.end(), tool_name) != tools.end();
+    return tools.empty() || std::ranges::find(tools, tool_name) != tools.end();
 }
 }  // namespace
 

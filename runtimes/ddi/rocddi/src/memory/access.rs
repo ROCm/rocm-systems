@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Validated device-memory access flags and their set operations.
 
 use std::ops::{

@@ -57,19 +57,24 @@ ncclResult_t g_nameResult = ncclSuccess;
 std::string g_deviceName;
 std::array<std::array<unsigned long long, 2>, 2> g_eccCounters{};
 std::array<std::array<ncclResult_t, 2>, 2> g_eccResults{};
-std::array<unsigned int, RAS_DIAG_NVLINK_MAX_LINKS> g_nvLinkValid{};
-std::array<ncclResult_t, RAS_DIAG_NVLINK_MAX_LINKS> g_nvLinkCapabilityResults{};
-std::array<nvmlEnableState_t, RAS_DIAG_NVLINK_MAX_LINKS> g_nvLinkStates{};
-std::array<ncclResult_t, RAS_DIAG_NVLINK_MAX_LINKS> g_nvLinkStateResults{};
+struct NvLinkSample {
+  nvmlEnableState_t state = NVML_FEATURE_ENABLED;
+  unsigned int speedMBps = 50000;
+  ncclResult_t result = ncclSuccess;
+  nvmlReturn_t stateStatus = NVML_SUCCESS;
+  nvmlReturn_t speedStatus = NVML_SUCCESS;
+};
+std::vector<NvLinkSample> g_nvLinks;
+ncclResult_t g_nvLinkCountResult = ncclSuccess;
+nvmlReturn_t g_nvLinkCountStatus = NVML_SUCCESS;
 std::vector<unsigned int> g_handleIndices;
 std::vector<int> g_nameDevices;
 std::vector<int> g_eccDevices;
 std::vector<nvmlMemoryErrorType_t> g_eccErrorTypes;
 std::vector<nvmlEccCounterType_t> g_eccCounterTypes;
 std::vector<nvmlMemoryLocation_t> g_eccLocations;
-std::vector<int> g_nvLinkCapabilityDevices;
-std::vector<nvmlNvLinkCapability_t> g_nvLinkCapabilities;
-std::vector<int> g_nvLinkStateDevices;
+std::vector<int> g_nvLinkFieldDevices;
+std::vector<std::pair<unsigned int, unsigned int>> g_nvLinkFieldQueries;
 
 int DeviceIndex(nvmlDevice_t device) {
   return static_cast<int>(reinterpret_cast<uintptr_t>(device)) - 1;
@@ -130,22 +135,34 @@ ncclResult_t ncclNvmlDeviceGetMemoryErrorCounter(nvmlDevice_t device, nvmlMemory
   return ncclSuccess;
 }
 
-ncclResult_t ncclNvmlDeviceGetNvLinkCapability(nvmlDevice_t device, unsigned int link,
-                                               nvmlNvLinkCapability_t capabilityType,
-                                               unsigned int* capability) {
-  g_nvLinkCapabilityDevices.push_back(DeviceIndex(device));
-  g_nvLinkCapabilities.push_back(capabilityType);
-  *capability = 0x5EED;
-  if (g_nvLinkCapabilityResults[link] != ncclSuccess) return g_nvLinkCapabilityResults[link];
-  *capability = g_nvLinkValid[link];
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetNvLinkState(nvmlDevice_t device, unsigned int link, nvmlEnableState_t* state) {
-  g_nvLinkStateDevices.push_back(DeviceIndex(device));
-  *state = NVML_FEATURE_ENABLED;
-  if (g_nvLinkStateResults[link] != ncclSuccess) return g_nvLinkStateResults[link];
-  *state = g_nvLinkStates[link];
+ncclResult_t ncclNvmlDeviceGetFieldValues(nvmlDevice_t device, int count, nvmlFieldValue_t* values) {
+  g_nvLinkFieldDevices.push_back(DeviceIndex(device));
+  for (int i = 0; i < count; ++i) {
+    auto& value = values[i];
+    g_nvLinkFieldQueries.emplace_back(value.fieldId, value.scopeId);
+    if (value.fieldId == NVML_FI_DEV_NVLINK_LINK_COUNT) {
+      EXPECT_EQ(1, count);
+      value.nvmlReturn = g_nvLinkCountStatus;
+      value.value.uiVal = static_cast<unsigned int>(g_nvLinks.size());
+      if (g_nvLinkCountResult != ncclSuccess) return g_nvLinkCountResult;
+    } else {
+      EXPECT_EQ(2, count);
+      if (value.scopeId >= g_nvLinks.size()) {
+        ADD_FAILURE() << "Unexpected NVLink scope " << value.scopeId;
+        return ncclInternalError;
+      }
+      const auto& link = g_nvLinks[value.scopeId];
+      if (link.result != ncclSuccess) return link.result;
+      if (value.fieldId == NVML_FI_DEV_NVLINK_GET_STATE) {
+        value.nvmlReturn = link.stateStatus;
+        value.value.uiVal = link.state;
+      } else {
+        EXPECT_EQ(NVML_FI_DEV_NVLINK_GET_SPEED, value.fieldId);
+        value.nvmlReturn = link.speedStatus;
+        value.value.uiVal = link.speedMBps;
+      }
+    }
+  }
   return ncclSuccess;
 }
 
@@ -201,8 +218,9 @@ rasDiagnosticsEccData EccData(bool available, uint64_t correctedSram = 0, uint64
                                static_cast<uint8_t>(available)};
 }
 
-rasDiagnosticsNvLinkData NvLinkData(int links, int inactive) {
-  return rasDiagnosticsNvLinkData{static_cast<uint8_t>(links), static_cast<uint8_t>(inactive)};
+rasDiagnosticsNvLinkData NvLinkData(int links, int inactive, uint32_t minSpeed = 50000, uint32_t maxSpeed = 50000) {
+  return rasDiagnosticsNvLinkData{static_cast<uint8_t>(links), static_cast<uint8_t>(inactive),
+                                 links > inactive ? minSpeed : 0, links > inactive ? maxSpeed : 0};
 }
 
 void ResetState() {
@@ -220,19 +238,17 @@ void ResetState() {
   ncclNvmlDeviceCount = 0;
   for (auto& byLocation : g_eccCounters) byLocation.fill(0);
   for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
-  g_nvLinkValid.fill(0);
-  g_nvLinkCapabilityResults.fill(ncclSuccess);
-  g_nvLinkStates.fill(NVML_FEATURE_ENABLED);
-  g_nvLinkStateResults.fill(ncclSuccess);
+  g_nvLinks.clear();
+  g_nvLinkCountResult = ncclSuccess;
+  g_nvLinkCountStatus = NVML_SUCCESS;
   g_handleIndices.clear();
   g_nameDevices.clear();
   g_eccDevices.clear();
   g_eccErrorTypes.clear();
   g_eccCounterTypes.clear();
   g_eccLocations.clear();
-  g_nvLinkCapabilityDevices.clear();
-  g_nvLinkCapabilities.clear();
-  g_nvLinkStateDevices.clear();
+  g_nvLinkFieldDevices.clear();
+  g_nvLinkFieldQueries.clear();
 }
 
 class RasDiagnosticsGpuMicrotest : public ::testing::Test {
@@ -276,7 +292,7 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
     ASSERT_EQ(ncclSuccess, summarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
     ASSERT_EQ(1u, state.lines.size());
     EXPECT_EQ(fmt::format("[INFO] {}: diagnostics incomplete, gathered 1/2 ranks in comm "
-                          "0x{:x}/0x{:x}/0x{:x} (RAS overlay may not be ready)",
+                          "0x{:x}/0x{:x}/0x{:x}",
                           checkName, commHash, commHash + 1, commHash + 2), state.lines[0]);
   }
 
@@ -390,7 +406,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionCollectHandlesSuccessFailureAndZ
 
   g_driverVersion = 0;
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
-  EXPECT_EQ(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN, data.version);
+  EXPECT_EQ(0u, data.version);  // Successful zero means no driver installed, not a failed query.
 
   g_driverResult = ncclSystemError;
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
@@ -470,21 +486,25 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectCountsValidAndInactiveLinks) {
   InstallNcclComms({owned.comm.get()});
   owned.comm->nvmlDev = 0;
   ncclNvmlDeviceCount = 1;
-  g_nvLinkValid[0] = 1;
-  g_nvLinkValid[1] = 1;
-  g_nvLinkValid[2] = 1;
-  g_nvLinkStates[1] = NVML_FEATURE_DISABLED;
-  g_nvLinkStateResults[2] = ncclSystemError;
-  g_nvLinkCapabilityResults[3] = ncclSystemError;
+  g_nvLinks.resize(4);
+  g_nvLinks[1].state = NVML_FEATURE_DISABLED;
+  g_nvLinks[2].speedMBps = 25000;
+  g_nvLinks[3].result = ncclSystemError;
   rasDiagnosticsNvLinkData data{};
 
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-  EXPECT_EQ(3, data.nLinks);
+  EXPECT_EQ(4, data.nLinks);
   EXPECT_EQ(2, data.nInactive);
-  ASSERT_EQ(RAS_DIAG_NVLINK_MAX_LINKS, static_cast<int>(g_nvLinkCapabilityDevices.size()));
-  for (int device : g_nvLinkCapabilityDevices) EXPECT_EQ(0, device);
-  for (nvmlNvLinkCapability_t capability : g_nvLinkCapabilities) EXPECT_EQ(NVML_NVLINK_CAP_VALID, capability);
-  EXPECT_EQ((std::vector<int>{0, 0, 0}), g_nvLinkStateDevices);
+  EXPECT_EQ(25000u, data.minSpeedMBps);
+  EXPECT_EQ(50000u, data.maxSpeedMBps);
+  EXPECT_EQ((std::vector<int>{0, 0, 0, 0, 0}), g_nvLinkFieldDevices);
+  const std::vector<std::pair<unsigned int, unsigned int>> expectedQueries = {
+    {NVML_FI_DEV_NVLINK_LINK_COUNT, 0},
+    {NVML_FI_DEV_NVLINK_GET_STATE, 0}, {NVML_FI_DEV_NVLINK_GET_SPEED, 0},
+    {NVML_FI_DEV_NVLINK_GET_STATE, 1}, {NVML_FI_DEV_NVLINK_GET_SPEED, 1},
+    {NVML_FI_DEV_NVLINK_GET_STATE, 2}, {NVML_FI_DEV_NVLINK_GET_SPEED, 2},
+    {NVML_FI_DEV_NVLINK_GET_STATE, 3}};
+  EXPECT_EQ(expectedQueries, g_nvLinkFieldQueries);
 
   g_handleIndices.clear();
   for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
@@ -498,14 +518,55 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectCountsValidAndInactiveLinks) {
 
   owned.comm->nvmlDev = 0;
   g_handleResult = ncclSystemError;
-  g_nvLinkCapabilityDevices.clear();
+  g_nvLinkFieldDevices.clear();
   data = NvLinkData(9, 9);
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
   EXPECT_EQ(0, data.nLinks);
   EXPECT_EQ(0, data.nInactive);
   ASSERT_EQ(1u, g_handleIndices.size());
   EXPECT_EQ(0u, g_handleIndices[0]);
-  EXPECT_TRUE(g_nvLinkCapabilityDevices.empty());
+  EXPECT_TRUE(g_nvLinkFieldDevices.empty());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectHandlesUnavailableCountsAndUnreadableLinks) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  InstallNcclComms({owned.comm.get()});
+  owned.comm->nvmlDev = 0;
+  ncclNvmlDeviceCount = 1;
+  g_nvLinks.resize(2);
+  for (int failure = 0; failure < 4; ++failure) {
+    SCOPED_TRACE(failure);
+    g_nvLinkCountResult = failure == 0 ? ncclSystemError : ncclSuccess;
+    g_nvLinkCountStatus = failure == 1 ? NVML_ERROR_UNKNOWN : NVML_SUCCESS;
+    for (auto& link : g_nvLinks) {
+      link.result = failure == 2 ? ncclSystemError : ncclSuccess;
+      link.stateStatus = failure == 3 ? NVML_ERROR_UNKNOWN : NVML_SUCCESS;
+    }
+    rasDiagnosticsNvLinkData data = NvLinkData(9, 9);
+    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
+    EXPECT_EQ(0, data.nLinks);
+    EXPECT_EQ(0, data.nInactive);
+    EXPECT_EQ(0u, data.minSpeedMBps);
+    EXPECT_EQ(0u, data.maxSpeedMBps);
+  }
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectTreatsUnknownAndZeroSpeedsAsInactive) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  InstallNcclComms({owned.comm.get()});
+  owned.comm->nvmlDev = 0;
+  ncclNvmlDeviceCount = 1;
+  g_nvLinks.resize(3);
+  g_nvLinks[0].speedStatus = NVML_ERROR_UNKNOWN;
+  g_nvLinks[1].speedMBps = 0;
+  rasDiagnosticsNvLinkData data{};
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
+  EXPECT_EQ(3, data.nLinks);
+  EXPECT_EQ(2, data.nInactive);
+  EXPECT_EQ(50000u, data.minSpeedMBps);
+  EXPECT_EQ(50000u, data.maxSpeedMBps);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
@@ -659,7 +720,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInac
   records = BuildRecords<rasDiagnosticsNvLinkData>({{MakeRank(2, 0, 1), NvLinkData(8, 0)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
-  EXPECT_EQ("[OK]   NVLink: found 8 link(s) per device, all active across 1 ranks in comm 0x2", state.lines[0]);
+  EXPECT_EQ("[OK]   NVLink: 8 links per GPU, all active at consistent speed across 1 ranks in comm 0x2", state.lines[0]);
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
@@ -679,8 +740,20 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInac
   records = BuildRecords<rasDiagnosticsNvLinkData>(
     {{MakeRank(6, 0, 1), NvLinkData(8, 0)}, {MakeRank(7, 0, 1), NvLinkData(8, 1)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
-  EXPECT_TRUE(Contains(state.lines, "all active across 1 ranks in comm 0x6"));
+  EXPECT_TRUE(Contains(state.lines, "all active at consistent speed across 1 ranks in comm 0x6"));
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {0} across 1 ranks in comm 0x7"));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryReportsSpeedDifferencesWithinAndBetweenRanks) {
+  for (const auto& mismatch : {NvLinkData(8, 0, 25000, 50000), NvLinkData(8, 0, 25000, 25000)}) {
+    state.lines.clear();
+    auto records = BuildRecords<rasDiagnosticsNvLinkData>(
+      {{MakeRank(30, 1, 2), mismatch}, {MakeRank(30, 0, 2), NvLinkData(8, 0)}});
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(),
+                                                        static_cast<int>(records.size())));
+    ASSERT_EQ(1u, state.lines.size());
+    EXPECT_EQ("[INFO] NVLink: inconsistent link speeds on rank(s) {1} across 2 ranks in comm 0x1e", state.lines[0]);
+  }
 }
 
 namespace {
