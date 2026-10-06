@@ -2342,8 +2342,16 @@ public:
       // later interposed open/close and the DSO finalizer itself. The engine's own
       // in-band latch wins; this only fires if nothing latched.
       local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
-        rj_vm_run(vm, nullptr);
+        const rj_status_t status = rj_vm_run(vm, nullptr);
         vm->engine->latch_startup_if_unlatched(/*failed=*/true);
+        if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
+          util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
+          // rj_vm_run() has joined the engine workers and shut down components
+          // and plugins. The host may be blocked on a completion that can no
+          // longer arrive. exit() would run the interposer finalizer on this
+          // thread and try to join itself, so use the process-level fatal exit.
+          std::_Exit(EXIT_FAILURE);
+        }
       });
     } catch (const std::exception &e) {
       util::Logger::debug_print("rocjitsu: failed to start local VM engine thread: ", e.what());

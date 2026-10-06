@@ -1010,6 +1010,59 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+TEST(CommandProcessorFailure, ShutdownCancelsUnprocessedFanoutFailure) {
+  GpuVm gpu_vm;
+  CommandProcessor owner("owner");
+  CommandProcessor peer("peer");
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 41;
+  constexpr uint32_t kDispatchId = 19;
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, kProcessId, 0x11);
+  owner.set_gpu_vm(&gpu_vm);
+  peer.set_gpu_vm(&gpu_vm);
+  owner.set_xcd_topology(0, {&owner, &peer});
+  peer.set_xcd_topology(1, {&owner, &peer});
+  (void)owner.register_queue({.address_space = address_space,
+                              .process_id = kProcessId,
+                              .queue_id = kQueueId,
+                              .ring_base_va = 0x100,
+                              .ring_size = 4096,
+                              .read_ptr_va = 0x80,
+                              .write_ptr_va = 0x88,
+                              .xcd_fanout = true});
+
+  auto grid = std::make_shared<GridCompletion>();
+  grid->grid_wgs = 2;
+  DispatchEntry owner_entry{};
+  owner_entry.dispatch_id = kDispatchId;
+  owner_entry.queue_id = kQueueId;
+  owner_entry.process_id = kProcessId;
+  owner_entry.kind = DispatchPacketKind::Kernel;
+  owner_entry.total_wgs = 1;
+  owner_entry.grid_completion = grid;
+  DispatchEntry peer_entry = owner_entry;
+  peer_entry.fanout_peer = true;
+  owner.accept_fanout_shard(std::move(owner_entry));
+  peer.accept_fanout_shard(std::move(peer_entry));
+  peer.drain_fanout_inbox_for_test();
+
+  // The owner has not even consumed its shard when the peer fails. No further
+  // doorbell event runs after the engine stops; shutdown must cancel it.
+  peer.notify_dispatch_failure(kQueueId, kProcessId, kDispatchId);
+  EXPECT_TRUE(grid->faulted());
+  owner.shutdown();
+  peer.shutdown();
+  EXPECT_TRUE(owner.queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_TRUE(peer.queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_FALSE(owner.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
+  EXPECT_FALSE(peer.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
+  EXPECT_EQ(grid.use_count(), 1);
+
+  owner.unregister_queue(kQueueId, kProcessId);
+  peer.unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
 TEST(CommandProcessorVmFault, RejectsNonterminalOrMismatchedNotifications) {
   GpuVm gpu_vm;
   CommandProcessor command_processor("cp");

@@ -1317,13 +1317,13 @@ protected:
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
-  struct PendingVmFault {
+  struct PendingDispatchFailure {
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint32_t dispatch_id = 0;
-    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+    std::optional<VmAccessOutcome> vm_outcome;
   };
-  std::vector<PendingVmFault> pending_vm_faults_;
+  std::vector<PendingDispatchFailure> pending_dispatch_failures_;
   /// @brief Runtime queue exceptions raised while the wave-state lock was held.
   /// @details Drained before workgroup completions so an error cannot race a
   /// successful completion from a later instruction.

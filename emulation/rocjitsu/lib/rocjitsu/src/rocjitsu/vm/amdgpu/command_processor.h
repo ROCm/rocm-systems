@@ -285,6 +285,11 @@ public:
   void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                                 VmAccessOutcome outcome);
 
+  /// @brief Cancel a failed dispatch without publishing successful completion.
+  /// @details Called outside the CU wave-state lock. Also cancels fan-out shards
+  /// and faults their queues, using the same path as a terminal VM fault.
+  void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
+
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
   [[nodiscard]] size_t dispatched_count() const { return total_dispatched_; }
@@ -671,7 +676,6 @@ private:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
-    VmAccessOutcome outcome;
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
   void drain_dispatch_fault_inbox();
@@ -736,8 +740,7 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
-  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
-                            VmAccessOutcome outcome);
+  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);

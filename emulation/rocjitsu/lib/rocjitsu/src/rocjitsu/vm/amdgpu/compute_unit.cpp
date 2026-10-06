@@ -386,15 +386,15 @@ void ComputeUnitCore::flush_cp_notifications() {
   // notification behind it; draining to empty keeps that from waiting for whatever
   // takes the wave-state lock next.
   for (;;) {
-    std::vector<PendingVmFault> faults;
+    std::vector<PendingDispatchFailure> failures;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_vm_faults_.empty() && pending_queue_exceptions_.empty() &&
+      if (pending_dispatch_failures_.empty() && pending_queue_exceptions_.empty() &&
           pending_wg_completions_.empty())
         return;
-      faults.swap(pending_vm_faults_);
+      failures.swap(pending_dispatch_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
     }
@@ -402,9 +402,13 @@ void ComputeUnitCore::flush_cp_notifications() {
     // against the CP's dispatch path.
     if (!cp_)
       return;
-    for (const PendingVmFault &fault : faults)
-      cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                    fault.outcome);
+    for (const PendingDispatchFailure &failure : failures) {
+      if (failure.vm_outcome)
+        cp_->notify_dispatch_vm_fault(failure.queue_id, failure.process_id, failure.dispatch_id,
+                                      *failure.vm_outcome);
+      else
+        cp_->notify_dispatch_failure(failure.queue_id, failure.process_id, failure.dispatch_id);
+    }
     for (const auto &exception : exceptions) {
       const bool delivered =
           queue_exception_handler_
@@ -438,10 +442,10 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
     abort_dispatch(wf.dispatch_id());
     return;
   }
-  pending_vm_faults_.push_back({.queue_id = wf.queue_id(),
-                                .process_id = wf.process_id(),
-                                .dispatch_id = wf.dispatch_id(),
-                                .outcome = outcome});
+  pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                        .process_id = wf.process_id(),
+                                        .dispatch_id = wf.dispatch_id(),
+                                        .vm_outcome = outcome});
   if (outcome == VmAccessOutcome::Revoked) {
     // Fetch revocation is recovered before reaching this terminal path. An
     // in-flight data access cannot be replayed safely. Notify the live queue
@@ -1875,15 +1879,23 @@ template <bool EnableAsync>
         window->drain();
     }
     const InstructionExecutionError error = active->instruction_execution_error();
-    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
-                                            this->name(), active->wf_id(), inst->mnemonic(),
-                                            active->pc, instruction_execution_error_name(error));
+    const std::string failure = std::format(
+        "CU {}: wf{} could not execute {} at pc={:#x} (pid={} qid={} dispatch={} wg={}): {}",
+        this->name(), active->wf_id(), inst->mnemonic(), active->pc, active->process_id(),
+        active->queue_id(), active->dispatch_id(), active->wg_id(),
+        instruction_execution_error_name(error));
     util::Logger::warn(failure);
     if (!active->fail_pm4_submission()) {
+      pending_dispatch_failures_.push_back({.queue_id = active->queue_id(),
+                                            .process_id = active->process_id(),
+                                            .dispatch_id = active->dispatch_id(),
+                                            .vm_outcome = std::nullopt});
       if (auto *sim_engine = this->engine())
         sim_engine->request_exit(failure, /*code=*/1);
     }
-    active->halt();
+    // halt() follows the successful workgroup-completion path. A rejected
+    // instruction instead cancels resident waves and their pending memory work.
+    abort_dispatch(active->dispatch_id());
     return;
   }
 

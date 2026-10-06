@@ -8590,22 +8590,48 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
 
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   constexpr uint32_t kSCbranchIFork = 0xB8000000u;
-  VmFixture f("cdna4", /*num_cus=*/2);
-  f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  constexpr uint64_t kBarrierSignal = 0x3040;
+  for (const auto *arch : {"cdna3", "cdna4"}) {
+    for (uint32_t threads : {1u, 2u}) {
+      for (uint32_t grid_size : {64u, 4096u}) {
+        SCOPED_TRACE(std::format("arch={} threads={} grid_size={}", arch, threads, grid_size));
+        VmFixture f(arch, /*num_cus=*/2);
+        f.cp()->set_dispatch_threads(threads);
+        const uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
+        test::AqlQueue queue(f.mem(), f.cp());
+        init_completion_signal(f.mem(), kCompletionSignal);
+        queue.submit(make_dispatch_packet(kernel, kCompletionSignal, grid_size));
+        init_completion_signal(f.mem(), kBarrierSignal);
+        hsa_kernel_dispatch_packet_t barrier{};
+        barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+        barrier.completion_signal.handle = kBarrierSignal;
+        queue.submit(barrier);
 
-  ASSERT_TRUE(f.engine->step());
-  EXPECT_FALSE(f.engine->step());
-  const auto &exit = f.engine->last_exit();
-  EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
-  EXPECT_EQ(exit.code, 1);
-  EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
-  EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
-  EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
-  EXPECT_TRUE(f.cu(0)->is_idle());
-  EXPECT_TRUE(f.cu(1)->is_idle());
+        ASSERT_TRUE(f.engine->step());
+        ASSERT_NE(f.cu(0)->wf(0), nullptr);
+        const uint32_t dispatch_id = f.cu(0)->wf(0)->dispatch_id();
+        ASSERT_TRUE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+        EXPECT_FALSE(f.engine->step());
+        const auto &exit = f.engine->last_exit();
+        EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
+        EXPECT_EQ(exit.code, 1);
+        EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
+        EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
+        EXPECT_NE(exit.message.find("pid=0 qid=1 dispatch=" + std::to_string(dispatch_id)),
+                  std::string::npos);
+        EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
+        EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+        EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+        EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 1);
+        EXPECT_EQ(completion_signal_value(f.mem(), kBarrierSignal), 1);
+        for (uint32_t cu = 0; cu < 2; ++cu) {
+          EXPECT_TRUE(f.cu(cu)->is_idle());
+          EXPECT_TRUE(f.cu(cu)->can_accept_workgroup(10, 64 * 1024));
+        }
+      }
+    }
+  }
 }
 
 class ThrowingIssuePlugin final : public ExecutionPlugin {
@@ -8639,8 +8665,10 @@ TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
     f.soc_ptr->set_plugin_group(group);
-    // Halt after rejection, so the hook runs outside execute_instruction().
-    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xB8000000u : 0xBE800000u;
+    // An indirect branch to zero halts outside execute_instruction().
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt
+                              ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
+                              : 0xBE800000u;
     f.write_kernel(0x1000, &code, sizeof(code));
     ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
 
