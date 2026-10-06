@@ -346,6 +346,15 @@ class AMDSMILogger:
         # Remove process_info indices for Host parity:
         yaml_output = re.sub(r"PROCESS_INFO_[0-9]+:", "PROCESS_INFO:", yaml_output)
 
+        # Fold AMPP's indexed profile marker + opaque NAME field into a single
+        # "PROFILE: <name>" header line, so each profile's ACTIVE/WRITABLE/
+        # CONFIGURED/FIELDS render nested beneath it. Unlike PROCESS_INFO_N
+        # above (which just merges duplicate labels), the opaque profile name
+        # isn't derivable from the index, so it's recovered from NAME instead.
+        yaml_output = re.sub(
+            r"( *)AMPP_PROFILE_[0-9]+:\n *NAME: (.+)\n", r"\1PROFILE: \2\n", yaml_output
+        )
+
         clean_yaml_output = ""
         for line in yaml_output.splitlines():
             # Continuation lines (no ":") must not run replace("  ", "    ") on leading

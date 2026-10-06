@@ -1740,11 +1740,29 @@ a fixed profile count or field set. This is unrelated to the legacy
 `amd-smi set --profile` (power profile preset-mask) command.
 
 `amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi`
-version once, followed by, per profile: name, index, whether it is
-currently active, whether it is a writable custom slot, and whether a
-writable slot has been configured. For configured/active profiles it also
-lists each field's name, unit, current value, and (when published by the
-driver) guidance-only min/max bounds.
+version once, followed by a `PROFILE`/`ACTIVE`/`WRITABLE`/`CONFIGURED` block
+per profile. Configured profiles also list a `FIELDS` block with each
+field's name, unit, current value, and (when published by the driver)
+guidance-only min/max bounds.
+
+```shell-session
+~$ amd-smi static --gpu 0 --ampp
+GPU: 0
+    AMPP:
+        VERSION: 1.0
+        PROFILE: profile_0
+            ACTIVE: true
+            WRITABLE: false
+            CONFIGURED: true
+            FIELDS:
+                PPT0_LIMIT: 500 W (min=100, max=700)
+                MAXGFXCLKFREQ: 2100 MHz (min=500, max=2200)
+                BOOSTMODE: 1 -
+        PROFILE: profile_6
+            ACTIVE: false
+            WRITABLE: true
+            CONFIGURED: false
+```
 
 ```shell-session
 ~$ sudo amd-smi set --ampp-activate profile_2

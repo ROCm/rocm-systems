@@ -249,12 +249,28 @@ class TestCliStaticAmpp(unittest.TestCase):
 
     def test_human_readable_output_lists_profiles_and_fields(self):
         static_dict = self._run_ampp("human")
-        ampp_text = static_dict["ampp"]
-        self.assertIn("ABI_VERSION: 1.0", ampp_text)
-        self.assertIn("*[0] profile_0 (configured)", ampp_text)
-        self.assertIn(" [2] profile_2 (writable, configured)", ampp_text)
-        self.assertIn("PPT0_Limit: 300 W", ampp_text)
-        self.assertIn("PPT0_Limit: 250 W (min=100, max=400)", ampp_text)
+        ampp_dict = static_dict["ampp"]
+        self.assertEqual(ampp_dict["version"], "1.0")
+        self.assertEqual(
+            ampp_dict["ampp_profile_0"],
+            {
+                "name": "profile_0",
+                "active": "true",
+                "writable": "false",
+                "configured": "true",
+                "fields": {"PPT0_Limit": "300 W"},
+            },
+        )
+        self.assertEqual(
+            ampp_dict["ampp_profile_1"],
+            {
+                "name": "profile_2",
+                "active": "false",
+                "writable": "true",
+                "configured": "true",
+                "fields": {"PPT0_Limit": "250 W (min=100, max=400)"},
+            },
+        )
 
     def test_not_supported_reports_descriptive_reason_human(self):
         self.holder["get_profiles"] = lambda: (_ for _ in ()).throw(
@@ -302,9 +318,11 @@ class TestCliStaticAmpp(unittest.TestCase):
 
         self.holder["get_fields"] = _raise_other
         static_dict = self._run_ampp("human")
-        ampp_text = static_dict["ampp"]
-        self.assertIn("ABI_VERSION: 1.0", ampp_text)
-        self.assertIn("FIELDS: N/A", ampp_text)
+        ampp_dict = static_dict["ampp"]
+        self.assertEqual(ampp_dict["version"], "1.0")
+        for key, value in ampp_dict.items():
+            if key.startswith("ampp_profile_"):
+                self.assertEqual(value["fields"], "N/A")
 
     def test_human_readable_output_zero_profiles_reports_na(self):
         self.holder["get_profiles"] = lambda: ("1.0", [])
@@ -337,8 +355,15 @@ class TestCliStaticAmpp(unittest.TestCase):
         ]
         self.holder["get_profiles"] = lambda: ("1.0", unconfigured)
         static_dict = self._run_ampp("human")
-        ampp_text = static_dict["ampp"]
-        self.assertIn(" [3] profile_3 (writable, unconfigured)", ampp_text)
+        ampp_dict = static_dict["ampp"]
+        profile_3 = next(
+            v for v in ampp_dict.values() if isinstance(v, dict) and v.get("name") == "profile_3"
+        )
+        self.assertEqual(
+            profile_3,
+            {"name": "profile_3", "active": "false", "writable": "true", "configured": "false"},
+        )
+        self.assertNotIn("fields", profile_3)
 
     def test_field_with_empty_unit_displayed_without_extra_formatting(self):
         self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
@@ -353,4 +378,8 @@ class TestCliStaticAmpp(unittest.TestCase):
             }
         ]
         static_dict = self._run_ampp("human")
-        self.assertIn("SomeCount: 5 ", static_dict["ampp"])
+        ampp_dict = static_dict["ampp"]
+        profile_0 = next(
+            v for v in ampp_dict.values() if isinstance(v, dict) and v.get("name") == "profile_0"
+        )
+        self.assertEqual(profile_0["fields"], {"SomeCount": "5 "})

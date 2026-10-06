@@ -1267,49 +1267,43 @@ class StaticCommands:
                     static_dict["ampp_version"] = ampp_version
                     static_dict["ampp"] = profiles_str
                 else:
-                    # Human readable: nested per-profile / per-field listing
-                    formatted_profiles = []
-                    for profile_entry in ampp_profile_list:
-                        marker = "*" if profile_entry["is_active"] else " "
-                        state_bits = []
-                        if profile_entry["is_writable"]:
-                            state_bits.append("writable")
-                        if profile_entry["is_configured"]:
-                            state_bits.append("configured")
-                        elif profile_entry["is_writable"]:
-                            state_bits.append("unconfigured")
-                        state_str = ", ".join(state_bits) if state_bits else "N/A"
-                        header = (
-                            f"    {marker}[{profile_entry['index']}] {profile_entry['name']} "
-                            f"({state_str})"
-                        )
-                        field_lines = []
-                        if not isinstance(profile_entry["fields"], list):
+                    # Human readable: PROFILE header with ACTIVE/WRITABLE/
+                    # CONFIGURED/FIELDS nested beneath it, per the AMPP design
+                    # doc. custom_dump has no "header + nested children" shape
+                    # for list items, so each profile is keyed by index
+                    # (ampp_profile_N) with its opaque name stashed in a NAME
+                    # field; amdsmi_logger folds that back into a "PROFILE:
+                    # <name>" line. Profile names are opaque sysfs folder
+                    # names (not assumed to be "profile_N"), so they can't be
+                    # recovered from the index alone.
+                    ampp_dict = {"version": ampp_version}
+                    for index, profile_entry in enumerate(ampp_profile_list):
+                        profile_dict = {
+                            "name": profile_entry["name"],
+                            "active": str(profile_entry["is_active"]).lower(),
+                            "writable": str(profile_entry["is_writable"]).lower(),
+                            "configured": str(profile_entry["is_configured"]).lower(),
+                        }
+                        fields = profile_entry["fields"]
+                        if not isinstance(fields, list):
                             # Per-profile field fetch failed; "fields" holds the
                             # "N/A" sentinel rather than a list.
-                            field_lines.append("        FIELDS: N/A")
-                        else:
-                            for field in profile_entry["fields"]:
-                                field_line = (
-                                    f"        {field['name']}: {field['value']} {field['unit']}"
-                                )
+                            profile_dict["fields"] = "N/A"
+                        elif fields:
+                            fields_dict = {}
+                            for field in fields:
+                                field_value = f"{field['value']} {field['unit']}"
                                 if field["has_limits"]:
-                                    field_line += (
+                                    field_value += (
                                         f" (min={field['limit_min']}, max={field['limit_max']})"
                                     )
-                                field_lines.append(field_line)
-                        formatted_profiles.append(
-                            "\n".join([header] + field_lines) if field_lines else header
-                        )
-                    if formatted_profiles:
-                        # UPPER_CASE label to match the established convention
-                        # for hand-formatted human-readable labels elsewhere
-                        # in the CLI (e.g. node.py's POWER_MANAGEMENT/GTT/
-                        # LIMIT/STATUS/THRESHOLD/SIZE labels).
-                        version_line = f"    ABI_VERSION: {ampp_version}"
-                        static_dict["ampp"] = (
-                            "\n" + version_line + "\n" + "\n".join(formatted_profiles)
-                        )
+                                fields_dict[field["name"]] = field_value
+                            profile_dict["fields"] = fields_dict
+                        # else: unconfigured slot - omit FIELDS entirely, per design.
+                        ampp_dict[f"ampp_profile_{index}"] = profile_dict
+
+                    if ampp_profile_list:
+                        static_dict["ampp"] = ampp_dict
                     else:
                         static_dict["ampp"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
