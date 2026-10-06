@@ -11,10 +11,8 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -25,8 +23,6 @@
 #include <unistd.h>
 
 #include "../common/LogCapture.hpp"
-#include "ScopedHook.h"
-#include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
 #include "debug.h"
@@ -46,48 +42,10 @@
 
 using RcclUnitTesting::CaptureStdout;
 
-static uint64_t DefaultIbClockNano() {
-  return clockNano();
-}
-static std::function<uint64_t()> g_ibClockNano = DefaultIbClockNano;
-
-static int g_ibCallocFailAt = 0;
-static int g_ibCallocCalls = 0;
-static std::vector<void*> g_ibHostLive;
-template <typename T>
-static ncclResult_t IbCalloc(T** ptr, std::size_t nelem) {
-  if (++g_ibCallocCalls == g_ibCallocFailAt) {
-    return ncclSystemError;
-  }
-  const ncclResult_t ret = ncclCallocDebug(ptr, nelem, __FILE__, __LINE__, __func__, true);
-  if (ret == ncclSuccess) {
-    g_ibHostLive.push_back(*ptr);
-  }
-  return ret;
-}
-
-static void IbFree(void* ptr) {
-  auto it = std::find(g_ibHostLive.begin(), g_ibHostLive.end(), ptr);
-  if (it != g_ibHostLive.end()) {
-    g_ibHostLive.erase(it);
-  } else if (ptr != nullptr) {
-    ADD_FAILURE() << "free of untracked host pointer " << ptr;
-    return;
-  }
-  std::free(ptr);
-}
-
 #include "fakes/libc_seam.h"
-#undef ncclCalloc
-#define ncclCalloc(...) IbCalloc(__VA_ARGS__)
-#define clockNano() g_ibClockNano()
-#define free(ptr) IbFree(ptr)
 
 #include DIAG_IB_WRITE_BW_CC_PATH
 
-#undef free
-#undef clockNano
-#undef ncclCalloc
 #include "fakes/libc_seam_undef.h"
 
 namespace {
@@ -186,27 +144,16 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
       return localNetResult_;
     };
     g_ncclDiagChildRun = [this](const char* command, int timeoutSec, char* output, int outputSize, bool* truncated) {
+      EXPECT_STREQ(command, "ib_write_bw --help");
       EXPECT_EQ(timeoutSec, IB_BW_TIMEOUT_SEC);
       EXPECT_EQ(outputSize, IB_BW_TOOL_OUTPUT_BYTES);
       EXPECT_EQ(truncated, nullptr);
-      const bool probe = std::string(command) == "ib_write_bw --help";
-      if (!probe) {
-        clientCommands_.push_back(command);
-      }
-      DeliverChildOutput(probe ? help_ : clientOutput_, output, outputSize, nullptr, nullptr, truncated);
-      return probe ? probeExit_ : clientExit_;
+      DeliverChildOutput(help_, output, outputSize, nullptr, nullptr, truncated);
+      return probeExit_;
     };
   }
 
   void TearDown() override {
-    EXPECT_TRUE(g_ibHostLive.empty()) << "host buffers leaked: " << g_ibHostLive.size();
-    for (void* p : g_ibHostLive) {
-      std::free(p);
-    }
-    g_ibHostLive.clear();
-    g_ibCallocFailAt = 0;
-    g_ibCallocCalls = 0;
-    g_ibClockNano = DefaultIbClockNano;
     g_ibNetDevices = nullptr;
     g_ibNetGetProperties = nullptr;
     ResetDevRuntimeMicroFakes();
@@ -251,6 +198,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   }
 
   void SetDevices(const std::vector<const char*>& devices) {
+    ASSERT_LE(devices.size(), info_.size());
     for (std::size_t r = 0; r < devices.size(); r++) {
       info_[r] = Info(("host" + std::to_string(r)).c_str(), devices[r]);
     }
@@ -310,9 +258,6 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   std::vector<std::string> accessed_;
   std::string help_ = kHelp;
   int probeExit_ = 0;
-  std::string clientOutput_ = kClientOutput;
-  int clientExit_ = 0;
-  std::vector<std::string> clientCommands_;
 };
 
 TEST_F(DiagIbWriteBwMicrotest, NodeInventory_GroupsByFirstAppearanceInLocalRankOrder) {
@@ -382,7 +327,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_CrossClientAnchorsOnPreviousDeviceOfThre
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 4);
-  comm_->rank = 3;
+  PlaceRank(3);
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 2);
   EXPECT_EQ(client, 3);
@@ -400,12 +345,13 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_BothEndsOfEveryPairAgree) {
   struct Topology {
     std::vector<std::vector<int>> nodes;
     std::vector<const char*> devices;
+    int pairedRanks[2][2];  // [phase][cross]
   };
   const std::vector<Topology> topologies = {
-      {{{0, 1, 2}, {3, 4, 5}}, {"A", "B", "C", "C", "A", "B"}},
-      {{{0, 1, 2, 3}, {4, 5, 6, 7}}, {"A", "A", "B", "C", "C", "B", "A", "A"}},
-      {{{0, 1}, {2, 3}, {4, 5}}, {"A", "B", "B", "A", "A", "C"}},
-      {{{3, 0}, {1, 4}, {2, 5}, {6, 7}}, {"A", "B", "A", "B", "A", "B", "B", "A"}},
+      {{{0, 1, 2}, {3, 4, 5}}, {"A", "B", "C", "C", "A", "B"}, {{6, 6}, {6, 6}}},
+      {{{0, 1, 2, 3}, {4, 5, 6, 7}}, {"A", "A", "B", "C", "C", "B", "A", "A"}, {{8, 6}, {8, 6}}},
+      {{{0, 1}, {2, 3}, {4, 5}}, {"A", "B", "B", "A", "A", "C"}, {{4, 4}, {2, 2}}},
+      {{{3, 0}, {1, 4}, {2, 5}, {6, 7}}, {"A", "B", "A", "B", "A", "B", "B", "A"}, {{8, 8}, {8, 8}}},
   };
   for (std::size_t t = 0; t < topologies.size(); t++) {
     BuildComm(0, topologies[t].nodes);
@@ -432,7 +378,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_BothEndsOfEveryPairAgree) {
           EXPECT_EQ(clients[peer], clients[r]) << r;
           pairs++;
         }
-        EXPECT_GT(pairs, 0);
+        EXPECT_EQ(pairs, topologies[t].pairedRanks[phase][cross]);
       }
     }
   }
@@ -685,6 +631,56 @@ TEST_F(DiagIbWriteBwMicrotest, ParseBandwidth_TakesAverageOfFirstFiniteResultRow
   EXPECT_FALSE(parseBandwidth("", average));
   EXPECT_FALSE(parseBandwidth("1 2 3", average));
   EXPECT_FALSE(parseBandwidth(nullptr, average));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, ComputeBandwidthStats_SkipsUnmeasuredAndTakesMedianOfSorted) {
+  const RankBandwidth bandwidth[5] = {{40, 7}, {-1, 1}, {10, -1}, {30, 5}, {20, 3}};
+  double sorted[5] = {};
+  double minimum = -1, median = -1, maximum = -1;
+  EXPECT_EQ(computeBandwidthStats(bandwidth, 5, false, sorted, minimum, median, maximum), 4);
+  EXPECT_DOUBLE_EQ(minimum, 10);
+  EXPECT_DOUBLE_EQ(median, 25);
+  EXPECT_DOUBLE_EQ(maximum, 40);
+  EXPECT_EQ(computeBandwidthStats(bandwidth, 5, true, sorted, minimum, median, maximum), 4);
+  EXPECT_DOUBLE_EQ(minimum, 1);
+  EXPECT_DOUBLE_EQ(median, 4);
+  EXPECT_DOUBLE_EQ(maximum, 7);
+  EXPECT_EQ(computeBandwidthStats(bandwidth, 4, true, sorted, minimum, median, maximum), 3);
+  EXPECT_DOUBLE_EQ(minimum, 1);
+  EXPECT_DOUBLE_EQ(median, 5);
+  EXPECT_DOUBLE_EQ(maximum, 7);
+  minimum = median = maximum = -1;
+  EXPECT_EQ(computeBandwidthStats(bandwidth + 1, 2, false, sorted, minimum, median, maximum), 1);
+  EXPECT_DOUBLE_EQ(minimum, 10);
+  EXPECT_DOUBLE_EQ(median, 10);
+  EXPECT_DOUBLE_EQ(maximum, 10);
+  minimum = median = maximum = -1;
+  EXPECT_EQ(computeBandwidthStats(bandwidth + 1, 1, false, sorted, minimum, median, maximum), 0);
+  EXPECT_DOUBLE_EQ(minimum, -1);
+  const RankBandwidth zero = {0, -1};
+  EXPECT_EQ(computeBandwidthStats(&zero, 1, false, sorted, minimum, median, maximum), 1);
+  EXPECT_DOUBLE_EQ(maximum, 0);
+}
+
+TEST_F(DiagIbWriteBwMicrotest, BandwidthOutlier_StrictlyBeyondThirtyPercent) {
+  EXPECT_FALSE(bandwidthOutlier(70, 100));
+  EXPECT_FALSE(bandwidthOutlier(130, 100));
+  EXPECT_TRUE(bandwidthOutlier(69.9, 100));
+  EXPECT_TRUE(bandwidthOutlier(130.1, 100));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) {
+  BuildComm(0, {{0}, {1}});
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 1;
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].nChannels = 1;
+  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 0;
+  comm_->graphs[0].nChannels = 1;
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[0].crossNic = 1;
+  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
 }
 
 }  // namespace
