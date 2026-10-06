@@ -1151,6 +1151,27 @@
           "name": "NetIB_RMA_MultiSeg_FindRemotePeerTopology",
           "description": "findRemotePeerForLocalRank returns a rank on another node with the same local rank, or -1 when none exists",
           "test_filter": "RmaMultiSegmentMPITest.FindRemotePeerForLocalRankTopology"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath",
+          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops and per-context batches",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch8",
+          "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=8, so chains of 9+ WRs drain the batch and post directly",
+          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "env_variables": {
+            "NCCL_RMA_IB_WR_BATCHSIZE": "8"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch2",
+          "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=2 (the minimum): any multi-segment chain posts directly and every aggregated batch holds one op",
+          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "env_variables": {
+            "NCCL_RMA_IB_WR_BATCHSIZE": "2"
+          }
         }
       ]
     },
