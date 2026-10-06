@@ -1,6 +1,6 @@
 # Metric grouping (SPP / SPU)
 
-**Parent:** [Overall plan](aiprofcomp-865.md)
+**Parent:** [Overall plan](<[HLD]Single-pass packable and unpackable - Plan.md>)
 
 This note is the packing algorithm. Same-pass bind and SPU composite operators stay in the overall plan.
 
