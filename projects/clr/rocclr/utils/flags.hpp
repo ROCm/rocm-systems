@@ -275,9 +275,10 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
         "Set to a directory path to enable HRR capture; archive written there") \
-release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
+debug(bool, HIP_HRR_DEBUG_ARGS, false,                                        \
         "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
-        "H2D destination logging) at LOG_INFO level")                         \
+        "H2D destination logging) at LOG_INFO level. DEBUG builds only: the " \
+        "dumps copy kernel argument bytes into the log")                      \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
