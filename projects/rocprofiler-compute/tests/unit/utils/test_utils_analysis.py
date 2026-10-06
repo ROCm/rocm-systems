@@ -26,6 +26,7 @@ from utils.utils_analysis import (
     NodeRollup,
     attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
+    filter_forest_by_backends,
     fold_identical_sibling_subtrees,
     format_operator_args,
     nest_marker_intervals,
@@ -1014,6 +1015,32 @@ def test_fold_identical_sibling_subtrees_merges_nested_children():
     assert len(folded[0].children) == 1
     assert folded[0].children[0].call_count == 2
     assert folded[0].children[0].kernels["k"].launches == 2
+
+
+def test_filter_forest_by_backends_strips_scaffolding_kernels():
+    child = leaf_operator(
+        "triton.JITFunction.matmul_kernel",
+        "1",
+        40.0,
+        kernel="triton_matmul_kernel",
+        backend="triton",
+    )
+    parent = leaf_operator(
+        "nn.Module.Linear.forward",
+        "0",
+        10.0,
+        kernel="torch_gemm_kernel",
+        backend="torch",
+    )
+    parent.children = [child]
+    forest = {"1": [parent]}
+
+    filtered = filter_forest_by_backends(forest, ["triton"])
+    filtered_parent = filtered["1"][0]
+    assert filtered_parent.kernels == {}
+    assert "triton_matmul_kernel" in filtered_parent.children[0].kernels
+    assert "torch_gemm_kernel" in forest["1"][0].kernels
+    assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
 
 
 def test_split_operator_args_respects_nested_commas():
