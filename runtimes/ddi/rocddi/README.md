@@ -182,9 +182,10 @@ On a GFX1201 system with KFD and its DRM render node, run the opt-in native
 Rust contract tests with `cargo test -p rocddi --test cts --locked -- --ignored`.
 It copies and fills through ordinary allocations, copies through rocddi-owned
 host staging and a device virtual-memory mapping, and submits a packet through
-a targeted user SDMA ring with byte-index and doorbell progress checks. The
-capability case checks expert queue scheduling against KFD 1.20 or newer and
-the GFX1201 scratch aperture against the reported XCC count.
+a targeted user SDMA ring with device-producer mappings, byte-index, and
+doorbell progress checks. The capability case checks expert queue scheduling
+against KFD 1.20 or newer and the GFX1201 scratch aperture against the
+reported XCC count.
 
 The CMake build from `runtimes/` stages the same combined shared image and
 AMDF static archive. Native allocations, virtual mappings, and frontend pools

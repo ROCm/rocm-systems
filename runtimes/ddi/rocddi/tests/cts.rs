@@ -348,7 +348,7 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
                 selection: SdmaEngineSelection::Id(0),
             },
             priority: QueuePriority::Normal,
-            device_producer: false,
+            device_producer: true,
         })?
     };
     let transport = queue.info();
@@ -361,6 +361,13 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
     assert_eq!(transport.read_index_host_address % 8, 0);
     assert_eq!(transport.write_index_host_address % 8, 0);
     assert_eq!(transport.doorbell_host_address % 8, 0);
+    assert_ne!(transport.read_index_device_address, 0);
+    assert_ne!(transport.write_index_device_address, 0);
+    assert!(
+        transport
+            .doorbell_device_address
+            .is_some_and(|address| address != 0)
+    );
 
     // GFX1201 OSS5: a GCR cache envelope around one linear copy packet.
     let mut packet = [0_u32; PACKET_BYTES / 4];

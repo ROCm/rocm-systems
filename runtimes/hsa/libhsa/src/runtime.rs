@@ -31,7 +31,9 @@ use crate::ffi::*;
 use crate::loader::{CodeObject, CodeSymbol, Executable, Reader, Symbol};
 use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservation};
 use crate::platform::host::{self as platform_host, CpuCacheKind, CpuInfo};
-use crate::queue::{CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SoftQueue};
+use crate::queue::{
+    CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SdmaQueue, SoftQueue,
+};
 use crate::signal::{
     AsyncDispatcher, AsyncSignalRecord, ImportedIpcSignal, OwnedIpcSignal, SignalSlab,
 };
@@ -468,6 +470,7 @@ pub(crate) struct Runtime {
     pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
     pub(crate) signal_groups: HashMap<u64, Vec<HsaSignal>>,
     pub(crate) queues: HashMap<usize, Queue>,
+    pub(crate) sdma_queues: HashMap<usize, SdmaQueue>,
     pub(crate) soft_queues: HashMap<usize, SoftQueue>,
     pub(crate) counted_queues: HashMap<usize, CountedQueue>,
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
@@ -696,6 +699,7 @@ impl Runtime {
             async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
             queues: HashMap::new(),
+            sdma_queues: HashMap::new(),
             soft_queues: HashMap::new(),
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
@@ -847,6 +851,13 @@ impl Runtime {
                 // An unresolved native queue can still reference its scratch
                 // and inactive signal. Preserve the complete dependency set
                 // for KFD process teardown instead of freeing reachable pages.
+                std::mem::forget(queue);
+            }
+        }
+        for (_, mut queue) in self.sdma_queues.drain() {
+            if crate::queue::destroy_runtime_sdma_queue(&mut queue).is_err() {
+                // Native teardown may still reach the ring, pointer page, or
+                // doorbell. Keep their owner and the public handle together.
                 std::mem::forget(queue);
             }
         }

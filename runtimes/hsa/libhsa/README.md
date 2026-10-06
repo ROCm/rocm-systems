@@ -18,6 +18,26 @@ Final shutdown removes the runtime from that registry before stopping workers
 and releasing native state. Blocking native work and user callbacks must remain
 outside global registry locks.
 
+`hsa_amd_queue_create` accepts compute and SDMA descriptors. Compute queues
+use the rocddi AQL control layout; their public header aliases the native
+control page. SDMA queues use a separate HSA header because native SDMA
+read and write pointers occupy different offsets. Both queue types retain a
+rocddi queue owner until destruction succeeds. A failed native teardown keeps
+the public handle and backing available for retry, and final shutdown retains
+an unresolved owner for process teardown.
+
+SDMA descriptors select a native engine ID or round-robin selection through
+rocddi. Their public ring size and monotonic indices count bytes. The ring is
+host-visible, while the read and write pointer info queries return addresses
+mapped for a device producer. The public index functions use rocddi's host
+pointer mappings directly; aligned handle layouts distinguish SDMA, AQL,
+counted, and soft queues without taking the process registry lock. A caller
+must serialize SDMA packet production, check ring space, and publish the
+write pointer and doorbell after writing complete packets. CU masks and AQL
+profiling control do not apply to SDMA queues. KFD SDMA queues have no
+wavefront scheduling priority or queue-error callback event source. SDMA
+descriptors requesting either option are rejected.
+
 On Linux, the workspace-root shared package builds
 `libhsa-runtime64.so.1` with `ROCR_1` default versions on its public HSA
 symbols and supplies the conventional HSA library alias. Binary
