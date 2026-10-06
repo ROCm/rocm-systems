@@ -277,7 +277,7 @@ def test_frexp_simd_probes_use_the_shared_raw_operations():
         assert 'util::frexp' not in simd_probe_line(name)
 
 
-def test_ldexp_f16_simd_probes_use_the_shared_raw_operation():
+def test_ldexp_simd_probes_use_the_shared_raw_operation():
     operation = (
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make('
     )
@@ -291,6 +291,13 @@ def test_ldexp_f16_simd_probes_use_the_shared_raw_operation():
     )
     assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
         f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
+    )
+    assert simd_probe_line('v_ldexp_f32_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP(amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
+    )
+    assert simd_probe_line('v_ldexp_f64_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
+        'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'
     )
 
 

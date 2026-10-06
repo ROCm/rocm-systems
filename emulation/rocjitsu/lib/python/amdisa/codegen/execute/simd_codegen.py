@@ -281,7 +281,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b)); }',
     ),
     # F16 LDEXP reads raw halves; see float_ldexp.simd_probe for VOP3.
-    'v_ldexp_f16_vop2': ('uint32_t', float_ldexp.simd_functor()),
+    'v_ldexp_f16_vop2': ('uint32_t', float_ldexp.simd_functor('f16')),
 }
 
 # template_name -> (cpp_in_type, cpp_out_type, cpp_unary_op_functor)
@@ -2077,23 +2077,6 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
 SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
 SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
 
-# Mixed-width LDEXP batches operand access but rounds each lane with guest MODE.
-SIMD_VOP3_LDEXP_FP32: dict[str, str] = {
-    'v_ldexp_f32_vop3': (
-        '[&wf](auto a, auto e) { return util::native<float>([&](auto i) {'
-        ' return amdgpu::ldexp_float(static_cast<float>(a[i]), static_cast<int32_t>(e[i]),'
-        ' wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()); }); }'
-    ),
-}
-SIMD_VOP3_LDEXP_FP64: dict[str, str] = {
-    'v_ldexp_f64_vop3': (
-        '[&wf](auto a, auto e) { return util::native<double>([&](auto i) {'
-        ' return amdgpu::ldexp_float(static_cast<double>(a[i]), static_cast<int32_t>(e[i]),'
-        ' wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }); }'
-    ),
-}
-
-
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # Sum-of-absolute-differences (byte / 16-bit / 32-bit) + accumulate src2.
     # Pure integer byte SWAR (see util::sad_bytes_u32_simd etc); no modifiers.
@@ -2878,13 +2861,6 @@ def _simd_probe_line(
         return f'  {macro}();'
     if template_name in SIMD_VOP3_FMAC_FP64:
         return '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64();'
-    # VOP3 ldexp: mixed-width fp src0 + int32 src1 exp.
-    specldexpf32 = SIMD_VOP3_LDEXP_FP32.get(template_name)
-    if specldexpf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32({specldexpf32});'
-    specldexpf64 = SIMD_VOP3_LDEXP_FP64.get(template_name)
-    if specldexpf64 is not None:
-        return f'  ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64({specldexpf64});'
     # VOP3 unary integer ops with no VOP1 twin (e.g. v_not_b16). Reuse the
     # VOP1 unary glue — operand shape (src0, vdst, 32-bit lanes) matches.
     spec3unai = SIMD_VOP3_UNARY_INT_EXTRA.get(template_name)

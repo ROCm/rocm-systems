@@ -17,10 +17,12 @@
 /// are quieted; infinities and zeros pass through.
 ///
 /// The floating_operation.h wrapper applies ABS/NEG to the floating source
-/// only, then OMOD/CLAMP to the result. gfx1201 captures of V_LDEXP_F16 match
-/// these rules bit for bit, VOP2 and VOP3 including true16 halves, under every
-/// MODE rounding, denormal and FP16_OVFL setting probed. Other targets use them
-/// without hardware verification.
+/// only, then OMOD/CLAMP to the result. gfx1201 audit captures of V_LDEXP_F16,
+/// F32 and F64 match these rules bit for bit, including the true16 F16 halves,
+/// under every MODE rounding, denormal and FP16_OVFL setting probed. The
+/// tininess rule comes from a hand-run gfx1201 probe of all three formats under
+/// every MODE setting; the audit captures do not cover it. Other targets use
+/// these rules without hardware verification.
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 

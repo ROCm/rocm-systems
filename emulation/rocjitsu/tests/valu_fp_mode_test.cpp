@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -2923,6 +2924,57 @@ std::vector<ArithmeticCase> ldexp_f16_captured_cases() {
   return cases;
 }
 
+// V_LDEXP_F32/F64 lanes from a hand-run gfx1201 probe; the audit captures do
+// not cover them. The value just below 1.0 scaled to just below the smallest
+// normal stays tiny at full precision, so with output denormals disabled it
+// flushes to a signed zero; kept, it rounds up to the smallest normal, or
+// truncates toward zero. MODE 0x30 keeps F32 denormals and flushes F64 ones;
+// 0xc0 does the reverse.
+std::vector<ArithmeticCase> ldexp_tininess_cases() {
+  struct Lane {
+    const char *name;
+    uint64_t value;
+    int32_t exponent;
+    uint32_t mode;
+    uint64_t expected;
+  };
+  const auto add = [](std::vector<ArithmeticCase> &cases, bool f64, const Lane &lane) {
+    // v6 (v[6:7]) = ldexp(v0 (v[0:1]), v2)
+    const auto words = rdna4::build_vop3(f64 ? rdna4::kVLdexpF64Vop3 : rdna4::kVLdexpF32Vop3,
+                                         {.vdst = 6, .src0 = 256, .src1 = 258});
+    std::vector<std::pair<uint32_t, uint32_t>> sources{{0, uint32_t(lane.value)},
+                                                       {2, uint32_t(lane.exponent)}};
+    std::vector<std::pair<uint32_t, uint32_t>> expected{{6, uint32_t(lane.expected)}};
+    if (f64) {
+      sources.emplace_back(1, uint32_t(lane.value >> 32));
+      expected.emplace_back(7, uint32_t(lane.expected >> 32));
+    }
+    cases.push_back({std::string(f64 ? "LdexpF64" : "LdexpF32") + lane.name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     std::move(expected),
+                     lane.mode,
+                     FE_TONEAREST});
+  };
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : {
+           Lane{"TinyAfterRoundingFlushed", 0x3f7fffffu, -126, 0xc0u, 0u},
+           Lane{"TinyAfterRoundingKept", 0x3f7fffffu, -126, 0x30u, 0x00800000u},
+           Lane{"TinyTowardZeroKept", 0x3f7fffffu, -126, 0xffu, 0x007fffffu},
+           Lane{"NegativeTinyFlushed", 0xbf7fffffu, -126, 0xc0u, 0x80000000u},
+       })
+    add(cases, false, lane);
+  for (const Lane &lane : {
+           Lane{"TinyAfterRoundingFlushed", 0x3fefffffffffffffu, -1022, 0x30u, 0u},
+           Lane{"TinyAfterRoundingKept", 0x3fefffffffffffffu, -1022, 0xc0u, 0x0010000000000000u},
+           Lane{"TinyTowardZeroKept", 0x3fefffffffffffffu, -1022, 0xccu, 0x000fffffffffffffu},
+           Lane{"NegativeTinyFlushed", 0xbfefffffffffffffu, -1022, 0x30u, 0x8000000000000000u},
+       })
+    add(cases, true, lane);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -3064,6 +3116,12 @@ INSTANTIATE_TEST_SUITE_P(Frexp, ValuCapturedLaneTest, testing::ValuesIn(frexp_ca
 
 INSTANTIATE_TEST_SUITE_P(LdexpF16, ValuCapturedLaneTest,
                          testing::ValuesIn(ldexp_f16_captured_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(LdexpTininess, ValuCapturedLaneTest,
+                         testing::ValuesIn(ldexp_tininess_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -3357,10 +3415,10 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
   const bool native_matches = amdgpu::fp_mode::native_arithmetic_matches(0, 3);
   const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
       std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
-  const uint32_t scaled32 =
-      std::bit_cast<uint32_t>(amdgpu::ldexp_float(std::bit_cast<float>(1u), 1, 1, 3));
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false);
+  const uint32_t scaled32 = amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>(1u, 1u, ldexp_policy);
   const uint64_t scaled64 =
-      std::bit_cast<uint64_t>(amdgpu::ldexp_float(std::bit_cast<double>(uint64_t{1}), 1, 1, 3));
+      amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>(uint64_t{1}, uint64_t{1}, ldexp_policy);
   const uint32_t restored_mxcsr = _mm_getcsr();
   _mm_setcsr(saved_mxcsr);
   EXPECT_FALSE(native_matches);

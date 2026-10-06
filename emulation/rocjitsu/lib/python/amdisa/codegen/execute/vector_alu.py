@@ -596,7 +596,9 @@ def gen_vector_binop(
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
             'fmac': f'std::fma(sv0, sv1, std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({d}, lane)))',
-            'ldexp': 'amdgpu::ldexp_float(sv0, sv1_i, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64())',
+            'ldexp': 'std::bit_cast<double>(amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>('
+            'std::bit_cast<uint64_t>(sv0), static_cast<uint64_t>(static_cast<uint32_t>(sv1_i)), '
+            'amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false)))',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:
@@ -637,7 +639,9 @@ def gen_vector_binop(
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
             'fmac': f'amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())',
-            'ldexp': 'amdgpu::ldexp_float(sv0, sv1_i, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())',
+            'ldexp': 'std::bit_cast<float>(amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>('
+            'std::bit_cast<uint32_t>(sv0), static_cast<uint32_t>(sv1_i), '
+            'amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false)))',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:

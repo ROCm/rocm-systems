@@ -3285,70 +3285,16 @@ template <typename Inst>
   return false;
 }
 
-/// VOP3 mixed-width LDEXP fast path with explicit guest FP controls.
-/// Reads src0 as native<float>, applies src0 abs/neg in f32, reads src1 as
-/// native<int32_t> (per-lane exponent), runs `op(a, e)`, applies
-/// result omod/clamp, then stores through a RegisterAccess write view.
+/// VOP3 F64 LDEXP fast path on raw encodings. Reads src0 as native<uint64_t>
+/// and the I32 exponent from src1's 32-bit lanes, widened to the value's lanes;
+/// `op` applies the modifiers and reads only the exponent's low 32 bits.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_ldexp_vop3_raw64_simd(Inst &inst, Wavefront &wf, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  // The final floating clamp must not inherit host DAZ/FTZ or exception state.
-  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-  using T = float32_t;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto exp_src = regs.read_operand(inst.src1, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
-    const auto e = exp_src.template load_native<int32_t>(base);
-    const util::native<float> values = op(a, e);
-    const util::native<float> scaled([&](auto index) {
-      return div_apply_omod(static_cast<float>(values[index]), wf.fp_round_mode_f32(), omod);
-    });
-    const auto r = apply_vop3_dst_mod_f32(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
-  }
-  return true;
-}
-
-template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
-  return false;
-}
-
-/// VOP3 mixed-width F64 LDEXP fast path with explicit guest FP controls.
-/// Reads src0 as native<double> via a 64-bit RegisterAccess operand view,
-/// applies src0 abs/neg in f64,
-/// reads src1 as narrow32<int32_t> (native_width64-wide), runs `op(a, e)`,
-/// applies result omod/clamp, and stores through a 64-bit RegisterAccess write
-/// view.
-template <typename Inst, typename Op>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  // Keep the final clamp in the same guest environment as the scalar path.
-  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f16_f64());
-  using T = double;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
+  using T = uint64_t;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3360,20 +3306,16 @@ template <typename Inst, typename Op>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f64<0>(src0.template load_native<T>(base), abs, neg);
-    const auto e = exp_src.template load_narrow<int32_t>(base);
-    const util::native<double> values = op(a, e);
-    const util::native<double> scaled([&](auto index) {
-      return div_apply_omod(static_cast<double>(values[index]), wf.fp_round_mode_f16_f64(), omod);
-    });
-    const auto r = apply_vop3_dst_mod_f64(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
+    const auto a = src0.template load_native<T>(base);
+    const auto e =
+        util::stdx::static_simd_cast<util::native<T>>(exp_src.template load_narrow<uint32_t>(base));
+    dst.template store_native<T>(base, op(a, e), chunk);
   }
   return true;
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_raw64_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -5100,7 +5042,7 @@ template <bool Vop3, typename Inst>
   return
 #endif
 
-/// LDEXP_F16 on raw halves: ABS/NEG apply to the value, never to the exponent.
+/// LDEXP on raw encodings: ABS/NEG apply to the value, never to the exponent.
 #define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16(...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<false, uint32_t>(                       \
           inst, wf,                                                                                \
@@ -5113,6 +5055,22 @@ template <bool Vop3, typename Inst>
           ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F16>(            \
               inst, wf, __VA_ARGS__, 1u)))                                                         \
   return
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<uint32_t>(                                  \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F32>(            \
+              inst, wf, __VA_ARGS__, 1u)))                                                         \
+  return
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_raw64_simd(                                       \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F64>(            \
+              inst, wf, __VA_ARGS__, 1u)))                                                         \
+  return
+#endif
 
 /// Unary raw floating-point paths, with the same modifier wrapper as the binary ones.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP(Fmt, ...)                                              \
@@ -5329,20 +5287,6 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
-  return
-#endif
-
-/// VOP3 ldexp counterpart (f32 src0 + int32 src1 exp). Variadic functor.
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp32_simd(inst, wf, __VA_ARGS__))                 \
-  return
-
-/// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
 #endif
 

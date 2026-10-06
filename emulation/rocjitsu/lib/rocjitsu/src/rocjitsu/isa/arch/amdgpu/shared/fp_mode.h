@@ -1136,27 +1136,4 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   return util::f32_to_f16_mode(value, fp16_ovfl);
 }
 
-/// @brief Scale an F32 or F64 value by an integer power of two with explicit
-/// guest rounding and flushing. V_LDEXP_F16 uses ldexp.h on raw halves.
-template <typename Float>
-inline Float ldexp_float(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {
-  using Format = DivisionFormat<Float>;
-  using Bits = typename Format::Bits;
-  const Bits bits = std::bit_cast<Bits>(value);
-  const Bits magnitude = bits & ~Format::sign;
-  if (magnitude >= Format::infinity)
-    return std::bit_cast<Float>(Bits(bits | (magnitude > Format::infinity ? Format::quiet : 0)));
-  const int exponent = Format::exponent(bits);
-  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u)))
-    return std::bit_cast<Float>(Bits(bits & Format::sign));
-  const Bits significand =
-      (bits & Format::fraction_mask) | (exponent ? Bits{1} << Format::fraction : 0);
-  // Larger adjustments have the same overflow/underflow result. Bound them
-  // before adding the format's exponent so INT32_MIN/MAX cannot overflow.
-  const int bounded = std::clamp(adjustment, -4096, 4096);
-  return div_round<Float>(significand,
-                          (exponent ? exponent : 1) - Format::bias - Format::fraction + bounded,
-                          (bits & Format::sign) != 0, rounding, denorm);
-}
-
 } // namespace rocjitsu::amdgpu

@@ -922,22 +922,31 @@ class TestDeriveVectorUnary:
         assert 'inst_.omod' not in cpp and 'inst_.clamp' not in cpp
         assert 'f32_to_f16' not in cpp and 'std::frexp' not in cpp
 
-    def test_ldexp_f16_vop3_modifies_only_the_value(self):
-        sem = derive_semantics('V_LDEXP_F16', 'ENC_VOP3')
+    @pytest.mark.parametrize(
+        ('dtype', 'operation'),
+        [
+            ('F16', 'Operation<amdgpu::fp_format::F16>'),
+            ('F32', 'Operation<amdgpu::fp_format::F32>'),
+            ('F64', 'Operation<amdgpu::fp_format::F64, 32>'),
+        ],
+    )
+    def test_ldexp_vop3_modifies_only_the_value(self, dtype, operation):
+        sem = derive_semantics(f'V_LDEXP_{dtype}', 'ENC_VOP3')
         fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
         cpp = lower_sema_block(
             enrich_block(derive_sema_block(sem), enc_field_names=fields)
         )
-        assert 'amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(' in cpp
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert f'amdgpu::ldexp::{operation}{{ldexp_policy}}' in cpp
         assert (
             'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
             in cpp
         )
         assert (
-            'amdgpu::output_modifier_policy<amdgpu::fp_format::F16>'
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
             '(wf, inst_.omod, inst_.clamp)' in cpp
         )
-        assert 'fp_mode::ldexp_f16' not in cpp
+        assert 'ldexp_float' not in cpp and 'div_apply_omod' not in cpp
 
     @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
