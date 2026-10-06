@@ -1132,9 +1132,6 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
           max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
-  // Track queue IDs already assigned to earlier internal streams so each new
-  // stream avoids colliding with them at creation time.
-  std::unordered_set<uint64_t> used_qids;
   for (uint32_t i = 0; i < max_streams; ++i) {
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
                                   hipStreamNonBlocking);
@@ -1151,14 +1148,11 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
       return hipErrorOutOfMemory;
     }
 
-    // Pin the queue so dynamic queue management won't release it between launches
-    stream->vdev()->PinQueue();
-    // Acquire a queue that doesn't collide with previously created internal streams.
-    // On the first stream (used_qids empty) this is a normal acquisition.
-    if (!used_qids.empty()) {
-      stream->vdev()->ReacquireQueueExcluding(used_qids);
-    }
-    used_qids.insert(stream->getQueueID());
+    // Graph executables may outlive their last launch. Give an idle internal
+    // stream's queue back to the dynamic pool instead of occupying a queue
+    // for the entire graph lifetime. UpdateStreams resolves queue collisions
+    // against the launch stream and other internal streams on every launch.
+    stream->vdev()->ReleaseHwQueue();
 
     parallel_streams_[devId].push_back(stream);
   }
@@ -1194,17 +1188,9 @@ hipError_t GraphExecBase::EnsureCrossDeviceStream() {
   }
 
   auto& parallel_streams = parallel_streams_[captureDeviceId_];
-  stream->vdev()->PinQueue();
-  // Avoid colliding with the queues already held by the capture-device pool.
-  std::unordered_set<uint64_t> used_qids;
-  for (auto* existing : parallel_streams) {
-    if (existing != nullptr) {
-      used_qids.insert(existing->getQueueID());
-    }
-  }
-  if (!used_qids.empty()) {
-    stream->vdev()->ReacquireQueueExcluding(used_qids);
-  }
+  // Queue assignment is resolved with the rest of the capture-device pool
+  // when a cross-device launch uses this stream.
+  stream->vdev()->ReleaseHwQueue();
 
   // Owned by parallel_streams_, so ~GraphExecBase() tears it down with the rest.
   parallel_streams.push_back(stream);
@@ -1545,6 +1531,22 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
   if (min_overlap == 0) return false;            // gate disabled
   if (segments_.size() < 2) return false;        // nothing to parallelize
 
+  // Graphs with several distinct branches have enough work to amortize their
+  // synchronization even when each kernel's launch grid is small. The
+  // occupancy estimate below cannot see loop work inside those kernels.
+  if (segments_.size() >= 3) {
+    size_t nodes = 0;
+    for (const auto& segment : segments_) nodes += segment.nodes.size();
+    bool has_parallel_level = false;
+    for (const auto& level_segments : segments_per_level_) {
+      if (level_segments.second.size() >= 2) {
+        has_parallel_level = true;
+        break;
+      }
+    }
+    if (nodes >= 4 && has_parallel_level) return false;
+  }
+
   const int dev0 = segments_.front().dev_id;
   for (const auto& seg : segments_) {
     if (seg.dev_id != dev0) return false;
@@ -1554,6 +1556,33 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
   if (dev0 >= 0) {
     const auto& dinfo = g_devices[dev0]->devices()[0]->info();
     machine_threads = static_cast<size_t>(dinfo.maxComputeUnits_) * dinfo.maxThreadsPerCU_;
+  }
+  // Two independent, substantial kernel chains can also amortize the
+  // cross-stream signals. Require a full machine wave on each branch so
+  // short chains of tiny kernels still use the cheaper single-stream path.
+  if (segments_.size() == 2 && machine_threads != 0) {
+    size_t nodes = 0;
+    for (const auto& segment : segments_) nodes += segment.nodes.size();
+    bool parallel = false;
+    for (const auto& level_segments : segments_per_level_) {
+      if (level_segments.second.size() == 2) {
+        parallel = true;
+        break;
+      }
+    }
+    auto has_full_wave = [machine_threads](const Segment& segment) {
+      for (Node node : segment.nodes) {
+        if (node != nullptr && node->GetType() == hipGraphNodeTypeKernel &&
+            static_cast<GraphKernelNode*>(node)->GetLaunchThreadCount() >= machine_threads) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (nodes >= 4 && parallel && has_full_wave(segments_[0]) &&
+        has_full_wave(segments_[1])) {
+      return false;
+    }
   }
   auto node_work = [machine_threads](Node n) -> size_t {
     if (n == nullptr || n->GetType() != hipGraphNodeTypeKernel) return 1;
@@ -2678,6 +2707,11 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
           if (seg_stream != launch_stream) {
             auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
             if (marker != nullptr) {
+              // A deep graph can reuse data across many dependent levels. Keep its
+              // entry cache scope; short parallel graphs avoid the extra flush.
+              if (max_dependency_level_ <= 4) {
+                marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+              }
               marker->enqueue();
               marker->release();
             }

@@ -2361,6 +2361,23 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
 
 void Device::hostFree(void* ptr, size_t size) const { memFree(ptr, size); }
 
+// ================================================================================================
+void* Device::hostExecutableAlloc(size_t size) const {
+  // CPU-written, GPU-executed command buffers: fine-grained coherent system memory with an
+  // explicit executable and uncached policy, independent of the kernel-argument pool policy.
+  void* ptr = nullptr;
+  const uint32_t memFlags = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG | HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  if (Hsa::memory_pool_allocate(getHostMemoryPool(kAtomics), size, memFlags, &ptr) !=
+      HSA_STATUS_SUCCESS) {
+    return nullptr;
+  }
+  if (Hsa::agents_allow_access(1, &bkendDevice_, nullptr, ptr) != HSA_STATUS_SUCCESS) {
+    hostFree(ptr, size);
+    return nullptr;
+  }
+  return ptr;
+}
+
 bool Device::deviceAllowAccess(void* ptr) const {
   std::lock_guard<std::mutex> lock(lock_allow_access_);
   if (!p2pAgents().empty()) {
@@ -3732,6 +3749,29 @@ void Device::DrainDeferredQueueDestroys() {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
     Hsa::queue_destroy(queue);
   }
+}
+
+// ================================================================================================
+bool Device::TryNativeQueueReadIndex(uint64_t queue_id, uint64_t* read_index) {
+  // Queue-pool mutation uses the same lock. Never wait for it on the dispatch path.
+  // Pooled queues are never destroyed while the device exists, and their ids are unique.
+  if (!active_queue_access_.tryLock()) {
+    return false;
+  }
+  std::unique_lock<amd::Monitor> lock(active_queue_access_, std::adopt_lock);
+  size_t inspected = 0;
+  for (const auto& pool : queuePool_) {
+    for (const auto& entry : pool) {
+      if (++inspected > 64) {
+        return false;
+      }
+      if (entry.first->id == queue_id && entry.second.refCount > 0) {
+        *read_index = Hsa::queue_load_read_index_scacquire(entry.first);
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ================================================================================================
