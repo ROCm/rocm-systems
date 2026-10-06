@@ -57,7 +57,9 @@ protected:
     {
         std::map<size_t, float> result;
         for(size_t i = 0; i < 4; ++i)
+        {
             result[i] = mhz;
+        }
         return result;
     }
 
@@ -85,7 +87,7 @@ TEST_F(cpu_device_test, all_metrics_supported_when_procfs_readable)
     const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_EQ(supported.bits.frequency, 1u);
     EXPECT_EQ(supported.bits.load, 1u);
     EXPECT_EQ(supported.bits.page_rss, 1u);
@@ -154,7 +156,7 @@ TEST_F(cpu_device_test, frequencies_collected)
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    auto const          result = dev.get_cpu_metrics(all_enabled);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -170,7 +172,7 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 
     const std::set<size_t> subset = { 1, 3 };
     device<MockBackend>    dev(mock_backend, 0, subset);
-    auto                   result = dev.get_cpu_metrics(all_enabled);
+    auto const             result = dev.get_cpu_metrics(all_enabled);
 
     std::set<size_t> collected_ids;
     for(const auto& cpu : result.cpu_data)
@@ -190,7 +192,7 @@ TEST_F(cpu_device_test, first_sample_returns_zero_load)
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    auto const          result = dev.get_cpu_metrics(all_enabled);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -201,10 +203,10 @@ TEST_F(cpu_device_test, first_sample_returns_zero_load)
 TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
 {
     // Baseline: 100 active (user), 900 idle, total=1000
-    auto baseline = make_jiffies(100, 900);
+    auto const baseline = make_jiffies(100, 900);
     // After: 200 active (user), 1800 idle, total=2000
     // delta_active=100, delta_total=1000, load=10%
-    auto after = make_jiffies(200, 1800);
+    auto const after = make_jiffies(200, 1800);
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
         .WillOnce(Return(baseline))  // init probe
@@ -216,7 +218,7 @@ TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result = dev.get_cpu_metrics(all_enabled);
+    auto const result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 10.0, 0.001);
@@ -225,9 +227,9 @@ TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
 
 TEST_F(cpu_device_test, full_load_calculation)
 {
-    auto baseline = make_jiffies(0, 1000);
+    auto const baseline = make_jiffies(0, 1000);
     // delta_active=1000, delta_total=1000, load=100%
-    auto after = make_jiffies(1000, 1000);
+    auto const after = make_jiffies(1000, 1000);
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
         .WillOnce(Return(baseline))
@@ -239,7 +241,7 @@ TEST_F(cpu_device_test, full_load_calculation)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);
 
-    auto result = dev.get_cpu_metrics(all_enabled);
+    auto const result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 100.0, 0.001);
@@ -248,9 +250,9 @@ TEST_F(cpu_device_test, full_load_calculation)
 
 TEST_F(cpu_device_test, zero_load_when_idle)
 {
-    auto baseline = make_jiffies(100, 900);
+    auto const baseline = make_jiffies(100, 900);
     // Only idle increased: delta_active=0, delta_total=1000, load=0%
-    auto after = make_jiffies(100, 1900);
+    auto const after = make_jiffies(100, 1900);
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
         .WillOnce(Return(baseline))
@@ -262,7 +264,7 @@ TEST_F(cpu_device_test, zero_load_when_idle)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);
 
-    auto result = dev.get_cpu_metrics(all_enabled);
+    auto const result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 0.0, 0.001);
@@ -271,7 +273,7 @@ TEST_F(cpu_device_test, zero_load_when_idle)
 
 TEST_F(cpu_device_test, process_metrics_collected)
 {
-    auto snap = make_rusage();
+    auto const snap = make_rusage();
     ON_CALL(*mock_backend, read_rusage()).WillByDefault(Return(snap));
 
     EXPECT_CALL(*mock_backend, read_proc_stat()).Times(2);        // init + 1 sample
@@ -279,7 +281,7 @@ TEST_F(cpu_device_test, process_metrics_collected)
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    auto const          result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_EQ(result.process_data.page_rss, 50 * 1024 * 1024);
     EXPECT_EQ(result.process_data.virt_mem, 200 * 1024 * 1024);
@@ -312,7 +314,7 @@ TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 
     const std::set<size_t> empty_set;
     device<MockBackend>    dev(mock_backend, 0, empty_set);
-    auto                   result = dev.get_cpu_metrics(all_enabled);
+    auto const             result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_TRUE(result.cpu_data.empty());
     EXPECT_GT(result.process_data.page_rss, 0);
@@ -326,12 +328,15 @@ TEST_F(cpu_device_test, single_cpu_monitored)
 
     const std::set<size_t> single = { 2 };
     device<MockBackend>    dev(mock_backend, 0, single);
-    auto                   result = dev.get_cpu_metrics(all_enabled);
+    auto const             result = dev.get_cpu_metrics(all_enabled);
 
     size_t cpu2_count = 0;
     for(const auto& cpu : result.cpu_data)
     {
-        if(cpu.cpu_id == 2) cpu2_count++;
+        if(cpu.cpu_id == 2)
+        {
+            cpu2_count++;
+        }
     }
     EXPECT_EQ(cpu2_count, 1u);
 }
@@ -357,10 +362,10 @@ TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
 
 TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
 {
-    auto jiffies1 = make_jiffies(100, 900);  // total=1000
-    auto jiffies2 =
+    auto const jiffies1 = make_jiffies(100, 900);  // total=1000
+    auto const jiffies2 =
         make_jiffies(200, 1800);  // total=2000, delta=1000, active_delta=100 -> 10%
-    auto jiffies3 =
+    auto const jiffies3 =
         make_jiffies(700, 2300);  // total=3000, delta=1000, active_delta=500 -> 50%
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
@@ -375,13 +380,13 @@ TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
 
     (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result2 = dev.get_cpu_metrics(all_enabled);  // 10%
+    auto const result2 = dev.get_cpu_metrics(all_enabled);  // 10%
     for(const auto& cpu : result2.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 10.0, 0.001);
     }
 
-    auto result3 = dev.get_cpu_metrics(all_enabled);  // 50%
+    auto const result3 = dev.get_cpu_metrics(all_enabled);  // 50%
     for(const auto& cpu : result3.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 50.0, 0.001);
@@ -390,8 +395,8 @@ TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
 
 TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
 {
-    auto jiffies1 = make_jiffies(100, 900);
-    auto jiffies2 = make_jiffies(200, 1800);
+    auto const jiffies1 = make_jiffies(100, 900);
+    auto const jiffies2 = make_jiffies(200, 1800);
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
         .WillOnce(Return(jiffies1))
@@ -401,7 +406,7 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
     ON_CALL(*mock_backend, read_cpu_frequencies())
         .WillByDefault(Return(make_freqs(3200.0f)));
 
-    auto snap = make_rusage(100 * 1024 * 1024, 500 * 1024 * 1024);
+    auto const snap = make_rusage(100 * 1024 * 1024, 500 * 1024 * 1024);
     ON_CALL(*mock_backend, read_rusage()).WillByDefault(Return(snap));
 
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(3);  // init + 2 samples
@@ -410,7 +415,7 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result = dev.get_cpu_metrics(all_enabled);
+    auto const result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_EQ(result.cpu_data.size(), 4u);
     for(const auto& cpu : result.cpu_data)
@@ -442,7 +447,7 @@ TEST_F(cpu_device_test, only_frequency_enabled_skips_load_and_process)
         .Times(1);  // only the init probe in constructor
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(freq_only);
+    auto const          result = dev.get_cpu_metrics(freq_only);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -458,8 +463,8 @@ TEST_F(cpu_device_test, only_load_enabled_skips_frequency_and_process)
     enabled_metrics load_only{};
     load_only.bits.load = 1;
 
-    auto baseline = make_jiffies(100, 900);
-    auto after    = make_jiffies(200, 1800);
+    auto const baseline = make_jiffies(100, 900);
+    auto const after    = make_jiffies(200, 1800);
 
     EXPECT_CALL(*mock_backend, read_proc_stat())
         .WillOnce(Return(baseline))  // init probe
@@ -475,7 +480,7 @@ TEST_F(cpu_device_test, only_load_enabled_skips_frequency_and_process)
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(load_only);  // baseline
 
-    auto result = dev.get_cpu_metrics(load_only);
+    auto const result = dev.get_cpu_metrics(load_only);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -492,7 +497,7 @@ TEST_F(cpu_device_test, only_process_metrics_enabled)
     process_only.bits.peak_rss  = 1;
     process_only.bits.user_time = 1;
 
-    auto snap = make_rusage();
+    auto const snap = make_rusage();
     EXPECT_CALL(*mock_backend, read_rusage())
         .WillOnce(Return(snap))   // init probe
         .WillOnce(Return(snap));  // sample
@@ -502,7 +507,7 @@ TEST_F(cpu_device_test, only_process_metrics_enabled)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // only the init probe
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(process_only);
+    auto const          result = dev.get_cpu_metrics(process_only);
 
     EXPECT_EQ(result.process_data.page_rss, 50 * 1024 * 1024);
     EXPECT_EQ(result.process_data.peak_rss, 60 * 1024 * 1024);
@@ -522,7 +527,7 @@ TEST_F(cpu_device_test, no_metrics_enabled_skips_all_reads)
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // only the init probe
 
     device<MockBackend> dev(mock_backend, 0, monitored_cpus);
-    auto                result = dev.get_cpu_metrics(none);
+    auto const          result = dev.get_cpu_metrics(none);
 
     // Per-CPU entries exist (from make_empty_metrics) but all values are zero
     EXPECT_EQ(result.cpu_data.size(), 4u);

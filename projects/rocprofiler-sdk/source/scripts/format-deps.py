@@ -26,7 +26,6 @@
 import argparse
 import io
 import os
-import sys
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -43,7 +42,7 @@ class FormatSource(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../tests -type f -not -path "'
             + os.path.dirname(__file__)
-            + "/../../build/*\" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"
+            + r"""/../../build/*" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"""
         )
         exit(0)
 
@@ -57,7 +56,7 @@ class FormatCMake(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../build/*" -not -path "'
             + os.path.dirname(__file__)
-            + "/../../external/*\" | egrep 'CMakeLists.txt|\.cmake$')"
+            + r"""/../../external/*" | egrep 'CMakeLists.txt|\.cmake$')"""
         )
         exit(0)
 
@@ -96,7 +95,7 @@ class FormatAll(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../tests -type f -not -path "'
             + os.path.dirname(__file__)
-            + "/../../build/*\" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"
+            + r"""/../../build/*" | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')"""
         )
         os.system(
             "cmake-format -i $(find "
@@ -105,7 +104,7 @@ class FormatAll(argparse.Action):
             + os.path.dirname(__file__)
             + '/../../build/*" -not -path "'
             + os.path.dirname(__file__)
-            + "/../../external/*\" | egrep 'CMakeLists.txt|\.cmake$')"
+            + r"""/../../external/*" | egrep 'CMakeLists.txt|\.cmake$')"""
         )
         os.system("black " + os.path.dirname(__file__) + "/../..")
         FormatYAML.__call__(FormatYAML, parser, namespace, values, option_string)
