@@ -1344,15 +1344,6 @@ def deref_for_param(api: str, param: str) -> Optional[Deref]:
     return None
 
 
-def deref_covered_params(api: str) -> Set[str]:
-    """Parameters whose pointee reaches the archive.
-
-    Read by the matrix's payload-loss detector (derive_manifest.py): a
-    const-struct-pointer argument that is carried inline is no longer a loss.
-    """
-    return {d.param for d in deref_specs(api)}
-
-
 # ---------------------------------------------------------------------------
 # Structs passed BY VALUE that do not fit in a uint64_t
 #

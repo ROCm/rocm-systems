@@ -11,7 +11,7 @@
  * Hidden ([.][hrr-direct]) GPU workloads for the per-API replay matrix. Each
  * one is a call site for a family of HIP APIs; hrr_api_matrix_test.cc captures
  * them, replays the archive, and asserts that every API behaved as
- * api_matrix.yaml says it should.
+ * hrr_api_matrix_expectations.h says it should.
  *
  * These differ from the workloads in hrr_workload_test.cc in intent rather
  * than in kind. Those exist to produce a D2H buffer that must survive replay
@@ -472,8 +472,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   }
 
   // ---- P2(d): hipStreamBatchMemOp's op list -------------------------------
-  // The op array is a plain (non-const) pointer, so the mechanical detector in
-  // derive_manifest.py does not flag it — api_matrix.yaml marks it by hand.
+  // The op array is a plain (non-const) pointer, so it does not look like the
+  // other payload losses; its row in hrr_api_matrix_expectations.h marks it.
   // The ops themselves never reach the archive.
   {
     uint32_t* flag = nullptr;
@@ -2179,8 +2179,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
 // Worth knowing while reading this: HRR's capture shims record only on
 // hipSuccess. An API that cannot succeed on this machine therefore cannot be
 // captured, and cannot be given a replay class by any amount of test code.
-// Those come back as not-exercised and are answered in api_matrix.yaml with a
-// measured reason rather than another call site.
+// Those come back as not-exercised rather than failed.
 //
 // Final blob: d[i] == 29.
 // ===========================================================================
@@ -2211,8 +2210,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   // not by choice: hipDeviceGetDevResource, hipGreenCtxCreate, the
   // hipExecutionCtx* set and their hipDevResource types are declared in the
   // rocm-systems headers but not in the ROCm SDK these tests compile against,
-  // so there is no way to write the call. api_matrix.yaml carries the same
-  // reason for each of them.
+  // so there is no way to write the call.
 
   // ---- Batch memory operations --------------------------------------------
   // The batched spellings of copy, prefetch and discard. A recording made by a

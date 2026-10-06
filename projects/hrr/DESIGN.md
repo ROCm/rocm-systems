@@ -1425,10 +1425,8 @@ comparison only; the value handed back to the runtime is always a local of the p
 own type.
 
 What is left is the honest residue: an API whose pointer argument has no `DEREF_FIELDS`
-entry still records only the address. That is now visible rather than silent — the
-manifest classifies it as payload loss and `derive_manifest.py` fails the build if the
-count drifts from its recorded baseline, so a newly-captured struct-input API cannot
-lose its payload unnoticed.
+entry still records only the address. That is now visible rather than silent: its row
+in `tests/integration/hrr_api_matrix_expectations.h` carries the payload-loss flag.
 
 ### Fail-Loud Scope Exclusions
 
