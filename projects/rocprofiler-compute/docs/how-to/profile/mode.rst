@@ -1041,7 +1041,7 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* The workload’s Python version must match the Python version used by ``roctx``.
+* Old stacked traces are unreadable.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
