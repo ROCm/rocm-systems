@@ -867,17 +867,22 @@ inline void amdSmiFabricTelemetryRecordMover(amdsmiFabricTelemetryMover* top, in
 /**
  * @brief Identity of the instance a counter belongs to
  *
- * Folds the category and the instance label into one value, so a baseline slot can
- * be checked against the counter now occupying it. The instance has to be part of
- * this: two instances of the same kind carry identical item IDs, so an ID alone
- * would not tell netport6 from netport7.
+ * Folds the category, the instance's logical index and its label into one value, so
+ * a baseline slot can be checked against the counter now occupying it. The instance
+ * has to be part of this: two instances of the same kind carry identical item IDs, so
+ * an ID alone would not tell netport6 from netport7. The logical index is included
+ * because the label is not guaranteed to be populated, and an unset one is the same
+ * empty string for every instance in the category.
  *
  * @param[in] category Category the instance belongs to
+ * @param[in] logicalIdx Instance's logical index within the category
  * @param[in] instanceName Instance label, which need not be NUL terminated
- * @return Hash of the two, for use with amdSmiFabricTelemetryItemKey()
+ * @return Hash of the three, for use with amdSmiFabricTelemetryItemKey()
  */
-inline uint64_t amdSmiFabricTelemetryInstanceKey(unsigned category, const char* instanceName) {
+inline uint64_t amdSmiFabricTelemetryInstanceKey(unsigned category, unsigned logicalIdx,
+                                                 const char* instanceName) {
   uint64_t hash = 14695981039346656037ull ^ category; // FNV-1a basis
+  hash = (hash ^ logicalIdx) * 1099511628211ull;
   for (size_t i = 0; i < kAmdSmiFabricTelemetryLabelSize && instanceName[i] != '\0'; i++) {
     hash = (hash ^ (unsigned char)instanceName[i]) * 1099511628211ull;
   }
@@ -971,7 +976,7 @@ inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
     for (unsigned i = 0; dataset->instances != nullptr && i < dataset->instance_count; i++) {
       const amdsmi_fabric_telemetry_instance_t* inst = &dataset->instances[i];
       if (inst->items == nullptr) continue;
-      const uint64_t instanceKey = amdSmiFabricTelemetryInstanceKey(cat, inst->name.text);
+      const uint64_t instanceKey = amdSmiFabricTelemetryInstanceKey(cat, inst->logical_idx, inst->name.text);
 
       for (unsigned k = 0; k < inst->item_count; k++) {
         const uint64_t value = inst->items[k].value;

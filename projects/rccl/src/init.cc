@@ -492,6 +492,22 @@ static ncclResult_t commFree(ncclComm_t comm) {
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL) return ncclSuccess;
 
+#ifdef USE_AMDSMI
+  // This device's last reference frees its telemetry; the session's last device
+  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
+  // (telemetry disabled, or an init that failed before acquiring) does not
+  // unbalance the count.
+  //
+  // First, because everything below is an NCCLCHECK and teardown is expected to
+  // fail on abort. Returning early from any of those would leave this device in
+  // telemetryDevices and the sampler polling a GPU whose comm is gone. It needs
+  // only comm->nvmlDev, which commAlloc sets.
+  if (comm->fabricTelemetryAcquired) {
+    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
+    comm->fabricTelemetryAcquired = false;
+  }
+#endif
+
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
 
@@ -653,17 +669,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     NCCLCHECK(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority));
     comm->sideStreamAcquired = false;
   }
-
-#ifdef USE_AMDSMI
-  // This device's last reference frees its telemetry; the session's last device
-  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
-  // (telemetry disabled, or an init that failed before acquiring) does not
-  // unbalance the count.
-  if (comm->fabricTelemetryAcquired) {
-    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
-    comm->fabricTelemetryAcquired = false;
-  }
-#endif
 
   // Destroy dynamic memory manager only after all device memory has been released. RCCL previously
   // deferred this to just after the destructor loop; upstream's slot here is strictly later and still

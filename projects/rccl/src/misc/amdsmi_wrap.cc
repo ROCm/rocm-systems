@@ -140,6 +140,9 @@ std::mutex fabricLock; // Thread safety for fabric operations
 bool fabricInitialized = false;
 thread_local bool threadFabricInitialized = false;
 ncclResult_t fabricInitResult = ncclSuccess;
+// Whether fabric discovery ended up on sysfs rather than the library's typed path.
+// Written once under fabricLock during initialization, read afterwards.
+bool fabricUsedSysfs = false;
 std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 bool amdSmiInitCalled = false;
@@ -687,6 +690,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       }
     }
   }
+  // Published for callers that read other library-allocated fabric structs, which the
+  // probe above does not cover and which have no probe of their own.
+  fabricUsedSysfs = useSysfs;
   amdsmiFabricDeviceCount = (int)numDevs;
 
   for (uint32_t d = 0; d < numDevs; d++) {
@@ -1036,6 +1042,16 @@ bool fabricTelemetryPreflightLocked() {
   }
   if (amd_smi_ensureFabricInitialized() != ncclSuccess) {
     WARN("fabric telemetry: fabric discovery failed; telemetry disabled");
+    return false;
+  }
+  // Discovery fell back to sysfs because it could not confirm the loaded library's
+  // fabric ABI. Telemetry has no equivalent probe and reads further than discovery
+  // does, following instance and item pointers out of a library-allocated struct, so
+  // it cannot be the one path that trusts a library the rest of this file does not.
+  // Devices keep fabricSupported on the sysfs path, so this gate is what stops them.
+  if (fabricUsedSysfs) {
+    WARN("fabric telemetry: fabric discovery could not confirm the loaded amd_smi's ABI and fell back to sysfs, "
+         "which leaves the telemetry struct layout unverified; telemetry disabled");
     return false;
   }
 

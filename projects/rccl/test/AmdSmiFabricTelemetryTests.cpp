@@ -94,6 +94,19 @@ public:
         telemetry_.datasets[category]->instances = nullptr;
     }
 
+    // Blanks an instance label, as amd_smi leaves it when the firmware supplies no
+    // name for the instance.
+    void ClearLabel(unsigned category, size_t instance)
+    {
+        amdsmi_fabric_telemetry_instance_t* inst = &telemetry_.datasets[category]->instances[instance];
+        memset(inst->name.text, 0, sizeof(inst->name.text));
+    }
+
+    void SetLogicalIdx(unsigned category, size_t instance, unsigned logicalIdx)
+    {
+        telemetry_.datasets[category]->instances[instance].logical_idx = logicalIdx;
+    }
+
     void SetLabel(unsigned category, size_t instance, const char* text, size_t length)
     {
         memcpy(telemetry_.datasets[category]->instances[instance].name.text, text, length);
@@ -556,6 +569,38 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas
     ASSERT_EQ(amdSmiFabricTelemetryDiff(relabelled.Get(), &baseline, FakeTelemName, reports), 1);
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0) << "a counter from another instance is not this one's history";
+}
+
+// The label is not guaranteed to be populated, and an unset one is the same empty
+// string for every instance, so it cannot be the only thing identifying them. Here
+// two unnamed instances with the same counter IDs swap positions, which leaves the
+// counter total unchanged and so is invisible to a count comparison too.
+TEST(AmdSmiFabricTelemetryDiff, UnnamedInstancesSwappingPositionsReportNoFabricatedDeltas)
+{
+    FakeSample first;
+    first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10}, {20}});
+    first.ClearLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0);
+    first.ClearLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1);
+    first.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 6);
+    first.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 7);
+
+    amdsmiFabricTelemetryBaseline baseline{};
+    Reports                       reports;
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_TRUE(baseline.established);
+
+    // The same two ports, reported in the other order. Port 7's 20 now sits in the
+    // slot holding port 6's 10, which would read as +10.
+    FakeSample swapped;
+    swapped.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{20}, {10}});
+    swapped.ClearLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0);
+    swapped.ClearLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1);
+    swapped.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 7);
+    swapped.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 6);
+
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(swapped.Get(), &baseline, FakeTelemName, reports), 1);
+    EXPECT_FALSE(baseline.established);
+    EXPECT_EQ(reports[0].changedCount, 0) << "the logical index is all that separates unnamed instances";
 }
 
 TEST(AmdSmiFabricTelemetryDiff, OnlyPresentCategoriesAreReported)

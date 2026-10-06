@@ -350,21 +350,23 @@ TEST(AmdSmiWrapFabricPaths, LibraryPathMatchesSysfs)
 // process.
 // ---------------------------------------------------------------------------
 
+// clearVariable rather than setting the key to 0: the child inherits the parent
+// environment, and the point is the RCCL_PARAM default, not an explicit zero.
 TEST(AmdSmiFabricTelemetryAcquire, DisabledByDefaultAcquiresNothing)
 {
-    RUN_ISOLATED_TEST_WITH_ENV(
-        "DisabledByDefaultAcquiresNothing",
-        []() {
-            bool acquired = true; // must be cleared even on the early return
-            EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
-            EXPECT_FALSE(acquired) << "telemetry is opt-in, so an unset enable must acquire nothing";
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                           "DisabledByDefaultAcquiresNothing",
+                           []() {
+                               bool acquired = true; // must be cleared even on the early return
+                               EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
+                               EXPECT_FALSE(acquired) << "telemetry is opt-in, so an unset enable acquires nothing";
 
-            // What commFree() skips for such a comm, called anyway: releasing a device
-            // that was never acquired has to be harmless rather than underflow a count.
-            EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
-        },
-        {{"RCCL_USE_AMD_SMI_LIB", "1"}, {"RCCL_FABRIC_TELEMETRY_ENABLE", "0"}}
-    );
+                               // What commFree() skips for such a comm, called anyway: releasing a
+                               // device never acquired has to be harmless, not underflow a count.
+                               EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+                           })
+                           .setVariable("RCCL_USE_AMD_SMI_LIB", "1")
+                           .clearVariable("RCCL_FABRIC_TELEMETRY_ENABLE"));
 }
 
 TEST(AmdSmiFabricTelemetryAcquire, EnabledWithoutAmdSmiLibAcquiresNothing)
