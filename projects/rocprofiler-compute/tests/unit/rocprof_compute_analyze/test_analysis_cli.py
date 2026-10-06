@@ -292,3 +292,17 @@ def test_apply_operator_filter_kernel_ids_only_from_requested_backend():
         for root in roots:
             collect_names(root)
     assert "triton.JITFunction.matmul_kernel" not in stored_names
+
+
+def test_list_operators_omits_other_backend_kernel_lines(capsys):
+    cli = cli_analysis.__new__(cli_analysis)
+    workload = schema.Workload()
+    workload.ml_api_call_trees = torch_parent_triton_child_forest()
+    cli._runs = {"/workload": workload}
+    kernel_top = pd.DataFrame({
+        "Kernel_Name": ["torch_gemm_kernel", "triton_matmul_kernel"]
+    })
+    cli.list_operators("/workload", kernel_top, ["triton"])
+    captured = capsys.readouterr()
+    assert "triton_matmul_kernel" in captured.out
+    assert "torch_gemm_kernel" not in captured.out
