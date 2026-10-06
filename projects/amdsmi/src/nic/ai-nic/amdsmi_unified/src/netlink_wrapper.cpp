@@ -56,6 +56,13 @@ void NLSocket::set_buffer_size(int rx_size, int tx_size) {
   nl_socket_set_buffer_size(sock_, rx_size, tx_size);
 }
 
+void NLSocket::disable_auto_ack() {
+  if (!sock_) {
+    return;
+  }
+  nl_socket_disable_auto_ack(sock_);
+}
+
 NLMessage::NLMessage() : msg_(nlmsg_alloc()) {
   if (!msg_) {
     throw std::runtime_error("Failed to allocate netlink message");

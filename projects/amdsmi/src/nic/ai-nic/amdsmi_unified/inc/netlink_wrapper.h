@@ -44,6 +44,10 @@ class NLSocket {
 
   void set_buffer_size(int rx_size, int tx_size);
 
+  // Stops libnl requesting an ACK per message. The ACK is a second message the
+  // query loop never reads, so the next query would consume it in place of its reply.
+  void disable_auto_ack();
+
   // Non-owning; do not free.
   struct nl_sock* get() const { return sock_; }
 
