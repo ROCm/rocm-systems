@@ -9,6 +9,9 @@
 #ifndef NCCL_INT_TUNER_H_
 #define NCCL_INT_TUNER_H_
 
+#include <map>
+#include <string>
+
 #include "nccl_tuner.h"
 #include "comm.h"
 
@@ -17,11 +20,15 @@
 // Built-in CSV tuner - compiled into librccl.so (follows rocmNetIb pattern)
 extern ncclTuner_t rcclCsvTuner;
 
-// Find CSV config file path. Returns path if found, nullptr if not.
+// Find the CSV config source. Returns a file path, an "<embedded>/<name>" label
+// for a config compiled into librccl.so, or nullptr if neither is available.
 // gpuArch: GPU architecture string (e.g., "gfx950") for arch-specific config lookup
 const char* rcclCsvTunerFindConfig(const char* gpuArch);
 
-// Reset CSV tuner config path discovery (for testing)
+// CSV configs compiled in from the source tree's tuner/ directory, keyed by file name.
+const std::map<std::string, std::string>& rcclCsvTunerEmbeddedConfigs();
+
+// Reset CSV tuner config source discovery (for testing)
 void rcclCsvTunerResetConfigPath();
 
 // Attempts to load NCCL tuner from environmental variable.

@@ -81,6 +81,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
+    csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc
@@ -426,6 +427,15 @@ function(rccl_standalone_setup)
   if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
   endif()
+
+  # csv_tuner.cc needs the embedded-tuner header. The RCCL build normally emits
+  # it; generate it here so a standalone test build works against an older tree.
+  if(NOT EXISTS "${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h")
+    execute_process(COMMAND ${CMAKE_COMMAND}
+      -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
+      -DOUT_FILE=${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/GenerateEmbeddedTunerConfigs.cmake)
+  endif()
   message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
   message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
@@ -770,6 +780,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"

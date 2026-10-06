@@ -1,32 +1,43 @@
 # RCCL CSV Tuner Configuration
 
-This directory is installed to `${ROCM_PATH}/share/rccl/tuner/` when RCCL is built and installed. Any CSV files added here will be automatically copied to the install location.
+Every CSV file in this directory is compiled into `librccl.so` at build time and used as the stock tuning
+default. Nothing has to be staged on disk, so a cluster does not need the file on NFS or copied to every
+node. The CSV text is embedded verbatim and parsed exactly as a file would be.
+
+Adding or editing a CSV here and rebuilding is all that is needed to change the shipped defaults. The
+generator is `cmake/GenerateEmbeddedTunerConfigs.cmake`; it writes `rccl_tuner_embedded_configs.h` into the
+build tree's `include/` directory.
 
 ## How to Use
 
-### For Development (running from build directory)
+### Shipped defaults
 
-Place your CSV config files in the `tuner/` directory within your build directory:
-
-```bash
-# From the build directory (e.g., build/release/)
-cp rccl_tuner_gfx950.csv tuner/
-./rccl-tests/all_reduce_perf  # Will auto-detect tuner/rccl_tuner_gfx950.csv
-```
-
-### For Production (after installing RCCL)
-
-Place your CSV config files in the installed location:
+Nothing to do. On a `gfx950` GPU, RCCL loads the embedded `rccl_tuner_gfx950.csv` automatically. Confirm
+with:
 
 ```bash
-sudo cp rccl_tuner_gfx950.csv /opt/rocm/share/rccl/tuner/
+NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=TUNING ./all_reduce_perf -b 1K -e 256M -f 2
+# NCCL INFO Using built-in CSV tuner, config: <embedded>/rccl_tuner_gfx950.csv
 ```
 
-RCCL will automatically detect and load the config file at runtime.
+### Overriding with your own file
+
+A CSV on disk takes precedence over the embedded defaults. Either point at it directly:
+
+```bash
+export NCCL_TUNER_CONFIG_FILE=/path/to/my_tuning.csv
+```
+
+or drop it in a discovered location:
+
+```bash
+mkdir -p build/release/tuner && cp my_tuning.csv build/release/tuner/rccl_tuner_gfx950.csv  # development
+sudo mkdir -p /opt/rocm/share/rccl/tuner && sudo cp my_tuning.csv /opt/rocm/share/rccl/tuner/  # installed
+```
 
 ## Auto-Discovery Order
 
-The built-in CSV tuner searches for config files in this order:
+The built-in CSV tuner resolves its config in this order:
 
 1. `NCCL_TUNER_CONFIG_FILE` environment variable (if set)
 2. `<librccl.so dir>/tuner/rccl_tuner_<arch>.csv` (adjacent to library, for development builds)
@@ -35,8 +46,13 @@ The built-in CSV tuner searches for config files in this order:
 5. `<librccl.so dir>/../share/rccl/tuner/rccl_tuner.csv` (relative share path, for installed RCCL)
 6. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv` (fallback, GPU-specific)
 7. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv` (fallback, generic)
+8. The embedded `rccl_tuner_<arch>.csv`, then the embedded `rccl_tuner.csv`
 
-At each location, if GPU architecture is unknown, the directory is scanned for any `rccl_tuner*.csv` file.
+Steps 1-7 are overrides; step 8 is what ships in the binary.
+
+At each disk location, if GPU architecture is unknown, the directory is scanned for any `rccl_tuner*.csv`
+file. When the architecture *is* known and no entry matches it, the tuner stays inactive rather than
+applying another architecture's tuning.
 
 ## CSV Format
 
@@ -75,7 +91,13 @@ allgather,0,32768,ring,ll,4,-1,-1,-1,-1
 
 ## Disabling the Tuner
 
-To disable the built-in CSV tuner even when a config file exists:
+To ignore only the configs compiled into the binary, while still honouring a CSV on disk:
+
+```bash
+export RCCL_TUNER_EMBEDDED_CONFIG=0
+```
+
+To disable the built-in CSV tuner entirely, embedded or not:
 
 ```bash
 export NCCL_TUNER_PLUGIN=none

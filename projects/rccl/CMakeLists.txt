@@ -793,6 +793,21 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
+## the files being staged on every node. Disk locations remain as overrides.
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
+set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
+file(GLOB RCCL_TUNER_CSV_FILES ${CMAKE_CURRENT_SOURCE_DIR}/tuner/*.csv)
+add_custom_command(
+  OUTPUT  ${RCCL_EMBEDDED_TUNER_HEADER}
+  COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
+                           -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
+                           -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  DEPENDS ${RCCL_TUNER_CSV_FILES} ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  COMMENT "Generating embedded RCCL tuner configs"
+  VERBATIM)
+add_custom_target(rccl_embedded_tuner_configs DEPENDS ${RCCL_EMBEDDED_TUNER_HEADER})
+
 # Example plugins are C sources
 if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
   enable_language(C)
@@ -881,9 +896,9 @@ if(EMIT_LLVM_IR)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
-## Install tuner config directory for CSV-based tuner
-file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
+## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
+## so nothing is copied to the build tree or installed. A CSV placed in
+## <libdir>/tuner/ or share/rccl/tuner/ still overrides the embedded defaults.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
