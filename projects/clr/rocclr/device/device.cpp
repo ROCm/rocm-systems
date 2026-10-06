@@ -485,18 +485,6 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
 
   std::shared_lock lock(AllocatedLock_);
 
-  if (DEBUG_CLR_DISABLE_MEMOBJ_CACHE) {
-    for (size_t i = 0; i < count; ++i) {
-      auto s = findMemObjNoLock(srcs[i], dev);
-      src_memories[i] = s.memory;
-      src_offsets[i] = s.offset;
-      auto d = findMemObjNoLock(dsts[i], dev);
-      dst_memories[i] = d.memory;
-      dst_offsets[i] = d.offset;
-    }
-    return;
-  }
-
   constexpr int kRangeCacheSize = 16;  // src + dst base pointers across up to 8 GPUs
   constexpr int kWarmupProbes = 64;
   constexpr int kMinHitPercent = 25;   // give up below this hit rate after warmup
@@ -510,7 +498,7 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
   int cache_next = 0;
   int probes = 0;
   int hits = 0;
-  bool cache_active = true;
+  bool cache_active = !DEBUG_CLR_DISABLE_MEMOBJ_CACHE;
 
   auto resolve = [&](const void* ptr) -> LookupResult {
     const uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
