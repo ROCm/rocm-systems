@@ -223,8 +223,9 @@ Keep cleanup gated on Phase 1 + Phase 2 (collectables) acceptance so rollback vi
    - **(a) High-level metric validation** — panel / SoL-style sanity (avg/max ≤ 100% where expected; no impossible ratios).
    - **(b) Delta comparison before/after** — SPP (and Phase 2 where applicable) vs legacy packing / legacy pass-merge baselines (`compare_spp_legacy_medians` / health-report deltas).
 
+4. **SPU collectables (Phase 2 only)** — gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
 
-4. **Blocking-ticket validation** — Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
+5. **Blocking-ticket validation** — Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
 
    | Ticket | Symptom |
    |--------|---------|
@@ -234,7 +235,5 @@ Keep cleanup gated on Phase 1 + Phase 2 (collectables) acceptance so rollback vi
    | [AIPROFCOMP-267](https://ontrack-internal.amd.com/browse/AIPROFCOMP-267) | Incorrect TA/TD metrics |
    | [AIPROFCOMP-266](https://ontrack-internal.amd.com/browse/AIPROFCOMP-266) | Incorrect Workgroup Manager utilization |
    | [ROCM-31864](https://ontrack-internal.amd.com/browse/ROCM-31864) | gfx950 L2-Fabric HBM / remote read traffic incorrect (incl. >100%) |
-
-5. **SPU collectables (Phase 2 only)** — gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
 
 **Stack:** Doc → Phase 1 (SPP packing + same-pass bind) → Health utils → Phase 2a (SPU collectables / `WEIGHTED_AVG` / `COLLECT_*`) → Phase 2b (legacy cleanup, separate PR).
