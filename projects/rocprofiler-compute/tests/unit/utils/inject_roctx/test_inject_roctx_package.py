@@ -408,3 +408,30 @@ def test_resolve_user_caller_location_skips_package_and_framework_roots():
     finally:
         if stored in core._STATE.framework_roots:
             core._STATE.framework_roots.remove(stored)
+
+
+def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
+    import runpy
+    import sys
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    target = tmp_path / "target.py"
+    ok_path = tmp_path / "ok.txt"
+    target.write_text(
+        f"from pathlib import Path\nPath({str(ok_path)!r}).write_text('ok')\n"
+    )
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    recorded = []
+    monkeypatch.setattr(
+        core, "install_global_wraps", lambda names: recorded.append(list(names))
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(launch), "--frameworks", "torch", "triton", "--", str(target)],
+    )
+    runpy.run_path(str(launch))
+    assert recorded == [["torch", "triton"]]
+    assert ok_path.read_text() == "ok"
