@@ -23,3 +23,11 @@ def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
     rendered = format_wrap_args((tensor, "skip"), {"bias": tensor, "flag": True})
     assert rendered == "(float32[2x4], bias=float32[2x4])"
     assert format_wrap_args((), {}) == "n/a"
+
+
+def test_dispatcher_marker_name_for_aten_packet():
+    from utils.inject_roctx._backends.torch import dispatcher_marker_name_for
+
+    packet = SimpleNamespace(_qualified_op_name="aten::addmm")
+    func = SimpleNamespace(overloadpacket=packet)
+    assert dispatcher_marker_name_for(func) == "torch.ops.aten.addmm"
