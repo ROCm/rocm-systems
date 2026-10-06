@@ -321,12 +321,12 @@ regardless of the order the waves execute in:
    508–511, the address wave 1 wrote. The detector validates that no live writes
    overlap:
 
-   - *Fast path*: the write count for the 16-byte chunk containing byte 508 is
-     non-zero (wave 1's write is still live). Falls through to slow path.
-   - *Slow path*: scans live write events. Finds wave 1's event covering bytes
-     508–511. The event is **WAVE_COMPLETE**, not **RETIRED**, and the accessing
-     wave (0) differs from the owning wave (1).
-   - **Race reported.**
+    - *Fast path*: the write count for the 16-byte chunk containing byte 508 is
+      non-zero (wave 1's write is still live). Falls through to slow path.
+    - *Slow path*: scans live write events. Finds wave 1's event covering bytes
+      508–511. The event is **WAVE_COMPLETE**, not **RETIRED**, and the accessing
+      wave (0) differs from the owning wave (1).
+    - **Race reported.**
 
 1. **What `s_barrier` would fix.** If an `s_barrier` had appeared between steps
    4 and 5, the detector would flush all **WAVE_COMPLETE** events to

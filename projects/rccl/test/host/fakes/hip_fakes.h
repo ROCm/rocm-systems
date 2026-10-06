@@ -91,6 +91,9 @@ extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
+// Both default to hipErrorInvalidValue, the fail-loud floor.
+extern std::function<hipError_t(int /*peerDevice*/, unsigned int /*flags*/)> g_hipDeviceEnablePeerAccess;
+extern std::function<hipError_t(int /*peerDevice*/)> g_hipDeviceDisablePeerAccess;
 
 // Deep-path result seams. Default to hipErrorInvalidValue so any call a test
 // hasn't opted into surfaces as an unexpected call; set to hipSuccess to enable

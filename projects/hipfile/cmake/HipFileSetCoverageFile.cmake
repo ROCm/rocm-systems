@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-function(ais_set_coverage_file test_list_name directory)
+function(hipfile_set_coverage_file test_list_name directory)
     set(test_counter 0)
     set(test_list "${${test_list_name}}")
     foreach(test IN LISTS test_list)

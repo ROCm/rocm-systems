@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISCompilerOptions)
+include(HipFileCompilerOptions)
 include(CheckLinkerFlag)
 
-# Add a library using AIS build conventions. Shared vs. static
+# Add a library using hipFile build conventions. Shared vs. static
 # is decided by the BUILD_SHARED_LIBS option and only one can
 # be built at a time (like the rest of ROCm).
 #
@@ -16,7 +16,7 @@ include(CheckLinkerFlag)
 #   SYSINCLS [path1 [path2 ...]]                Paths to other include dirs
 #   SRCS     [src1 [src2 ...]]                  The source files
 #   LIBS     [lib1, [lib2 ...]]                 List of external library dependencies
-function(ais_add_libraries)
+function(hipfile_add_libraries)
 
     # Parse arguments
     set(options) # None at this time
@@ -28,16 +28,16 @@ function(ais_add_libraries)
     add_library(${arg_NAME} ${arg_SRCS})
 
     # Set C++ standard
-    target_compile_features(${arg_NAME} PUBLIC cxx_std_${AIS_CXX_STANDARD})
+    target_compile_features(${arg_NAME} PUBLIC cxx_std_${HIPFILE_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Set position-independent code
     set_target_properties(${arg_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     # Add version numbers
-    set_target_properties(${arg_NAME} PROPERTIES VERSION ${AIS_LIBRARY_VERSION})
+    set_target_properties(${arg_NAME} PROPERTIES VERSION ${HIPFILE_LIBRARY_VERSION})
     if(BUILD_SHARED_LIBS)
-        set_target_properties(${arg_NAME} PROPERTIES SOVERSION ${AIS_LIBRARY_SOVERSION})
+        set_target_properties(${arg_NAME} PROPERTIES SOVERSION ${HIPFILE_LIBRARY_SOVERSION})
     endif()
 
     # Add dependencies on external libraries
@@ -96,5 +96,5 @@ function(ais_add_libraries)
     target_include_directories(${arg_NAME} PRIVATE "${HIPFILE_ROOT_PATH}/shared")
 
     # Set compiler flags
-    ais_set_compiler_flags(${arg_NAME})
+    hipfile_set_compiler_flags(${arg_NAME})
 endfunction()
