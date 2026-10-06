@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -176,3 +177,25 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
+
+
+def test_sanitize_errors_when_list_torch_operators_without_trace(tmp_path, monkeypatch):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text("torch_trace: false\n")
+    mock_error = Mock(side_effect=SystemExit(1))
+    common.patch_console(monkeypatch, MODULE, "error", error=mock_error)
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(
+                tui=False,
+                path=[[str(workload)]],
+                list_torch_operators=True,
+                list_triton_operators=False,
+                torch_operator=None,
+                triton_operator=None,
+            ),
+            {},
+        ).sanitize()
+    assert "was not profiled" in mock_error.call_args.args[1]
+    assert "--torch-trace" in mock_error.call_args.args[1]
