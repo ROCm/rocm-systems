@@ -51,6 +51,10 @@
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+inline bool IsRealRequest(void* request) {
+    return request != nullptr && request != (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
+}
+
 // Skip a Cast test when any required WRR scheduler env var is absent or wrong.
 // Must be called from the test body (not a helper), because GTEST_SKIP() only
 // interrupts execution when expanded inline in the test scope.
@@ -80,6 +84,25 @@ using namespace RCCLTestHelpers;
         }                                                                                \
     } while (0)
 
+// RCCL_IB_OPTIONAL_RECV_COMPLETION=1 and QP sched off.
+#define OPT_RECV_ENABLED_ENV_CHECK_OR_SKIP()                                             \
+    do {                                                                                 \
+        struct { const char* name; const char* required; } _vars[] = {                  \
+            { "RCCL_IB_OPTIONAL_RECV_COMPLETION", "1" },                                \
+            { "RCCL_IB_QP_SCHED_ENABLE",     "0" },                                     \
+        };                                                                               \
+        for (auto& _v : _vars) {                                                         \
+            const char* _val = getenv(_v.name);                                          \
+            bool _missing = !_val || _val[0] == '\0';                                    \
+            bool _wrong   = _v.required && (!_val || strcmp(_val, _v.required) != 0);   \
+            if (_missing || _wrong) {                                                    \
+                GTEST_SKIP() << "Requires " << _v.name << "="                           \
+                             << (_v.required ? _v.required : "<any>")                   \
+                             << " (use cast_opt_recv in net_ib_transport.json)";         \
+            }                                                                            \
+        }                                                                                \
+    } while (0)
+
 // Skip when RCCL_IB_QP_SCHED_UPDATE_INTERVAL is below min_us: tests that
 // assert exact per-send token state need the RTT-driven update suspended.
 #define CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(min_us)                                     \
@@ -89,6 +112,25 @@ using namespace RCCLTestHelpers;
         if (_v < (long long)(min_us)) {                                                  \
             GTEST_SKIP() << "Requires RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= "             \
                          << (long long)(min_us) << " us (current: " << _v << ")";        \
+        }                                                                                \
+    } while (0)
+
+// Skip a port recovery test unless every rank can create UD QPs on all devices.
+// Collective (see AllRanksSupportUd), and must be expanded in the test body.
+#define RECOVERY_UD_OR_SKIP()                                                           \
+    do {                                                                                 \
+        if (!AllRanksSupportUd()) {                                                      \
+            GTEST_SKIP() << "UD QP is unsupported. Skipping port recovery test";         \
+        }                                                                                \
+    } while (0)
+
+// Skip a test that fails over between ports unless every rank completes RDMA READ
+// on all devices: failover probing reads the peer's completion records.
+// Collective (see AllRanksSupportRdmaRead), and must be expanded in the test body.
+#define FAILOVER_RDMA_READ_OR_SKIP()                                                    \
+    do {                                                                                 \
+        if (!AllRanksSupportRdmaRead()) {                                                \
+            GTEST_SKIP() << "RDMA READ is unsupported. Skipping port failover test";     \
         }                                                                                \
     } while (0)
 
@@ -279,6 +321,39 @@ protected:
         return net_->getProperties(dev, props);
     }
 
+    // If the query fails, assume every feature works so the test runs as before.
+    ncclIbCastDeviceCaps QueryDeviceCaps(int dev = 0) {
+        ncclIbCastDeviceCaps caps;
+        caps.udSupported = true;
+        caps.rdmaReadSupported = true;
+        (void)ncclIbCastGetDeviceCaps(dev, &caps);
+        return caps;
+    }
+
+    // True if every rank has the feature on dev, or on every plugin device when dev < 0.
+    // Collective: all ranks must call it, before any per-connection MPI op.
+    bool AllRanksHaveCap(bool ncclIbCastDeviceCaps::*cap, int dev) {
+        int local = 1;
+        if (dev >= 0) {
+            local = QueryDeviceCaps(dev).*cap ? 1 : 0;
+        } else {
+            int ndev = 0;
+            (void)net_->devices(&ndev);
+            for (int d = 0; d < ndev; d++) {
+                if (!(QueryDeviceCaps(d).*cap)) local = 0;
+            }
+        }
+        int all = 0;
+        MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        return all != 0;
+    }
+
+    bool AllRanksSupportUd(int dev = -1) { return AllRanksHaveCap(&ncclIbCastDeviceCaps::udSupported, dev); }
+
+    bool AllRanksSupportRdmaRead(int dev = -1) {
+        return AllRanksHaveCap(&ncclIbCastDeviceCaps::rdmaReadSupported, dev);
+    }
+
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
         return net_->listen(initCtx_, dev, handle, listenComm);
@@ -310,15 +385,17 @@ protected:
         return net_->deregMr(comm, mhandle);
     }
 
-    // Helper: Post send operation
+    // optRecvHint seeds the optional-recv sentinel.
     ncclResult_t PostSend(void* sendComm, void* data, size_t size, int tag,
-                         void* mhandle, void** request) {
+                         void* mhandle, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->isend(sendComm, data, size, tag, mhandle, nullptr, request);
     }
 
-    // Helper: Post recv operation
+    // See PostSend for optRecvHint.
     ncclResult_t PostRecv(void* recvComm, int n, void** data, size_t* sizes,
-                         int* tags, void** mhandles, void** request) {
+                         int* tags, void** mhandles, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->irecv(recvComm, n, data, sizes, tags, mhandles, nullptr, request);
     }
 
@@ -421,19 +498,19 @@ protected:
         return ncclSuccess;
     }
 
-    // Helper: Retry until the receiver's FIFO slot is ready.
+    // Retry until the FIFO slot is ready. Re-seed the hint; a NULL isend clears it.
     void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
-                           void* mhandle, void** request) {
+                           void* mhandle, void** request, bool optRecvHint = false) {
         int attempts = 0;
         do {
-            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request);
+            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request, optRecvHint);
             ASSERT_EQ(result, ncclSuccess);
-            if (*request != nullptr) break;
+            if (IsRealRequest(*request)) break;
             if (++attempts >= kMaxRetryAttempts) {
                 FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
             }
             usleep(kPollIntervalUs);
-        } while (*request == nullptr);
+        } while (!IsRealRequest(*request));
     }
 
     // Helper: Wait for request completion with timeout
@@ -510,13 +587,15 @@ protected:
 
     // Composite block: Post a single irecv. Wraps the 4-array boilerplate.
     void PostSingleRecv(void* recvComm, void* buf, size_t size, int tag,
-                        void* mhandle, void** request) {
+                        void* mhandle, void** request, bool optRecvHint = false) {
         void*  bufs[1]    = {buf};
         size_t sizes[1]   = {size};
         int    tags[1]    = {tag};
         void*  handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request, optRecvHint), ncclSuccess);
     }
+
+    void OptRecvCompletionRunMultiRecv(bool optRecvHint);
 
     static bool PortIsEthernet(const char* portsPath, const char* port) {
         char path[PATH_MAX];

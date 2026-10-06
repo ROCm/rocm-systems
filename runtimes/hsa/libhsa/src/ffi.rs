@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Rust representations of the HSA core and AMD-extension C ABI.
 //!
 //! Numeric constants, handle encodings, callback signatures, and `repr(C)`
@@ -374,25 +376,6 @@ pub(crate) const AMD_SIGNAL_KIND_USER: i64 = 1;
 pub(crate) const AMD_SIGNAL_KIND_DOORBELL: i64 = -1;
 pub(crate) const AMD_SIGNAL_AMD_GPU_ONLY: u64 = 1;
 pub(crate) const AMD_SIGNAL_IPC: u64 = 1 << 1;
-pub(crate) const AMD_MEMORY_COPY_OP_VERSION: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_SWAP: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC: u16 = 3;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST: u16 = 4;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: u16 = 5;
-pub(crate) const AMD_MEMORY_COPY_WAIT_ALWAYS: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_WAIT_LT: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_WAIT_LE: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_WAIT_EQ: u16 = 3;
-pub(crate) const AMD_MEMORY_COPY_WAIT_NE: u16 = 4;
-pub(crate) const AMD_MEMORY_COPY_WAIT_GE: u16 = 5;
-pub(crate) const AMD_MEMORY_COPY_WAIT_GT: u16 = 6;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_NONE: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_WRITE: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_ADD: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_SUB: u16 = 3;
-pub(crate) const FENCE_SCOPE_SYSTEM: u16 = 2;
 pub(crate) const AMD_QUEUE_PROPERTIES_ENABLE_PROFILING: u32 = 1 << 3;
 
 pub(crate) const AMD_QUEUE_INFO_AGENT: u32 = 0;

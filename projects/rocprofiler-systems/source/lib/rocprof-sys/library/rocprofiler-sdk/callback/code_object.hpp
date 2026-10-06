@@ -20,24 +20,22 @@ on_code_object_configure()
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_code_object_enter(typename SdkBackend::callback_tracing_record_t record,
-                     typename SdkBackend::user_data_t* user_data, void* callback_data)
-{
-    (void) record;
-    (void) user_data;
-    (void) callback_data;
-}
+on_code_object_enter([[maybe_unused]]
+                     typename SdkBackend::callback_tracing_record_t     record,
+                     [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
+                     [[maybe_unused]] void*                             callback_data,
+                     [[maybe_unused]] typename SdkBackend::timestamp_t  timestamp)
+{}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_code_object_exit(typename SdkBackend::callback_tracing_record_t record,
-                    typename SdkBackend::user_data_t* user_data, void* callback_data)
-{
-    (void) record;
-    (void) user_data;
-    (void) callback_data;
-}
+on_code_object_exit([[maybe_unused]]
+                    typename SdkBackend::callback_tracing_record_t     record,
+                    [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
+                    [[maybe_unused]] void*                             callback_data,
+                    [[maybe_unused]] typename SdkBackend::timestamp_t  timestamp)
+{}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>

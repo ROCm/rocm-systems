@@ -130,6 +130,7 @@ protected:
       queue.faulted = true;
       status = Pm4TestStatus::Faulted;
     };
+    context.wake = [] {};
     context.flush_caches = [] {};
     context.dispatch = [this](const std::array<uint32_t, 4> &dimensions) {
       dispatches.push_back(dimensions);
@@ -190,6 +191,41 @@ TEST_F(Pm4PacketProcessorTest, ProcessesRegisterWriteAcrossNativeRingWrap) {
   EXPECT_TRUE(completed);
   EXPECT_EQ(queue.read_pointer_journal.cursor(), 7u);
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
+}
+
+TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
+  context.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  context.xcc_id = 0;
+  const std::array words{0xc0002300u, (1u << 25) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  submit(words, true, 6, 8);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 13u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_TRUE(queue.read_pointer_journal.publication_pending());
+  EXPECT_FALSE(completed);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 5u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, CondExecRetainsSkippedCursorAcrossPublicationRetry) {
+  constexpr uint32_t kPredicate = kOutput + 16;
+  const std::array words{0xc0032200u, kPredicate, 0u,      0u, 5u,
+                         0xc0033700u, 5u << 8,    kOutput, 0u, 99u};
+  memory->store(kPredicate, uint32_t{0});
+  submit(words, true, 14, 16);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 24u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_TRUE(queue.read_pointer_journal.publication_pending());
+  EXPECT_FALSE(completed);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 8u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_TRUE(completed);
 }
 
 TEST_F(Pm4PacketProcessorTest, PublishesCommittedEffectBeforeFetchingAnotherPacket) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! HSA code-object readers, ELF validation, relocation, and executable state.
 //!
 //! Readers first take an owned snapshot of caller memory or a bounded file
@@ -7,14 +9,15 @@
 //! the complete object is valid. Executable freeze and destruction retain the
 //! HSA-visible ownership and failure semantics around that native backing.
 //!
-//! File readers accept Linux descriptors through rocddi's Linux provider. A
-//! future platform frontend will need its own native-handle adapter.
+//! File readers use rocddi's Linux descriptor provider to snapshot caller
+//! storage while leaving descriptor ownership with the application.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::Arc;
 use std::sync::atomic::{Ordering, fence};
 
+use crate::platform::memory as linux_interop;
 use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::ffi::*;
@@ -656,6 +659,7 @@ fn parse_and_load(
             LOADER_OBJECT_KIND_AGENT,
         )
     };
+    let page = runtime.host_page_size as u64;
     let mut loads = Vec::new();
     let mut virtual_base = u64::MAX;
     let mut virtual_end = 0_u64;
@@ -682,7 +686,7 @@ fn parse_and_load(
         {
             return Err(INVALID_CODE_OBJECT);
         }
-        virtual_base = virtual_base.min(align_down(virtual_address, 4096));
+        virtual_base = virtual_base.min(align_down(virtual_address, page));
         virtual_end = virtual_end.max(
             virtual_address
                 .checked_add(memory_size)
@@ -693,14 +697,17 @@ fn parse_and_load(
     if loads.is_empty() || virtual_end <= virtual_base {
         return Err(INVALID_CODE_OBJECT);
     }
-    let allocation_end = align_up(virtual_end, 4096).ok_or(INVALID_CODE_OBJECT)?;
+    let allocation_end = align_up(virtual_end, page).ok_or(INVALID_CODE_OBJECT)?;
     let allocation_size = allocation_end - virtual_base;
+    if allocation_size > isize::MAX as u64 {
+        return Err(INVALID_CODE_OBJECT);
+    }
     let allocation = runtime.gpus[gpu_index]
         .device
         .allocate(
             memory_kind,
             allocation_size,
-            4096,
+            page,
             DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
         )
         .map_err(map_error)?;
@@ -773,11 +780,9 @@ fn parse_and_load(
                     code_object.len()
                 )
                 .into_bytes(),
-                ReaderStorage::File { descriptor, offset } => format!(
-                    "file:///proc/self/fd/{descriptor}#offset={offset}&size={}",
-                    code_object.len()
-                )
-                .into_bytes(),
+                ReaderStorage::File { descriptor, offset } => {
+                    crate::platform::code_object_file_uri(descriptor, offset, code_object.len())
+                }
             },
             segments,
             code_object,
@@ -1251,7 +1256,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let size = match rocddi::session::linux::descriptor_length(file)
+        let size = match linux_interop::descriptor_length(file)
             .ok()
             .and_then(|length| usize::try_from(length).ok())
         {
@@ -1264,7 +1269,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             return OUT_OF_RESOURCES;
         }
         bytes.resize(size, 0);
-        if rocddi::session::linux::read_descriptor_exact(file, &mut bytes, 0).is_err() {
+        if linux_interop::read_descriptor_exact_at(file, &mut bytes, 0).is_err() {
             return INVALID_FILE;
         }
         let handle = match runtime.allocate_handle() {
@@ -1294,11 +1299,18 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
     reader: *mut HsaCodeObjectReader,
 ) -> Status {
     boundary(|| {
-        if code_object.is_null() || size == 0 || reader.is_null() {
+        if code_object.is_null() || size == 0 || size > isize::MAX as usize || reader.is_null() {
             return INVALID_ARGUMENT;
         }
-        // SAFETY: The caller supplies size readable bytes for the call.
-        let bytes = unsafe { std::slice::from_raw_parts(code_object.cast::<u8>(), size) }.to_vec();
+        let mut bytes = Vec::new();
+        if bytes.try_reserve_exact(size).is_err() {
+            return OUT_OF_RESOURCES;
+        }
+        // SAFETY: The caller supplies size readable bytes for the call, and
+        // the checked byte length is within Rust's maximum slice extent.
+        bytes.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(code_object.cast::<u8>(), size)
+        });
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -2546,10 +2558,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             return OUT_OF_RESOURCES;
         }
         bytes.resize(size, 0);
-        let Ok(file_offset) = i64::try_from(offset) else {
-            return INVALID_FILE;
-        };
-        if rocddi::session::linux::read_descriptor_exact(file, &mut bytes, file_offset).is_err() {
+        if linux_interop::read_descriptor_exact_at(file, &mut bytes, offset as u64).is_err() {
             return INVALID_FILE;
         }
         let mut guard = match lock() {
@@ -2628,6 +2637,21 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_reader_rejects_oversized_slice_before_access() {
+        let byte = 0_u8;
+        let mut reader = HsaCodeObjectReader { handle: 0 };
+        // SAFETY: The oversized length is rejected before the byte is read.
+        let status = unsafe {
+            hsa_code_object_reader_create_from_memory(
+                (&raw const byte).cast(),
+                isize::MAX as usize + 1,
+                &raw mut reader,
+            )
+        };
+        assert_eq!(status, INVALID_ARGUMENT);
+    }
 
     fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
         bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -2865,6 +2889,109 @@ mod tests {
         let mut bytes = gfx1201_code_object();
         bytes[7] = 0;
         assert!(matches!(parse_elf_layout(&bytes), Err(INVALID_CODE_OBJECT)));
+    }
+
+    #[test]
+    fn rejects_truncated_and_corrupt_elf_tables() {
+        let original = gfx1201_code_object();
+        // The last section header ends at byte 384. Every shorter prefix is
+        // missing either the ELF header or part of its declared section table.
+        for length in 0..384 {
+            assert!(matches!(
+                parse_elf_layout(&original[..length]),
+                Err(INVALID_CODE_OBJECT)
+            ));
+        }
+
+        let mut bytes = original.clone();
+        write_u64(&mut bytes, 32, u64::MAX);
+        write_u16(&mut bytes, 56, 1);
+        assert!(matches!(parse_elf_layout(&bytes), Err(INVALID_CODE_OBJECT)));
+
+        let mut bytes = original.clone();
+        write_u64(&mut bytes, 40, u64::MAX);
+        assert!(matches!(parse_elf_layout(&bytes), Err(INVALID_CODE_OBJECT)));
+
+        let symbol_section = 64 + 128;
+        let string_section = 64 + 64;
+        let cases: &[(usize, u64)] = &[
+            (symbol_section + 24, u64::MAX),
+            (symbol_section + 32, u64::MAX),
+            (symbol_section + 56, 0),
+            (string_section + 24, u64::MAX),
+            (string_section + 32, u64::MAX),
+        ];
+        for &(offset, value) in cases {
+            let mut bytes = original.clone();
+            write_u64(&mut bytes, offset, value);
+            let layout = parse_elf_layout(&bytes).unwrap();
+            assert!(matches!(
+                parse_symbols(&bytes, layout, &[SECTION_SYMTAB]),
+                Err(INVALID_CODE_OBJECT)
+            ));
+        }
+
+        let mut bytes = original.clone();
+        write_u32(&mut bytes, symbol_section + 40, 5);
+        let layout = parse_elf_layout(&bytes).unwrap();
+        assert!(matches!(
+            parse_symbols(&bytes, layout, &[SECTION_SYMTAB]),
+            Err(INVALID_CODE_OBJECT)
+        ));
+
+        let mut bytes = original.clone();
+        bytes[385] = 0xff; // invalid UTF-8 in the first symbol name
+        let layout = parse_elf_layout(&bytes).unwrap();
+        assert!(matches!(
+            parse_symbols(&bytes, layout, &[SECTION_SYMTAB]),
+            Err(INVALID_CODE_OBJECT)
+        ));
+
+        let mut bytes = original;
+        bytes[409] = b'x'; // remove the final NUL in the string table
+        let layout = parse_elf_layout(&bytes).unwrap();
+        assert!(matches!(
+            parse_symbols(&bytes, layout, &[SECTION_SYMTAB]),
+            Err(INVALID_CODE_OBJECT)
+        ));
+    }
+
+    #[test]
+    fn generated_elf_mutations_keep_parser_and_relocator_bounded() {
+        let original = gfx1201_code_object();
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        // Deterministic malformed-input sweep, including table offsets,
+        // counts, symbol strings and bytes that can become relocation headers.
+        for case in 0..4096 {
+            let mut bytes = original.clone();
+            for _ in 0..=(case % 8) {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let index = usize::try_from(seed % u64::try_from(bytes.len()).unwrap()).unwrap();
+                bytes[index] ^= (seed >> 32) as u8 | 1;
+            }
+            let length = if case % 4 == 0 {
+                usize::try_from(seed % u64::try_from(bytes.len() + 1).unwrap()).unwrap()
+            } else {
+                bytes.len()
+            };
+            let bytes = &bytes[..length];
+            if let Ok(layout) = parse_elf_layout(bytes) {
+                let _ = code_object_version(layout);
+                let _ = parse_symbols(bytes, layout, &[SECTION_SYMTAB, SECTION_DYNSYM]);
+                let mut image = [0_u8; 256];
+                let _ = apply_relocations(
+                    bytes,
+                    layout.section_offset,
+                    layout.section_entry_size,
+                    layout.section_count,
+                    0x100,
+                    0x1000,
+                    &mut image,
+                );
+            }
+        }
     }
 
     #[test]
