@@ -117,9 +117,23 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
-    // __constant__ variables are captured too; restoring them is harmless. Do not skip them via
-    // HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST: ROCr reports that attribute inverted (true for
-    // symbols in writable sections), so filtering on it drops the __device__ globals instead.
+    // VARIABLE_IS_CONST is not reliable across ROCr versions, so use the variable segment, which
+    // identifies symbols in readonly memory independently of that attribute.
+    hsa_variable_segment_t segment{};
+    if(core->hsa_executable_symbol_get_info_fn(
+           symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SEGMENT, &segment) != HSA_STATUS_SUCCESS)
+    {
+        out->incomplete = true;
+        return HSA_STATUS_SUCCESS;
+    }
+
+    if(segment == HSA_VARIABLE_SEGMENT_READONLY) return HSA_STATUS_SUCCESS;
+    if(segment != HSA_VARIABLE_SEGMENT_GLOBAL)
+    {
+        out->incomplete = true;
+        return HSA_STATUS_SUCCESS;
+    }
+
     uint64_t addr = 0;
     uint32_t size = 0;
     if(core->hsa_executable_symbol_get_info_fn(
