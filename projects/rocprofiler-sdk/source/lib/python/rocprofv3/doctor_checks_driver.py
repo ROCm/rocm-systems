@@ -86,6 +86,16 @@ def _group_check(accessor, group_name):
     groups = accessor.getgroups()
     data = {"group": group_name, "gid": gid, "effective_gids": groups}
 
+    if accessor.getuid() == 0:
+        # Root bypasses device-node permissions, so group membership grants it
+        # nothing. Whether root can really open /dev/kfd (not a given in a
+        # user namespace) is what driver.kfd-readable checks.
+        return make_pass(
+            "running as root: membership in {!r} is not needed".format(group_name),
+            "",
+            data,
+        )
+
     if gid is None:
         return make_warn(
             "group {!r} does not exist on this system".format(group_name),
@@ -155,6 +165,19 @@ def check_kfd_readable(accessor):
     data = {"path": KFD_DEVICE, "readable": readable, "writable": writable}
     if readable and writable:
         return make_pass("{} is readable and writable".format(KFD_DEVICE), "", data)
+    if accessor.getuid() == 0:
+        # root without access means a user namespace (rootless container) that
+        # does not map the device's owner -- group membership cannot fix that
+        return make_fail(
+            "{} is not {} even though this process runs as root".format(
+                KFD_DEVICE, "readable" if not readable else "writable"
+            ),
+            "This happens in rootless containers and user namespaces. Pass the\n"
+            "device and keep its group, for example:\n"
+            "  podman run --device /dev/kfd --device /dev/dri "
+            "--group-add keep-groups ...",
+            data,
+        )
     return make_fail(
         "{} is not {} by the current user".format(
             KFD_DEVICE,

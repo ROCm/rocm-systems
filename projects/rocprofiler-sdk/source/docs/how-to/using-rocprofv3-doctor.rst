@@ -24,6 +24,14 @@ The tool makes no persistent changes to your system and has no ``--fix`` mode. I
 more than read files, though: see :ref:`what-a-run-does` for the temporary files,
 child processes, and GPU initialization a run involves.
 
+Run it as the user who runs ``rocprofv3``, without ``sudo``. It needs no elevated
+privileges, and a root process sees a different system: root opens ``/dev/kfd``
+regardless of group membership, holds every capability, and ``sudo`` resets variables
+such as ``LD_LIBRARY_PATH``. The ``environ.run-as-user`` check warns when the tool runs
+as root on behalf of another account. Running as root is expected inside a container
+whose processes run as root; there, the group-membership checks pass because they do
+not apply.
+
 .. _what-a-run-does:
 
 What a run does
@@ -128,7 +136,7 @@ short title:
      [ PASS ]  driver.kfd-device                   /dev/kfd device node exists
      [ FAIL ]  driver.kfd-readable                 /dev/kfd readable and writable by the current user
 
-     Summary: 40 passed, 6 warning(s), 2 failed, 3 skipped (51 total)
+     Summary: 41 passed, 6 warning(s), 2 failed, 3 skipped (52 total)
 
 The status tags mean:
 
@@ -202,7 +210,7 @@ attaching to bug reports:
      "rocm_root_source": "location of rocprofv3-doctor",
      "install_kind": "system-package",
      "timestamp_utc": "2026-09-15T12:34:56Z",
-     "summary": { "pass": 40, "warn": 6, "fail": 2, "skip": 3, "error": 0, "total": 51 },
+     "summary": { "pass": 41, "warn": 6, "fail": 2, "skip": 3, "error": 0, "total": 52 },
      "checks": [
        {
          "id": "install.sdk-library",
@@ -451,6 +459,11 @@ Common findings
      - Passes whenever ``/sys/module/amdgpu`` exists. The driver version is shown only
        when the driver publishes one -- the DKMS driver does, the in-tree driver of a
        distribution kernel does not.
+   * - ``environ.run-as-user``
+     - The tool runs as root on behalf of another account (through ``sudo``, ``su``, or
+       similar), so its results describe root rather than the user who profiles.
+       Re-run it without ``sudo``. If you also run ``rocprofv3`` with ``sudo``, the
+       results apply; use ``sudo -E`` for both.
    * - ``environ.ld-preload-conflict``
      - ``LD_PRELOAD`` loads a v1/v2 profiler library. Only one profiler may intercept the
        ROCm runtime at a time; ``unset LD_PRELOAD``.

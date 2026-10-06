@@ -43,10 +43,82 @@ CONFLICTING_PRELOADS = (
     "librocprof.so",
 )
 
+LOGINUID_PATH = "/proc/self/loginuid"
+# the audit login uid of a process that never logged in (services, containers)
+LOGINUID_UNSET = 4294967295
+
 BETA_GATES = (
     ("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "PC sampling"),
     ("ROCPROFILER_SPM_BETA_ENABLED", "Streaming Performance Monitor"),
 )
+
+
+def elevated_from(accessor):
+    """The account this root process was started on behalf of, or None.
+
+    sudo records the invoking user in SUDO_USER. The audit login uid in
+    /proc/self/loginuid also survives su, doas, and pkexec, so it catches
+    those too. A direct root login keeps loginuid 0, and a container or a
+    service leaves it unset; both are genuinely root and do not count.
+    """
+    if accessor.getuid() != 0:
+        return None
+    sudo_user = accessor.getenv("SUDO_USER")
+    if sudo_user and sudo_user != "root":
+        return sudo_user
+    try:
+        login_uid = int((accessor.read_file(LOGINUID_PATH) or "").strip())
+    except ValueError:
+        return None
+    if login_uid in (0, LOGINUID_UNSET):
+        return None
+    return "uid {}".format(login_uid)
+
+
+@register(
+    id="environ.run-as-user",
+    group="environ",
+    title="Running as the user who runs rocprofv3",
+    severity=SEV_WARNING,
+    order=49,
+)
+def check_run_as_user(accessor):
+    uid = accessor.getuid()
+    data = {"uid": uid, "username": accessor.get_username()}
+    if uid != 0:
+        return make_pass(
+            "running as {} (uid {}), without elevated privileges".format(
+                data["username"] or "the current user", uid
+            ),
+            "",
+            data,
+        )
+
+    invoker = elevated_from(accessor)
+    data["elevated_from"] = invoker
+    if invoker is None:
+        return make_pass(
+            "running as root (a root login or a container), so the results "
+            "describe root, which is who rocprofv3 will run as here",
+            "",
+            data,
+        )
+
+    # Root bypasses device permissions and holds every capability, and sudo or
+    # su - reset the environment: the report would describe a different
+    # session from the one that will run rocprofv3.
+    return make_warn(
+        "running as root on behalf of {0}: device access, group membership, and "
+        "capabilities are root's, not {0}'s, and sudo or su reset variables such "
+        "as LD_LIBRARY_PATH, LD_PRELOAD, and ROCM_PATH, so the results do not "
+        "describe {0}'s profiling session".format(invoker),
+        "Re-run without sudo, as the user who runs rocprofv3:\n"
+        "  rocprofv3-doctor\n"
+        "If you also run rocprofv3 itself with sudo (for example for device-wide\n"
+        "counters), these results apply; use `sudo -E` for both so the\n"
+        "environment is kept.",
+        data,
+    )
 
 
 @register(
