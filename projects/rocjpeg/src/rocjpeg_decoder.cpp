@@ -832,11 +832,15 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGB(HipInteropDeviceMem& hip_interop
     switch (hip_interop_dev_mem.surface_format) {
         case VA_FOURCC_444P:
             ColorConvertYUV444ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0], hip_interop_dev_mem.offset[1] + roi_offset, hip_interop_dev_mem.offset[2] + roi_offset);
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_offset,
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_offset);
             break;
         case VA_FOURCC_422V:
             ColorConvertYUV440ToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0], hip_interop_dev_mem.offset[1] + roi_uv_offset, hip_interop_dev_mem.offset[2] + roi_uv_offset);
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset,
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_uv_offset);
             break;
         case VA_FOURCC_YUY2:
             ColorConvertYUYVToRGB(hip_stream_, picture_width, picture_height, destination->channel[0], destination->pitch[0],
@@ -899,11 +903,15 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_i
     switch (hip_interop_dev_mem.surface_format) {
         case VA_FOURCC_444P:
             ColorConvertYUV444ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0], hip_interop_dev_mem.offset[1] + roi_offset, hip_interop_dev_mem.offset[2] + roi_offset);
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_offset,
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_offset);
             break;
         case VA_FOURCC_422V:
             ColorConvertYUV440ToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
-                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0], hip_interop_dev_mem.offset[1] + roi_uv_offset, hip_interop_dev_mem.offset[2] + roi_uv_offset);
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0],
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[1] + roi_uv_offset,
+                                                  hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[2] + roi_uv_offset);
             break;
         case VA_FOURCC_YUY2:
             ColorConvertYUYVToRGBPlanar(hip_stream_, picture_width, picture_height, destination->channel[0], destination->channel[1], destination->channel[2], destination->pitch[0],
@@ -1086,13 +1094,13 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
-                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_offset;
-                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_offset;
+                bp.src_u_image = mem.hip_mapped_device_mem + mem.offset[1] + roi_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + mem.offset[2] + roi_offset;
                 break;
             case VA_FOURCC_422V:
                 bp.layout      = YUV_LAYOUT_YUV440;
-                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_uv_offset;
-                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_uv_offset;
+                bp.src_u_image = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + mem.offset[2] + roi_uv_offset;
                 break;
             case VA_FOURCC_YUY2:
                 bp.layout = YUV_LAYOUT_YUYV;
@@ -1172,13 +1180,13 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
-                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_offset;
-                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_offset;
+                bp.src_u_image = mem.hip_mapped_device_mem + mem.offset[1] + roi_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + mem.offset[2] + roi_offset;
                 break;
             case VA_FOURCC_422V:
                 bp.layout      = YUV_LAYOUT_YUV440;
-                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_uv_offset;
-                bp.src_v_image = bp.src_y_image + mem.offset[2]+ roi_uv_offset;
+                bp.src_u_image = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + mem.offset[2] + roi_uv_offset;
                 break;
             case VA_FOURCC_YUY2:
                 bp.layout = YUV_LAYOUT_YUYV;

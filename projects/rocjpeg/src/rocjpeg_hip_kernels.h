@@ -75,11 +75,12 @@ THE SOFTWARE.
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image buffer.
  * @param src_yuv_image Pointer to the source YUV444 image buffer.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV444 image buffer.
- * @param src_u_image_offset The offset (in bytes) of the U component in the source YUV444 image buffer.
+ * @param src_u_image Pointer to the U plane of the source YUV444 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV444 image (already ROI-adjusted).
  */
 void ColorConvertYUV444ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts YUV440 image to RGB image.
@@ -93,11 +94,12 @@ void ColorConvertYUV444ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t ds
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image buffer.
  * @param src_yuv_image Pointer to the source YUV440 image buffer.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV440 image buffer.
- * @param src_u_image_offset The offset (in bytes) of the U component in the source YUV440 image buffer.
+ * @param src_u_image Pointer to the U plane of the source YUV440 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV440 image (already ROI-adjusted).
  */
 void ColorConvertYUV440ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts an image in YUYV format to RGB format.
@@ -188,11 +190,12 @@ void ColorConvertRGBAToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image.
  * @param src_yuv_image Pointer to the source YUV444 image.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV444 image.
- * @param src_u_image_offset The offset (in bytes) of the U plane in the source YUV444 image.
+ * @param src_u_image Pointer to the U plane of the source YUV444 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV444 image (already ROI-adjusted).
  */
 void ColorConvertYUV444ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts YUV440 image to RGB planar format.
@@ -209,11 +212,12 @@ void ColorConvertYUV444ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image.
  * @param src_yuv_image Pointer to the source YUV440 image.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV440 image.
- * @param src_u_image_offset The offset (in bytes) of the U plane in the source YUV440 image.
+ * @param src_u_image Pointer to the U plane of the source YUV440 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV440 image (already ROI-adjusted).
  */
 void ColorConvertYUV440ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * Converts a YUYV image to RGB planar format.
