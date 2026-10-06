@@ -72,14 +72,15 @@ class SmiInfiniBandPort {
   std::optional<std::string> state() const;
   std::optional<uint16_t> max_mtu() const;
   std::optional<uint16_t> active_mtu() const;
-  void collect_hw_counters();
+  // const: counters are re-read on every query, so the map is a mutable cache.
+  void collect_hw_counters() const;
   const std::map<std::string, uint64_t>& get_hw_counters_map() const;
 
  private:
   std::string netdev_;
   std::string name_;
   std::string sysfs_path_;
-  std::map<std::string, uint64_t> hw_counters_map_;
+  mutable std::map<std::string, uint64_t> hw_counters_map_;
 };
 
 class SmiInfiniBand {

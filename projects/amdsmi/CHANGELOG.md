@@ -33,6 +33,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
+- **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
+  - ``--rdma`` prints the RDMA hardware counters of each RDMA port of an AI-NIC under ``RDMA_PORTS`` (the counters of ``rdma statistic show link DEV/PORT``), with the RDMA device, port number and netdev of each port. The index counts the NIC's RDMA ports from 0 across its RDMA devices. Python: ``amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_index)`` returns a dictionary of counter name to value.
+  - Not supported: ``rdma statistic show mr``, ``rdma statistic mode supported``, and setting optional counters.
+
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
   - New API: `amdsmi_set_npm_limit()`.
@@ -336,6 +340,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed AI-NIC FEC counters missing or shown for the wrong port**.  
   - ``amd-smi metric --nic --port --extended`` omitted ``CORRECTED_BITS`` and ``CORRECTED_BLOCKS`` on most ports and could show another port's values. Each ethtool netlink query left an unread acknowledgement on the socket, so the next query read it, or a stale reply, instead of its own. Queries now read only their own reply.
+
+- **Fixed ``amdsmi_get_nic_rdma_port_statistics()`` listing ``lifespan`` as a counter and reading only the first RDMA device**.  
+  - ``lifespan`` in the sysfs ``hw_counters`` directory is the kernel's refresh interval in milliseconds, not a counter. The RDMA port index is now resolved across all RDMA devices of the NIC, and the counters are read on every call.
+
+- **Fixed ``--nic <ID>`` and ``--nic <UUID>`` failing with ``Invalid BDF format``**.  
+  - Every selection that did not match the first NIC was parsed as a BDF, so only ID ``0`` worked. ID, UUID and BDF selections now match across all NICs.
 
 ## amd_smi_lib for ROCm 10.1.0
 
