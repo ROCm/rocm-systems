@@ -543,14 +543,10 @@ static_assert(NET_IB_MAX_REQUESTS <= 256,
 // Preserve two send WQEs (data + signal) and one flush WQE per request, plus
 // enough room to replace one regular request with the largest segmented chain.
 // Runtime credits prevent multiple large chains from exceeding these depths.
-#define NCCL_IB_RMA_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS - 2)
-#define NCCL_IB_RMA_MAX_FLUSH_WRS (NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS - 1)
+#define NCCL_IB_RMA_MAX_SEND_WRS NCCL_RMA_MAX_SEND_QP_WRS
+#define NCCL_IB_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_FLUSH_QP_WRS
 static_assert(NET_IB_MAX_REQUESTS == NCCL_RMA_MAX_INFLIGHT_REQUESTS,
               "CAST RMA QP request depth must match NCCL_RMA_MAX_INFLIGHT_REQUESTS");
-static_assert(NCCL_IB_RMA_MAX_SEND_WRS == NCCL_RMA_MAX_SEND_QP_WRS,
-              "CAST RMA send QP depth must match NCCL_RMA_MAX_SEND_QP_WRS");
-static_assert(NCCL_IB_RMA_MAX_FLUSH_WRS == NCCL_RMA_MAX_FLUSH_QP_WRS,
-              "CAST RMA flush QP depth must match NCCL_RMA_MAX_FLUSH_QP_WRS");
 
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {

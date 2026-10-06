@@ -63,7 +63,10 @@ static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
   return n;
 }
 
+// Map offset to the covering [segOff[s], segOff[s+1]) bucket. Offsets at or
+// past the terminal size clamp to the last segment, matching the CAST wrappers.
 static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
+  if (nSeg < 1 || segOff == NULL) return 0;
   for (int s = 0; s < nSeg; s++) {
     if (off < segOff[s + 1]) return s;
   }
@@ -157,15 +160,6 @@ static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
   return lhsSegments == rhsSegments && lhsSegments >= 1 && lhsSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets, int rhsSegments,
-                                      const size_t* rhsOffsets) {
-  if (!ncclRmaSegmentCountsMatch(lhsSegments, rhsSegments)) return 0;
-  for (int s = 0; s <= lhsSegments; s++) {
-    if (lhsOffsets[s] != rhsOffsets[s]) return 0;
-  }
-  return 1;
-}
-
 // Peer segOff tables feed unsigned offset math: they must start at 0 and never decrease.
 static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
   if (segOff == NULL || nSegments < 1 || nSegments > NCCL_RMA_MAX_SEGMENTS || segOff[0] != 0) return 0;
@@ -179,16 +173,6 @@ static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
 static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
   if (rankSegOff == NULL || rank < 0) return localSegOff;
   return rankSegOff + (size_t)rank * (NCCL_RMA_MAX_SEGMENTS + 1);
-}
-
-// Map offset to the covering [segOff[s], segOff[s+1]) bucket. Offsets at or
-// past the terminal size clamp to the last segment, matching the CAST wrappers.
-static inline int ncclRmaSegIndexOf(int nSegments, const size_t* segOff, uint64_t off) {
-  if (nSegments < 1 || segOff == NULL) return 0;
-  for (int s = 0; s < nSegments; s++) {
-    if (off < segOff[s + 1]) return s;
-  }
-  return nSegments - 1;
 }
 
 static inline int ncclRmaOffsetRangeOk(int nSegments, const size_t* segOff, uint64_t off, size_t size) {
@@ -229,7 +213,7 @@ static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int 
 
 // Keep-or-free after ibv_post_send. posted==0 and error: free the slot.
 // Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
-// was lost. gin.cc applies the IB side effects from these flags.
+// was lost. Each backend applies the IB side effects from these flags.
 static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, int posted, int nWr, int* keepRequest,
                                                         int* markFailed) {
   if (keepRequest) *keepRequest = 0;
