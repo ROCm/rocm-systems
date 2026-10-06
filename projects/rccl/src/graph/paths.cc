@@ -1522,7 +1522,13 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // part index with comm->p2pnChannelsPerPeer (see sendrecv.h), so the channel stride cannot
     // vary between plans; a workload whose real peers are few declares them through
     // config.maxP2pPeers and keeps its full per-peer count.
-    if (comm->hasMloPart) {
+    //
+    // nNodes is tested here and not left to the else, which is also reached by a multi-node comm
+    // whose user pinned nChannelsPerNetPeer -- that pin is the whole reason the branch above
+    // declines to run, and ncclTopoGetNchannels() hands it straight back as the count for every
+    // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
+    // size against, not the on-package fabric's.
+    if (comm->nNodes == 1 && comm->hasMloPart) {
       while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
                comm->p2pnChannels &&
              comm->p2pnChannelsPerPeer > 1)
