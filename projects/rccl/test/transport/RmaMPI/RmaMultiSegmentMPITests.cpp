@@ -19,6 +19,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <numeric>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -1686,6 +1688,452 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
         }
         Barrier();
     }
+}
+
+// Post-path fixture: WR batching, request aggregation, contexts and wait order.
+// Each rank puts to the next rank and receives from the previous one, so the
+// same tests run on 2 ranks or N ranks across any number of nodes.
+class RmaMultiSegmentPostMPITest : public RmaMultiSegmentMPITest
+{
+protected:
+    enum class OpKind { Put, Get, PutSignal };
+    enum class WaitOrder { InOrder, Reversed, Shuffled };
+
+    // One segment-split transfer. For a put local is the source; for a get it
+    // is the destination.
+    struct Chain
+    {
+        uint64_t localOff  = 0;
+        uint64_t remoteOff = 0;
+        size_t   size      = 0;
+    };
+
+    struct Op
+    {
+        OpKind   kind      = OpKind::Put;
+        void*    localMh   = nullptr;
+        void*    remoteMh  = nullptr;
+        Chain    chain;
+        int      ctx       = 0;
+        bool     aggregate = false;
+    };
+
+    struct Region
+    {
+        uint64_t dstOff = 0;
+        size_t   size   = 0;
+        uint64_t srcOff = 0;
+    };
+
+    // Window bytes expected after a round: `regions` copied from a source filled
+    // with `seed`, the sentinel everywhere else.
+    struct Expect
+    {
+        void*               window = nullptr;
+        size_t              total  = 0;
+        std::vector<Region> regions;
+        int                 seed   = 0;
+    };
+
+    static constexpr uint8_t kSentinel = 0xD3;
+
+    int numContexts_ = 1;
+    int GetNumContexts() const override { return numContexts_; }
+
+    MultiSegmentVmmBuffer* src_   = nullptr;
+    MultiSegmentVmmBuffer* dst_   = nullptr;
+    void*                  sig_   = nullptr;
+    void*                  srcMh_ = nullptr;
+    void*                  dstMh_ = nullptr;
+    void*                  sigMh_ = nullptr;
+
+    int SendPeer() const { return (worldRank_ + 1) % worldSize_; }
+    int RecvPeer() const { return (worldRank_ + worldSize_ - 1) % worldSize_; }
+    static int SeedOf(int rank) { return 0x21 + 37 * rank; }
+
+    // Mirrors the backend clamp of NCCL_RMA_IB_WR_BATCHSIZE to [2, 64].
+    static int WrBatchSize()
+    {
+        return std::clamp(MPIHelpers::getEnvParam<int>("NCCL_RMA_IB_WR_BATCHSIZE", 64), 2, 64);
+    }
+
+    // Registers max-segment src_/dst_ windows and a signal word, and fills src_
+    // with this rank's pattern. Returns a skip reason, or "" when ready.
+    std::string PrepareWindows()
+    {
+        if (!AllocSymPair(&src_, &dst_, NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes))
+            return "multi-segment VMM allocation unavailable on this host";
+        sig_ = AllocBuf(kSignalSize);
+        if (SyncSkip(sig_ == nullptr)) return "signal buffer allocation failed";
+        FillBuf(src_->ptr, src_->totalSize, SeedOf(worldRank_));
+        EXPECT_EQ(ncclSuccess, RegMr(src_->ptr, src_->totalSize, &srcMh_));
+        EXPECT_EQ(ncclSuccess, RegMr(dst_->ptr, dst_->totalSize, &dstMh_));
+        EXPECT_EQ(ncclSuccess, RegMr(sig_, kSignalSize, &sigMh_));
+        if (HasFailure()) return "registration failed";
+        if (!MultiSegmentPathAvailable()) return "multi-segment path not exercised on this host";
+        return "";
+    }
+
+    static std::vector<size_t> SegOffTable(const MultiSegmentVmmBuffer& b)
+    {
+        std::vector<size_t> off(1, 0);
+        for (int s = 0; s < b.nSegments; s++)
+            off.push_back(off.back() + (b.segSizes.empty() ? b.segSize : b.segSizes[s]));
+        return off;
+    }
+
+    // Size from (localOff, remoteOff) whose chain is exactly `target` data WRs on
+    // two windows laid out like `b`, or 0 when no in-range size gives that count.
+    static size_t SizeForDataWrs(const MultiSegmentVmmBuffer& b, uint64_t localOff,
+                                 uint64_t remoteOff, int target)
+    {
+        const std::vector<size_t> off = SegOffTable(b);
+        std::vector<size_t> ends;
+        for (size_t o : off)
+        {
+            if (o > localOff) ends.push_back(o - localOff);
+            if (o > remoteOff) ends.push_back(o - remoteOff);
+        }
+        std::sort(ends.begin(), ends.end());
+        ends.erase(std::unique(ends.begin(), ends.end()), ends.end());
+        for (size_t size : ends)
+        {
+            if (localOff + size > b.totalSize || remoteOff + size > b.totalSize) break;
+            const int wrs = ncclRmaCountLayoutDataWrs(off.data(), b.nSegments, off.data(), b.nSegments,
+                                                      localOff, remoteOff, size, NCCL_RMA_MAX_DATA_WRS);
+            if (wrs == target) return size;
+            if (wrs > target) break;
+        }
+        return 0;
+    }
+
+    // Chains with the given data-WR counts, back to back in `b`. The remote side
+    // is shifted half a segment so each spanned segment costs two WRs.
+    static std::vector<Chain> PlanChains(const MultiSegmentVmmBuffer& b, const std::vector<int>& dataWrs)
+    {
+        std::vector<Chain> chains;
+        const size_t half = b.segSize / 2;
+        uint64_t cursor = 0;
+        for (int target : dataWrs)
+        {
+            const size_t size = SizeForDataWrs(b, cursor, cursor + half, target);
+            if (size == 0) return {};
+            chains.push_back({cursor, cursor + half, size});
+            cursor = (cursor + half + size + b.segSize - 1) / b.segSize * b.segSize;
+        }
+        return chains;
+    }
+
+    Op MakeOp(OpKind kind, void* localMh, void* remoteMh, const Chain& chain,
+              int ctx, bool aggregate) const
+    {
+        Op op;
+        op.kind      = kind;
+        op.localMh   = localMh;
+        op.remoteMh  = remoteMh;
+        op.chain     = chain;
+        op.ctx       = ctx;
+        op.aggregate = aggregate;
+        return op;
+    }
+
+    // Puts and signals go to SendPeer() and signal sig_ word 0; gets read from it.
+    ncclResult_t Post(const Op& op, void** req)
+    {
+        const uint32_t flags = op.aggregate ? ncclRmaOptFlagsAggregateRequests : ncclRmaOptFlagsDefault;
+        const Chain& c = op.chain;
+        *req = nullptr;
+        switch (op.kind)
+        {
+        case OpKind::Put:
+            return rma_->iput(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
+                              c.remoteOff, op.remoteMh, SendPeer(), flags, req);
+        case OpKind::Get:
+            return rma_->iget(rmaCtx_, op.ctx, c.remoteOff, op.remoteMh, c.size,
+                              c.localOff, op.localMh, SendPeer(), flags, req);
+        case OpKind::PutSignal:
+            return rma_->iputSignal(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
+                                    c.remoteOff, op.remoteMh, SendPeer(), /*signalOff=*/0, sigMh_,
+                                    /*signalValue=*/0, NCCL_NET_SIGNAL_OP_INC,
+                                    /*isStrongSignal=*/false, flags, req);
+        }
+        return ncclInternalError;
+    }
+
+    static Region PutRegion(const Chain& c) { return {c.remoteOff, c.size, c.localOff}; }
+    static Region GetRegion(const Chain& c) { return {c.localOff, c.size, c.remoteOff}; }
+
+    // dst_ contents after RecvPeer() ran the same put plan into this rank.
+    Expect IntoDst(const std::vector<Chain>& puts) const
+    {
+        Expect e{dst_->ptr, dst_->totalSize, {}, SeedOf(RecvPeer())};
+        for (const Chain& c : puts) e.regions.push_back(PutRegion(c));
+        return e;
+    }
+
+    std::vector<size_t> WaitOrderFor(size_t n, WaitOrder order) const
+    {
+        std::vector<size_t> idx(n);
+        std::iota(idx.begin(), idx.end(), size_t{0});
+        if (order == WaitOrder::Reversed) std::reverse(idx.begin(), idx.end());
+        if (order == WaitOrder::Shuffled)
+            std::shuffle(idx.begin(), idx.end(), std::mt19937(0x5EEDu + static_cast<unsigned>(worldRank_)));
+        return idx;
+    }
+
+    // One test() call. A request still pending is drained so it is not leaked.
+    bool DoneOnFirstTest(void* req)
+    {
+        if (req == nullptr) return false;
+        int done = 0;
+        if (rma_->test(collComm_, req, &done) != ncclSuccess) return false;
+        if (done) return true;
+        ADD_FAILURE() << "request was not complete on its first test()";
+        (void)PollUntilDone(req);
+        return false;
+    }
+
+    // One D2H copy; reports the first byte that differs from the expectation.
+    void ExpectRegions(const Expect& e)
+    {
+        std::vector<uint8_t> want(e.total, kSentinel), got(e.total);
+        for (const Region& r : e.regions)
+            for (size_t i = 0; i < r.size; i++)
+                want[r.dstOff + i] = static_cast<uint8_t>((e.seed + r.srcOff + i) % 256);
+        ASSERT_EQ(hipSuccess, hipMemcpy(got.data(), e.window, e.total, hipMemcpyDeviceToHost));
+        const auto diff = std::mismatch(want.begin(), want.end(), got.begin());
+        EXPECT_TRUE(diff.first == want.end())
+            << "first mismatch at offset " << (diff.first - want.begin()) << ": want 0x" << std::hex
+            << int(*diff.first) << " got 0x" << int(*diff.second);
+    }
+
+    // Reset the expected windows, post `ops` (an iflush of dst_ after op
+    // `flushAfter`), wait in `waitIdx` order, then check payloads and signals.
+    void RunAndVerify(const std::vector<Op>& ops, const std::vector<size_t>& waitIdx,
+                      const std::vector<Expect>& expects, uint64_t signals, int flushAfter = -1)
+    {
+        for (const Expect& e : expects) FillSentinel(e.window, e.total, kSentinel);
+        FillSentinel(sig_, kSignalSize, 0);
+        Barrier();
+
+        bool ok = true;
+        std::vector<void*> reqs(ops.size(), nullptr);
+        void* flushReq = nullptr;
+        for (size_t i = 0; i < ops.size(); i++)
+        {
+            const ncclResult_t r = Post(ops[i], &reqs[i]);
+            if (r != ncclSuccess || reqs[i] == nullptr)
+            {
+                ADD_FAILURE() << "op " << i << " post failed: " << r;
+                ok = false;
+            }
+            if (static_cast<int>(i) == flushAfter &&
+                rma_->iflush(rmaCtx_, ops[i].ctx, dstMh_, RecvPeer(), &flushReq) != ncclSuccess)
+            {
+                ADD_FAILURE() << "iflush after op " << i << " failed";
+                ok = false;
+            }
+        }
+        if (flushReq) ok = PollUntilDone(flushReq) && ok;
+        for (size_t i : waitIdx)
+            if (reqs[i]) ok = PollUntilDone(reqs[i]) && ok;
+        if (!MPIHelpers::allRanksTrue(ok))
+        {
+            ADD_FAILURE() << "post or wait failed on at least one rank";
+            return;
+        }
+        Barrier();
+        for (const Expect& e : expects) ExpectRegions(e);
+        EXPECT_EQ(ReadSignal(sig_), signals) << "signals from rank " << RecvPeer();
+        Barrier();
+    }
+};
+
+// Chains up to NCCL_RMA_IB_WR_BATCHSIZE WRs go through the batch; longer ones
+// drain it and post directly. Both sides of that limit must land intact.
+TEST_F(RmaMultiSegmentPostMPITest, ChainsAroundWrBatchSizeLandIntact)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int batch  = WrBatchSize();
+    const int maxWrs = 2 * src_->nSegments - 1;
+    for (bool aggregate : {false, true})
+    {
+        for (OpKind kind : {OpKind::Put, OpKind::PutSignal})
+        {
+            const int signalWrs = kind == OpKind::PutSignal ? 1 : 0;
+            for (int total : {1, 2, batch - 1, batch, batch + 1, maxWrs, maxWrs + 1})
+            {
+                const int dataWrs = total - signalWrs;
+                if (dataWrs < 1 || dataWrs > maxWrs) continue;
+                SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate << " putSignal="
+                                                  << signalWrs << " wrs=" << total << " batch=" << batch);
+                const std::vector<Chain> chains = PlanChains(*src_, {dataWrs});
+                ASSERT_EQ(chains.size(), 1u);
+                RunAndVerify({MakeOp(kind, srcMh_, dstMh_, chains[0], 0, aggregate)}, {0},
+                             {IntoDst(chains)}, static_cast<uint64_t>(signalWrs));
+                if (HasFailure()) return;
+            }
+        }
+    }
+}
+
+// Aggregated requests share one doorbell that test() on any of them rings.
+// They must complete in any wait order, also with an iflush posted mid-batch.
+TEST_F(RmaMultiSegmentPostMPITest, QueuedRequestsCompleteInAnyWaitOrder)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {1, 3, std::min(WrBatchSize() + 1, 7), 2, 5});
+    ASSERT_EQ(chains.size(), 5u);
+    for (bool aggregate : {false, true})
+    {
+        std::vector<Op> ops;
+        uint64_t signals = 0;
+        for (size_t i = 0; i < chains.size(); i++)
+        {
+            const OpKind kind = i % 2 ? OpKind::PutSignal : OpKind::Put;
+            signals += kind == OpKind::PutSignal;
+            ops.push_back(MakeOp(kind, srcMh_, dstMh_, chains[i], 0, aggregate));
+        }
+        for (WaitOrder order : {WaitOrder::InOrder, WaitOrder::Reversed, WaitOrder::Shuffled})
+        {
+            SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate << " order=" << int(order));
+            RunAndVerify(ops, WaitOrderFor(ops.size(), order), {IntoDst(chains)}, signals,
+                         /*flushAfter=*/1);
+            if (HasFailure()) return;
+        }
+    }
+}
+
+// Single-segment and multi-segment requests, puts and gets, share the per-peer
+// QP and batch. Interleaved, each payload must land only in its own range.
+TEST_F(RmaMultiSegmentPostMPITest, InterleavedSingleAndMultiSegmentOps)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr size_t kPlain = kMiB;
+    void* plainSrc = AllocBuf(kPlain);
+    void* plainDst = AllocBuf(kPlain);
+    MultiSegmentVmmBuffer* getBuf = AllocSym(NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes);
+    if (SyncSkip(plainSrc == nullptr || plainDst == nullptr || getBuf == nullptr))
+        GTEST_SKIP() << "buffer allocation failed";
+    FillBuf(plainSrc, kPlain, SeedOf(worldRank_));
+    void *plainSrcMh = nullptr, *plainDstMh = nullptr, *getMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(plainSrc, kPlain, &plainSrcMh));
+    ASSERT_EQ(ncclSuccess, RegMr(plainDst, kPlain, &plainDstMh));
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf->ptr, getBuf->totalSize, &getMh));
+
+    const std::vector<Chain> puts = PlanChains(*src_, {3, 5, 2});
+    const std::vector<Chain> gets = PlanChains(*getBuf, {4, 1});
+    ASSERT_EQ(puts.size(), 3u);
+    ASSERT_EQ(gets.size(), 2u);
+    const Chain plainA{0, 0, kPlain / 4};
+    const Chain plainB{kPlain / 4, kPlain / 2, kPlain / 4};
+
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        const std::vector<Op> ops = {
+            MakeOp(OpKind::Put,       srcMh_,     dstMh_,     puts[0], 0, aggregate),
+            MakeOp(OpKind::Put,       plainSrcMh, plainDstMh, plainA,  0, aggregate),
+            MakeOp(OpKind::Get,       getMh,      srcMh_,     gets[0], 0, aggregate),
+            MakeOp(OpKind::PutSignal, plainSrcMh, plainDstMh, plainB,  0, aggregate),
+            MakeOp(OpKind::PutSignal, srcMh_,     dstMh_,     puts[1], 0, aggregate),
+            MakeOp(OpKind::Get,       getMh,      srcMh_,     gets[1], 0, aggregate),
+            MakeOp(OpKind::Put,       srcMh_,     dstMh_,     puts[2], 0, aggregate),
+        };
+        const std::vector<Expect> expects = {
+            IntoDst(puts),
+            {plainDst, kPlain, {PutRegion(plainA), PutRegion(plainB)}, SeedOf(RecvPeer())},
+            {getBuf->ptr, getBuf->totalSize, {GetRegion(gets[0]), GetRegion(gets[1])}, SeedOf(SendPeer())},
+        };
+        RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Shuffled), expects, /*signals=*/2);
+        if (HasFailure()) return;
+    }
+}
+
+// A zero-size op posts no WR and takes the previous request's id, so it
+// completes only after that request has, which must then test done at once.
+TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOpsCompleteWithQueuedPredecessor)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {3, 4});
+    ASSERT_EQ(chains.size(), 2u);
+    const Chain none{};
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+        FillSentinel(sig_, kSignalSize, 0);
+        Barrier();
+
+        bool ok = true;
+        auto post = [&](OpKind kind, void* localMh, void* remoteMh, const Chain& c) {
+            void* req = nullptr;
+            ok = Post(MakeOp(kind, localMh, remoteMh, c, 0, aggregate), &req) == ncclSuccess && req && ok;
+            return req;
+        };
+        void* first   = post(OpKind::Put, srcMh_, dstMh_, chains[0]);
+        void* zeroPut = post(OpKind::Put, srcMh_, dstMh_, none);
+        void* zeroGet = post(OpKind::Get, dstMh_, srcMh_, none);
+        ok = PollUntilDone(zeroPut) && ok;
+        ok = DoneOnFirstTest(first) && ok;
+        ok = DoneOnFirstTest(zeroGet) && ok;
+
+        void* signalOnly = post(OpKind::PutSignal, srcMh_, dstMh_, none);
+        void* second     = post(OpKind::Put, srcMh_, dstMh_, chains[1]);
+        ok = PollUntilDone(second) && ok;
+        ok = DoneOnFirstTest(signalOnly) && ok;
+        ok = DoneOnFirstTest(post(OpKind::Put, srcMh_, dstMh_, none)) && ok;
+
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+        Barrier();
+        ExpectRegions(IntoDst(chains));
+        EXPECT_EQ(ReadSignal(sig_), 1u) << "signal-only put from rank " << RecvPeer();
+        Barrier();
+        if (HasFailure()) return;
+    }
+}
+
+// Each context batches on its own QP. Waiting on one context must not need the
+// others' doorbells, and their still-queued requests must land afterwards.
+TEST_F(RmaMultiSegmentPostMPITest, ContextBatchesDrainIndependently)
+{
+    numContexts_ = std::max(2, MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_CONTEXTS", 2));
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {2, 3, 1, 4, 2, 3});
+    ASSERT_EQ(chains.size(), 6u);
+    std::vector<Op> ops;
+    uint64_t signals = 0;
+    for (size_t i = 0; i < chains.size(); i++)
+    {
+        const OpKind kind = i % 3 == 2 ? OpKind::PutSignal : OpKind::Put;
+        signals += kind == OpKind::PutSignal;
+        ops.push_back(MakeOp(kind, srcMh_, dstMh_, chains[i],
+                             static_cast<int>(i) % numContexts_, /*aggregate=*/true));
+    }
+    std::vector<size_t> waitIdx = WaitOrderFor(ops.size(), WaitOrder::InOrder);
+    std::stable_sort(waitIdx.begin(), waitIdx.end(),
+                     [&](size_t a, size_t b) { return ops[a].ctx > ops[b].ctx; });
+    RunAndVerify(ops, waitIdx, {IntoDst(chains)}, signals);
 }
 
 } // namespace RCCLRmaTests
