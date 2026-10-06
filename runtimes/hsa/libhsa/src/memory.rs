@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! HSA memory pools, pointer metadata, registration, IPC, and virtual memory.
 //!
 //! rocddi owns native allocations and mappings; this module owns their HSA
@@ -12,17 +14,17 @@
 //! descriptor and AIS operations remain explicit rather than being presented
 //! as portable native-handle behavior.
 
+use crate::platform::fd::{AsFd, IntoRawFd};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
-use std::mem::{align_of, size_of};
-use std::os::fd::{BorrowedFd, IntoRawFd};
+use std::mem::{MaybeUninit, align_of, size_of};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use rocddi::memory::interop::linux as linux_interop;
-use rocddi::memory::interop::linux::{
+use crate::platform::memory as linux_interop;
+use crate::platform::memory::{
     KfdIpcMemoryHandle as IpcMemoryHandle, KfdSvmAccess as SvmAccess,
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
@@ -30,7 +32,7 @@ use rocddi::memory::{
     Allocation, DeviceAccess, MemoryKind, VirtualAddress, VirtualDeviceMapping, VirtualHostMapping,
     VirtualMemory,
 };
-use rocddi::session::Session;
+use rocddi::session::{Session, SessionLifetime};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
@@ -81,14 +83,6 @@ impl PointerDescription {
             || self
                 .host_base
                 .is_some_and(|host| contains(host, self.size, address))
-    }
-
-    fn allow_access(&mut self, agents: &[HsaAgent]) {
-        for agent in agents {
-            if !self.accessible.contains(agent) {
-                self.accessible.push(*agent);
-            }
-        }
     }
 
     fn starts_at(&self, address: usize) -> bool {
@@ -183,10 +177,6 @@ impl Memory {
 
     fn contains(&self, address: usize) -> bool {
         self.description.contains(address)
-    }
-
-    fn allow_access(&mut self, agents: &[HsaAgent]) {
-        self.description.allow_access(agents);
     }
 
     fn new_interop(allocation: Allocation, owner: HsaAgent, accessible: Vec<HsaAgent>) -> Self {
@@ -420,6 +410,15 @@ fn contains(base: usize, size: usize, address: usize) -> bool {
         .is_some_and(|offset| offset < size)
 }
 
+fn current_host_page() -> Result<usize, Status> {
+    let page =
+        usize::try_from(rocddi::memory::host_page_size().map_err(map_error)?).map_err(|_| ERROR)?;
+    if page < 4096 || !page.is_power_of_two() {
+        return Err(ERROR);
+    }
+    Ok(page)
+}
+
 fn cpu_pool(pool: HsaMemoryPool) -> bool {
     matches!(
         pool.handle,
@@ -427,8 +426,8 @@ fn cpu_pool(pool: HsaMemoryPool) -> bool {
     )
 }
 
-fn cpu_pool_memory_kind(pool: HsaMemoryPool) -> MemoryKind {
-    if pool.handle == CPU_POOL_KERNARG {
+fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime) -> MemoryKind {
+    if pool.handle == CPU_POOL_KERNARG || lifetime == SessionLifetime::Session {
         MemoryKind::System
     } else {
         MemoryKind::OwnedHost
@@ -510,6 +509,43 @@ fn pool_access(same_owner: bool, storage: PoolStorage, linked: bool, same_hive: 
             PoolStorage::LocalFine | PoolStorage::Group => POOL_ACCESS_NEVER,
         }
     }
+}
+
+fn agent_pool_relationship(
+    runtime: &Runtime,
+    agent: HsaAgent,
+    owner: HsaAgent,
+    storage: PoolStorage,
+) -> (u32, Option<MemoryLinkInfo>) {
+    let same = owner == agent;
+    let requester_gpu = runtime.gpu_index(agent);
+    let owner_gpu = runtime.gpu_index(owner);
+    let same_hive = match (requester_gpu, owner_gpu) {
+        (Some(requester), Some(owner)) => {
+            runtime.gpus[requester].info.hive_id == runtime.gpus[owner].info.hive_id
+        }
+        (None, Some(owner)) => runtime.gpus[owner].info.hive_id == 0,
+        _ => false,
+    };
+    let link = if same {
+        None
+    } else if agent.handle == CPU_AGENT {
+        owner_gpu.and_then(|index| runtime.gpus[index].endpoint.memory_link_from_host())
+    } else if let Some(requester) = requester_gpu {
+        if matches!(storage, PoolStorage::System) {
+            runtime.gpus[requester].endpoint.memory_link_to_host()
+        } else {
+            owner_gpu.and_then(|owner| {
+                runtime.gpus[requester]
+                    .endpoint
+                    .memory_link_to(&runtime.gpus[owner].endpoint)
+            })
+        }
+    } else {
+        None
+    };
+    let linked = same || link.is_some_and(|link| link.hop_count() != 0);
+    (pool_access(same, storage, linked, same_hive), link)
 }
 
 fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
@@ -762,6 +798,7 @@ unsafe fn memory_pool_get_info(
     let kind = gpu_pool.map_or(0, |(_, kind)| kind);
     let group = kind == GPU_POOL_GROUP;
     let flags = pool_global_flags(runtime, pool).unwrap_or(0);
+    let page = runtime.host_page_size;
     let size = gpu_pool.map_or(runtime.host_memory_bytes, |(index, _)| {
         if group {
             usize::try_from(runtime.gpus[index].info.local_data_share_byte_length)
@@ -783,18 +820,18 @@ unsafe fn memory_pool_get_info(
             POOL_INFO_ALLOC_MAX_SIZE => {
                 value
                     .cast::<usize>()
-                    .write(if group { 0 } else { size & !4095 })
+                    .write(if group { 0 } else { size & !(page - 1) })
             }
             POOL_INFO_RUNTIME_ALLOC_ALLOWED => value.cast::<bool>().write(!group),
             POOL_INFO_RUNTIME_ALLOC_GRANULE | POOL_INFO_RUNTIME_ALLOC_ALIGNMENT => {
-                value.cast::<usize>().write(if group { 0 } else { 4096 })
+                value.cast::<usize>().write(if group { 0 } else { page })
             }
             POOL_INFO_RUNTIME_ALLOC_REC_GRANULE => value.cast::<usize>().write(if group {
                 0
             } else if gpu_pool.is_some() {
                 2 * 1024 * 1024
             } else {
-                4096
+                page
             }),
             POOL_INFO_ACCESSIBLE_BY_ALL => value.cast::<bool>().write(cpu_pool(pool)),
             POOL_INFO_LOCATION => {
@@ -1006,7 +1043,6 @@ pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
         let Some(owner) = pool_owner(runtime, pool) else {
             return INVALID_MEMORY_POOL;
         };
-        let same = owner == agent;
         let storage = runtime
             .decode_gpu_pool(pool)
             .map_or(PoolStorage::System, |(_, kind)| match kind {
@@ -1014,39 +1050,8 @@ pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
                 GPU_POOL_FINE => PoolStorage::LocalFine,
                 _ => PoolStorage::LocalCoarse,
             });
-        let requester_gpu = runtime.gpu_index(agent);
-        let owner_gpu = runtime.gpu_index(owner);
-        let same_hive = match (requester_gpu, owner_gpu) {
-            (Some(requester), Some(owner)) => {
-                runtime.gpus[requester].info.hive_id == runtime.gpus[owner].info.hive_id
-            }
-            (None, Some(owner)) => runtime.gpus[owner].info.hive_id == 0,
-            _ => false,
-        };
-        let link = if same {
-            None
-        } else if agent.handle == CPU_AGENT {
-            let Some(owner) = owner_gpu else {
-                return INVALID_MEMORY_POOL;
-            };
-            runtime.gpus[owner].endpoint.memory_link_from_host()
-        } else {
-            let Some(requester) = requester_gpu else {
-                return INVALID_AGENT;
-            };
-            if cpu_pool(pool) {
-                runtime.gpus[requester].endpoint.memory_link_to_host()
-            } else {
-                let Some(owner) = owner_gpu else {
-                    return INVALID_MEMORY_POOL;
-                };
-                runtime.gpus[requester]
-                    .endpoint
-                    .memory_link_to(&runtime.gpus[owner].endpoint)
-            }
-        };
-        let linked = same || link.is_some_and(|link| link.hop_count() != 0);
-        let access = pool_access(same, storage, linked, same_hive);
+        let (access, link) = agent_pool_relationship(runtime, agent, owner, storage);
+        let same = owner == agent;
         let hops = if same || access == POOL_ACCESS_NEVER {
             0
         } else {
@@ -1086,12 +1091,13 @@ unsafe fn memory_pool_allocate(
         if pointer.is_null() || size == 0 || flags & !ALLOC_FLAGS != 0 {
             return INVALID_ARGUMENT;
         }
-        let rounded = match size.checked_add(4095).map(|value| value & !4095) {
+        let page = runtime.host_page_size;
+        let rounded = match size.checked_add(page - 1).map(|value| value & !(page - 1)) {
             Some(size) => size,
             None => return INVALID_ALLOCATION,
         };
         let (device_index, kind) = if cpu_pool(pool) {
-            (0, cpu_pool_memory_kind(pool))
+            (0, cpu_pool_memory_kind(pool, runtime.lifetime))
         } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
             if pool_kind == GPU_POOL_GROUP {
                 return INVALID_ALLOCATION;
@@ -1110,14 +1116,14 @@ unsafe fn memory_pool_allocate(
             return invalid_pool;
         };
         let maximum = runtime.decode_gpu_pool(pool).map_or(
-            runtime.host_memory_bytes & !4095,
+            runtime.host_memory_bytes & !(page - 1),
             |(index, pool_kind)| {
                 if pool_kind == GPU_POOL_GROUP {
                     0
                 } else {
                     usize::try_from(runtime.gpus[index].endpoint.local_memory_bytes)
                         .unwrap_or(usize::MAX)
-                        & !4095
+                        & !(page - 1)
                 }
             },
         );
@@ -1140,7 +1146,7 @@ unsafe fn memory_pool_allocate(
         let allocation = match runtime.gpus[device_index].device.allocate(
             kind,
             rounded as u64,
-            4096,
+            page as u64,
             permissions,
         ) {
             Ok(allocation) => allocation,
@@ -1422,8 +1428,8 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
         {
             return INVALID_ARGUMENT;
         }
-        // SAFETY: The caller supplied writable output storage.
-        unsafe { mapped_pointer.write(std::ptr::null_mut()) };
+        // Read inputs before publishing output; the C ABI does not forbid
+        // mapped_pointer from overlapping the handle or agent array.
         // SAFETY: The caller supplied a readable IPC handle.
         let words = unsafe { handle.read() }.handle;
         let mut guard = match lock() {
@@ -1627,22 +1633,24 @@ unsafe fn ais_transfer(
         else {
             break Err(EOVERFLOW);
         };
-        // SAFETY: The caller validated the complete host range. Linux borrows
-        // the descriptor and host bytes only for this synchronous operation.
-        let transferred = unsafe {
-            match operation {
-                AisOperation::Read => rocddi::session::linux::read_descriptor(
-                    descriptor,
-                    host + copied,
-                    remaining,
-                    offset,
-                ),
-                AisOperation::Write => rocddi::session::linux::write_descriptor(
-                    descriptor,
-                    host + copied,
-                    remaining,
-                    offset,
-                ),
+        // SAFETY: The caller validated the complete host range and keeps it
+        // live for this synchronous transfer. The Linux provider borrows it.
+        let transferred = match operation {
+            AisOperation::Read => {
+                let buffer = if remaining == 0 {
+                    &mut []
+                } else {
+                    unsafe { std::slice::from_raw_parts_mut((host + copied) as *mut u8, remaining) }
+                };
+                linux_interop::read_descriptor_at(descriptor, buffer, offset)
+            }
+            AisOperation::Write => {
+                let buffer = if remaining == 0 {
+                    &[]
+                } else {
+                    unsafe { std::slice::from_raw_parts((host + copied) as *const u8, remaining) }
+                };
+                linux_interop::write_descriptor_at(descriptor, buffer, offset)
             }
         };
         let transferred = match transferred {
@@ -1689,35 +1697,34 @@ unsafe fn ais_file_io(
 ) -> Status {
     // SAFETY: Linux defines the public union's active member as fd.
     let descriptor = unsafe { handle.fd };
-    let (host, transfer_size) = {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
-        };
-        if device_pointer.is_null() || descriptor < 0 {
-            return INVALID_ARGUMENT;
-        }
-        let transfer_size = match usize::try_from(size.min(AIS_MAX_TRANSFER_BYTES)) {
-            Ok(size) => size,
-            Err(_) => return ERROR,
-        };
-        let Some(description) = pointer_description(runtime, device_pointer as usize) else {
-            return ERROR;
-        };
-        if description.owner.handle == CPU_AGENT {
-            return ERROR;
-        }
-        let Some(host) = description.host_range(device_pointer as usize, transfer_size) else {
-            return ERROR;
-        };
-        (host, transfer_size)
+    let guard = match lock() {
+        Ok(guard) => guard,
+        Err(status) => return status,
     };
-    // SAFETY: Runtime ownership proves the translated range remains mapped;
-    // the public call requires the allocation and descriptor to remain live.
-    unsafe {
+    let Some(runtime) = guard.as_ref() else {
+        return NOT_INITIALIZED;
+    };
+    if device_pointer.is_null() || descriptor < 0 {
+        return INVALID_ARGUMENT;
+    }
+    let transfer_size = match usize::try_from(size.min(AIS_MAX_TRANSFER_BYTES)) {
+        Ok(size) => size,
+        Err(_) => return ERROR,
+    };
+    let Some(description) = pointer_description(runtime, device_pointer as usize) else {
+        return ERROR;
+    };
+    if description.owner.handle == CPU_AGENT {
+        return ERROR;
+    }
+    let Some(host) = description.host_range(device_pointer as usize, transfer_size) else {
+        return ERROR;
+    };
+    // Keep the runtime lock through positioned I/O so another HSA call cannot
+    // free or unmap the allocation while the provider borrows its host range.
+    // SAFETY: The mapped range stays owned by the locked runtime. The public
+    // call requires the descriptor to remain live for this synchronous call.
+    let status = unsafe {
         ais_transfer(
             descriptor,
             host,
@@ -1727,7 +1734,9 @@ unsafe fn ais_file_io(
             operation_status,
             operation,
         )
-    }
+    };
+    drop(guard);
+    status
 }
 
 #[unsafe(no_mangle)]
@@ -1860,7 +1869,8 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
 #[unsafe(no_mangle)]
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
-        if rocddi::session::linux::close_descriptor(descriptor).is_ok() {
+        // SAFETY: The ABI transfers responsibility for closing this descriptor.
+        if unsafe { linux_interop::close_owned_descriptor(descriptor) }.is_ok() {
             SUCCESS
         } else {
             RESOURCE_FREE
@@ -1868,16 +1878,22 @@ pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     })
 }
 
-fn registered_extent(host: usize, size: usize) -> Option<usize> {
+fn registered_extent(host: usize, size: usize, page: usize) -> Option<usize> {
     host.checked_add(size)?;
-    let page_offset = host & 4095;
+    let page_offset = host & (page - 1);
     page_offset
         .checked_add(size)?
-        .checked_add(4095)
-        .map(|extent| extent & !4095)
+        .checked_add(page - 1)
+        .map(|extent| extent & !(page - 1))
 }
 
-fn memory_lock_to_pool(
+/// # Safety
+/// `host_ptr` must cover `size` live host bytes through successful unlock,
+/// `agents` must contain `num_agents` readable handles when non-null, and
+/// `agent_ptr` must point to writable output storage. After an ambiguous
+/// native registration failure, the caller must retain the host page cover
+/// through process teardown.
+unsafe fn memory_lock_to_pool(
     host_ptr: *mut c_void,
     size: usize,
     agents: *const HsaAgent,
@@ -1897,8 +1913,6 @@ fn memory_lock_to_pool(
     if host_ptr.is_null() || size == 0 || agent_ptr.is_null() {
         return INVALID_ARGUMENT;
     }
-    // SAFETY: The caller supplied writable pointer storage.
-    unsafe { agent_ptr.write(std::ptr::null_mut()) };
     if num_agents < 0
         || (agents.is_null() && num_agents != 0)
         || (!agents.is_null() && num_agents == 0)
@@ -1918,6 +1932,8 @@ fn memory_lock_to_pool(
         return SUCCESS;
     }
 
+    // Keep the output untouched while reading the caller's agent array: the
+    // two may share storage under the public C ABI.
     let mut gpu_indexes = Vec::new();
     if agents.is_null() {
         gpu_indexes.extend(0..runtime.gpus.len());
@@ -1945,36 +1961,40 @@ fn memory_lock_to_pool(
         return OUT_OF_RESOURCES;
     }
     let host_base = host_ptr as usize;
-    let (allocation, device_base) =
-        if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
-            let Some(native_size) = registered_extent(host_base, size) else {
-                return INVALID_ARGUMENT;
-            };
-            let allocation = {
-                let first = &runtime.gpus[first_index].device;
-                let peers: Vec<_> = peer_indexes
-                    .iter()
-                    .map(|&index| &runtime.gpus[index].device)
-                    .collect();
-                match first.allocate_with_peers(
-                    &peers,
-                    MemoryKind::RegisteredHost {
-                        address: host_base,
-                        uncached: flags & ALLOC_UNCACHED != 0,
-                    },
-                    native_size as u64,
-                    4096,
-                    DeviceAccess::READ | DeviceAccess::WRITE,
-                ) {
-                    Ok(allocation) => allocation,
-                    Err(error) => return map_error(error),
-                }
-            };
-            let device_base = allocation.info().device_address as usize;
-            (Some(allocation), device_base)
-        } else {
-            (None, host_base)
+    let (allocation, device_base) = if let Some((&first_index, peer_indexes)) =
+        gpu_indexes.split_first()
+    {
+        let Some(native_size) = registered_extent(host_base, size, runtime.host_page_size) else {
+            return INVALID_ARGUMENT;
         };
+        let allocation = {
+            let first = &runtime.gpus[first_index].device;
+            let peers: Vec<_> = peer_indexes
+                .iter()
+                .map(|&index| &runtime.gpus[index].device)
+                .collect();
+            // SAFETY: The HSA lock caller retains the complete host page
+            // cover until unlock succeeds; ambiguous native failures keep
+            // the registration backing caller-owned through teardown.
+            match unsafe {
+                first.register_host_with_peers(
+                    &peers,
+                    host_base,
+                    flags & ALLOC_UNCACHED != 0,
+                    native_size as u64,
+                    runtime.host_page_size as u64,
+                    DeviceAccess::READ | DeviceAccess::WRITE,
+                )
+            } {
+                Ok(allocation) => allocation,
+                Err(error) => return map_error(error),
+            }
+        };
+        let device_base = allocation.info().device_address as usize;
+        (Some(allocation), device_base)
+    } else {
+        (None, host_base)
+    };
     let accessible = gpu_indexes
         .into_iter()
         .map(|index| HsaAgent {
@@ -2003,17 +2023,21 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
     agent_ptr: *mut *mut c_void,
 ) -> Status {
     boundary(|| {
-        memory_lock_to_pool(
-            host_ptr,
-            size,
-            agents,
-            num_agents,
-            HsaMemoryPool {
-                handle: CPU_POOL_COARSE,
-            },
-            0,
-            agent_ptr,
-        )
+        // SAFETY: The HSA C caller provides live input and output storage and
+        // retains the host page cover through unlock or uncertain teardown.
+        unsafe {
+            memory_lock_to_pool(
+                host_ptr,
+                size,
+                agents,
+                num_agents,
+                HsaMemoryPool {
+                    handle: CPU_POOL_COARSE,
+                },
+                0,
+                agent_ptr,
+            )
+        }
     })
 }
 
@@ -2027,7 +2051,11 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     flags: u32,
     agent_ptr: *mut *mut c_void,
 ) -> Status {
-    boundary(|| memory_lock_to_pool(host_ptr, size, agents, num_agents, pool, flags, agent_ptr))
+    boundary(|| {
+        // SAFETY: The HSA C caller provides live input and output storage and
+        // retains the host page cover through unlock or uncertain teardown.
+        unsafe { memory_lock_to_pool(host_ptr, size, agents, num_agents, pool, flags, agent_ptr) }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -2108,13 +2136,14 @@ unsafe fn interop_map_buffer(
         devices.push(&runtime.gpus[index].device);
         accessible.push(*agent);
     }
-    // SAFETY: The public HSA call keeps the validated descriptor live for this
-    // synchronous import. rocddi duplicates it before returning.
-    let descriptor = unsafe { BorrowedFd::borrow_raw(interop_handle) };
+    let descriptor = match linux_interop::duplicate_descriptor(interop_handle) {
+        Ok(descriptor) => descriptor,
+        Err(error) => return map_error(error),
+    };
     let allocation = match linux_interop::import_graphics_dma_buf(
         &runtime.session,
         &devices,
-        descriptor,
+        descriptor.as_fd(),
         size_hint as u64,
     ) {
         Ok(allocation) => allocation,
@@ -2385,7 +2414,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     flags: u64,
 ) -> Status {
     // SAFETY: This entry point is the default-alignment form of the same ABI.
-    unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, 4096, flags) }
+    let page = match current_host_page() {
+        Ok(page) => page,
+        Err(status) => return status,
+    };
+    unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
 }
 
 #[unsafe(no_mangle)]
@@ -2397,10 +2430,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     flags: u64,
 ) -> Status {
     boundary(|| {
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
         if address.is_null()
             || size == 0
-            || size % 4096 != 0
-            || alignment < 4096
+            || size % page != 0
+            || alignment < page as u64
             || !alignment.is_power_of_two()
             || flags & !VMEM_ADDRESS_NO_REGISTER != 0
         {
@@ -2498,8 +2535,12 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
     memory_handle: *mut HsaAmdVmemAllocHandle,
 ) -> Status {
     boundary(|| {
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
         if size == 0
-            || size % 4096 != 0
+            || size % page != 0
             || !matches!(memory_type, MEMORY_TYPE_NONE | MEMORY_TYPE_PINNED)
             || flags & !u64::from(ALLOC_UNCACHED) != 0
             || memory_handle.is_null()
@@ -2599,7 +2640,11 @@ pub extern "C" fn hsa_amd_vmem_map(
     flags: u64,
 ) -> Status {
     boundary(|| {
-        if address.is_null() || size == 0 || size % 4096 != 0 || offset % 4096 != 0 || flags != 0 {
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
+        if address.is_null() || size == 0 || size % page != 0 || offset % page != 0 || flags != 0 {
             return INVALID_ARGUMENT;
         }
         let base = address as usize;
@@ -2734,11 +2779,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     descriptor_count: usize,
 ) -> Status {
     boundary(|| {
-        if address.is_null() || size == 0 || descriptors.is_null() || descriptor_count == 0 {
+        if address.is_null()
+            || size == 0
+            || descriptors.is_null()
+            || descriptor_count == 0
+            || descriptor_count > isize::MAX as usize / size_of::<HsaAmdMemoryAccessDesc>()
+        {
             return INVALID_ARGUMENT;
         }
-        // SAFETY: The caller supplies descriptor_count readable entries.
-        let descriptors = unsafe { std::slice::from_raw_parts(descriptors, descriptor_count) };
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -2747,7 +2795,17 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        for descriptor in descriptors {
+        let mut requested = Vec::new();
+        if requested.try_reserve_exact(descriptor_count).is_err() {
+            return OUT_OF_RESOURCES;
+        }
+        // A CPU access change can remove the mapping that holds the caller's
+        // descriptors. Own them before the first native access update.
+        // SAFETY: The caller supplies descriptor_count readable entries.
+        requested.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(descriptors, descriptor_count)
+        });
+        for descriptor in &requested {
             if !runtime.is_agent(descriptor.agent_handle) {
                 return INVALID_AGENT;
             }
@@ -2766,7 +2824,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             Err(status) => return status,
         };
         for base in bases {
-            for descriptor in descriptors {
+            for descriptor in &requested {
                 let status = replace_vmem_access(runtime, base, *descriptor);
                 if status != SUCCESS {
                     return status;
@@ -2869,13 +2927,15 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
         if runtime.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        // SAFETY: The caller-owned descriptor was validated above and remains
-        // live for this synchronous import. rocddi duplicates it before return.
-        let descriptor = unsafe { BorrowedFd::borrow_raw(descriptor) };
-        let memory = match linux_interop::import_virtual_memory(&runtime.session, descriptor) {
-            Ok(memory) => memory,
+        let descriptor = match linux_interop::duplicate_descriptor(descriptor) {
+            Ok(descriptor) => descriptor,
             Err(error) => return map_error(error),
         };
+        let memory =
+            match linux_interop::import_virtual_memory(&runtime.session, descriptor.as_fd()) {
+                Ok(memory) => memory,
+                Err(error) => return map_error(error),
+            };
         let handle = match runtime.allocate_handle() {
             Ok(handle) => handle,
             Err(status) => return status,
@@ -3138,18 +3198,12 @@ fn host_address(runtime: &Runtime, address: usize) -> Result<usize, Status> {
     Ok(address)
 }
 
-fn translate_copy_address(address: usize) -> Result<usize, Status> {
-    let guard = lock()?;
-    let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    host_address(runtime, address)
-}
-
 fn memory_copy_has_work(
     destination: *mut c_void,
     source: *const c_void,
     size: usize,
 ) -> Result<bool, Status> {
-    if destination.is_null() || source.is_null() {
+    if destination.is_null() || source.is_null() || size > isize::MAX as usize {
         return Err(INVALID_ARGUMENT);
     }
     Ok(size != 0)
@@ -3164,14 +3218,9 @@ fn memory_fill_size(pointer: *mut c_void, count: usize) -> Result<Option<usize>,
     }
     count
         .checked_mul(size_of::<u32>())
+        .filter(|size| isize::try_from(*size).is_ok())
         .map(Some)
         .ok_or(INVALID_ARGUMENT)
-}
-
-fn system_timestamp() -> Result<u64, Status> {
-    let guard = lock()?;
-    let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    runtime.system_timestamp()
 }
 
 unsafe fn write_pointer_info(
@@ -3380,39 +3429,96 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         if agents.iter().any(|agent| !runtime.is_agent(*agent)) {
             return INVALID_AGENT;
         }
-        if let Some(memory) = runtime
+        let Some(key) = runtime
             .allocations
-            .values_mut()
-            .find(|memory| memory.contains(pointer as usize))
-        {
-            memory.allow_access(agents);
-            return SUCCESS;
+            .iter()
+            .find(|(_, memory)| memory.contains(pointer as usize))
+            .map(|(key, _)| *key)
+        else {
+            // This API is defined for memory-pool allocations. IPC, graphics,
+            // and locked ranges need their own native mapping lifecycle.
+            return INVALID_ALLOCATION;
+        };
+        let memory = &runtime.allocations[&key];
+        let owner = memory.description.owner;
+        let storage = if owner.handle == CPU_AGENT {
+            PoolStorage::System
+        } else if memory.description.global_flags & POOL_FLAG_FINE != 0 {
+            PoolStorage::LocalFine
+        } else {
+            PoolStorage::LocalCoarse
+        };
+        if agents.iter().any(|agent| {
+            agent_pool_relationship(runtime, *agent, owner, storage).0 == POOL_ACCESS_NEVER
+                || (agent.handle == CPU_AGENT && memory.description.host_base.is_none())
+        }) {
+            return INVALID_ARGUMENT;
         }
-        if let Some(memory) = runtime
-            .ipc_allocations
-            .values_mut()
-            .find(|memory| memory.contains(pointer as usize))
-        {
-            memory.allow_access(agents);
-            return SUCCESS;
+        let mut desired = Vec::new();
+        if desired.try_reserve(agents.len().saturating_add(1)).is_err() {
+            return OUT_OF_RESOURCES;
         }
-        if let Some(memory) = runtime
-            .interop_allocations
-            .values_mut()
-            .find(|memory| memory.contains(pointer as usize))
-        {
-            memory.allow_access(agents);
-            return SUCCESS;
+        for agent in agents.iter().copied().chain(std::iter::once(owner)) {
+            if !desired.contains(&agent) {
+                desired.push(agent);
+            }
         }
-        if let Some(memory) = runtime
-            .locked_allocations
-            .iter_mut()
-            .find(|memory| memory.contains(pointer as usize))
-        {
-            memory.description.allow_access(agents);
-            return SUCCESS;
+        let mut devices = Vec::new();
+        if devices.try_reserve(desired.len()).is_err() {
+            return OUT_OF_RESOURCES;
         }
-        INVALID_ALLOCATION
+        for agent in &desired {
+            if let Some(index) = runtime.gpu_index(*agent) {
+                devices.push(&runtime.gpus[index].device);
+            }
+        }
+        let Some(origin) = runtime
+            .gpus
+            .iter()
+            .map(|gpu| &gpu.device)
+            .find(|device| memory.allocation.originates_from(device))
+        else {
+            return ERROR;
+        };
+        let Some(memory) = runtime.allocations.get_mut(&key) else {
+            return ERROR;
+        };
+        match memory.allocation.set_device_access(origin, &devices) {
+            Ok(()) => {
+                memory.description.accessible = desired;
+                SUCCESS
+            }
+            Err(error) => {
+                // Native calls can complete a prefix before reporting failure.
+                // Report only mappings still known to be available.
+                let cpu = HsaAgent { handle: CPU_AGENT };
+                let cpu_accessible = owner == cpu || memory.description.accessible.contains(&cpu);
+                memory.description.accessible.clear();
+                if memory
+                    .description
+                    .accessible
+                    .try_reserve(runtime.gpus.len() + usize::from(cpu_accessible))
+                    .is_ok()
+                {
+                    if cpu_accessible {
+                        memory.description.accessible.push(cpu);
+                    }
+                    for (index, gpu) in runtime.gpus.iter().enumerate() {
+                        if memory.allocation.device_address(&gpu.device).is_ok() {
+                            memory.description.accessible.push(HsaAgent {
+                                handle: GPU_AGENT_BASE + index as u64,
+                            });
+                        }
+                    }
+                }
+                match error.kind() {
+                    rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
+                        INVALID_ARGUMENT
+                    }
+                    _ => map_error(error),
+                }
+            }
+        }
     })
 }
 
@@ -3496,9 +3602,9 @@ pub unsafe extern "C" fn hsa_memory_copy(
             Ok(address) => address as *const c_void,
             Err(status) => return status,
         };
-        drop(guard);
         // SAFETY: HSA requires both ranges to be valid for size bytes. ptr::copy
         // also preserves the documented overlap behavior of hsa_memory_copy.
+        // The runtime lock retains any runtime-owned backing during the copy.
         unsafe { std::ptr::copy(src.cast::<u8>(), dst.cast::<u8>(), size) };
         SUCCESS
     })
@@ -3529,10 +3635,11 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         let Some(host) = description.host_range(pointer as usize, size) else {
             return INVALID_ALLOCATION;
         };
-        drop(guard);
         // SAFETY: The complete aligned output range belongs to a live runtime
-        // allocation and has been translated to its host-visible mapping.
-        unsafe { std::slice::from_raw_parts_mut(host as *mut u32, count).fill(value) };
+        // allocation retained by the runtime lock. Its prior contents need not
+        // be initialized u32 values.
+        unsafe { std::slice::from_raw_parts_mut(host as *mut MaybeUninit<u32>, count) }
+            .fill(MaybeUninit::new(value));
         SUCCESS
     })
 }
@@ -3618,7 +3725,11 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if attribute_count != 0 && attribute_list.is_null() {
+        if attribute_count > SVM_MAX_ATTRIBUTES
+            || (attribute_count != 0
+                && (attribute_list.is_null()
+                    || (attribute_list as usize) % align_of::<HsaAmdSvmAttributePair>() != 0))
+        {
             return INVALID_ARGUMENT;
         }
         let (address, size) = match svm_range(pointer, size) {
@@ -3781,26 +3892,29 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if attribute_count != 0 && attribute_list.is_null() {
+        if attribute_count > SVM_MAX_ATTRIBUTES
+            || (attribute_count != 0
+                && (attribute_list.is_null()
+                    || (attribute_list as usize) % align_of::<HsaAmdSvmAttributePair>() != 0))
+        {
             return INVALID_ARGUMENT;
         }
         let (address, size) = match svm_range(pointer, size) {
             Ok(range) => range,
             Err(status) => return status,
         };
-        let pairs = if attribute_count == 0 {
-            &mut []
-        } else {
-            // SAFETY: The HSA ABI requires attribute_count readable and writable pairs.
-            unsafe { std::slice::from_raw_parts_mut(attribute_list, attribute_count) }
-        };
         let (mut attributes, mut indices) = match reserve_svm_attributes(attribute_count) {
             Ok(storage) => storage,
             Err(status) => return status,
         };
         let mut get_flags = false;
-        for pair in pairs.iter() {
-            match pair.attribute {
+        for index in 0..attribute_count {
+            // SAFETY: The caller supplies this complete pair array. Only each
+            // attribute tag is initialized for a query; its value is input
+            // only for ACCESS_QUERY.
+            let pair = unsafe { attribute_list.add(index) };
+            let attribute = unsafe { (&raw const (*pair).attribute).read() };
+            match attribute {
                 AMD_SVM_ATTRIB_GLOBAL_FLAG
                 | AMD_SVM_ATTRIB_READ_ONLY
                 | AMD_SVM_ATTRIB_HIVE_LOCAL
@@ -3822,7 +3936,10 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                     attributes.push(SvmAttribute::PrefetchLocation(SvmLocation::Undefined));
                 }
                 AMD_SVM_ATTRIB_ACCESS_QUERY => {
-                    let agent = HsaAgent { handle: pair.value };
+                    // SAFETY: ACCESS_QUERY requires the agent value as input.
+                    let agent = HsaAgent {
+                        handle: unsafe { (&raw const (*pair).value).read() },
+                    };
                     if !runtime.is_agent(agent) {
                         return INVALID_AGENT;
                     }
@@ -3873,31 +3990,27 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
             };
             (clear, set)
         });
-        for (index, pair) in pairs.iter_mut().enumerate() {
-            match pair.attribute {
+        for (index, native_index) in indices.iter().copied().enumerate() {
+            // SAFETY: The caller retains the complete writable pair array.
+            // Read only the initialized tag until an output value is written.
+            let pair = unsafe { attribute_list.add(index) };
+            let attribute = unsafe { (&raw const (*pair).attribute).read() };
+            let value = match attribute {
                 AMD_SVM_ATTRIB_GLOBAL_FLAG => {
-                    pair.value = if set_flags & SVM_FLAG_COHERENT != 0 {
+                    if set_flags & SVM_FLAG_COHERENT != 0 {
                         AMD_SVM_GLOBAL_FLAG_FINE_GRAINED
                     } else if clear_flags & SVM_FLAG_COHERENT != 0 {
                         AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED
                     } else {
                         AMD_SVM_GLOBAL_FLAG_INDETERMINATE
-                    };
+                    }
                 }
-                AMD_SVM_ATTRIB_READ_ONLY => {
-                    pair.value = u64::from(set_flags & SVM_FLAG_GPU_READ_ONLY);
-                }
-                AMD_SVM_ATTRIB_HIVE_LOCAL => {
-                    pair.value = u64::from(set_flags & SVM_FLAG_HIVE_LOCAL);
-                }
-                AMD_SVM_ATTRIB_READ_MOSTLY => {
-                    pair.value = u64::from(set_flags & SVM_FLAG_GPU_READ_MOSTLY);
-                }
-                AMD_SVM_ATTRIB_GPU_EXEC => {
-                    pair.value = u64::from(set_flags & SVM_FLAG_GPU_EXECUTE);
-                }
+                AMD_SVM_ATTRIB_READ_ONLY => u64::from(set_flags & SVM_FLAG_GPU_READ_ONLY),
+                AMD_SVM_ATTRIB_HIVE_LOCAL => u64::from(set_flags & SVM_FLAG_HIVE_LOCAL),
+                AMD_SVM_ATTRIB_READ_MOSTLY => u64::from(set_flags & SVM_FLAG_GPU_READ_MOSTLY),
+                AMD_SVM_ATTRIB_GPU_EXEC => u64::from(set_flags & SVM_FLAG_GPU_EXECUTE),
                 AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => {
-                    let Some(native) = indices[index] else {
+                    let Some(native) = native_index else {
                         return ERROR;
                     };
                     let Some(SvmAttribute::MigrationGranularity(value)) =
@@ -3905,20 +4018,20 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                     else {
                         return ERROR;
                     };
-                    pair.value = u64::from(value);
+                    u64::from(value)
                 }
                 AMD_SVM_ATTRIB_PREFERRED_LOCATION | AMD_SVM_ATTRIB_PREFETCH_LOCATION => {
-                    let Some(native) = indices[index] else {
+                    let Some(native) = native_index else {
                         return ERROR;
                     };
                     let location = match attributes.get(native).copied() {
                         Some(SvmAttribute::PreferredLocation(location))
-                            if pair.attribute == AMD_SVM_ATTRIB_PREFERRED_LOCATION =>
+                            if attribute == AMD_SVM_ATTRIB_PREFERRED_LOCATION =>
                         {
                             location
                         }
                         Some(SvmAttribute::PrefetchLocation(location))
-                            if pair.attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION =>
+                            if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION =>
                         {
                             location
                         }
@@ -3928,18 +4041,21 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                         Ok(agent) => agent,
                         Err(status) => return status,
                     };
-                    pair.value = agent.handle;
+                    agent.handle
                 }
                 AMD_SVM_ATTRIB_ACCESS_QUERY => {
-                    let agent = HsaAgent { handle: pair.value };
-                    pair.attribute = if agent.handle == CPU_AGENT {
+                    // SAFETY: ACCESS_QUERY retains its initialized agent input.
+                    let agent = HsaAgent {
+                        handle: unsafe { (&raw const (*pair).value).read() },
+                    };
+                    let result = if agent.handle == CPU_AGENT {
                         if set_flags & SVM_FLAG_HOST_ACCESS != 0 {
                             AMD_SVM_ATTRIB_AGENT_ACCESSIBLE
                         } else {
                             AMD_SVM_ATTRIB_AGENT_NO_ACCESS
                         }
                     } else {
-                        let Some(native) = indices[index] else {
+                        let Some(native) = native_index else {
                             return ERROR;
                         };
                         match attributes.get(native).copied() {
@@ -3958,27 +4074,82 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
                             _ => return ERROR,
                         }
                     };
+                    // SAFETY: The pair's initialized tag is the output field
+                    // for ACCESS_QUERY; its input agent value is preserved.
+                    unsafe { (&raw mut (*pair).attribute).write(result) };
+                    continue;
                 }
                 _ => return INVALID_ARGUMENT,
-            }
+            };
+            // SAFETY: The caller supplied writable value storage. Its prior
+            // bytes need not have been initialized for output-only queries.
+            unsafe { (&raw mut (*pair).value).write(value) };
         }
         SUCCESS
     })
+}
+
+/// Rolls back signal retention if worker creation fails or unwinds.
+struct PendingPrefetchSignals<'a> {
+    runtime: &'a mut Runtime,
+    handles: Arc<Vec<HsaSignal>>,
+    retained: usize,
+}
+
+impl<'a> PendingPrefetchSignals<'a> {
+    fn new(runtime: &'a mut Runtime, handles: Arc<Vec<HsaSignal>>) -> Result<Self, Status> {
+        let mut pending = Self {
+            runtime,
+            handles,
+            retained: 0,
+        };
+        for signal in pending.handles.iter() {
+            pending.runtime.retain_async_signal(*signal)?;
+            pending.retained += 1;
+        }
+        Ok(pending)
+    }
+
+    fn transfer_to_worker(&mut self) {
+        self.retained = 0;
+    }
+}
+
+impl Drop for PendingPrefetchSignals<'_> {
+    fn drop(&mut self) {
+        for signal in self.handles.iter().take(self.retained) {
+            self.runtime.release_async_signal(*signal);
+        }
+    }
+}
+
+fn release_svm_prefetch_signals(handles: &[HsaSignal]) {
+    if let Ok(mut guard) = lock() {
+        if let Some(runtime) = guard.as_mut() {
+            for signal in handles {
+                runtime.release_async_signal(*signal);
+            }
+        }
+    }
+    // Shutdown removes the runtime from the registry before joining workers;
+    // it retains all signal storage until after this worker exits.
 }
 
 fn finish_svm_prefetch(completion: HsaSignal, success: bool) {
     if completion.handle == 0 {
         return;
     }
-    // SAFETY: The entry point validates that this is runtime-owned signal
-    // storage, which remains mapped until all runtime workers have joined.
-    if let Some(signal) = unsafe { crate::signal::signal_ref(completion) } {
-        if success {
-            signal.value.fetch_sub(1, Ordering::Release);
-        } else {
-            signal.value.store(-1, Ordering::Release);
-        }
-    }
+    // SAFETY: Submission retains this signal until the worker exits, and
+    // shutdown keeps its storage mapped until all workers have joined.
+    let _ = unsafe {
+        crate::signal::with_signal(completion, |signal| {
+            if success {
+                signal.value.fetch_sub(1, Ordering::Release);
+            } else {
+                signal.value.store(-1, Ordering::Release);
+            }
+        })
+    };
 }
 
 #[allow(
@@ -3988,24 +4159,28 @@ fn finish_svm_prefetch(completion: HsaSignal, success: bool) {
 fn svm_prefetch_worker(
     session: Session,
     stop: Arc<AtomicBool>,
-    dependencies: Vec<HsaSignal>,
+    dependencies: &[HsaSignal],
     completion: HsaSignal,
     address: u64,
     size: u64,
     location: SvmLocation,
 ) {
-    for dependency in dependencies {
+    for &dependency in dependencies {
         loop {
             if stop.load(Ordering::Acquire) {
                 return;
             }
-            // SAFETY: The entry point validates every dependency and runtime
-            // shutdown retains signal slabs until all workers have joined.
-            let Some(signal) = (unsafe { crate::signal::signal_ref(dependency) }) else {
+            // SAFETY: Submission retains each signal until this worker exits;
+            // shutdown retains the storage until all workers have joined.
+            let Some(ready) = (unsafe {
+                crate::signal::with_signal(dependency, |signal| {
+                    signal.value.load(Ordering::Acquire) == 0
+                })
+            }) else {
                 finish_svm_prefetch(completion, false);
                 return;
             };
-            if signal.value.load(Ordering::Acquire) == 0 {
+            if ready {
                 break;
             }
             thread::sleep(Duration::from_micros(20));
@@ -4062,33 +4237,50 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         {
             return INVALID_SIGNAL;
         }
-        let mut dependency_handles = Vec::new();
-        if dependency_handles
-            .try_reserve_exact(dependency_slice.len())
+        let mut signal_handles = Vec::new();
+        if signal_handles
+            .try_reserve_exact(dependency_slice.len() + usize::from(completion.handle != 0))
             .is_err()
+            || runtime.workers.try_reserve(1).is_err()
         {
             return OUT_OF_RESOURCES;
         }
-        dependency_handles.extend_from_slice(dependency_slice);
-        let session = runtime.session.clone();
-        let stop = runtime.stop_workers.clone();
+        signal_handles.extend_from_slice(dependency_slice);
+        if completion.handle != 0 {
+            signal_handles.push(completion);
+        }
+        let mut pending = match PendingPrefetchSignals::new(runtime, Arc::new(signal_handles)) {
+            Ok(pending) => pending,
+            Err(status) => return status,
+        };
+        let session = pending.runtime.session.clone();
+        let stop = pending.runtime.stop_workers.clone();
+        let worker_handles = pending.handles.clone();
+        let dependency_len = dependency_slice.len();
         let worker = match thread::Builder::new()
             .name("rocddi-svm-prefetch".into())
             .spawn(move || {
-                svm_prefetch_worker(
-                    session,
-                    stop,
-                    dependency_handles,
-                    completion,
-                    address,
-                    size,
-                    location,
-                );
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    svm_prefetch_worker(
+                        session,
+                        stop,
+                        &worker_handles[..dependency_len],
+                        completion,
+                        address,
+                        size,
+                        location,
+                    );
+                }));
+                if result.is_err() {
+                    finish_svm_prefetch(completion, false);
+                }
+                release_svm_prefetch_signals(&worker_handles);
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
         };
-        runtime.workers.push(worker);
+        pending.transfer_to_worker();
+        pending.runtime.workers.push(worker);
         SUCCESS
     })
 }
@@ -4152,743 +4344,63 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     })
 }
 
-unsafe fn wait_dependencies(count: u32, dependencies: *const HsaSignal) -> Status {
-    if count == 0 {
-        return SUCCESS;
-    }
-    if count != 0 && dependencies.is_null() {
-        return INVALID_ARGUMENT;
-    }
-    // SAFETY: The caller supplies count readable signal handles.
-    let dependencies = unsafe { std::slice::from_raw_parts(dependencies, count as usize) };
-    for dependency in dependencies {
-        // SAFETY: Dependency handles are required to remain live through submission.
-        unsafe {
-            crate::signal::hsa_signal_wait_scacquire(
-                *dependency,
-                SIGNAL_CONDITION_EQ,
-                0,
-                u64::MAX,
-                1,
-            )
-        };
-    }
-    SUCCESS
-}
+// These ABI symbols stay exported, but no copy is submitted until an
+// asynchronous engine with retained dependencies is implemented.
 
-unsafe fn execute_async_copy(
-    dst: *mut c_void,
-    src: *const c_void,
-    size: usize,
-    count: u32,
-    dependencies: *const HsaSignal,
-    completion: &crate::signal::AmdSignal,
+#[unsafe(no_mangle)]
+pub extern "C" fn hsa_amd_memory_async_copy(
+    _dst: *mut c_void,
+    _dst_agent: HsaAgent,
+    _src: *const c_void,
+    _src_agent: HsaAgent,
+    _size: usize,
+    _count: u32,
+    _dependencies: *const HsaSignal,
+    _completion: HsaSignal,
 ) -> Status {
-    if size == 0 {
-        return SUCCESS;
-    }
-    // SAFETY: Submission validation established a live dependency array.
-    let status = unsafe { wait_dependencies(count, dependencies) };
-    if status != SUCCESS {
-        return status;
-    }
-    let start = match system_timestamp() {
-        Ok(timestamp) => timestamp,
-        Err(status) => return status,
-    };
-    completion.start_ts.store(start, Ordering::Release);
-    // SAFETY: HSA requires both copy ranges to be valid and non-overlapping.
-    unsafe { std::ptr::copy_nonoverlapping(src.cast::<u8>(), dst.cast::<u8>(), size) };
-    completion
-        .end_ts
-        .store(system_timestamp().unwrap_or(start), Ordering::Release);
-    completion.value.fetch_sub(1, Ordering::Release);
-    SUCCESS
-}
-
-#[derive(Clone, Copy)]
-struct AsyncCopyRequest {
-    dst: *mut c_void,
-    dst_agent: HsaAgent,
-    src: *const c_void,
-    src_agent: HsaAgent,
-    size: usize,
-    count: u32,
-    dependencies: *const HsaSignal,
-    completion: HsaSignal,
-    engine: Option<u32>,
-}
-
-unsafe fn async_copy(request: AsyncCopyRequest) -> Status {
-    let AsyncCopyRequest {
-        dst,
-        dst_agent,
-        src,
-        src_agent,
-        size,
-        count,
-        dependencies,
-        completion,
-        engine,
-    } = request;
-    if dst.is_null()
-        || src.is_null()
-        || (count == 0 && !dependencies.is_null())
-        || (count != 0 && dependencies.is_null())
-    {
-        return INVALID_ARGUMENT;
-    }
-    let (dst, src, completion) = {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
-        };
-        if !runtime.is_agent(dst_agent) || !runtime.is_agent(src_agent) {
-            return INVALID_AGENT;
-        }
-        let dependencies = if count == 0 {
-            &[]
-        } else {
-            // SAFETY: The caller supplied count readable signal handles.
-            unsafe { std::slice::from_raw_parts(dependencies, count as usize) }
-        };
-        if dependencies
-            .iter()
-            .any(|dependency| !runtime.owns_signal(*dependency))
-            || !runtime.owns_signal(completion)
-        {
-            return INVALID_SIGNAL;
-        }
-        if size != 0 && engine.is_some_and(|engine| !engine.is_power_of_two() || engine & !3 != 0) {
-            return INVALID_ARGUMENT;
-        }
-        let (dst, src) = if size == 0 {
-            (dst, src)
-        } else {
-            let dst = match host_address(runtime, dst as usize) {
-                Ok(address) => address as *mut c_void,
-                Err(status) => return status,
-            };
-            let src = match host_address(runtime, src as usize) {
-                Ok(address) => address as *const c_void,
-                Err(status) => return status,
-            };
-            (dst, src)
-        };
-        // SAFETY: Runtime ownership validation established a live signal record.
-        let Some(completion) = (unsafe { crate::signal::signal_ref(completion) }) else {
-            return INVALID_SIGNAL;
-        };
-        (dst, src, completion)
-    };
-    // SAFETY: All public handles and translated addresses were validated above.
-    unsafe { execute_async_copy(dst, src, size, count, dependencies, completion) }
+    NOT_SUPPORTED
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_memory_async_copy(
-    dst: *mut c_void,
-    dst_agent: HsaAgent,
-    src: *const c_void,
-    src_agent: HsaAgent,
-    size: usize,
-    count: u32,
-    dependencies: *const HsaSignal,
-    completion: HsaSignal,
-) -> Status {
-    boundary(|| {
-        // SAFETY: The ABI contract supplies valid copy ranges and signal arrays.
-        unsafe {
-            async_copy(AsyncCopyRequest {
-                dst,
-                dst_agent,
-                src,
-                src_agent,
-                size,
-                count,
-                dependencies,
-                completion,
-                engine: None,
-            })
-        }
-    })
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
-    dst: *mut c_void,
-    dst_agent: HsaAgent,
-    src: *const c_void,
-    src_agent: HsaAgent,
-    size: usize,
-    count: u32,
-    dependencies: *const HsaSignal,
-    completion: HsaSignal,
-    engine: u32,
+pub extern "C" fn hsa_amd_memory_async_copy_on_engine(
+    _dst: *mut c_void,
+    _dst_agent: HsaAgent,
+    _src: *const c_void,
+    _src_agent: HsaAgent,
+    _size: usize,
+    _count: u32,
+    _dependencies: *const HsaSignal,
+    _completion: HsaSignal,
+    _engine: u32,
     _force: bool,
 ) -> Status {
-    boundary(|| {
-        // SAFETY: The ABI contract supplies valid copy ranges and signal arrays.
-        unsafe {
-            async_copy(AsyncCopyRequest {
-                dst,
-                dst_agent,
-                src,
-                src_agent,
-                size,
-                count,
-                dependencies,
-                completion,
-                engine: Some(engine),
-            })
-        }
-    })
-}
-
-impl HsaAmdMemoryCopyOp {
-    fn source_list(self) -> *const *const c_void {
-        self.source.cast()
-    }
-
-    fn destination_list(self) -> *const *mut c_void {
-        self.destination.cast()
-    }
-
-    fn destination_agent_list(self) -> *const HsaAgent {
-        self.destination_agent.handle as usize as *const HsaAgent
-    }
-
-    fn size_list(self) -> *const usize {
-        self.size as *const usize
-    }
-
-    fn has_work(self) -> bool {
-        self.entry_count != 0 || self.size != 0
-    }
-}
-
-unsafe fn validate_batch_copy_op(runtime: &Runtime, operation: HsaAmdMemoryCopyOp) -> Status {
-    if operation.version != AMD_MEMORY_COPY_OP_VERSION
-        || operation.operation > AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST
-        || operation.source.is_null()
-        || operation.reserved != [0]
-    {
-        return INVALID_ARGUMENT;
-    }
-    if operation.completion_signal.handle == 0 {
-        return INVALID_ARGUMENT;
-    }
-    if !runtime.owns_signal(operation.completion_signal) {
-        return INVALID_SIGNAL;
-    }
-    if !runtime.is_agent(operation.source_agent) {
-        return INVALID_AGENT;
-    }
-    if operation.wait.reserved != 0
-        || operation.wait.function > AMD_MEMORY_COPY_WAIT_GT
-        || operation.wait.scope > FENCE_SCOPE_SYSTEM
-        || (operation.wait.function != AMD_MEMORY_COPY_WAIT_ALWAYS
-            && operation.wait.address.is_null())
-        || (operation.wait.function == AMD_MEMORY_COPY_WAIT_ALWAYS
-            && (!operation.wait.address.is_null()
-                || operation.wait.value != 0
-                || operation.wait.mask != 0
-                || operation.wait.scope != 0))
-        || operation.signal.reserved != 0
-        || operation.signal.operation > AMD_MEMORY_COPY_SIGNAL_SUB
-        || operation.signal.scope > FENCE_SCOPE_SYSTEM
-        || (operation.signal.operation != AMD_MEMORY_COPY_SIGNAL_NONE
-            && operation.signal.address.is_null())
-        || (operation.signal.operation == AMD_MEMORY_COPY_SIGNAL_NONE
-            && (!operation.signal.address.is_null()
-                || operation.signal.data != 0
-                || operation.signal.scope != 0))
-    {
-        return INVALID_ARGUMENT;
-    }
-
-    let source_is_gpu = runtime.gpu_index(operation.source_agent).is_some();
-    match operation.operation {
-        AMD_MEMORY_COPY_OP_LINEAR => {
-            if operation.entry_count == 0 {
-                if operation.destination.is_null() || operation.secondary_size != 0 {
-                    return INVALID_ARGUMENT;
-                }
-                if !runtime.is_agent(operation.destination_agent)
-                    || (!source_is_gpu
-                        && runtime.gpu_index(operation.destination_agent).is_none()
-                        && operation.size != 0)
-                {
-                    return INVALID_AGENT;
-                }
-            } else {
-                if operation.source_list().is_null()
-                    || operation.destination_list().is_null()
-                    || operation.destination_agent_list().is_null()
-                    || operation.size_list().is_null()
-                    || operation.secondary_size != 0
-                {
-                    return INVALID_ARGUMENT;
-                }
-                for index in 0..operation.entry_count as usize {
-                    // SAFETY: The public descriptor promises entry_count readable elements.
-                    let source = unsafe { operation.source_list().add(index).read() };
-                    // SAFETY: The public descriptor promises entry_count readable elements.
-                    let destination = unsafe { operation.destination_list().add(index).read() };
-                    // SAFETY: The public descriptor promises entry_count readable elements.
-                    let destination_agent =
-                        unsafe { operation.destination_agent_list().add(index).read() };
-                    // SAFETY: The public descriptor promises entry_count readable elements.
-                    let size = unsafe { operation.size_list().add(index).read() };
-                    if source.is_null() || destination.is_null() || size == 0 {
-                        return INVALID_ARGUMENT;
-                    }
-                    if !runtime.is_agent(destination_agent)
-                        || (!source_is_gpu && runtime.gpu_index(destination_agent).is_none())
-                    {
-                        return INVALID_AGENT;
-                    }
-                }
-            }
-        }
-        AMD_MEMORY_COPY_OP_LINEAR_BROADCAST => {
-            if operation.destination_list().is_null()
-                || operation.destination_agent_list().is_null()
-                || operation.entry_count == 0
-                || operation.secondary_size != 0
-            {
-                return INVALID_ARGUMENT;
-            }
-            if !source_is_gpu {
-                return INVALID_AGENT;
-            }
-            for index in 0..operation.entry_count as usize {
-                // SAFETY: The public descriptor promises entry_count readable elements.
-                let destination = unsafe { operation.destination_list().add(index).read() };
-                // SAFETY: The public descriptor promises entry_count readable elements.
-                let destination_agent =
-                    unsafe { operation.destination_agent_list().add(index).read() };
-                if destination.is_null() {
-                    return INVALID_ARGUMENT;
-                }
-                if !runtime.is_agent(destination_agent) {
-                    return INVALID_AGENT;
-                }
-            }
-        }
-        AMD_MEMORY_COPY_OP_LINEAR_SWAP
-        | AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC
-        | AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST
-        | AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST => return INVALID_ARGUMENT,
-        _ => return INVALID_ARGUMENT,
-    }
-    SUCCESS
-}
-
-fn batch_wait_condition(function: u16, observed: u64, value: u64) -> bool {
-    match function {
-        AMD_MEMORY_COPY_WAIT_ALWAYS => true,
-        AMD_MEMORY_COPY_WAIT_LT => observed < value,
-        AMD_MEMORY_COPY_WAIT_LE => observed <= value,
-        AMD_MEMORY_COPY_WAIT_EQ => observed == value,
-        AMD_MEMORY_COPY_WAIT_NE => observed != value,
-        AMD_MEMORY_COPY_WAIT_GE => observed >= value,
-        AMD_MEMORY_COPY_WAIT_GT => observed > value,
-        _ => false,
-    }
-}
-
-unsafe fn wait_batch_address(wait: HsaAmdMemoryCopyWait) -> Status {
-    if wait.function == AMD_MEMORY_COPY_WAIT_ALWAYS {
-        return SUCCESS;
-    }
-    let address = match translate_copy_address(wait.address as usize) {
-        Ok(address) if address % align_of::<AtomicU64>() == 0 => address,
-        Ok(_) => return INVALID_ARGUMENT,
-        Err(status) => return status,
-    };
-    // SAFETY: The descriptor provides an aligned readable 64-bit wait address.
-    let value = unsafe { &*(address as *const AtomicU64) };
-    let order = if wait.scope == 0 {
-        Ordering::Relaxed
-    } else {
-        Ordering::Acquire
-    };
-    let start = std::time::Instant::now();
-    loop {
-        if batch_wait_condition(wait.function, value.load(order) & wait.mask, wait.value) {
-            return SUCCESS;
-        }
-        if start.elapsed() < Duration::from_micros(50) {
-            std::hint::spin_loop();
-        } else {
-            thread::sleep(Duration::from_micros(10));
-        }
-    }
-}
-
-fn resolve_batch_address(address: *const c_void) -> Result<usize, Status> {
-    let address = address as usize;
-    if address == 0 {
-        return Err(INVALID_ARGUMENT);
-    }
-    translate_copy_address(address)
-}
-
-unsafe fn copy_batch_entry(source: *const c_void, destination: *mut c_void, size: usize) -> Status {
-    let source = match resolve_batch_address(source) {
-        Ok(address) => address,
-        Err(status) => return status,
-    };
-    let destination = match resolve_batch_address(destination) {
-        Ok(address) => address,
-        Err(status) => return status,
-    };
-    // SAFETY: The HSA batch-copy contract requires valid, non-overlapping ranges.
-    unsafe { std::ptr::copy_nonoverlapping(source as *const u8, destination as *mut u8, size) };
-    SUCCESS
-}
-
-unsafe fn execute_batch_copy_op(operation: HsaAmdMemoryCopyOp) -> Status {
-    // SAFETY: Validation established the raw wait descriptor contract.
-    let status = unsafe { wait_batch_address(operation.wait) };
-    if status != SUCCESS {
-        return status;
-    }
-    let start = match system_timestamp() {
-        Ok(timestamp) => timestamp,
-        Err(status) => return status,
-    };
-    let status = match operation.operation {
-        AMD_MEMORY_COPY_OP_LINEAR => {
-            if operation.entry_count == 0 {
-                // SAFETY: Validation established the scalar pointer and size contract.
-                unsafe { copy_batch_entry(operation.source, operation.destination, operation.size) }
-            } else {
-                let mut status = SUCCESS;
-                for index in 0..operation.entry_count as usize {
-                    // SAFETY: Validation established all array extents and entries.
-                    status = unsafe {
-                        copy_batch_entry(
-                            operation.source_list().add(index).read(),
-                            operation.destination_list().add(index).read(),
-                            operation.size_list().add(index).read(),
-                        )
-                    };
-                    if status != SUCCESS {
-                        break;
-                    }
-                }
-                status
-            }
-        }
-        AMD_MEMORY_COPY_OP_LINEAR_BROADCAST => {
-            let mut status = SUCCESS;
-            for index in 0..operation.entry_count as usize {
-                // SAFETY: Validation established all destination entries.
-                status = unsafe {
-                    copy_batch_entry(
-                        operation.source,
-                        operation.destination_list().add(index).read(),
-                        operation.size,
-                    )
-                };
-                if status != SUCCESS {
-                    break;
-                }
-            }
-            status
-        }
-        _ => INVALID_ARGUMENT,
-    };
-    if status != SUCCESS {
-        return status;
-    }
-
-    if operation.signal.operation != AMD_MEMORY_COPY_SIGNAL_NONE {
-        let address = match translate_copy_address(operation.signal.address as usize) {
-            Ok(address) if address % align_of::<AtomicU64>() == 0 => address,
-            Ok(_) => return INVALID_ARGUMENT,
-            Err(status) => return status,
-        };
-        // SAFETY: Validation established an aligned writable raw signal address.
-        let target = unsafe { &*(address as *const AtomicU64) };
-        let order = if operation.signal.scope == 0 {
-            Ordering::Relaxed
-        } else {
-            Ordering::Release
-        };
-        match operation.signal.operation {
-            AMD_MEMORY_COPY_SIGNAL_WRITE => target.store(operation.signal.data, order),
-            AMD_MEMORY_COPY_SIGNAL_ADD => {
-                target.fetch_add(operation.signal.data, order);
-            }
-            AMD_MEMORY_COPY_SIGNAL_SUB => {
-                target.fetch_sub(operation.signal.data, order);
-            }
-            _ => return INVALID_ARGUMENT,
-        }
-    }
-    // SAFETY: Validation established a live runtime-owned completion signal.
-    let Some(completion) = (unsafe { crate::signal::signal_ref(operation.completion_signal) })
-    else {
-        return INVALID_SIGNAL;
-    };
-    completion.start_ts.store(start, Ordering::Release);
-    completion
-        .end_ts
-        .store(system_timestamp().unwrap_or(start), Ordering::Release);
-    completion.value.fetch_sub(1, Ordering::Release);
-    SUCCESS
+    NOT_SUPPORTED
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
-    copy_operations: *const HsaAmdMemoryCopyOp,
-    operation_count: u32,
-    dependency_count: u32,
-    dependencies: *const HsaSignal,
+pub extern "C" fn hsa_amd_memory_async_batch_copy(
+    _copy_operations: *const HsaAmdMemoryCopyOp,
+    _operation_count: u32,
+    _dependency_count: u32,
+    _dependencies: *const HsaSignal,
 ) -> Status {
-    boundary(|| {
-        if copy_operations.is_null()
-            || operation_count == 0
-            || (dependency_count == 0 && !dependencies.is_null())
-            || (dependency_count != 0 && dependencies.is_null())
-        {
-            return INVALID_ARGUMENT;
-        }
-        // SAFETY: The caller supplied operation_count readable descriptors.
-        let operations =
-            unsafe { std::slice::from_raw_parts(copy_operations, operation_count as usize) };
-        {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(runtime) = guard.as_ref() else {
-                return NOT_INITIALIZED;
-            };
-            let dependency_slice = if dependency_count == 0 {
-                &[]
-            } else {
-                // SAFETY: The caller supplied dependency_count readable handles.
-                unsafe { std::slice::from_raw_parts(dependencies, dependency_count as usize) }
-            };
-            if dependency_slice
-                .iter()
-                .any(|dependency| dependency.handle == 0)
-            {
-                return INVALID_ARGUMENT;
-            }
-            if dependency_slice
-                .iter()
-                .any(|dependency| !runtime.owns_signal(*dependency))
-            {
-                return INVALID_SIGNAL;
-            }
-            for operation in operations {
-                // SAFETY: The public descriptor owns every selected array for submission.
-                let status = unsafe { validate_batch_copy_op(runtime, *operation) };
-                if status != SUCCESS {
-                    return status;
-                }
-            }
-        }
-        // SAFETY: Dependency handles were validated and remain caller-owned.
-        let status = unsafe { wait_dependencies(dependency_count, dependencies) };
-        if status != SUCCESS {
-            return status;
-        }
-        for operation in operations {
-            if !operation.has_work() {
-                continue;
-            }
-            // SAFETY: The complete operation was validated before execution.
-            let status = unsafe { execute_batch_copy_op(*operation) };
-            if status != SUCCESS {
-                return status;
-            }
-        }
-        SUCCESS
-    })
-}
-
-fn validate_copy_rect(
-    dst: HsaPitchedPtr,
-    dst_offset: HsaDim3,
-    src: HsaPitchedPtr,
-    src_offset: HsaDim3,
-    range: HsaDim3,
-) -> Result<(), Status> {
-    if range.x == 0 || range.y == 0 || range.z == 0 {
-        return Ok(());
-    }
-    if dst.base.is_null()
-        || src.base.is_null()
-        || (dst.base as usize) % 4 != 0
-        || (src.base as usize) % 4 != 0
-        || dst.pitch % 4 != 0
-        || src.pitch % 4 != 0
-        || dst.slice % 4 != 0
-        || src.slice % 4 != 0
-    {
-        return Err(INVALID_ARGUMENT);
-    }
-    let width = range.x as usize;
-    let dst_x = dst_offset.x as usize;
-    let src_x = src_offset.x as usize;
-    if dst_x.checked_add(width).is_none_or(|end| end > dst.pitch)
-        || src_x.checked_add(width).is_none_or(|end| end > src.pitch)
-    {
-        return Err(INVALID_ARGUMENT);
-    }
-    let height = range.y as usize;
-    let dst_y = dst_offset.y as usize;
-    let src_y = src_offset.y as usize;
-    if (dst.slice != 0
-        && dst_y
-            .checked_add(height)
-            .is_none_or(|end| end > dst.slice / dst.pitch))
-        || (src.slice != 0
-            && src_y
-                .checked_add(height)
-                .is_none_or(|end| end > src.slice / src.pitch))
-        || (range.z > 1 && (dst.slice == 0 || src.slice == 0))
-    {
-        return Err(INVALID_ARGUMENT);
-    }
-    Ok(())
-}
-
-fn copy_rect_offset(layout: HsaPitchedPtr, offset: HsaDim3, y: u32, z: u32) -> Option<usize> {
-    (offset.z as usize)
-        .checked_add(z as usize)?
-        .checked_mul(layout.slice)?
-        .checked_add(
-            (offset.y as usize)
-                .checked_add(y as usize)?
-                .checked_mul(layout.pitch)?,
-        )?
-        .checked_add(offset.x as usize)
+    NOT_SUPPORTED
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
-    dst: *const HsaPitchedPtr,
-    dst_offset: *const HsaDim3,
-    src: *const HsaPitchedPtr,
-    src_offset: *const HsaDim3,
-    range: *const HsaDim3,
-    copy_agent: HsaAgent,
-    direction: u32,
-    dependency_count: u32,
-    dependencies: *const HsaSignal,
-    completion: HsaSignal,
+pub extern "C" fn hsa_amd_memory_async_copy_rect(
+    _dst: *const HsaPitchedPtr,
+    _dst_offset: *const HsaDim3,
+    _src: *const HsaPitchedPtr,
+    _src_offset: *const HsaDim3,
+    _range: *const HsaDim3,
+    _copy_agent: HsaAgent,
+    _direction: u32,
+    _dependency_count: u32,
+    _dependencies: *const HsaSignal,
+    _completion: HsaSignal,
 ) -> Status {
-    boundary(|| {
-        if dst.is_null()
-            || dst_offset.is_null()
-            || src.is_null()
-            || src_offset.is_null()
-            || range.is_null()
-            || (dependency_count == 0 && !dependencies.is_null())
-            || (dependency_count != 0 && dependencies.is_null())
-            || !(1..=3).contains(&direction)
-        {
-            return INVALID_ARGUMENT;
-        }
-        // SAFETY: The caller supplied readable descriptors for the duration of submission.
-        let (dst, dst_offset, src, src_offset, range) =
-            unsafe { (*dst, *dst_offset, *src, *src_offset, *range) };
-        let (dst_base, src_base) = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(runtime) = guard.as_ref() else {
-                return NOT_INITIALIZED;
-            };
-            if runtime.gpu_index(copy_agent).is_none() {
-                return INVALID_AGENT;
-            }
-            let dependency_slice = if dependency_count == 0 {
-                &[]
-            } else {
-                // SAFETY: The caller supplied dependency_count readable handles.
-                unsafe { std::slice::from_raw_parts(dependencies, dependency_count as usize) }
-            };
-            if dependency_slice
-                .iter()
-                .any(|dependency| !runtime.owns_signal(*dependency))
-                || !runtime.owns_signal(completion)
-            {
-                return INVALID_SIGNAL;
-            }
-            if range.x == 0 || range.y == 0 || range.z == 0 {
-                return SUCCESS;
-            }
-            if let Err(status) = validate_copy_rect(dst, dst_offset, src, src_offset, range) {
-                return status;
-            }
-            let dst_base = match host_address(runtime, dst.base as usize) {
-                Ok(address) => address,
-                Err(status) => return status,
-            };
-            let src_base = match host_address(runtime, src.base as usize) {
-                Ok(address) => address,
-                Err(status) => return status,
-            };
-            (dst_base, src_base)
-        };
-        // SAFETY: Dependency handles were validated while their runtime-owned
-        // storage was live and the ABI requires callers to retain them.
-        let status = unsafe { wait_dependencies(dependency_count, dependencies) };
-        if status != SUCCESS {
-            return status;
-        }
-        // SAFETY: The completion handle was validated against runtime ownership.
-        let Some(completion) = (unsafe { crate::signal::signal_ref(completion) }) else {
-            return INVALID_SIGNAL;
-        };
-        let start = match system_timestamp() {
-            Ok(timestamp) => timestamp,
-            Err(status) => return status,
-        };
-        completion.start_ts.store(start, Ordering::Release);
-        for z in 0..range.z {
-            for y in 0..range.y {
-                let Some(dst_row) = copy_rect_offset(dst, dst_offset, y, z)
-                    .and_then(|offset| dst_base.checked_add(offset))
-                else {
-                    completion.value.store(-1, Ordering::Release);
-                    return INVALID_ARGUMENT;
-                };
-                let Some(src_row) = copy_rect_offset(src, src_offset, y, z)
-                    .and_then(|offset| src_base.checked_add(offset))
-                else {
-                    completion.value.store(-1, Ordering::Release);
-                    return INVALID_ARGUMENT;
-                };
-                // SAFETY: The validated pitches and offsets describe a row of
-                // range.x non-overlapping bytes in each caller-owned region.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        src_row as *const u8,
-                        dst_row as *mut u8,
-                        range.x as usize,
-                    )
-                };
-            }
-        }
-        completion
-            .end_ts
-            .store(system_timestamp().unwrap_or(start), Ordering::Release);
-        completion.value.fetch_sub(1, Ordering::Release);
-        SUCCESS
-    })
+    NOT_SUPPORTED
 }
 
 #[unsafe(no_mangle)]
@@ -4913,7 +4425,7 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
             return INVALID_AGENT;
         }
         // SAFETY: The caller supplied writable output storage.
-        unsafe { mask.write(3) };
+        unsafe { mask.write(0) };
         SUCCESS
     })
 }
@@ -4974,6 +4486,28 @@ mod tests {
     }
 
     #[test]
+    fn ipc_attach_does_not_clobber_an_aliased_input_on_failure() {
+        #[repr(align(8))]
+        struct AlignedHandle(HsaAmdIpcMemory);
+
+        let original = [0xfeed_beef_u32; 8];
+        let mut handle = AlignedHandle(HsaAmdIpcMemory { handle: original });
+        // SAFETY: Both raw pointers refer to the same aligned writable storage.
+        // The input is read before any successful output can be published.
+        let status = unsafe {
+            hsa_amd_ipc_memory_attach(
+                &raw const handle.0,
+                1,
+                0,
+                std::ptr::null(),
+                (&raw mut handle.0).cast::<*mut c_void>(),
+            )
+        };
+        assert_ne!(status, SUCCESS);
+        assert_eq!(handle.0.handle, original);
+    }
+
+    #[test]
     fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
         let agent = HsaAgent {
             handle: GPU_AGENT_BASE,
@@ -4995,10 +4529,12 @@ mod tests {
 
     #[test]
     fn registered_extent_covers_unaligned_host_ranges() {
-        assert_eq!(registered_extent(0x10_000, 1), Some(4096));
-        assert_eq!(registered_extent(0x10_345, 1), Some(4096));
-        assert_eq!(registered_extent(0x10_345, 4096), Some(8192));
-        assert_eq!(registered_extent(usize::MAX, 2), None);
+        assert_eq!(registered_extent(0x10_000, 1, 4096), Some(4096));
+        assert_eq!(registered_extent(0x10_345, 1, 4096), Some(4096));
+        assert_eq!(registered_extent(0x10_345, 4096, 4096), Some(8192));
+        assert_eq!(registered_extent(usize::MAX, 2, 4096), None);
+        assert_eq!(registered_extent(0x10_123, 1, 65_536), Some(65_536));
+        assert_eq!(registered_extent(0x10_123, 65_536, 65_536), Some(131_072));
     }
 
     #[test]
@@ -5256,6 +4792,44 @@ mod tests {
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
         assert_eq!(&contents, b"prefixrocddi..suffix");
+
+        copied = u64::MAX;
+        status = i32::MIN;
+        // SAFETY: A zero-byte transfer borrows no host storage.
+        assert_eq!(
+            unsafe {
+                ais_transfer(
+                    file.as_raw_fd(),
+                    0,
+                    0,
+                    0,
+                    &raw mut copied,
+                    &raw mut status,
+                    AisOperation::Read,
+                )
+            },
+            SUCCESS
+        );
+        assert_eq!((copied, status), (0, 0));
+
+        copied = u64::MAX;
+        status = i32::MIN;
+        // SAFETY: The source is readable; Linux reports the invalid descriptor.
+        assert_eq!(
+            unsafe {
+                ais_transfer(
+                    -1,
+                    source.as_ptr() as usize,
+                    source.len(),
+                    0,
+                    &raw mut copied,
+                    &raw mut status,
+                    AisOperation::Write,
+                )
+            },
+            ERROR
+        );
+        assert_eq!((copied, status), (0, -9));
         drop(file);
         std::fs::remove_file(path)?;
         Ok(())
@@ -5292,6 +4866,10 @@ mod tests {
     fn zero_length_memory_operations_skip_address_resolution() {
         let aligned = align_of::<u32>() as *mut c_void;
         assert_eq!(memory_copy_has_work(aligned, aligned, 0), Ok(false));
+        assert_eq!(
+            memory_copy_has_work(aligned, aligned, isize::MAX as usize + 1),
+            Err(INVALID_ARGUMENT)
+        );
         assert_eq!(memory_fill_size(aligned, 0), Ok(None));
 
         assert_eq!(
@@ -5304,6 +4882,10 @@ mod tests {
         );
         assert_eq!(
             memory_fill_size((align_of::<u32>() + 1) as *mut c_void, 0),
+            Err(INVALID_ARGUMENT)
+        );
+        assert_eq!(
+            memory_fill_size(aligned, isize::MAX as usize / size_of::<u32>() + 1),
             Err(INVALID_ARGUMENT)
         );
     }
@@ -5330,75 +4912,6 @@ mod tests {
     }
 
     #[test]
-    fn zero_length_async_copy_still_rejects_null_buffers() {
-        // SAFETY: This deliberately exercises argument validation and supplies
-        // no dereferenceable pointers or handles.
-        assert_eq!(
-            unsafe {
-                hsa_amd_memory_async_copy(
-                    std::ptr::null_mut(),
-                    HsaAgent { handle: 0 },
-                    std::ptr::null(),
-                    HsaAgent { handle: 0 },
-                    0,
-                    0,
-                    std::ptr::null(),
-                    HsaSignal { handle: 0 },
-                )
-            },
-            INVALID_ARGUMENT
-        );
-    }
-
-    #[test]
-    fn async_copy_rejects_a_dependency_pointer_for_zero_dependencies() {
-        let mut destination = 0_u8;
-        let source = 0_u8;
-        let dependency = HsaSignal { handle: 1 };
-        // SAFETY: The live byte pointers and dependency storage are valid; the
-        // deliberately inconsistent dependency count must be rejected first.
-        assert_eq!(
-            unsafe {
-                hsa_amd_memory_async_copy(
-                    (&raw mut destination).cast(),
-                    HsaAgent { handle: 0 },
-                    (&raw const source).cast(),
-                    HsaAgent { handle: 0 },
-                    0,
-                    0,
-                    &raw const dependency,
-                    HsaSignal { handle: 0 },
-                )
-            },
-            INVALID_ARGUMENT
-        );
-    }
-
-    #[test]
-    fn zero_length_async_copy_does_not_wait_or_complete() {
-        let completion = crate::signal::AmdSignal::user(7);
-        let dependency = HsaSignal { handle: u64::MAX };
-        // SAFETY: A zero-byte operation returns before inspecting the copy
-        // addresses or dependency handles, matching ROCr after validation.
-        assert_eq!(
-            unsafe {
-                execute_async_copy(
-                    std::ptr::null_mut(),
-                    std::ptr::null(),
-                    0,
-                    1,
-                    &raw const dependency,
-                    &completion,
-                )
-            },
-            SUCCESS
-        );
-        assert_eq!(completion.value.load(Ordering::Relaxed), 7);
-        assert_eq!(completion.start_ts.load(Ordering::Relaxed), 0);
-        assert_eq!(completion.end_ts.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
     fn batch_copy_entry_point_and_descriptor_match_the_public_abi() {
         let _: unsafe extern "C" fn(
             *const HsaAmdMemoryCopyOp,
@@ -5420,54 +4933,60 @@ mod tests {
     }
 
     #[test]
-    fn batch_copy_wait_comparisons_cover_every_function() {
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_ALWAYS, 0, 1));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_LT, 3, 4));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_LE, 4, 4));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_EQ, 4, 4));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_NE, 3, 4));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_GE, 4, 4));
-        assert!(batch_wait_condition(AMD_MEMORY_COPY_WAIT_GT, 5, 4));
-    }
-
-    #[test]
-    fn rectangular_copy_geometry_matches_rocr_validation() {
-        let base = 0x1000_usize as *mut c_void;
-        let layout = HsaPitchedPtr {
-            base,
-            pitch: 64,
-            slice: 256,
-        };
+    fn unsupported_async_copy_entry_points_return_without_touching_memory() {
+        let agent = HsaAgent { handle: 0 };
+        let completion = HsaSignal { handle: 1 };
+        let dependency = HsaSignal { handle: 2 };
+        let mut destination = 0x5a_u8;
+        let source = 0xa5_u8;
         assert_eq!(
-            validate_copy_rect(
-                layout,
-                HsaDim3 { x: 4, y: 1, z: 0 },
-                layout,
-                HsaDim3 { x: 8, y: 2, z: 0 },
-                HsaDim3 { x: 16, y: 2, z: 1 },
+            hsa_amd_memory_async_copy(
+                (&raw mut destination).cast(),
+                agent,
+                (&raw const source).cast(),
+                agent,
+                1,
+                1,
+                &raw const dependency,
+                completion,
             ),
-            Ok(())
+            NOT_SUPPORTED
         );
         assert_eq!(
-            validate_copy_rect(
-                layout,
-                HsaDim3 { x: 60, y: 0, z: 0 },
-                layout,
-                HsaDim3 { x: 0, y: 0, z: 0 },
-                HsaDim3 { x: 8, y: 1, z: 1 },
+            hsa_amd_memory_async_copy_on_engine(
+                (&raw mut destination).cast(),
+                agent,
+                (&raw const source).cast(),
+                agent,
+                1,
+                1,
+                &raw const dependency,
+                completion,
+                1,
+                true,
             ),
-            Err(INVALID_ARGUMENT)
+            NOT_SUPPORTED
         );
         assert_eq!(
-            validate_copy_rect(
-                HsaPitchedPtr { slice: 0, ..layout },
-                HsaDim3 { x: 0, y: 0, z: 0 },
-                layout,
-                HsaDim3 { x: 0, y: 0, z: 0 },
-                HsaDim3 { x: 4, y: 1, z: 2 },
-            ),
-            Err(INVALID_ARGUMENT)
+            hsa_amd_memory_async_batch_copy(std::ptr::null(), 1, 1, &raw const dependency),
+            NOT_SUPPORTED
         );
+        assert_eq!(
+            hsa_amd_memory_async_copy_rect(
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                agent,
+                1,
+                1,
+                &raw const dependency,
+                completion,
+            ),
+            NOT_SUPPORTED
+        );
+        assert_eq!(destination, 0x5a);
     }
 
     #[test]
@@ -5516,19 +5035,16 @@ mod tests {
 
     #[test]
     fn svm_ranges_cover_each_touched_page() {
+        let page = current_host_page().unwrap();
+        let page_address = page as u64;
+        let interior = (page + 0x123) as *mut c_void;
+        assert_eq!(svm_range(interior, 1), Ok((page_address, page_address)));
         assert_eq!(
-            svm_range(0x10_123_usize as *mut c_void, 1),
-            Ok((0x10_000, 4096))
-        );
-        assert_eq!(
-            svm_range(0x10_123_usize as *mut c_void, 4096),
-            Ok((0x10_000, 8192))
+            svm_range(interior, page),
+            Ok((page_address, page_address * 2))
         );
         assert_eq!(svm_range(std::ptr::null_mut(), 1), Err(INVALID_ARGUMENT));
-        assert_eq!(
-            svm_range(0x10_000_usize as *mut c_void, 0),
-            Err(INVALID_ARGUMENT)
-        );
+        assert_eq!(svm_range(page as *mut c_void, 0), Err(INVALID_ARGUMENT));
     }
 
     #[test]
@@ -5621,16 +5137,25 @@ mod tests {
     fn cpu_pool_allocations_preserve_their_cache_policy() {
         for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
             assert_eq!(
-                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }),
+                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Process),
                 MemoryKind::OwnedHost
             );
         }
         assert_eq!(
-            cpu_pool_memory_kind(HsaMemoryPool {
-                handle: CPU_POOL_KERNARG,
-            }),
+            cpu_pool_memory_kind(
+                HsaMemoryPool {
+                    handle: CPU_POOL_KERNARG,
+                },
+                SessionLifetime::Process
+            ),
             MemoryKind::System
         );
+        for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
+            assert_eq!(
+                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Session),
+                MemoryKind::System
+            );
+        }
     }
 
     #[test]
@@ -5726,11 +5251,5 @@ mod tests {
         assert_eq!(hsa_link_type(MemoryLinkType::Infiniband), 3);
         assert_eq!(hsa_link_type(MemoryLinkType::Xgmi), 4);
         assert_eq!(hsa_link_type(MemoryLinkType::Unknown), 0);
-    }
-
-    #[test]
-    fn zero_dependencies_accepts_a_null_pointer() {
-        // SAFETY: A zero-length dependency list does not dereference its pointer.
-        assert_eq!(unsafe { wait_dependencies(0, std::ptr::null()) }, SUCCESS);
     }
 }

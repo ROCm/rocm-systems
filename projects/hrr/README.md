@@ -199,7 +199,7 @@ capture.hrr/
   capture itself
 - **blobs/** — host payloads referenced by the trace
 - **code_objects/** — code objects, content-addressed by hash (device images
-  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
@@ -217,6 +217,11 @@ Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-a
 **Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
 requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
+
+For the other end, producing an archive in the first place:
+[skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md)
+checks that the runtime a workload loads can capture at all, runs it with capture
+enabled, and reports whether the archive holds anything.
 
 ## Copyright
 
