@@ -162,9 +162,11 @@ extern int64_t ncclParamP2pLL128Enable();
 // parameter every CPX rank turns GIN off and falls back to a path that cannot export its buffers,
 // which is the AICOMRCCL-2387 failure. Named and lifted out of initTransportsRank so it can be
 // asserted on its own -- the host tests terminate several hundred lines before the call site, so a
-// change to the condition there is otherwise undetectable.
-static bool ginGateAllows(uint64_t ginTypeBitMask, bool cuMemGdrSupport, bool hasMloPart) {
-  return ginTypeBitMask != 0 && cuMemGdrSupport && (!hasMloPart || ncclParamGinMloPart() != 0);
+// change to the condition there is otherwise undetectable. Takes the communicator rather than the
+// two adjacent bools so the sole call site cannot transpose cuMemGdrSupport and hasMloPart.
+static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) {
+  return ginTypeBitMask != 0 && comm->cuMemGdrSupport &&
+         (!comm->hasMloPart || ncclParamGinMloPart() != 0);
 }
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
@@ -2773,7 +2775,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (ginGateAllows(globalGinTypeBitMask, comm->cuMemGdrSupport, comm->hasMloPart)) {
+  if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;

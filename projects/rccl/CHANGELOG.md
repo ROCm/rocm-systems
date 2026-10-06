@@ -19,6 +19,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Inspector plugin ring-buffer drop counters: a single warning per process when events are dropped, a `dump_stats` record with operation and drop counts in JSON output, and `NCCL_INSPECTOR_PROM_DUMP_STATS` (default `0`) to add the same counters to Prometheus output.
 * `NCCL_CE_CHUNK_SIZE` (default 8 MiB): chunk size for the round-robin chunking that host RMA Copy Engine batches use when per-peer transfer sizes differ.
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
+* `NCCL_GIN_MLOPART` (default `1`): allows GIN on MLO/CPX partitions. A partition reaches xGMI and the network over the physical device's paths, so GIN is as available to a partition as to the whole GPU. Mirrors `NCCL_NET_GDR_MLOPART`. Set to `0` to restore the previous partition exclusion.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * nccl4py: per-call collective configuration (`NCCLCollConfig`, `VendorOption`) including the launch completion event, communicator properties (`NCCLCommProperties`), and the `GIN_ONLY` window flag. On ROCm, the HIP `Event` shim provides only an event handle; `record()`, `sync()` and `query` are not implemented.
@@ -52,7 +53,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.31.2 for ROCm 10.2.0 (Unreleased)
 
 ### Added
-* `NCCL_GIN_MLOPART` (default `1`): allows GIN on MLO/CPX partitions. A partition reaches xGMI and the network over the physical device's paths, so GIN is as available to a partition as to the whole GPU. Mirrors `NCCL_NET_GDR_MLOPART`. Set to `0` to restore the previous partition exclusion.
 * `RCCL_CE_AR_MAX_MSG_BYTES` (default `-1`): overrides the 2-shot AllReduce size cap from the arch table. Set to a positive value to override `ceNonRegMax[AR]`.
 * `RCCL_CE_AR_REG_MAX_MSG_BYTES` (default `-1`): overrides the registered CE AllReduce size cap from the arch table.
 * `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.

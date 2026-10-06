@@ -1417,21 +1417,22 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
       size_t rangeSize = 0;
       const bool rangeOk =
           ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
-      if (rangeOk && rangeSize > retainedSize) {
-        WARN("windowRegisterNonSym: window at %p size=%zu spans multiple VMM segments (range %zu > "
-             "segment %zu); this path publishes a single allocation handle and cannot describe it",
-             userPtr, userSize, rangeSize, retainedSize);
+      // rangeOk false means a later segment of the window failed the walk: the first
+      // query already succeeded at the retain above, so a failure here is a multi-segment
+      // window that cannot be described by ExchangeEntry's single handle and size.
+      if (!rangeOk || rangeSize > retainedSize) {
+        WARN("windowRegisterNonSym: window at %p size=%zu spans multiple VMM segments (rangeOk=%d "
+             "range %zu > segment %zu); this path publishes a single allocation handle and cannot "
+             "describe it",
+             userPtr, userSize, rangeOk ? 1 : 0, rangeSize, retainedSize);
         goto fail;
-      } else {
-        exportCuMem = true;
-        if (rangeOk) {
-          allocBase = rangeBase;
-          allocSize = rangeSize;
-          userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
-        }
-        mine->isCuMem = 1;
-        memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
       }
+      exportCuMem = true;
+      allocBase = rangeBase;
+      allocSize = rangeSize;
+      userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
+      mine->isCuMem = 1;
+      memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
     }
     if (!exportCuMem) {
       cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
