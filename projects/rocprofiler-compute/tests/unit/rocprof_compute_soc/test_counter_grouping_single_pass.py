@@ -133,7 +133,7 @@ def test_first_fit_unplaced_adds_missing_counters():
 
 
 def test_slot_limit_fill_uses_existing_then_opens_new():
-    """SLOT_LIMIT set (4 PMCs, cap 2) fills leftover room then opens buckets."""
+    """SPU set (4 PMCs, cap 2) fills leftover room then opens buckets."""
     from rocprof_compute_soc.counter_grouping_single_pass import (
         fill_slot_limit_into_existing_passes,
     )
