@@ -36,7 +36,12 @@ extern "C" __device__ uint __ockl_activelane_u32(void);
 
 extern "C" __device__ __attribute__((const)) uint __ockl_mul24_u32(uint, uint);
 extern "C" __device__ __attribute__((const)) int __ockl_mul24_i32(int, int);
+extern "C" __device__ __attribute__((const)) uint __ockl_mul_hi_u32(uint, uint);
+extern "C" __device__ __attribute__((const)) int __ockl_mul_hi_i32(int, int);
 extern "C" __device__ __attribute__((const)) uint __ockl_sadd_u32(uint, uint, uint);
+
+extern "C" __device__ __attribute__((const)) float __ocml_fmin_f32(float, float);
+extern "C" __device__ __attribute__((const)) float __ocml_fmax_f32(float, float);
 
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_f64(double);
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_f64(double);
@@ -65,6 +70,9 @@ extern "C" __device__ __attribute__((const)) double __ocml_cvtrtn_f64_u64(__hip_
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtp_f64_u64(__hip_uint64_t);
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_uint64_t);
 
+extern "C" __device__ __attribute__((convergent)) void __ockl_gws_barrier(uint nwm1, uint rid);
+
+extern "C" __device__ __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
 extern "C" __device__ __attribute__((const)) int __ockl_grid_is_valid(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_grid_sync(void);
 extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_num_grids(void);
@@ -75,6 +83,8 @@ extern "C" __device__ __attribute__((const)) int __ockl_multi_grid_is_valid(void
 extern "C" __device__ __attribute__((convergent)) void __ockl_multi_grid_sync(void);
 extern "C" __device__ __attribute__((const)) uint __ockl_grid_bar_arrive(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
+
+extern "C" __device__ void __ockl_atomic_add_noret_f32(float*, float);
 
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_add_i32(int a);
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a);
