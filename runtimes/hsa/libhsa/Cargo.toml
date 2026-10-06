@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 [package]
 name = "libhsa"
 description = "Early-access HSA runtime ABI frontend over the private rocddi core"
@@ -10,7 +12,7 @@ repository.workspace = true
 
 [lib]
 name = "hsa_runtime64"
-crate-type = ["cdylib"]
+crate-type = ["rlib"]
 doc = false
 doctest = false
 

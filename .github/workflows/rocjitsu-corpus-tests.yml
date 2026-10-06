@@ -108,8 +108,10 @@ jobs:
             corpus_sanitizer: none
           - name: asan-ubsan
             allow_failure: true
-            # Sanitized simulator cases need extra interpreter headroom.
-            # A failed-test rerun preserves extra diagnostics.
+            # Sanitized simulator cases need extra interpreter headroom. Long
+            # gfx1100 FPSAN cases can cross four minutes under shared-runner
+            # load, so give the first pass the same six-minute budget as
+            # Release and retain a longer failed-test diagnostic rerun.
             verify_dbt_idempotence: 0
             dbt_timeout: 180
             dbt_memory_limit_mib: 4096
@@ -123,8 +125,8 @@ jobs:
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
             corpus_worker_limit: 4
-            corpus_soft_timeout: 240
-            corpus_hard_timeout: 480
+            corpus_soft_timeout: 360
+            corpus_hard_timeout: 600
             corpus_rerun_timeout: 1200
             corpus_sanitizer: clang-asan
           - name: tsan

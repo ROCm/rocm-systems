@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Regression coverage for host transition recipes, independent of GPU access.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 use super::*;
