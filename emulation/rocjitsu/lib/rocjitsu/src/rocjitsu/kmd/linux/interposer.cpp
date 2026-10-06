@@ -2356,6 +2356,10 @@ public:
       joined = true;
     } catch (const std::exception &ex) {
       failure = ex.what();
+    } catch (...) {
+      // This runs from the DSO finalizer. An escaping exception would terminate
+      // the process and skip the warning that names the group left active.
+      failure = "stopping the local VM engine threw a non-standard exception";
     }
 
     if (joined && stop.vm) {
@@ -2365,6 +2369,8 @@ public:
         rj_vm_shutdown_plugins(stop.vm);
       } catch (const std::exception &ex) {
         failure = ex.what();
+      } catch (...) {
+        failure = "plugin shutdown threw a non-standard exception";
       }
     }
 
