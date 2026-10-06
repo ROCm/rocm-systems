@@ -34,7 +34,7 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
-  WgpIdGfx1250,
+  IdentityGfx12,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -323,7 +323,7 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::IdentityGfx12, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -352,7 +352,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::WgpIdGfx1250, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::IdentityGfx12, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
@@ -471,12 +471,26 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
-  case HwregState::WgpIdGfx1250:
-    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+  case HwregState::IdentityGfx12: {
+    const bool gfx1250 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
+    const uint32_t cus_per_wgp = gfx1250 ? 1 : 2;
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16 * cus_per_wgp ||
+        wf.cu().shader_array_id() > 1 || wf.wf_id() >= (gfx1250 ? 64u : 32u))
       return HwregAccessResult::Unsupported;
-    // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
-    raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
+    // Each modeled SIMD owns 16 wave slots; RDNA interleaves sibling CU SIMD IDs.
+    const uint32_t simd_id =
+        gfx1250 ? wf.wf_id() / 16 : 2 * (wf.wf_id() / 16) + wf.cu().shader_array_cu_id() % 2;
+    raw_value = field_value(wf.wf_id() % 16, 0, 5) | field_value(simd_id, 8, 2) |
+                field_value(wf.cu().shader_array_cu_id() / cus_per_wgp, 10, 4) |
+                field_value(wf.cu().shader_array_id(), 16, 1);
+    // GFX12.5 moves SE_ID to MSG_RTN_GET_SE_HW_ID.
+    if (!gfx1250) {
+      if (wf.shader_engine_id() > 7)
+        return HwregAccessResult::Unsupported;
+      raw_value |= field_value(wf.shader_engine_id(), 18, 3);
+    }
     return HwregAccessResult::Success;
+  }
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -528,7 +542,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
-  case HwregState::WgpIdGfx1250:
+  case HwregState::IdentityGfx12:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -636,11 +650,16 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
-  // Only WGP_ID[13:10] has backing state; do not fabricate the other HW_ID1 fields.
-  if (desc->state == HwregState::WgpIdGfx1250 &&
-      (decoded.offset < 10 || decoded.offset + decoded.size > 14)) {
-    value = 0;
-    return HwregAccessResult::Unsupported;
+  // Full identity reads expose modeled allocation/topology fields. Unmodeled
+  // capability bits stay zero; field reads spanning unmodeled bits remain unsupported.
+  if (desc->state == HwregState::IdentityGfx12) {
+    // WAVE_ID[4:0], SIMD_ID[9:8], WGP_ID[13:10], SA_ID[16]; RDNA4 adds SE_ID[20:18].
+    const uint32_t known_mask =
+        0x00013f1fu | (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : 0x001c0000u);
+    if (decoded.size != 32 && ((decoded.mask << decoded.offset) & ~known_mask)) {
+      value = 0;
+      return HwregAccessResult::Unsupported;
+    }
   }
 
   uint32_t raw_value = 0;
