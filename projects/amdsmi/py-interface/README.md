@@ -53,14 +53,10 @@ The following install modes expose the same `import amdsmi` entry point:
 |------|-----------|--------------------|
 | System package (`amd-smi-lib` rpm/deb) | The wrapper installed directly into the system Python's `site-packages` so plain `import amdsmi` works. The shared library lives at `/opt/rocm/lib/libamd_smi.so` and is registered with the dynamic linker via `ldconfig`. | `libamd_smi.so` resolved by the dynamic linker (SONAME). |
 | TheRock native package, tarball, or ROCm pip install | The wrapper under `<root>/share/amd_smi/amdsmi`; add `<root>/share/amd_smi` to `PYTHONPATH` for direct imports. | `<root>/lib/libamd_smi.so.<MAJOR>`, resolved relative to the wrapper. |
-| Community-built PyPI releases through 7.0.2 | Only the Python wrapper in `<site-packages>/amdsmi/`. Its version must match the ROCm release providing the library. | Matching ROCm `libamd_smi.so`; the legacy loader checks `ROCM_HOME` before `ROCM_PATH`. |
 | Bundled-library wheel (`BUILD_PYTHON_WHEEL=ON`) | The wrapper plus a SONAME-renamed `libamd_smi_python.so` directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
 
 AMD SMI 27.x wheels on PyPI include the native library and use the AMD SMI
-library version, not the ROCm release number.
-The community-built PyPI releases through 7.0.2 predate that packaging and
-require a matching older ROCm library. Do not use those wrappers with arbitrary
-newer AMD SMI libraries. See the
+library version, not the ROCm release number. See the
 [installation guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
 for the available delivery channels.
 
