@@ -662,12 +662,21 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 `hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
 and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
 snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
-recovers pre-init fat binaries (compiler-table shims + retroactive sweep), and
-registers `hip_capture_shutdown` via `atexit`. Runtime shims are **not** installed at
+recovers pre-init fat binaries (compiler-table shims + retroactive sweep),
+registers `hip_capture_shutdown` via `atexit`, and prints the capture notice. Runtime
+shims are **not** installed at
 `libamdhip64` static-init time: that pulled every HIP call through capture from DSO
 load before `hip::init()` completed and disturbed host stacks that load HIP early
 (e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
 Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
+
+The capture notice is one line on stderr, printed with `fprintf` rather than through the
+CLR log so that `AMD_LOG_LEVEL` cannot hide it. It names this process's archive
+directory, `<base>/pid-<pid>`, and says that child processes record to their own `pid-*`
+directories in `<base>`. It appears only after the writer has opened the archive, and at
+most once per process, since `hip::init()` runs under `std::call_once`. A child created
+with `fork()` does not run `hip::init()` again, so it records without a line of its own;
+a child started with `exec` initialises HIP again and prints its own.
 
 ## Enable Flag
 
@@ -1340,6 +1349,10 @@ The event wire format (finding H5):
   `manifest.complete=false`, so replay/validation cannot mistake a capture missing a GPU
   launch for a faithful one. (Previously the size wrapped mod 65536, slipping past the
   total-payload guard and writing a corrupt event.)
+- **Kernel-name length limit (64 KiB) fails loudly too.** The kernel name's length is
+  also a `uint16_t` on the wire. A launch whose name is longer than 65,535 bytes is
+  dropped and the archive marked incomplete in the same way, rather than recorded with a
+  truncated name that matches no symbol at replay.
 - **Pointer-translation size precondition.** Whole-arg pointer translation requires the
   recorded `arg_size >= 8`; a smaller pointer descriptor is copied through untranslated,
   passing the stale capture-time VA to the kernel.

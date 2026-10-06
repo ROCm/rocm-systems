@@ -553,6 +553,7 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -592,6 +593,7 @@ add_executable(
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
+    kfd_events_test.cpp
     decode_smoke_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
@@ -1186,35 +1188,20 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
+    # Discover each case once instead of combining a whole-binary run with
+    # additional filtered registrations of the same cases.
+    rj_add_gtest_tests(
+        probe_fixture_test
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    # The helper installs the fragment without including it. Keep the installed
+    # probe cases reachable whenever this fixture target is available.
     if(RJ_INSTALL_TESTS)
-        rj_install_test_target(probe_fixture_test)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"probe_fixture_test.cmake\")\n\n"
+        )
     endif()
-    rj_add_test(
-        NAME "ProbeFixture.NopProbeResolvesAndReturns"
-        COMMAND probe_fixture_test
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND "bin/probe_fixture_test"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-    )
 endif()
 
 # Pin the zero-test failure behavior independently of GPU availability. This is

@@ -162,14 +162,16 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
-bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
+bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                              bool sealed_ram) {
   auto proc = find_process(local_process_id_);
   if (!proc)
     return false;
   // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
   // lifetime is tied to the GEM entry. It is not the application's CPU alias.
   map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
-             KfdProcess::HostExtentOwner::Driver);
+             sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
+                        : KfdProcess::HostExtentOwner::Driver);
   return true;
 }
 
@@ -1165,6 +1167,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
          .page_table_generation = proc->page_table_generation(),
          .request_mutex = proc->page_table_request_mutex(),
          .mutation_epoch = proc->page_table_mutation_epoch(),
+         .page_table_cache_state = proc->page_table_cache_state(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,
