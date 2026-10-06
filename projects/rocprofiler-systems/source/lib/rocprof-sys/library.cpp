@@ -714,17 +714,6 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-    // Claim initialization only after the timeline clock is usable. CPU,
-    // call-stack, and SDK host records all depend on CLOCK_BOOTTIME, so a
-    // missing clock disables profiling before any of those subsystems start.
-    if(!control::clocks::timeline_available())
-    {
-        LOG_CRITICAL("CLOCK_BOOTTIME is unavailable; profiling will not start");
-        state::process::set(state::process::Disabled);
-        rocprofsys_init_tooling_done.store(0);
-        return false;
-    }
-
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(state::process::get() == state::process::Init)

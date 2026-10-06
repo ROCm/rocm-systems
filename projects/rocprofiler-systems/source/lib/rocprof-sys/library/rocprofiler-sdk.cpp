@@ -2879,29 +2879,17 @@ bool
 sdk_tool_configure(std::uint32_t version, const char* runtime_version,
                    rocprofiler_client_id_t* id)
 {
-    // A completed configuration is reused. A failed attempt leaves the flag
-    // clear so a later attach does not treat the failure as success.
-    if(sdk_configured.load())
-    {
-        return rocprofsys::state::process::get() == rocprofsys::state::process::Active;
-    }
-
-    // Ensure tooling is initialized and state is Active. A failed timeline
-    // probe disables profiling, so SDK tracing must not continue on its own.
-    if(!rocprofsys::config::settings_are_configured() ||
-       rocprofsys::state::process::get() < rocprofsys::state::process::Active)
-    {
-        (void) rocprofsys_init_tooling_hidden();
-    }
-
-    if(rocprofsys::state::process::get() != rocprofsys::state::process::Active)
-    {
-        return false;
-    }
-
+    // Only configure once per attach session
     if(sdk_configured.exchange(true))
     {
         return true;
+    }
+
+    // Ensure tooling is initialized and state is Active
+    if(!rocprofsys::config::settings_are_configured() ||
+       rocprofsys::state::process::get() < rocprofsys::state::process::Active)
+    {
+        rocprofsys_init_tooling_hidden();
     }
 
     // set the client name
