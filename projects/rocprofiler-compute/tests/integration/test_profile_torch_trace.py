@@ -796,3 +796,46 @@ def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_com
         assert any(fn == "training_loop" for fn in functions)
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.torch_trace
+def test_torch_trace_backward_thread_in_marker_csv(
+    binary_handler_profile_rocprof_compute,
+):
+    require_torch(gpu=True)
+    if _find_collector() is None:
+        pytest.skip("torch_trace_collector .so not found")
+    workload_dir = common.get_output_dir(param_id="torch_trace_backward_thread")
+    profile_config = dict(config)
+    profile_config["simple_net_backward_thread"] = [
+        sys.executable,
+        "./sample/simple_net.py",
+        "--backward-thread",
+    ]
+    try:
+        returncode = binary_handler_profile_rocprof_compute(
+            profile_config,
+            workload_dir,
+            [
+                "--experimental",
+                "--torch-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=True,
+            app_name="simple_net_backward_thread",
+        )
+        assert returncode == 0
+        marker_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
+        assert marker_files
+        functions = []
+        thread_ids = set()
+        for marker_file in marker_files:
+            with csv_compression.open_gzip_csv_read(marker_file) as f:
+                for row in csv.DictReader(f):
+                    functions.append(row["Function"])
+                    thread_ids.add(row["Thread_Id"])
+        assert any("torch.Tensor.backward" in fn for fn in functions)
+        assert len(thread_ids) >= 2
+        assert any(re.search(r"ltid=\d+", fn) for fn in functions)
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)
