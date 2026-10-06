@@ -608,8 +608,11 @@ entry symbol `triton_` from many distinct code objects.
 ### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
 
 Setting `HIP_HRR_DEBUG_ARGS` enables arg dumps at capture time (see
-[README.md](README.md#capture-environment)). Every captured arg is dumped to stderr
-(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`). Two markers make
+[README.md](README.md#capture-environment)). Every captured arg is dumped to the log
+(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`), and capture says on
+stderr that it is doing so. The dumps are a second copy of the argument bytes the
+archive already holds, outside the archive's permissions, so only a Debug build of
+the HIP runtime (no `NDEBUG`) reads the variable; a release build ignores it. Two markers make
 common failure modes unambiguous:
 
 - `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
