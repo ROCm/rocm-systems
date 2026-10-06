@@ -713,7 +713,9 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
             )
     if name == 'S_SET_GPR_IDX_ON':
         return InstructionSemantics(name, 'gpr_idx', operation='on')
-    # Unrecognized SOPC instructions (S_SETVSKIP, …) → nop
+    if name == 'S_SETVSKIP':
+        return InstructionSemantics(name, 'set_vskip')
+    # Unrecognized SOPC instructions → nop
     return InstructionSemantics(name, 'nop')
 
 
