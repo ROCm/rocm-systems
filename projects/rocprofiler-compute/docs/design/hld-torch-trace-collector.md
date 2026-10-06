@@ -101,6 +101,11 @@ Those flags record `UnaccountedKernelError` when a kernel's `Correlation_ID`
 is not in the marker CSV, and report it after the call tree. Plain analyze
 without those flags does not join and does not report that error.
 
+Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
+Printed identical sibling fold is display-only and does not mutate the forest.
+Both `--list-*-operators` and `--*-operator` call `filter_forest_by_backends`
+before kernel ids. Operator filter then globs on that confined view.
+
 Two markers on the same `Thread_Id` whose intervals overlap (neither nested
 nor adjacent) record `OverlappingMarkerRangeError`. Adjacent ranges
 (`A.end == B.start`) are siblings. Analysis also uses the launcher id and
