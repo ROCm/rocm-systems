@@ -49,9 +49,10 @@ namespace RcclUnitTesting
 {
 
 // Covers HIP init, ncclCommInitAll on up to 8 GPUs and the RAS diagnostics collective. The pre-checkin CI entries
-// (ci-precheckin.json) allow 240 s for a TEST_F with one case and 300 s for one with two cases.
+// (ci-precheckin.json) allow 240 s for a TEST_F with one case and 300 s for one with two cases. A case waits for at
+// most two reports, so two kReportWait periods plus two inits (about 35 s) have to fit in kRasTimeoutSeconds.
 static constexpr int kRasTimeoutSeconds = 120;
-static constexpr auto kReportWait       = std::chrono::seconds(60);
+static constexpr auto kReportWait       = std::chrono::seconds(30);
 static constexpr int kMaxGpus           = 8;
 static constexpr size_t kAllReduceElems = 1 << 20;
 
@@ -188,6 +189,9 @@ public:
     ~StdoutToFile()
     {
         restore();
+        // gtest prints a failure where it happens, so a failure under the redirection is only in the file.
+        if(::testing::Test::HasFailure() && !path_.empty())
+            std::cout << "[ captured stdout ]\n" << read() << "[ end of captured stdout ]" << std::endl;
         if(!path_.empty())
             unlink(path_.c_str());
     }
@@ -221,9 +225,9 @@ public:
     }
 
     // Polls the file until it holds nReports completion lines or the wait expires; returns the parsed report.
-    RasReport waitForReports(int nReports) const
+    RasReport waitForReports(int nReports, std::chrono::milliseconds wait = kReportWait) const
     {
-        const auto deadline = std::chrono::steady_clock::now() + kReportWait;
+        const auto deadline = std::chrono::steady_clock::now() + wait;
         RasReport report    = parseRasReport(read());
         while(report.count(kRasDone) < nReports && std::chrono::steady_clock::now() < deadline)
         {
@@ -322,6 +326,9 @@ static std::string rasRequest(int port, const std::string& command, const std::s
     ssize_t n;
     while((n = ::recv(sock, buf, sizeof(buf), 0)) > 0)
         body.append(buf, n);
+    if(n < 0)
+        ADD_FAILURE() << "RAS client request \"" << command << "\": recv failed before the server closed the "
+                      << "connection (" << strerror(errno) << ", timeout " << kReportWait.count() << " s)";
     ::close(sock);
     return body;
 }
@@ -401,23 +408,31 @@ static void checkAllReduce(const std::vector<ncclComm_t>& comms)
     }
 }
 
-// nReports reports, each of a communicator with nRanks ranks: one header, one line per check covering all ranks and
-// tagged [OK] or [INFO], the NCCL environment consistent, one completion line and no failure line. The GPU checks
-// may report [INFO] when their data source is unavailable; the report still has to name every rank.
-static void expectCompleteReport(const RasReport& report, int nRanks, const std::string& doneScope, int nReports = 1)
+// nReports reports covering nComms communicators (one per report by default) of nRanks ranks each: one header and
+// one completion line per report, one line per check and communicator covering all ranks and tagged [OK] or [INFO],
+// the NCCL environment consistent and no failure line. The GPU checks may report [INFO] when their data source is
+// unavailable; the report still has to name every rank. Call sites wrap it in ASSERT_NO_FATAL_FAILURE.
+static void expectCompleteReport(
+    const RasReport& report, int nRanks, const std::string& doneScope, int nReports = 1, int nComms = 0)
 {
+    if(nComms == 0)
+        nComms = nReports;
     const std::string across = "across " + std::to_string(nRanks) + " ranks";
+    // ECC counters read on some ranks only: "across <n> of <nRanks> ranks".
+    const std::string ofRanks = " of " + std::to_string(nRanks) + " ranks";
     EXPECT_EQ(report.count(kRasHeader), nReports) << report.dump();
     for(const char* label : {kGpuInventory, kDriver, kEcc, kEnv})
     {
         const std::vector<std::string> lines = report.checkLines(label);
-        ASSERT_EQ(lines.size(), static_cast<size_t>(nReports)) << label << "\n" << report.dump();
+        ASSERT_EQ(lines.size(), static_cast<size_t>(nComms)) << label << "\n" << report.dump();
         for(const std::string& line : lines)
-            EXPECT_NE(line.find(across), std::string::npos) << line;
+            EXPECT_TRUE(line.find(across) != std::string::npos
+                        || (label == kEcc && line.find(ofRanks) != std::string::npos))
+                << line;
     }
-    EXPECT_EQ(report.count(std::string(kTagOk) + kEnv + "NCCL_* env vars consistent " + across), nReports)
+    EXPECT_EQ(report.count(std::string(kTagOk) + kEnv + "NCCL_* env vars consistent " + across), nComms)
         << report.dump();
-    EXPECT_EQ(report.count(std::string(kTagOk) + kDriver), nReports) << report.dump();
+    EXPECT_EQ(report.count(std::string(kTagOk) + kDriver), nComms) << report.dump();
     EXPECT_EQ(report.count(kRasDone), nReports) << report.dump();
     EXPECT_EQ(report.countDone(doneScope), nReports) << report.dump();
     EXPECT_TRUE(report.failures().empty()) << "failure lines:\n" << report.dump();
@@ -545,15 +560,22 @@ static bool reapWorkers(std::vector<pid_t> pids)
         const pid_t pid = waitpid(-1, &status, WNOHANG);
         if(pid > 0)
         {
-            pids.erase(std::remove(pids.begin(), pids.end(), pid), pids.end());
-            if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            const auto it = std::find(pids.begin(), pids.end(), pid);
+            if(it != pids.end())
             {
-                ADD_FAILURE() << "worker pid " << pid << " failed, status 0x" << std::hex << status;
-                ok = false;
+                pids.erase(it);
+                if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+                {
+                    ADD_FAILURE() << "worker pid " << pid << " failed, status 0x" << std::hex << status;
+                    ok = false;
+                }
             }
         }
         else if(pid < 0 && errno != EINTR)
-            break;
+        {
+            ADD_FAILURE() << "waitpid: " << strerror(errno);
+            ok = false;
+        }
         if(!pids.empty() && (!ok || std::chrono::steady_clock::now() > deadline))
         {
             if(ok)
@@ -617,7 +639,7 @@ TEST_F(RasDiagnostics, InitTimeReportCompletes)
         EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
         EXPECT_EQ(report.lines.front(), kRasHeader) << report.dump();
         EXPECT_EQ(report.lines.back().rfind(kRasDone, 0), 0u) << report.dump();
-        expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks");
+        ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks"));
     }}});
 }
 
@@ -635,7 +657,7 @@ TEST_F(RasDiagnostics, CommUsableAfterRasDiagnostics)
         const auto commGuards  = guardComms(comms);
         const RasReport report = capture.waitForReports(1);
         capture.restore();
-        expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks");
+        ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks"));
         checkAllReduce(comms);
     }}});
 }
@@ -658,7 +680,7 @@ TEST_F(RasDiagnostics, RunsAtEveryCommInit)
             const RasReport report = capture.waitForReports(1);
             capture.restore();
             EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
-            expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks");
+            ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, nGpus, std::to_string(nGpus) + " ranks"));
         }
     };
 
@@ -683,12 +705,12 @@ TEST_F(RasDiagnostics, RunsAtEveryCommInit)
         for(int i = 0; i < nGpus && res == ncclSuccess; ++i)
             res = ncclCommSplit(parents[i], i % 2, i, &children[i], nullptr);
         const ncclResult_t endRes = ncclGroupEnd();
+        const auto childGuards    = guardComms(children);
         ASSERT_EQ(res, ncclSuccess) << "ncclCommSplit: " << ncclGetErrorString(res);
         ASSERT_EQ(endRes, ncclSuccess) << "ncclGroupEnd: " << ncclGetErrorString(endRes);
-        const auto childGuards = guardComms(children);
         const RasReport report = capture.waitForReports(2);
         capture.restore();
-        expectCompleteReport(report, half, std::to_string(half) + " ranks", 2);
+        ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, half, std::to_string(half) + " ranks", 2));
         expectOneReportPerComm(report, 2);
     };
 
@@ -700,19 +722,23 @@ TEST_F(RasDiagnostics, RunsAtEveryCommInit)
 // communicator of the job and names the number of RAS peers (processes) that answered. The request is text-only.
 TEST_F(RasDiagnostics, OnDemandClientRequest)
 {
+    // Two communicators over the same GPUs: one report, with one line per check for each of them.
     auto text = []() {
         const int port = setRasEnv(false);
         ASSERT_GT(port, 0);
         const int nGpus = usableGpus();
-        std::vector<ncclComm_t> comms;
+        std::vector<ncclComm_t> comms, others;
         ASSERT_NO_FATAL_FAILURE(initAll(comms, nGpus));
         const auto commGuards = guardComms(comms);
+        ASSERT_NO_FATAL_FAILURE(initAll(others, nGpus));
+        const auto otherGuards = guardComms(others);
 
         const std::string response = rasRequest(port, "DIAGNOSTICS");
         ASSERT_FALSE(response.empty()) << "no response from the RAS client listener on port " << port;
         const RasReport report = parseRasReport(response);
         EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
-        expectCompleteReport(report, nGpus, "1 RAS peers");
+        ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, nGpus, "1 RAS peers", 1, 2));
+        expectOneReportPerComm(report, 2);
     };
     auto json = []() {
         const int port = setRasEnv(false);
@@ -749,10 +775,16 @@ TEST_F(RasDiagnostics, EnvMismatchAcrossProcesses)
         for(int rank = 0; rank < 2; ++rank)
         {
             const pid_t pid = spawnWorker(rank, uidHex, outPath);
-            ASSERT_GT(pid, 0) << "fork failed for rank " << rank;
+            if(pid <= 0)
+            {
+                ADD_FAILURE() << "fork failed for rank " << rank << ": " << strerror(errno);
+                break;
+            }
             pids.push_back(pid);
         }
-        ASSERT_TRUE(reapWorkers(pids)) << "see the worker output above";
+        const bool reaped = reapWorkers(pids);
+        ASSERT_EQ(pids.size(), 2u);
+        ASSERT_TRUE(reaped) << "see the worker output above";
 
         std::ifstream f(outPath);
         std::ostringstream os;
@@ -838,6 +870,9 @@ TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
         std::vector<ncclComm_t> comms;
         ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
         const auto commGuards = guardComms(comms);
+        // Only the header is synchronous; give the RAS thread the time a report takes on a loaded node to show that
+        // nothing follows it.
+        capture.waitForReports(1, std::chrono::seconds(5));
         capture.restore();
         checkAllReduce(comms);
         const RasReport report = parseRasReport(capture.read());
@@ -865,8 +900,19 @@ TEST_F(RasDiagnostics, ReportParserOnFixedCapture)
     const RasReport report = parseRasReport(captured);
     ASSERT_EQ(report.lines.size(), 6u) << report.dump();
     EXPECT_EQ(report.lines.front(), kRasHeader);
-    expectCompleteReport(report, 8, "8 ranks");
+    ASSERT_NO_FATAL_FAILURE(expectCompleteReport(report, 8, "8 ranks"));
     EXPECT_TRUE(parseRasReport("no report here\n").lines.empty());
+
+    // ECC counters read on some ranks only.
+    const std::string partialEcc
+        = "node01:4242 NCCL DIAG === RAS Diagnostics ===\n"
+          "node01:4242 NCCL DIAG [INFO] GPU inventory: unavailable via NVML across 8 ranks in comm 0x1f\n"
+          "node01:4242 NCCL DIAG [OK]   CUDA driver version: 71526333 consistent across 8 ranks in comm 0x1f\n"
+          "node01:4242 NCCL DIAG [INFO] ECC: no uncorrected volatile errors across 6 of 8 ranks in comm 0x1f "
+          "(ECC counters unavailable via NVML on 2 ranks)\n"
+          "node01:4242 NCCL DIAG [OK]   NCCL environment: NCCL_* env vars consistent across 8 ranks in comm 0x1f\n"
+          "node01:4242 NCCL DIAG RAS diagnostics completed in 41.7 ms across 8 ranks\n";
+    ASSERT_NO_FATAL_FAILURE(expectCompleteReport(parseRasReport(partialEcc), 8, "8 ranks"));
 
     // One line per failure marker, trimmed rather than verbatim product wording.
     const std::string failing

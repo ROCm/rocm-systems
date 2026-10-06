@@ -145,10 +145,12 @@ the client:
    export NCCL_RAS_ADDR=localhost:<port>
    rcclras -p <port> -D
 
-The client port does not check who connects. Any local user who can reach the
-port can request a report, which includes the names and values of ``NCCL_*``
-variables that differ across ranks. Keep ``NCCL_RAS_ADDR`` on ``localhost``
-unless remote access is required.
+The client port does not check who connects. Any user who can reach the port
+can read the job state that ``rcclras`` prints (hosts, process IDs, GPUs and
+communicators), request a diagnostics report, which includes the names and
+values of ``NCCL_*`` variables that differ across ranks, and change the
+profiler event mask of every process of the job. Keep ``NCCL_RAS_ADDR`` on
+``localhost`` unless remote access is required.
 
 Reading the report
 ==================
