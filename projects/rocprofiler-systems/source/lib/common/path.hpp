@@ -7,7 +7,6 @@
 #include "common/delimit.hpp"
 #include <fmt/format.h>
 
-#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <system_error>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_PATH_LOG_NAME)
@@ -120,20 +120,8 @@ get_internal_script_path() ROCPROFSYS_INTERNAL_API;
 inline std::string
 get_internal_libdir() ROCPROFSYS_INTERNAL_API;
 
-/**
- * Whether an absolute library path is visible to a process other than the
- * caller (e.g. an attach target running in a different mount namespace).
- */
-enum class target_visibility
-{
-    available,          ///< confirmed present as a regular file (symlinks followed)
-    confirmed_missing,  ///< confirmed absent
-    indeterminate       ///< could not be determined; caller should proceed optimistically
-};
-
-[[nodiscard]] inline target_visibility
-check_target_path_visibility(pid_t              pid,
-                             const std::string& library_path) ROCPROFSYS_INTERNAL_API;
+[[nodiscard]] inline bool
+is_missing_in_target(pid_t pid, const std::string& library_path) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::optional<std::string>
 find_loaded_library_dir(pid_t pid, std::string_view library_name) ROCPROFSYS_INTERNAL_API;
@@ -534,36 +522,33 @@ get_internal_libdir()
 }
 
 /**
- * @brief Determine whether an absolute library path is visible to a target process,
- * without assuming the caller shares a mount namespace with the target.
- * Non-absolute paths (e.g. a bare SONAME meant to be resolved by the
- * target's own dynamic linker search path) are not checked and always
- * yield ::indeterminate.
+ * @brief Whether an absolute library path is confirmed absent in the mount namespace of
+ * process @p pid, without assuming the caller shares that namespace.
+ *
+ * A path that cannot be checked (not absolute, e.g. a bare SONAME resolved by the
+ * target's own dynamic linker, or not accessible through /proc) is not reported as
+ * missing, so callers only refuse a library they have proven the target cannot load.
  *
  * @param pid Target process ID.
  * @param library_path Path to check, as it would be passed to the target for `dlopen`.
- *
- * @return The selected target library visibility relative to the host process.
  */
-target_visibility
-check_target_path_visibility(pid_t pid, const std::string& library_path)
+bool
+is_missing_in_target(pid_t pid, const std::string& library_path)
 {
     if(library_path.empty() || library_path.front() != '/')
     {
-        return target_visibility::indeterminate;
-    }
-    const auto  absolute_path = fmt::format("/proc/{}/root/{}", pid, library_path);
-    struct stat buffer;
-    if(stat(absolute_path.c_str(), &buffer) == 0)
-    {
-        return (S_ISREG(buffer.st_mode) != 0) ? target_visibility::available
-                                              : target_visibility::confirmed_missing;
+        return false;
     }
 
-    // ENOENT/ENOTDIR mean a component of the path is genuinely absent; any other
-    // errno (e.g. EACCES from restricted /proc access) means we can't tell.
-    return (errno == ENOENT || errno == ENOTDIR) ? target_visibility::confirmed_missing
-                                                 : target_visibility::indeterminate;
+    std::error_code ec;
+    const auto      status =
+        std::filesystem::status(fmt::format("/proc/{}/root{}", pid, library_path), ec);
+    if(!ec)
+    {
+        return !std::filesystem::is_regular_file(status);
+    }
+    // a missing file is reported through ec as well, so only these values mean "absent"
+    return ec == std::errc::no_such_file_or_directory || ec == std::errc::not_a_directory;
 }
 
 /**

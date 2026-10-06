@@ -81,8 +81,7 @@ resolve_tool_library(pid_t pid)
 
     if(const auto* user_library = std::getenv("ROCPROF_ATTACH_TOOL_LIBRARY"))
     {
-        if(path::check_target_path_visibility(pid, user_library) !=
-           path::target_visibility::confirmed_missing)
+        if(!path::is_missing_in_target(pid, user_library))
         {
             return std::string{ user_library };
         }
@@ -93,8 +92,7 @@ resolve_tool_library(pid_t pid)
     }
 
     const auto own_library = path::get_internal_libpath("librocprof-sys-dl.so");
-    if(path::check_target_path_visibility(pid, own_library) !=
-       path::target_visibility::confirmed_missing)
+    if(!path::is_missing_in_target(pid, own_library))
     {
         return own_library;
     }
@@ -108,8 +106,8 @@ resolve_tool_library(pid_t pid)
 
     LOG_ERROR(
         "Tool library '{}' does not exist in the mount namespace of process {}, and "
-        "no librocprof-sys-dl.so was found next to its librocprofiler-register "
-        "library. Set ROCPROF_ATTACH_TOOL_LIBRARY to the path as seen by the target.",
+        "no librocprof-sys-dl.so was found in its ROCm installation. Set "
+        "ROCPROF_ATTACH_TOOL_LIBRARY to the path as seen by the target.",
         own_library, pid);
     return std::nullopt;
 }

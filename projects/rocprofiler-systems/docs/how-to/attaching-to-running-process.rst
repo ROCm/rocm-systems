@@ -269,9 +269,8 @@ in a container. ``rocprof-sys-attach`` picks the library in this order:
 
 1. ``ROCPROF_ATTACH_TOOL_LIBRARY``, if set.
 2. The library from its own installation, if the target can see it at the same path.
-3. The ``librocprof-sys-dl.so`` located next to the ``librocprofiler-register``
-   library the target has loaded, that is, the one shipped with the target's own
-   ROCm installation.
+3. The ``librocprof-sys-dl.so`` shipped with the ROCm installation the target
+   process has loaded, found through that process' own view of the filesystem.
 
 If none of these is available in the target's mount namespace, set
 ``ROCPROF_ATTACH_TOOL_LIBRARY`` to the absolute path of ``librocprof-sys-dl.so``

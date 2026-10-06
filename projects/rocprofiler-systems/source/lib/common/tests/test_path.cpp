@@ -594,10 +594,10 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
     EXPECT_EQ(content, "ab");
 }
 
-TEST_F(PathTest, CheckTargetPathVisibility_AvailableWhenFileExists)
+TEST_F(PathTest, IsMissingInTarget_FalseWhenFileExists)
 {
     // using our own pid makes "/proc/<pid>/root" resolve to the real filesystem
-    // root, so a plain absolute path exercises the same stat() logic a genuine
+    // root, so a plain absolute path exercises the same lookup a genuine
     // cross-namespace target would, without needing any test-only indirection
     const std::string absolute_path =
         m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
@@ -605,36 +605,31 @@ TEST_F(PathTest, CheckTargetPathVisibility_AvailableWhenFileExists)
         std::filesystem::path{ absolute_path }.parent_path());
     std::ofstream{ absolute_path } << "fake library contents";
 
-    EXPECT_EQ(check_target_path_visibility(getpid(), absolute_path),
-              target_visibility::available);
+    EXPECT_FALSE(is_missing_in_target(getpid(), absolute_path));
 }
 
-TEST_F(PathTest, CheckTargetPathVisibility_ConfirmedMissingWhenAbsent)
+TEST_F(PathTest, IsMissingInTarget_TrueWhenAbsent)
 {
     const std::string absolute_path =
         m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
 
-    EXPECT_EQ(check_target_path_visibility(getpid(), absolute_path),
-              target_visibility::confirmed_missing);
+    EXPECT_TRUE(is_missing_in_target(getpid(), absolute_path));
 }
 
-TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateWhenStatFails)
+TEST_F(PathTest, IsMissingInTarget_FalseWhenPathCannotBeChecked)
 {
     // a path component longer than NAME_MAX (255 bytes on most Linux filesystems)
-    // makes stat() fail with ENAMETOOLONG regardless of privilege level, letting
-    // this test exercise the "could not be determined" branch portably (a plain
-    // nonexistent path is reported as confirmed_missing, not indeterminate)
+    // fails with ENAMETOOLONG regardless of privilege level, which must not be
+    // mistaken for a missing file
     const std::string too_long_path =
         "/" + std::string(300, 'a') + "/librocprof-sys-dl.so";
 
-    EXPECT_EQ(check_target_path_visibility(getpid(), too_long_path),
-              target_visibility::indeterminate);
+    EXPECT_FALSE(is_missing_in_target(getpid(), too_long_path));
 }
 
-TEST_F(PathTest, CheckTargetPathVisibility_IndeterminateForNonAbsolutePath)
+TEST_F(PathTest, IsMissingInTarget_FalseForNonAbsolutePath)
 {
-    EXPECT_EQ(check_target_path_visibility(1, "librocprof-sys-dl.so"),
-              target_visibility::indeterminate);
+    EXPECT_FALSE(is_missing_in_target(1, "librocprof-sys-dl.so"));
 }
 
 // the test binary itself is anchored on rather than a system library because system
