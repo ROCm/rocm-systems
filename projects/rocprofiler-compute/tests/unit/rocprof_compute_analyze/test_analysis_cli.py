@@ -242,3 +242,21 @@ def test_handle_operator_prints_matched_subtree(capsys):
     assert "Matched PyTorch Operators: *addmm*" in captured.out
     assert "aten::addmm" in captured.out
     assert workload.filter_kernel_ids == [0]
+
+
+def test_apply_operator_filter_intersects_existing_kernel_ids(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    args = Namespace(torch_operator=["*relu*"], kernel=[0])
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    workload.filter_kernel_ids = [0]
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert any(
+        "No PyTorch operators matched the -k filter: [0]" in str(item)
+        for item in warnings
+    )
+    assert workload.filter_kernel_ids == [0]
