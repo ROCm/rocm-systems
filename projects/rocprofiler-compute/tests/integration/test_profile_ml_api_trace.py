@@ -65,3 +65,23 @@ def test_ml_api_trace_profile_csvs(ml_api_trace_profiled_workload):
                 functions.append(row["Function"])
     assert any("|torch" in fn for fn in functions)
     assert any("|triton" in fn for fn in functions)
+
+
+@pytest.mark.ml_api_trace
+def test_list_both_operators(
+    ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--list-triton-operators",
+        "--path",
+        ml_api_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "PyTorch, Triton Operator Call Tree:" in out
+    assert "aten::relu" in out
+    assert "triton.JITFunction" in out
