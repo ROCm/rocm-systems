@@ -291,8 +291,10 @@ class VirtualGPU : public device::VirtualDevice {
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
     HwQueueEngine GetActiveEngine() const { return engine_; }
 
-    //! Returns the last submitted signal for a wait
-    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
+    //! Returns the last submitted signals for a wait.  aql_barrier_dep says the result goes
+    //! straight into an AQL packet on this queue; only then may a device resident edge appear.
+    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
+                                             bool aql_barrier_dep = false);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     void ResetCurrentSignal();
@@ -530,7 +532,7 @@ class VirtualGPU : public device::VirtualDevice {
   const Device& dev() const { return roc_device_; }
 
   void profilingBegin(amd::Command& command, bool sdmaProfiling = false);
-  void profilingEnd(bool clearHwEvent = false);
+  void profilingEnd(bool clearHwEvent = false, bool publishOrderingEdge = true);
 
   void updateCommandsState(amd::Command* list) const;
 
@@ -555,6 +557,8 @@ class VirtualGPU : public device::VirtualDevice {
       bool attach_signal = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
+
+  void PublishOrderingEdge();
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);

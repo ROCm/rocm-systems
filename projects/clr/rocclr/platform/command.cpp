@@ -287,7 +287,7 @@ bool Event::awaitCompletion() {
 }
 
 // ================================================================================================
-bool Event::notifyCmdQueue(bool cpu_wait) {
+bool Event::notifyCmdQueue(bool cpu_wait, bool cross_queue) {
   HostQueue* queue = command().queue();
   if (AMD_DIRECT_DISPATCH) {
     ScopedLock l(notify_lock_);
@@ -301,6 +301,8 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
       if (command == NULL) {
         return false;
       }
+      // The marker is the producer; the first waiter decides, later ones reuse notify_event_.
+      command->setCrossStreamProducer(cross_queue);
       command->enqueue();
       // Save notification, associated with the current event
       notify_event_ = command;
@@ -405,7 +407,7 @@ void Command::enqueue() {
           return;
         }
       } else {
-        event->notifyCmdQueue(!kCpuWait);
+        event->notifyCmdQueue(!kCpuWait, event->command().queue() != queue_);
       }
     }
 

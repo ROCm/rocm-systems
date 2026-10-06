@@ -1979,6 +1979,9 @@ class Device : public RuntimeObject {
     return false;
   }
 
+  //! True if graph and stream ordering edges use device resident signals
+  virtual bool orderingEdgeSignals() const { return false; }
+
   virtual bool deviceAllowAccess(void* dst) const {
     ShouldNotCallThis();
     return true;
