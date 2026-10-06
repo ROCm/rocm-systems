@@ -288,6 +288,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     g_ibNetDevices = nullptr;
     g_ibNetGetProperties = nullptr;
     ResetDevRuntimeMicroFakes();
+    ResetNcclFakes();
     ResetDiagnosticsFakes();
     ResetLibcFakes();
     ResetTopoStubs();
@@ -1017,7 +1018,7 @@ TEST_F(DiagIbWriteBwMicrotest, SyncPair_ClientSendsThenAdoptsEchoServerReceivesT
   inbox_[kSync] = {Bytes(1.0)};
   sendFailTag_ = kSync;
   EXPECT_FALSE(syncPair(comm_.get(), false, 1, bandwidth));
-  EXPECT_EQ(log_.size(), 1u);
+  ASSERT_EQ(log_.size(), 1u);
   EXPECT_FALSE(syncPair(comm_.get(), true, 1, bandwidth));
   sendFailTag_ = 0;
   EXPECT_FALSE(syncPair(comm_.get(), false, 1, bandwidth));
@@ -1070,6 +1071,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerToolFailureReportsAfterReady) {
   std::string out;
   EXPECT_DOUBLE_EQ(RunPair(0, 2, true, &out), 12.0);
   EXPECT_EQ(out, PairLine("cross", 0, 2, "tool run timed out"));
+  ASSERT_FALSE(log_.empty());
   EXPECT_EQ(log_.front(), (IbMsg{'S', 2, kReady, Bytes(true)}));
   EXPECT_EQ(log_.size(), 3u);
   ResetPairScene(1);
@@ -1078,6 +1080,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerToolFailureReportsAfterReady) {
   inbox_[kSync] = {Bytes(-1.0)};
   EXPECT_DOUBLE_EQ(RunPair(1, 2, false, &out), -1);
   EXPECT_EQ(out, PairLine("same", 1, 2, "tool run failed"));
+  ASSERT_FALSE(log_.empty());
   EXPECT_EQ(log_.front(), (IbMsg{'S', 2, kReady, Bytes(false)}));
 }
 
@@ -1150,6 +1153,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientFailuresReportWithMemoryKind) {
     std::string out;
     EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
     EXPECT_EQ(clientCommands_.size(), cases[i].reached ? 1u : 0u);
+    ASSERT_FALSE(log_.empty());
     EXPECT_EQ(log_.front().kind, 'R');
     EXPECT_EQ(log_.front().tag, kReady);
     EXPECT_EQ(log_.back(), (IbMsg{'R', 0, kSync, Bytes(-1.0)}));
@@ -1163,6 +1167,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_FailedExchangeReportsPeer) {
   std::string out;
   EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
   EXPECT_EQ(out, NetInfo("cannot exchange the measurement with rank 0"));
+  ASSERT_FALSE(log_.empty());
   EXPECT_EQ(log_.back(), (IbMsg{'R', 0, kSync, ""}));
 }
 
@@ -1199,6 +1204,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunSchedule_CrossPhaseFeedsCrossAndFailedPairClea
   EXPECT_DOUBLE_EQ(result_.direct, -1);
   EXPECT_FALSE(allPairsRan_);
   EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, false}));
+  ASSERT_FALSE(log_.empty());
   EXPECT_EQ(log_.front(), (IbMsg{'S', 3, kReady, Bytes(true)}));
 }
 
@@ -1312,6 +1318,7 @@ TEST_F(DiagIbWriteBwMicrotest, Run_CrossNicAddsCrossSummaryAndIncompleteIsInfo) 
   const std::string out = CaptureStdout([&] { Run(); });
   EXPECT_EQ(out, NetInfo("100.0/100.0/100.0 Gbit/s min/median/max same-nic bw (across 4 ranks)") +
                      NetInfo("80.0/80.0/80.0 Gbit/s min/median/max cross-nic bw (across 3 ranks)"));
+  ASSERT_FALSE(log_.empty());
   EXPECT_EQ(log_.front(), (IbMsg{'S', 3, kReady, Bytes(true)}));
   EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, false}));
 }
