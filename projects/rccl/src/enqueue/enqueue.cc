@@ -4711,12 +4711,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
-      // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
-      // rcclSelectAllGather Branch #3 reports, so selection and dispatch agree.
+      // Sym-window CE AllGather (-R 2) above the symk/CE crossover. Requires
+      // CTAPolicy=ZERO, matching rcclSelectAllGather Branch #3 so selection
+      // and dispatch agree.
       bool ceAgSymRegistered =
         !rcclNcclAlgoEnvIsSet() &&
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
+        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
