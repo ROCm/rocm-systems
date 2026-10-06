@@ -10,10 +10,10 @@ Build with `-DROCPROFILER_BUILD_SAMPLES=ON`.
 
 | | **Samples** (`samples/kernel_replay/`) | **Integration tests** (`tests/kernel-replay-*`) |
 |---|---|---|
-| Purpose | Teach tool authors: subscribe to replay, wire one service | Regression coverage (local toggles, concurrency) |
+| Purpose | Teach tool authors: subscribe to replay, wire one service | Regression coverage (per-pass service selection, concurrency) |
 | Tool | Small LD_PRELOAD client with only the feature under demo | Env-driven client in `tests/` |
 | App | Shared `main.cpp` HIP kernels | Dedicated test app per suite |
-| Run | `ctest -R '^kernel-replay-'` in the samples build dir | `ctest -R kernel-replay-local-context` in main build |
+| Run | `ctest -R '^kernel-replay-'` in the samples build dir | `ctest -R kernel-replay-pass-selection` in main build |
 
 For JSON output validation with the shared test harness, see `tests/counter-collection/`
 (`rocprofiler-sdk-json-tool`). Kernel replay JSON/tool wiring belongs to `rocprofv3`, not to

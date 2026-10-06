@@ -181,8 +181,8 @@ In-tree examples
   ``user_data.ptr`` without a dispatch-id side table.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
   out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
-* ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts
-  across passes.
+* ``tests/kernel-replay-pass-selection/`` — custom client whose counters, SPM, and thread trace
+  dispatch callbacks pick the passes each service collects on.
 * ``source/lib/rocprofiler-sdk/kernel_replay/tests/`` — unit tests for configure, local context,
   and snap/restore.
 
