@@ -473,7 +473,9 @@ class TestCliBase(unittest.TestCase):
                                     options.append(f"{items[item_index]} {perf_level}")
                             elif sub_arg == "PROFILE_LEVEL":  # arg --profile
                                 for profile_level in self.profile_levels:
-                                    options.append(f"{items[item_index]} {profile_level}")
+                                    options.append(
+                                        f"{items[item_index]} {{profile_{profile_level}}}"
+                                    )
                             elif sub_arg == "SCLKMAX":  # arg --perf-determinism
                                 options.append("{perf_determinism}")
                             elif sub_arg == "TYPE/INDEX":  # arg
@@ -783,6 +785,14 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+                elif nameStr.startswith("{profile_"):
+                    profile = nameStr[len("{profile_") : -1]
+                    outcome = self._profile_set_outcome(profile, gpu_index, explicit_gpu, ok)
+                    if outcome is None:
+                        cmd = ""
+                    else:
+                        cond = outcome
+                        cmd = cmd.replace(nameStr, profile, 1)
             cmds[index] = (cmd, cond)
 
         # Pare down commands
@@ -932,6 +942,48 @@ class TestCliBase(unittest.TestCase):
     def _prompt_answer_for(self, cmd):
         """Reply to pipe to a command whose parser prompts, else None."""
         return self._lookup(self.PROMPT_ANSWERS, cmd)
+
+    def _profile_set_outcome(self, profile, gpu_index, explicit_gpu, ok):
+        """What ``set --profile <profile>`` must answer, or None to skip the command.
+
+        The library refuses a profile the device does not list with
+        INPUT_OUT_OF_BOUNDS before it changes anything, so an unlisted profile
+        is checked for exactly that refusal. Tolerating it instead would also
+        let a listed profile be refused unnoticed.
+
+        Args:
+            profile: profile name as the CLI spells it, e.g. ``VR``.
+            gpu_index: device the command reads its values from.
+            explicit_gpu: whether the command named that device, as opposed to
+                defaulting to it while actually running on every device.
+            ok: the exit codes the sweep accepts for this command.
+
+        Returns:
+            list | int | None: *ok* when every device that reports its profiles
+            lists this one, INPUT_OUT_OF_BOUNDS when every targeted device
+            reports them and none lists it, otherwise None.
+        """
+        gpu_data = self.static_data["gpu_data"]
+        targets = [gpu_data[gpu_index]] if explicit_gpu else gpu_data
+        # static omits "profile" off bare metal and reports an error string when
+        # the read fails. Such a device refuses every profile with NOT_SUPPORTED,
+        # which *ok* accepts.
+        lists = [
+            gpu["profile"]["available_profiles"]
+            for gpu in targets
+            if isinstance(gpu.get("profile"), dict)
+        ]
+        if not lists:
+            return None
+        listed = [profile in names for names in lists]
+        if all(listed):
+            return ok
+        # Devices answering differently leave the CLI to combine their codes,
+        # into MIXED_DEVICE_ERRORS when they differ, so there is no one code to
+        # expect.
+        if any(listed) or len(lists) < len(targets):
+            return None
+        return amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS
 
     def _clk_level_count(self, clk_type, gpu_index, explicit_gpu):
         """How many levels a ``--clk-level`` mask for *clk_type* may name.
