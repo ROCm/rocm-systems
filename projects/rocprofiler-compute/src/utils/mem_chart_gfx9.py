@@ -360,7 +360,7 @@ def _build_l1_stack(
     """Build vertically stacked L1 cache panels: VL1D, LDS, sL1D, L1I."""
     vl1_rows: list[CachePanelRow] = [
         ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
-        ("Coalesce", metrics["vl1_coalesce"], "%", COLORS["hit"]),
+        ("Coalesce", metrics["vl1_coalesce"], "%", COLORS["neutral"]),
     ]
     gl1_stall_rows = _collect_stall_rows(membw, "GL1")  # gfx950 membw
     vl1_rows.extend(gl1_stall_rows)

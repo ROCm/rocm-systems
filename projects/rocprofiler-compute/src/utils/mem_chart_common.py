@@ -37,6 +37,8 @@ COLORS = {
     "hit": "yellow",
     "stall": "indian_red",
     "bw": "bright_cyan",
+    # Terminal default foreground, for rows outside the legend
+    "neutral": "default",
 }
 
 _LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (

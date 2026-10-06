@@ -13,7 +13,7 @@ import yaml
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from utils import mem_chart_gfx9
-from utils.mem_chart_common import strip_ansi
+from utils.mem_chart_common import COLORS, strip_ansi
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
@@ -442,3 +442,14 @@ class TestMembwAnnotations:
         output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
         legend_line = next(line for line in output.splitlines() if "Legend" in line)
         assert "Stall" not in legend_line
+
+
+def test_vl1_coalesce_uses_neutral_color():
+    """Coalesce is not a hit rate, so it must not use the legend's Hit% color."""
+    metrics = mem_chart_gfx9._extract_metrics(mem_chart_gfx9.DEFAULT_SAMPLE_METRICS)
+    vl1_panel = mem_chart_gfx9._build_l1_stack(metrics).renderables[0]
+    coalesce_line = next(
+        line for line in vl1_panel.renderable.splitlines() if "Coalesce" in line
+    )
+    assert f"[{COLORS['neutral']}]" in coalesce_line
+    assert f"[{COLORS['hit']}]" not in coalesce_line
