@@ -211,12 +211,17 @@ TEST_F(AmdSmiWrapTest, PciBusIdRoundTripsToDeviceIndex)
 
 // The RAS diagnostics name a GPU by its busIdToInt64() value, which amd_smi_diag* decode back into a BDF, so
 // every device's bus ID has to reach a GPU that AMD SMI knows. A partition (non-zero PCI function) may be known
-// only through its physical GPU on function 0, which is what the diagnostics fall back to.
+// only through its physical GPU on function 0, which is what the diagnostics fall back to. ECC counters and XGMI
+// links depend on the GPU, so only the values they return when they answer are checked.
 TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
 {
     requireDevices(1);
     if(amd_smi_diagInit() != ncclSuccess)
         GTEST_SKIP() << "amd_smi_diagInit() failed: no AMD SMI library";
+
+    uint32_t nGpus = 0;
+    ASSERT_EQ(amd_smi_diagGpuCount(&nGpus), ncclSuccess);
+    EXPECT_GT(nGpus, 0u);
 
     for(uint32_t i = 0; i < numDevices_; i++)
     {
@@ -226,11 +231,24 @@ TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
         ASSERT_EQ(busIdToInt64(busIdString, &busId), ncclSuccess) << "bus ID " << busIdString;
 
         char model[256] = {0};
-        ncclResult_t res = amd_smi_diagGpuModel(busId, model, sizeof(model));
-        if(res != ncclSuccess && (busId & 0xf) != 0)
-            res = amd_smi_diagGpuModel(busId & ~INT64_C(0xf), model, sizeof(model));
-        EXPECT_EQ(res, ncclSuccess) << "bus ID " << busIdString;
+        if(amd_smi_diagGpuModel(busId, model, sizeof(model)) != ncclSuccess && (busId & 0xf) != 0)
+            busId &= ~INT64_C(0xf);
+        model[0] = '\0';
+        EXPECT_EQ(amd_smi_diagGpuModel(busId, model, sizeof(model)), ncclSuccess) << "bus ID " << busIdString;
         EXPECT_GT(strlen(model), 0u) << "bus ID " << busIdString;
+
+        amdsmiDiagEccCounts ecc = {UINT64_MAX, UINT64_MAX, UINT64_MAX};
+        if(amd_smi_diagEccCounts(busId, &ecc) == ncclSuccess)
+            EXPECT_TRUE(ecc.correctable != UINT64_MAX && ecc.uncorrectable != UINT64_MAX && ecc.deferred != UINT64_MAX)
+                << "bus ID " << busIdString;
+
+        amdsmiDiagXgmiLinks links = {-1, -1};
+        if(amd_smi_diagXgmiLinks(busId, &links) == ncclSuccess)
+        {
+            EXPECT_GE(links.nLinks, 0) << "bus ID " << busIdString;
+            EXPECT_GE(links.nDown, 0) << "bus ID " << busIdString;
+            EXPECT_LE(links.nDown, links.nLinks) << "bus ID " << busIdString;
+        }
     }
 }
 
