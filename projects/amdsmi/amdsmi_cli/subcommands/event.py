@@ -88,6 +88,10 @@ class EventCommands:
         try:
             while not self.stop:
                 try:
+                    # read() is a global poll: amdsmi_get_gpu_event_notification()
+                    # returns queued events for ALL registered devices, each tagged
+                    # with its own processor_handle. A single listener's read()
+                    # therefore drains every GPU, not just listeners[0].
                     events = listeners[0].read(2000)
                     for event in events:
                         values_dict["timestamp"] = event["timestamp"]
