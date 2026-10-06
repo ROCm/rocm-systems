@@ -131,7 +131,10 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   for (int r = 0; r < nreqs; r++) wr_id += (uint64_t)(slot & 0xff) << (r * 8);
 
   uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
-  bool needSizesWr = (nreqs > 1);
+  // Non-BY_INDEX receivers sum byte_len for nreqs==1, but the imm rides only the last
+  // slice here, so write the size record. Not for size 0: its 4-byte record is summed.
+  bool needSizesWr =
+    (nreqs > 1) || (comm->base.recvMatchingScheme != BY_INDEX && reqs[0]->send.size > 0);
   bool arExtra =
     (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold);
   bool extraImmWr = needSizesWr || arExtra;   // dedicated final WR carries the imm
@@ -478,14 +481,8 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // (derived from device speeds). Each device's share is (size * weight / 100), further
       // split among the actual QPs on that device. When all devices have the same speed,
       // weights are equal and it reduces to the equal-split formula.
-      uint32_t chunkSize;
-      if (reqs[r]->send.size < splitDataThreshold) {
-        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
-      } else {
-        chunkSize = DIVUP(DIVUP((uint64_t)reqs[r]->send.size * weights[origDevIndex], 100 * qpsPerDev[origDevIndex]),
-                          IB_WRITE_CHUNK_ALIGNMENT) *
-                    IB_WRITE_CHUNK_ALIGNMENT;
-      }
+      uint32_t chunkSize =
+        ncclIbQpChunkSize(reqs[r]->send.size, splitDataThreshold, i, weights[origDevIndex], qpsPerDev[origDevIndex]);
       // Check the data left to send. If the send is too small, it might be
       // that on the current QP there is no data left to be sent.
       comm->wrs[r].sg_list->length = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
@@ -614,6 +611,11 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     return ncclSuccess;
   }
   nreqs = ncclIbCtsNreqs(slots[0].nreqs);
+  if (nreqs > NCCL_NET_IB_MAX_RECVS) {
+    WARN("NET/IB : peer posted nreqs %d > %d", nreqs, NCCL_NET_IB_MAX_RECVS);
+    ret = ncclInternalError;
+    goto isendFail;
+  }
   // Wait until all data has arrived
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
