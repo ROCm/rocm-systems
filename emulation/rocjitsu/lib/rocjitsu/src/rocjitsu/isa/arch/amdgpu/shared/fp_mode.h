@@ -1089,12 +1089,28 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
 /// @details A flushing output flushes results that are tiny after rounding. An
 /// active VOP3 OMOD flushes them even when MODE keeps output denormals
 /// (force_output_flush).
+///
+/// | Sources, after input flushing          | Result                         |
+/// |----------------------------------------|--------------------------------|
+/// | 0 * infinity, with any addend          | Default NaN (0xfff8000000000000) |
+/// | Otherwise a NaN in src0, src1 or src2  | First such NaN, quieted        |
+/// | Otherwise                              | Fused multiply-add             |
 inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
                         uint32_t denorm_mode, bool force_output_flush = false) {
+  using F64 = fp_format::F64;
   const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-  src2 = input_denormal::flush_input<fp_format::F64>(src2, input);
+  src0 = input_denormal::flush_input<F64>(src0, input);
+  src1 = input_denormal::flush_input<F64>(src1, input);
+  src2 = input_denormal::flush_input<F64>(src2, input);
+  // The invalid product wins even when the addend is a NaN; gfx1201 does not
+  // propagate the addend's payload here.
+  const uint64_t magnitude0 = src0 & F64::kMagnitude, magnitude1 = src1 & F64::kMagnitude;
+  if ((magnitude0 == 0 && magnitude1 == F64::kInfinity) ||
+      (magnitude1 == 0 && magnitude0 == F64::kInfinity))
+    return F64::kSign | F64::kInfinity | F64::kQuiet;
+  for (const uint64_t bits : {src0, src1, src2})
+    if ((bits & F64::kMagnitude) > F64::kInfinity)
+      return bits | F64::kQuiet;
   const auto output = output_denormal::Policy::make(force_output_flush ? 0u : denorm_mode);
 
   uint64_t result;

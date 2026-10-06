@@ -11372,6 +11372,8 @@ template <typename Inst>
 inline void execute_v_fma_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_FMA_VOP3_FP64();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11387,16 +11389,14 @@ inline void execute_v_fma_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
         amdgpu::source_modifier::apply_to_float(src1_value, 1, inst.inst_.abs, inst.inst_.neg);
     src2_value =
         amdgpu::source_modifier::apply_to_float(src2_value, 2, inst.inst_.abs, inst.inst_.neg);
-    uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
-                                                    wf.ieee_mode(), inst.inst_.omod);
     // An active OMOD flushes a result that is tiny after rounding.
-    uint64_t result = amdgpu::fp_mode::fma_f64(
+    const uint64_t result = amdgpu::fp_mode::fma_f64(
         std::bit_cast<uint64_t>(src0_value), std::bit_cast<uint64_t>(src1_value),
         std::bit_cast<uint64_t>(src2_value), wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64(), omod != 0);
-    result = amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
-                                         amdgpu::floating_clamp_nan_to_zero(wf));
-    sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
+        wf.fp_denorm_mode_f16_f64(), output_policy.omod != 0);
+    sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::output_modifier::apply<amdgpu::fp_format::F64>(result, output_policy));
   }
 }
 

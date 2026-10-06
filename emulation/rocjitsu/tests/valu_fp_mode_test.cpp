@@ -2585,6 +2585,23 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// An RDNA4 case with F64 operands in v[0:1], v[2:3] and v[4:5] and the result in v[6:7].
+ArithmeticCase f64_case(const std::string &name, std::array<uint32_t, 2> words,
+                        std::array<uint64_t, 3> sources, uint32_t mode, uint64_t result) {
+  std::vector<std::pair<uint32_t, uint32_t>> registers;
+  for (uint32_t i = 0; i < sources.size(); ++i) {
+    registers.emplace_back(2 * i, uint32_t(sources[i]));
+    registers.emplace_back(2 * i + 1, uint32_t(sources[i] >> 32));
+  }
+  return {name,
+          ROCJITSU_CODE_ARCH_RDNA4,
+          {words[0], words[1], 0u},
+          std::move(registers),
+          {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
+          mode,
+          FE_TONEAREST};
+}
+
 // gfx1201 detects tininess after rounding: a result that rounds to the
 // smallest normal only on the subnormal grid is still tiny, and a flushing
 // output (or an active OMOD) turns it into zero. Results are gfx1201
@@ -2659,21 +2676,9 @@ std::vector<ArithmeticCase> tiny_result_cases() {
   add_f32("MulDx9F32Vop3NegativeZeroTimesNanModeC0", dx9, 0x80000000u, 0x7fc00000u, 0xc0u, 0u);
   add_f32("MulDx9F32Vop3InfinityTimesZeroModeF0", dx9, 0xff800000u, 0u, 0xf0u, 0u);
 
-  // F64 operands in v[0:1], v[2:3] and v[4:5]; result in v[6:7].
   const auto add_f64 = [&](const std::string &name, std::array<uint32_t, 2> words,
                            std::array<uint64_t, 3> sources, uint32_t mode, uint64_t result) {
-    std::vector<std::pair<uint32_t, uint32_t>> registers;
-    for (uint32_t i = 0; i < sources.size(); ++i) {
-      registers.emplace_back(2 * i, uint32_t(sources[i]));
-      registers.emplace_back(2 * i + 1, uint32_t(sources[i] >> 32));
-    }
-    cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
-                     {words[0], words[1], 0u},
-                     std::move(registers),
-                     {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
-                     mode,
-                     FE_TONEAREST});
+    cases.push_back(f64_case(name, words, sources, mode, result));
   };
   constexpr uint64_t kMinNormal64 = 0x0010000000000000u;
   constexpr uint64_t kSign64 = 0x8000000000000000u;
@@ -2713,6 +2718,43 @@ std::vector<ArithmeticCase> tiny_result_cases() {
           {0x800fffffffffffffu, kMinNormal64, 0x800fffffffffffffu}, 0xf0u, 0x800fffffffffffffu);
   add_f64("FmaF64Mul2TinyModeF0", fma_f64_mul2, {kOneMinusUlp64, kMinNormal64, 0}, 0xf0u, 0u);
   return cases;
+}
+
+// V_FMA_F64 NaN selection and output modifiers, from gfx1201 captures. An
+// invalid product (0 * infinity, after MODE input flushing) gives the default
+// NaN even when the addend is a NaN; otherwise the first NaN source is quieted.
+// OMOD scales the rounded result like every other output modifier.
+std::vector<ArithmeticCase> fma_f64_policy_cases() {
+  constexpr uint64_t kInfinity = 0x7ff0000000000000u;
+  constexpr uint64_t kDefaultNan = 0xfff8000000000000u;
+  constexpr uint64_t kOne = 0x3ff0000000000000u;
+  const auto fma = [](uint8_t omod) {
+    return rdna4::build_vop3(rdna4::kVFmaF64Vop3,
+                             {.vdst = 6, .src0 = 256, .src1 = 258, .src2 = 260, .omod = omod});
+  };
+  return {
+      f64_case("ZeroTimesInfinitySignalingAddend", fma(0), {0u, kInfinity, 0x7ff4000000000001u},
+               0xf0u, kDefaultNan),
+      f64_case("InfinityTimesZeroQuietAddend", fma(0),
+               {0xfff0000000000000u, 0x8000000000000000u, 0x7ff8000000000005u}, 0x00u, kDefaultNan),
+      // MODE 0x30 flushes the F64 subnormal input, making the product invalid.
+      f64_case("FlushedSubnormalTimesInfinityMode30", fma(0), {kInfinity, 1u, 0x7ff0000000000001u},
+               0x30u, kDefaultNan),
+      f64_case("SubnormalTimesInfinityModeF0", fma(0), {kInfinity, 1u, 0x7ff0000000000001u}, 0xf0u,
+               0x7ff8000000000001u),
+      f64_case("FirstNanIsQuieted", fma(0),
+               {0x7ff4000000000007u, 0x7ff8000000000009u, 0x7ff800000000000bu}, 0xf0u,
+               0x7ffc000000000007u),
+      f64_case("SecondNanBeforeAddend", fma(0), {kOne, 0x7ff4000000000007u, 0x7ff800000000000bu},
+               0x00u, 0x7ffc000000000007u),
+      // Halving a normal with the smallest exponent gives a zero of its sign.
+      f64_case("Div2NegativeUnderflow", fma(3), {0x8018000000000000u, kOne, 0u}, 0xf0u,
+               0x8000000000000000u),
+      f64_case("Div2PositiveUnderflow", fma(3), {0x0018000000000000u, kOne, 0u}, 0x00u, 0u),
+      f64_case("Mul2Negative", fma(1), {0x8018000000000000u, kOne, 0u}, 0xf0u, 0x8028000000000000u),
+      // A subnormal result becomes +0 under OMOD, also when MODE keeps it.
+      f64_case("Div2Subnormal", fma(3), {0x000fffffffffffffu, kOne, 0u}, 0xf0u, 0u),
+  };
 }
 
 void expect_arithmetic_case(const ArithmeticCase &test) {
@@ -2851,6 +2893,12 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
 
 INSTANTIATE_TEST_SUITE_P(Tininess, ValuRoundedResultModifierTest,
                          testing::ValuesIn(tiny_result_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(FmaF64, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(fma_f64_policy_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

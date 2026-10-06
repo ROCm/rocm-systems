@@ -3003,8 +3003,8 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
-                                                wf.ieee_mode(), inst.inst_.omod);
+  const auto output_policy =
+      output_modifier_policy<fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand64(inst.src0, exec);
   auto src1 = regs.read_operand64(inst.src1, exec);
@@ -3020,11 +3020,11 @@ template <typename Inst>
                                              inst.inst_.abs, inst.inst_.neg);
     const auto c = apply_vop3_src_mod_f64<2>(src2.template load_native<double>(base),
                                              inst.inst_.abs, inst.inst_.neg);
-    auto result = fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(),
-                                    wf.fp_denorm_mode_f16_f64(), omod != 0);
-    result = finish_f64_mode_simd(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
-                                  floating_clamp_nan_to_zero(wf));
-    dst.template store_native<double>(base, result, chunk);
+    const auto result = fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(),
+                                          wf.fp_denorm_mode_f16_f64(), output_policy.omod != 0);
+    const auto bits = output_modifier::apply<fp_format::F64>(
+        std::bit_cast<util::native<uint64_t>>(result), output_policy);
+    dst.template store_native<uint64_t>(base, bits, chunk);
   }
   return true;
 }
