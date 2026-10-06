@@ -38,6 +38,12 @@
 # after the trailer leaves no unreplayable API in the manifest.
 # It reaches the live dispatch table through rocprofiler-register, with
 # hrr_dispatch_tool.cc as the tool library. Linux only.
+#
+# hrr_disk_space_test.cc covers how capture stops before the file system
+# holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
+# fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
+# HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
+# hidden [.][hrr-direct] workloads. POSIX only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -52,6 +58,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_disk_space_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -111,6 +118,15 @@ target_link_libraries(hrr-integration-tests PRIVATE
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+
+  # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
+  # executable exports only what its link-time libraries reference, and the
+  # runtime may name either statvfs or statvfs64, so export all three.
+  set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  target_link_options(hrr-integration-tests PRIVATE
+                      "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
+  target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by

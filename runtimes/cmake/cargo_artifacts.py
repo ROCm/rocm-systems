@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Stage selected Cargo artifacts without teaching CMake Cargo's output layout."""
 
 import argparse

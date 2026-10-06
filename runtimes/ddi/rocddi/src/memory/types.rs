@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Native allocation requests and limits, independent of kernel handle formats.
 
 /// One native memory allocation request with explicit size and alignment.

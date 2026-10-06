@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: MIT
+
 //! Private Linux memory-interop contract implemented by the selected backend.
 //!
 //! Keeping this contract separate from the portable driver facets prevents DMA-BUF file
 //! descriptors from becoming requirements for future non-Linux drivers.
 
-use std::os::fd::{BorrowedFd, RawFd};
+use std::io;
+use std::os::fd::{BorrowedFd, OwnedFd, RawFd};
 
 use crate::Error;
 use crate::event::GpuMemoryFault;
@@ -13,58 +16,69 @@ use crate::memory::interop::linux::{DmaBuf, KfdIpcMemoryHandle, KfdSvmAttribute}
 
 use super::{
     AllocationDriver, DeviceDriver, DeviceState, NativeAllocation, NativeSignalEvent,
-    NativeVirtualMemory, VirtualMemoryDriver,
+    VirtualMemoryDriver,
 };
 
 /// Linux-only DMA-BUF operations supplied by the active native driver.
 pub(crate) trait LinuxMemoryInteropDriver: AllocationDriver + VirtualMemoryDriver {
-    fn supports_system_dma_buf_import(device: &DeviceState) -> bool;
+    #[allow(unsafe_code)]
+    unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()>;
+    fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error>;
+    fn descriptor_length(descriptor: RawFd) -> io::Result<u64>;
+    fn read_descriptor_exact_at(
+        descriptor: RawFd,
+        buffer: &mut [u8],
+        offset: u64,
+    ) -> io::Result<()>;
+    fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize>;
+    fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize>;
+    fn supports_system_dma_buf_import(device: &Self::DeviceState) -> bool;
 
     fn import_virtual_memory(
         &self,
         descriptor: BorrowedFd<'_>,
-    ) -> Result<Owned<NativeVirtualMemory>, Error>;
+    ) -> Result<Owned<Self::VirtualMemory>, Error>;
 
-    fn export_virtual_memory(memory: &NativeVirtualMemory) -> Result<DmaBuf, Error>;
+    fn export_virtual_memory(memory: &Self::VirtualMemory) -> Result<DmaBuf, Error>;
 
     fn import_dma_buf(
         &self,
-        device: &DeviceState,
+        device: &Self::DeviceState,
         descriptor: BorrowedFd<'_>,
         source_offset: u64,
         byte_length: u64,
         alignment: u64,
         permissions: DeviceAccess,
-    ) -> Result<Owned<NativeAllocation>, Error>;
+    ) -> Result<Owned<Self::Allocation>, Error>;
 
     fn import_system_dma_buf(
         &self,
-        devices: &[&DeviceState],
+        devices: &[&Self::DeviceState],
         descriptor: RawFd,
         source_offset: u64,
         byte_length: u64,
         alignment: u64,
         permissions: DeviceAccess,
-    ) -> Result<Owned<NativeAllocation>, Error>;
+    ) -> Result<Owned<Self::Allocation>, Error>;
 
     fn import_graphics_dma_buf(
         &self,
-        devices: &[&DeviceState],
+        devices: &[&Self::DeviceState],
         descriptor: BorrowedFd<'_>,
         size_hint: u64,
-    ) -> Result<Owned<NativeAllocation>, Error>;
+    ) -> Result<Owned<Self::Allocation>, Error>;
 
-    fn export_dma_buf(allocation: &NativeAllocation) -> Result<DmaBuf, Error>;
+    fn export_dma_buf(allocation: &Self::Allocation) -> Result<DmaBuf, Error>;
 
     fn import_kfd_ipc_memory(
         &self,
-        devices: &[&DeviceState],
-        mapping_devices: &[&DeviceState],
+        devices: &[&Self::DeviceState],
+        mapping_devices: &[&Self::DeviceState],
         handle: KfdIpcMemoryHandle,
         size: u64,
-    ) -> Result<Owned<NativeAllocation>, Error>;
+    ) -> Result<Owned<Self::Allocation>, Error>;
 
-    fn export_kfd_ipc_memory(allocation: &NativeAllocation) -> Result<KfdIpcMemoryHandle, Error>;
+    fn export_kfd_ipc_memory(allocation: &Self::Allocation) -> Result<KfdIpcMemoryHandle, Error>;
 
     fn set_kfd_svm_attributes(
         &self,
@@ -79,16 +93,17 @@ pub(crate) trait LinuxMemoryInteropDriver: AllocationDriver + VirtualMemoryDrive
         size: u64,
         attributes: &mut [KfdSvmAttribute],
     ) -> Result<(), Error>;
-
-    fn retain_kfd_signal_event_page(allocation: &mut NativeAllocation) -> Result<(), Error>;
 }
 
 /// Linux KFD event operations supplied by the active native driver.
 pub(crate) trait LinuxGpuEventDriver: DeviceDriver {
+    fn retain_kfd_signal_event_page(allocation: &mut NativeAllocation) -> Result<(), Error>;
+
     fn create_kfd_signal_event(
         &self,
         device: &DeviceState,
         event_page: Option<&NativeAllocation>,
+        page_offered: &mut bool,
     ) -> Result<Owned<NativeSignalEvent>, Error>;
 
     fn destroy_kfd_signal_event(event: &mut NativeSignalEvent) -> Result<(), Error>;
