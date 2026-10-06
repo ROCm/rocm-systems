@@ -420,6 +420,7 @@ impl Fixture {
                 ..node()
             },
             lifetime,
+            gpu_counter_frequency_hz: 0,
         };
         let kind = crate::memory::OwnedMemoryKind::try_from(kind)?;
         super::super::LinuxKfdDriver::new(Allocator::default()).allocate_owned(
@@ -684,7 +685,7 @@ fn scratch_backing_programs_one_process_base_and_reuses_released_ranges() {
     let scratch = fixture.vm.scratch.lock().unwrap();
     assert_eq!(scratch.ranges.len(), 1);
     assert!(!scratch.ranges[0].allocated);
-    assert_eq!(scratch.ranges[0].size, GFX12_SCRATCH_BYTES_PER_XCC);
+    assert_eq!(scratch.ranges[0].size, 8_u64 << 30);
     drop(scratch);
     fixture.exhausted();
 }

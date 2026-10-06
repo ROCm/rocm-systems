@@ -299,10 +299,12 @@ pub(crate) struct Gpu {
     pub(crate) name: Box<str>,
     pub(crate) product_name: Box<str>,
     pub(crate) asic_family_id: u32,
+    pub(crate) timestamp_frequency_hz: u64,
     pub(crate) hdp_flush: [usize; 2],
     _mmio_remap: Option<Allocation>,
     pub(crate) coherency_type: u32,
     pub(crate) fine_grain_pool: bool,
+    pub(crate) persisting_l2_cache_size: Arc<Mutex<usize>>,
 }
 
 trait RetireSession {
@@ -449,6 +451,8 @@ pub(crate) struct Runtime {
     pub(crate) ipc_allocations: HashMap<usize, Memory>,
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    pub(crate) async_copy_borrows: HashMap<usize, usize>,
+    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
     pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
@@ -537,8 +541,6 @@ impl Runtime {
             name: "CPU".to_owned(),
             compute_units: 0,
         });
-        let force_fine_grain_pcie =
-            std::env::var("HSA_FORCE_FINE_GRAIN_PCIE").is_ok_and(|value| value == "1");
         // The HSA lifecycle gate admits one initialization at a time. Passive
         // enumeration may fail before a primary KFD VM is acquired.
         let lifetime = if PRIMARY_CONTEXT_USED.load(Ordering::Acquire) {
@@ -555,7 +557,6 @@ impl Runtime {
             host_page_size,
             host_memory_bytes,
             host,
-            force_fine_grain_pcie,
             lifetime,
         ) {
             Ok(runtime) => Ok(runtime),
@@ -571,7 +572,6 @@ impl Runtime {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: CpuInfo,
-        force_fine_grain_pcie: bool,
         lifetime: SessionLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
@@ -640,13 +640,14 @@ impl Runtime {
                 .product_name
                 .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let asic_family_id = presentation.asic_family_id;
+            let timestamp_frequency_hz = presentation.gpu_counter_frequency_hz.unwrap_or(0);
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
                     .as_ref()
                     .and_then(|mapping| mapping.info().host_address),
             );
-            let fine_grain_pool = info.hive_id != 0 || force_fine_grain_pcie;
+            let fine_grain_pool = info.hive_id != 0;
             pending.gpus.push(Gpu {
                 endpoint,
                 info,
@@ -654,10 +655,12 @@ impl Runtime {
                 name: name.into_boxed_str(),
                 product_name: product_name.into_boxed_str(),
                 asic_family_id,
+                timestamp_frequency_hz,
                 hdp_flush,
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
                 fine_grain_pool,
+                persisting_l2_cache_size: Arc::new(Mutex::new(0)),
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
@@ -676,6 +679,8 @@ impl Runtime {
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            async_copy_borrows: HashMap::new(),
+            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
@@ -695,8 +700,8 @@ impl Runtime {
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: environment_u32("GPU_MAX_HW_QUEUES", 4) as usize,
-            counted_queue_size: environment_u32("HSA_COUNTED_QUEUE_SIZE", 16_384),
+            counted_queue_limit: 4,
+            counted_queue_size: 16_384,
             host_memory_bytes,
             host_page_size,
             host_name: host.name.into_boxed_str(),
@@ -828,6 +833,12 @@ impl Runtime {
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
+        if self.async_copy_quarantine.load(Ordering::Acquire) {
+            // A copy with unproved native retirement can still reach runtime
+            // allocations and signals. Keep their entire ownership graph live.
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
         self.counted_queues.clear();
         self.counted_queue_pools.clear();
         self.released_counted_queues.clear();
@@ -870,12 +881,6 @@ impl Runtime {
     }
 }
 
-fn environment_u32(name: &str, default: u32) -> u32 {
-    std::env::var(name).map_or(default, |value| {
-        value.trim().parse::<i32>().map_or(0, |value| value as u32)
-    })
-}
-
 fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
     usize::try_from(flag / 8)
         .ok()
@@ -905,12 +910,15 @@ pub(crate) fn translate_gpu_tick(
     counters: rocddi::gpu::profiling::ClockCounters,
     tick: u64,
 ) -> Result<u64, Status> {
-    if counters.system_frequency == 0 {
+    if counters.system_frequency == 0 || counters.gpu_frequency == 0 {
         return Err(ERROR);
     }
     let scaled = |delta: u64| {
-        u64::try_from(u128::from(delta) * u128::from(counters.system_frequency) / 100_000_000_u128)
-            .unwrap_or(u64::MAX)
+        u64::try_from(
+            u128::from(delta) * u128::from(counters.system_frequency)
+                / u128::from(counters.gpu_frequency),
+        )
+        .unwrap_or(u64::MAX)
     };
     Ok(if tick >= counters.gpu {
         counters.system.wrapping_add(scaled(tick - counters.gpu))
@@ -1437,9 +1445,20 @@ mod tests {
             host: 0,
             system: 1_000,
             system_frequency: 1_000_000_000,
+            gpu_frequency: 100_000_000,
         };
         assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
         assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
+        assert_eq!(
+            translate_gpu_tick(
+                ClockCounters {
+                    gpu_frequency: 200_000_000,
+                    ..counters
+                },
+                110,
+            ),
+            Ok(1_050)
+        );
         assert_eq!(
             translate_gpu_tick(
                 ClockCounters {

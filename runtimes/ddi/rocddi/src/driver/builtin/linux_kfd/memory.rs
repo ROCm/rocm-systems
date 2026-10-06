@@ -39,8 +39,6 @@ const IPC_APERTURE_DGPU: u32 = 1;
 const IPC_APERTURE_DGPU_ALT: u32 = 2;
 const IPC_APERTURE_GPUVM: u32 = 3;
 const IPC_FRAGMENT: u32 = 1 << 31;
-const SCRATCH_BYTES_PER_XCC: u64 = 4 << 30;
-const GFX12_SCRATCH_BYTES_PER_XCC: u64 = 8 << 30;
 
 /// One free or allocated interval in the process scratch aperture.
 #[derive(Clone, Copy)]
@@ -63,11 +61,8 @@ struct ScratchPool {
 
 impl ScratchPool {
     fn new(properties: sysfs::NativeQueueProperties, allocator: Allocator) -> Self {
-        let per_xcc = if properties.gfx_target / 10_000 >= 12 {
-            GFX12_SCRATCH_BYTES_PER_XCC
-        } else {
-            SCRATCH_BYTES_PER_XCC
-        };
+        let per_xcc =
+            crate::topology::GpuInfo::scratch_bytes_per_xcc(properties.gfx_target / 10_000);
         let capacity = per_xcc
             .checked_mul(u64::from(properties.xcc_count))
             .filter(|capacity| *capacity != 0 && usize::try_from(*capacity).is_ok())

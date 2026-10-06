@@ -216,6 +216,7 @@ pub(crate) struct DeviceState {
     vm: Shared<memory::DeviceVm>,
     native: sysfs::NativeNode,
     lifetime: SessionLifetime,
+    gpu_counter_frequency_hz: u64,
 }
 
 impl DeviceState {
@@ -634,10 +635,21 @@ impl ProviderDriver for LinuxKfdDriver {
                 .map_err(|source| native_error("KFD context selection", source))?;
             connection.bindings.device(&kfd, &native)?
         };
+        let gpu_counter_frequency_hz = vm
+            .render()
+            .ok()
+            .and_then(|render| drm::device_info_prefix(render).ok())
+            .filter(|info| {
+                endpoint
+                    .pci
+                    .is_some_and(|pci| info.device_id == pci.device_id)
+            })
+            .map_or(0, |info| u64::from(info.gpu_counter_frequency_khz) * 1000);
         Ok(DeviceState {
             vm,
             native,
             lifetime,
+            gpu_counter_frequency_hz,
         })
     }
 }
@@ -647,6 +659,7 @@ impl GpuPresentationDriver for LinuxKfdDriver {
         let mut presentation = GpuPresentation {
             product_name: None,
             asic_family_id: endpoint.gpu().map_or(0, |gpu| gpu.asic_family_id),
+            gpu_counter_frequency_hz: None,
         };
         let Some(pci) = endpoint.pci else {
             return presentation;
@@ -662,6 +675,9 @@ impl GpuPresentationDriver for LinuxKfdDriver {
         if let Some(info) = device_info.filter(|info| info.family_id != 0) {
             presentation.asic_family_id = info.family_id;
         }
+        presentation.gpu_counter_frequency_hz = device_info
+            .filter(|info| info.gpu_counter_frequency_khz != 0)
+            .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
         presentation.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
             .ok()
             .filter(|metadata| metadata.len() <= 1024 * 1024)
@@ -977,6 +993,13 @@ impl VirtualMemoryDriver for LinuxKfdDriver {
 }
 
 impl QueueDriver for LinuxKfdDriver {
+    fn supports_expert_scheduling(&self, device: &DeviceState) -> Result<bool, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        let version = device.vm.version;
+        Ok((version.major, version.minor) >= (1, 20))
+    }
+
     fn check_queue(queue: &NativeQueue) -> Result<(), Error> {
         queue.check()
     }
@@ -1085,6 +1108,26 @@ impl DeviceDriver for LinuxKfdDriver {
             .available_memory(device.native.gpu_id)
             .map_err(|source| native_error("KFD available memory query", source))
     }
+
+    fn set_persisting_l2_cache_size(
+        &self,
+        device: &DeviceState,
+        size_bytes: u32,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        drm::set_persisting_l2_cache_size(device.vm.render()?, size_bytes).map_err(|source| {
+            if source.raw_os_error() == Some(22) {
+                Error::NativeOperation {
+                    kind: ErrorKind::InvalidArgument,
+                    operation: "DRM persisting L2 cache request",
+                    source,
+                }
+            } else {
+                native_error("DRM persisting L2 cache request", source)
+            }
+        })
+    }
 }
 
 impl GpuProfilingDriver for LinuxKfdDriver {
@@ -1100,6 +1143,7 @@ impl GpuProfilingDriver for LinuxKfdDriver {
             host: counters.cpu_clock_counter,
             system: counters.system_clock_counter,
             system_frequency: counters.system_clock_frequency,
+            gpu_frequency: device.gpu_counter_frequency_hz,
         })
     }
     #[allow(unsafe_code)]
@@ -1414,7 +1458,7 @@ mod tests {
         );
         assert_eq!(marketing_name(ids, 0x7550, 0xc1), None);
         assert_eq!(marketing_name(ids, 0x7551, 0xc0), None);
-        assert_eq!(std::mem::size_of::<drm::DeviceInfoPrefix>(), 20);
+        assert_eq!(std::mem::size_of::<drm::DeviceInfoPrefix>(), 32);
     }
     use crate::session::{Session, SessionLifetime};
     #[test]

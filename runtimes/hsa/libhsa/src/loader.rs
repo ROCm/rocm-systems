@@ -159,6 +159,37 @@ pub(crate) struct Executable {
     pub(crate) symbol_handles: Vec<u64>,
 }
 
+/// Resolves a complete range in a loaded executable to its CPU mapping.
+/// An address inside an object with an excessive extent is an error, so a
+/// caller cannot accidentally fall back to dereferencing its GPU address.
+pub(crate) fn loaded_host_range(
+    runtime: &Runtime,
+    address: usize,
+    size: usize,
+) -> Result<Option<usize>, Status> {
+    for executable in runtime.executables.values() {
+        for object in &executable.loaded {
+            let Some(offset) = (address as u64).checked_sub(object.device_base) else {
+                continue;
+            };
+            if offset >= object.size {
+                continue;
+            }
+            let offset = usize::try_from(offset).map_err(|_| INVALID_ALLOCATION)?;
+            let end = offset.checked_add(size).ok_or(INVALID_ALLOCATION)?;
+            if end > object.size as usize {
+                return Err(INVALID_ALLOCATION);
+            }
+            return object
+                .host_base
+                .checked_add(offset)
+                .map(Some)
+                .ok_or(INVALID_ALLOCATION);
+        }
+    }
+    Ok(None)
+}
+
 /// HSA-visible executable symbol with its resolved runtime address.
 pub(crate) struct Symbol {
     pub(crate) executable: u64,
@@ -2307,23 +2338,14 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let address = device_address as u64;
-        for executable in runtime.executables.values() {
-            for object in &executable.loaded {
-                if address >= object.device_base && address - object.device_base < object.size {
-                    let Ok(offset) = usize::try_from(address - object.device_base) else {
-                        return INVALID_ARGUMENT;
-                    };
-                    let Some(host) = object.host_base.checked_add(offset) else {
-                        return INVALID_ARGUMENT;
-                    };
-                    // SAFETY: The caller supplied writable output storage.
-                    unsafe { host_address.write(host as *const c_void) };
-                    return SUCCESS;
-                }
+        match loaded_host_range(runtime, device_address as usize, 1) {
+            Ok(Some(host)) => {
+                // SAFETY: The caller supplied writable output storage.
+                unsafe { host_address.write(host as *const c_void) };
+                SUCCESS
             }
+            Ok(None) | Err(_) => INVALID_ARGUMENT,
         }
-        INVALID_ARGUMENT
     })
 }
 

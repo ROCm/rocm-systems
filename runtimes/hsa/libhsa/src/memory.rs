@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::mem::{MaybeUninit, align_of, size_of};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::thread;
 use std::time::Duration;
 
@@ -28,6 +28,8 @@ use crate::platform::memory::{
     KfdIpcMemoryHandle as IpcMemoryHandle, KfdSvmAccess as SvmAccess,
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
+use rocddi::device::Device;
+use rocddi::gpu::CopyRect;
 use rocddi::memory::{
     Allocation, DeviceAccess, MemoryKind, VirtualAddress, VirtualDeviceMapping, VirtualHostMapping,
     VirtualMemory,
@@ -103,16 +105,8 @@ impl PointerDescription {
     }
 
     fn host_range(&self, address: usize, size: usize) -> Option<usize> {
-        let host = self.host_base?;
-        let base = if contains(host, self.size, address) {
-            host
-        } else if contains(self.agent_base, self.size, address) {
-            self.agent_base
-        } else {
-            return None;
-        };
-        let offset = address.checked_sub(base)?;
-        (offset.checked_add(size)? <= self.size).then(|| host + offset)
+        self.offset_range(address, size)?;
+        self.host_address(address)
     }
 
     fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
@@ -1337,6 +1331,13 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 Ok(runtime) => runtime,
                 Err(status) => return status,
             };
+            let base = runtime
+                .allocations
+                .get(&(pointer as usize))
+                .map_or(pointer as usize, |memory| memory.description.agent_base);
+            if copy_borrowed(runtime, base) {
+                return OUT_OF_RESOURCES;
+            }
             if let Some(mut memory) = runtime.allocations.remove(&(pointer as usize)) {
                 match memory.free() {
                     Ok(()) => std::mem::take(&mut memory.deallocation_callbacks),
@@ -1353,6 +1354,12 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 else {
                     return INVALID_ALLOCATION;
                 };
+                if copy_borrowed(
+                    runtime,
+                    runtime.locked_allocations[index].description.agent_base,
+                ) {
+                    return OUT_OF_RESOURCES;
+                }
                 let mut memory = runtime.locked_allocations.remove(index);
                 return match memory.free() {
                     Ok(()) => SUCCESS,
@@ -1551,6 +1558,13 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
             Err(status) => return status,
         };
         let key = mapped_pointer as usize;
+        let base = runtime
+            .ipc_allocations
+            .get(&key)
+            .map_or(key, |memory| memory.description.agent_base);
+        if copy_borrowed(runtime, base) {
+            return OUT_OF_RESOURCES;
+        }
         let Some(mut memory) = runtime.ipc_allocations.remove(&key) else {
             return INVALID_ARGUMENT;
         };
@@ -2082,6 +2096,12 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
         else {
             return INVALID_ARGUMENT;
         };
+        if copy_borrowed(
+            runtime,
+            runtime.locked_allocations[index].description.agent_base,
+        ) {
+            return OUT_OF_RESOURCES;
+        }
         let mut memory = runtime.locked_allocations.remove(index);
         match memory.free() {
             Ok(()) => SUCCESS,
@@ -2277,6 +2297,13 @@ pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
             return SUCCESS;
         }
         let key = pointer as usize;
+        let base = runtime
+            .interop_allocations
+            .get(&key)
+            .map_or(key, |memory| memory.description.agent_base);
+        if copy_borrowed(runtime, base) {
+            return OUT_OF_RESOURCES;
+        }
         if let Some(mut memory) = runtime.interop_allocations.remove(&key) {
             if memory.free().is_err() {
                 runtime.interop_allocations.insert(key, memory);
@@ -2739,6 +2766,9 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
             Ok(bases) => bases,
             Err(status) => return status,
         };
+        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+            return OUT_OF_RESOURCES;
+        }
         for base in bases {
             let Some(mut mapping) = runtime.vmem_mappings.remove(&base) else {
                 return ERROR;
@@ -2823,6 +2853,9 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             Ok(bases) => bases,
             Err(status) => return status,
         };
+        if bases.iter().any(|&base| copy_borrowed(runtime, base)) {
+            return OUT_OF_RESOURCES;
+        }
         for base in bases {
             for descriptor in &requested {
                 let status = replace_vmem_access(runtime, base, *descriptor);
@@ -3113,8 +3146,8 @@ fn vmem_pointer_description(runtime: &Runtime, address: usize) -> Option<Pointer
         let global_flags = pool_global_flags(runtime, handle.pool).unwrap_or(0);
         return Some(PointerDescription {
             pointer_type: POINTER_TYPE_HSA_VMEM,
-            agent_base: address,
-            host_base: Some(address),
+            agent_base: mapping.address,
+            host_base: host_access.then_some(mapping.address),
             size: mapping.size,
             owner,
             global_flags,
@@ -3140,62 +3173,28 @@ fn vmem_pointer_description(runtime: &Runtime, address: usize) -> Option<Pointer
         .map(|(_, reservation)| reservation.description.clone())
 }
 
-fn host_address(runtime: &Runtime, address: usize) -> Result<usize, Status> {
-    if let Some((_, mapping)) = runtime
-        .vmem_mappings
-        .range(..=address)
-        .next_back()
-        .filter(|(_, mapping)| mapping.contains(address))
-    {
-        return mapping
-            .access
-            .get(&CPU_AGENT)
-            .filter(|access| access.permissions != ACCESS_PERMISSION_NONE)
-            .map(|_| address)
+fn host_copy_address(
+    runtime: &Runtime,
+    address: usize,
+    size: usize,
+    required_access: u32,
+) -> Result<usize, Status> {
+    address.checked_add(size).ok_or(INVALID_ARGUMENT)?;
+    if let Some(description) = pointer_description(runtime, address) {
+        if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
+            return Err(INVALID_ALLOCATION);
+        }
+        vmem_copy_access(
+            runtime,
+            &description,
+            HsaAgent { handle: CPU_AGENT },
+            required_access,
+        )?;
+        return description
+            .host_range(address, size)
             .ok_or(INVALID_ALLOCATION);
     }
-    if let Some(memory) = runtime
-        .allocations
-        .values()
-        .find(|memory| memory.contains(address))
-    {
-        return memory
-            .description
-            .host_address(address)
-            .ok_or(INVALID_ALLOCATION);
-    }
-    if let Some(memory) = runtime
-        .ipc_allocations
-        .values()
-        .find(|memory| memory.contains(address))
-    {
-        return memory
-            .description
-            .host_address(address)
-            .ok_or(INVALID_ALLOCATION);
-    }
-    if let Some(memory) = runtime
-        .interop_allocations
-        .values()
-        .find(|memory| memory.contains(address))
-    {
-        return memory
-            .description
-            .host_address(address)
-            .ok_or(INVALID_ALLOCATION);
-    }
-    if let Some(memory) = runtime
-        .locked_allocations
-        .iter()
-        .rev()
-        .find(|memory| memory.contains(address))
-    {
-        return memory
-            .description
-            .host_address(address)
-            .ok_or(INVALID_ALLOCATION);
-    }
-    Ok(address)
+    crate::loader::loaded_host_range(runtime, address, size).map(|host| host.unwrap_or(address))
 }
 
 fn memory_copy_has_work(
@@ -3440,6 +3439,9 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return INVALID_ALLOCATION;
         };
         let memory = &runtime.allocations[&key];
+        if copy_borrowed(runtime, memory.description.agent_base) {
+            return OUT_OF_RESOURCES;
+        }
         let owner = memory.description.owner;
         let storage = if owner.handle == CPU_AGENT {
             PoolStorage::System
@@ -3582,31 +3584,72 @@ pub unsafe extern "C" fn hsa_memory_copy(
     size: usize,
 ) -> Status {
     boundary(|| {
-        let guard = match lock() {
+        let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
         };
         match memory_copy_has_work(dst, src, size) {
             Ok(false) => return SUCCESS,
             Ok(true) => {}
             Err(status) => return status,
         }
-        let dst = match host_address(runtime, dst as usize) {
-            Ok(address) => address as *mut c_void,
+        let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
+        let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
+        if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
+            // SAFETY: HSA requires both ranges to be valid for size bytes.
+            // ptr::copy tolerates overlap. The registry lock retains owned
+            // backing throughout this host copy.
+            unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
+            fence(Ordering::SeqCst);
+            return SUCCESS;
+        }
+
+        let resolved = match resolve_sync_gpu_copy(
+            runtime,
+            dst as usize,
+            src as usize,
+            size,
+            host_destination,
+            host_source,
+        ) {
+            Ok(resolved) => resolved,
             Err(status) => return status,
         };
-        let src = match host_address(runtime, src as usize) {
-            Ok(address) => address as *const c_void,
-            Err(status) => return status,
+        let Some(_inflight) = runtime.inflight.enter() else {
+            return OUT_OF_RESOURCES;
         };
-        // SAFETY: HSA requires both ranges to be valid for size bytes. ptr::copy
-        // also preserves the documented overlap behavior of hsa_memory_copy.
-        // The runtime lock retains any runtime-owned backing during the copy.
-        unsafe { std::ptr::copy(src.cast::<u8>(), dst.cast::<u8>(), size) };
-        SUCCESS
+        let mut retained = [None; 2];
+        for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
+            if let Some(base) = base {
+                if let Err(status) = retain_copy_borrow(runtime, base) {
+                    for base in retained.into_iter().flatten() {
+                        release_copy_borrow(runtime, base);
+                    }
+                    return status;
+                }
+                *slot = Some(base);
+            }
+        }
+        let stop = runtime.stop_workers.clone();
+        let quarantine = runtime.async_copy_quarantine.clone();
+        drop(guard);
+
+        let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
+            Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
+            Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
+                (write_loaded_copy_destination(address, &bytes), false)
+            }
+            Err(failure) => (failure.status, failure.operands_may_be_live),
+        };
+        if may_be_live {
+            quarantine.store(true, Ordering::Release);
+        }
+        release_async_resources(&[], &retained, may_be_live);
+        status
     })
 }
 
@@ -3617,12 +3660,13 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
     count: usize,
 ) -> Status {
     boundary(|| {
-        let guard = match lock() {
+        let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
         };
         let size = match memory_fill_size(pointer, count) {
             Ok(Some(size)) => size,
@@ -3630,17 +3674,87 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             Err(status) => return status,
         };
         let Some(description) = pointer_description(runtime, pointer as usize) else {
+            let host = match crate::loader::loaded_host_range(runtime, pointer as usize, size) {
+                Ok(Some(host)) => host,
+                Ok(None) => return INVALID_ALLOCATION,
+                Err(status) => return status,
+            };
+            if host % align_of::<u32>() != 0 {
+                return INVALID_ALLOCATION;
+            }
+            // SAFETY: The registry lock retains the complete writable loaded
+            // mapping until the fill returns.
+            unsafe { std::slice::from_raw_parts_mut(host as *mut MaybeUninit<u32>, count) }
+                .fill(MaybeUninit::new(value));
+            fence(Ordering::SeqCst);
+            return SUCCESS;
+        };
+        if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
+            return INVALID_ALLOCATION;
+        }
+        if let Some(host) = description.host_range(pointer as usize, size) {
+            if vmem_copy_access(
+                runtime,
+                &description,
+                HsaAgent { handle: CPU_AGENT },
+                ACCESS_PERMISSION_WO,
+            )
+            .is_ok()
+            {
+                // SAFETY: The complete aligned output range belongs to a live
+                // allocation retained by the runtime lock. Its prior contents
+                // need not have been initialized as u32 values.
+                unsafe { std::slice::from_raw_parts_mut(host as *mut MaybeUninit<u32>, count) }
+                    .fill(MaybeUninit::new(value));
+                fence(Ordering::SeqCst);
+                return SUCCESS;
+            }
+        }
+        let Some((index, agent)) = selected_copy_gpu(runtime, &description) else {
             return INVALID_ALLOCATION;
         };
-        let Some(host) = description.host_range(pointer as usize, size) else {
-            return INVALID_ALLOCATION;
+        let (address, base) = match gpu_copy_address(
+            runtime,
+            Some(&description),
+            pointer as usize,
+            size,
+            agent,
+            ACCESS_PERMISSION_WO,
+        ) {
+            Ok(address) => address,
+            Err(status) => return status,
         };
-        // SAFETY: The complete aligned output range belongs to a live runtime
-        // allocation retained by the runtime lock. Its prior contents need not
-        // be initialized u32 values.
-        unsafe { std::slice::from_raw_parts_mut(host as *mut MaybeUninit<u32>, count) }
-            .fill(MaybeUninit::new(value));
-        SUCCESS
+        let Ok(native_count) = u64::try_from(count) else {
+            return INVALID_ARGUMENT;
+        };
+        let Some(_inflight) = runtime.inflight.enter() else {
+            return OUT_OF_RESOURCES;
+        };
+        if let Err(status) = retain_copy_borrow(runtime, base) {
+            return status;
+        }
+        let device = runtime.gpus[index].device.clone();
+        let stop = runtime.stop_workers.clone();
+        let quarantine = runtime.async_copy_quarantine.clone();
+        drop(guard);
+
+        let (status, may_be_live) = match device.gpu() {
+            Ok(gpu) => {
+                // SAFETY: The complete writable GPU range was checked above.
+                // Its allocation borrow and in-flight token remain live until
+                // retirement or process teardown after an uncertain result.
+                match unsafe { gpu.fill_u32(address, value, native_count, &stop) } {
+                    Ok(()) => (SUCCESS, false),
+                    Err(failure) => (map_error(failure.error), failure.operands_may_be_live),
+                }
+            }
+            Err(error) => (map_error(error), false),
+        };
+        if may_be_live {
+            quarantine.store(true, Ordering::Release);
+        }
+        release_async_resources(&[], &[Some(base)], may_be_live);
+        status
     })
 }
 
@@ -4090,18 +4204,20 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
 }
 
 /// Rolls back signal retention if worker creation fails or unwinds.
-struct PendingPrefetchSignals<'a> {
+struct PendingAsyncSignals<'a> {
     runtime: &'a mut Runtime,
     handles: Arc<Vec<HsaSignal>>,
     retained: usize,
+    borrowed_memory: Vec<usize>,
 }
 
-impl<'a> PendingPrefetchSignals<'a> {
+impl<'a> PendingAsyncSignals<'a> {
     fn new(runtime: &'a mut Runtime, handles: Arc<Vec<HsaSignal>>) -> Result<Self, Status> {
         let mut pending = Self {
             runtime,
             handles,
             retained: 0,
+            borrowed_memory: Vec::new(),
         };
         for signal in pending.handles.iter() {
             pending.runtime.retain_async_signal(*signal)?;
@@ -4110,24 +4226,74 @@ impl<'a> PendingPrefetchSignals<'a> {
         Ok(pending)
     }
 
+    fn retain_memory(&mut self, base: usize) -> Result<(), Status> {
+        self.borrowed_memory
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        retain_copy_borrow(self.runtime, base)?;
+        self.borrowed_memory.push(base);
+        Ok(())
+    }
+
     fn transfer_to_worker(&mut self) {
         self.retained = 0;
+        self.borrowed_memory.clear();
     }
 }
 
-impl Drop for PendingPrefetchSignals<'_> {
-    fn drop(&mut self) {
-        for signal in self.handles.iter().take(self.retained) {
-            self.runtime.release_async_signal(*signal);
+fn retain_copy_borrow(runtime: &mut Runtime, base: usize) -> Result<(), Status> {
+    if !runtime.async_copy_borrows.contains_key(&base) {
+        runtime
+            .async_copy_borrows
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+    }
+    let count = runtime.async_copy_borrows.entry(base).or_default();
+    *count = count.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
+    Ok(())
+}
+
+fn release_copy_borrow(runtime: &mut Runtime, base: usize) {
+    if let Some(count) = runtime.async_copy_borrows.get_mut(&base) {
+        *count -= 1;
+        if *count == 0 {
+            runtime.async_copy_borrows.remove(&base);
         }
     }
 }
 
-fn release_svm_prefetch_signals(handles: &[HsaSignal]) {
+fn copy_borrowed(runtime: &Runtime, base: usize) -> bool {
+    runtime
+        .async_copy_borrows
+        .get(&base)
+        .is_some_and(|count| *count != 0)
+}
+
+impl Drop for PendingAsyncSignals<'_> {
+    fn drop(&mut self) {
+        for signal in self.handles.iter().take(self.retained) {
+            self.runtime.release_async_signal(*signal);
+        }
+        for &base in &self.borrowed_memory {
+            release_copy_borrow(self.runtime, base);
+        }
+    }
+}
+
+fn release_async_resources(
+    handles: &[HsaSignal],
+    borrowed_memory: &[Option<usize>],
+    retain_memory: bool,
+) {
     if let Ok(mut guard) = lock() {
         if let Some(runtime) = guard.as_mut() {
             for signal in handles {
                 runtime.release_async_signal(*signal);
+            }
+            if !retain_memory {
+                for &base in borrowed_memory.iter().flatten() {
+                    release_copy_borrow(runtime, base);
+                }
             }
         }
     }
@@ -4135,7 +4301,7 @@ fn release_svm_prefetch_signals(handles: &[HsaSignal]) {
     // it retains all signal storage until after this worker exits.
 }
 
-fn finish_svm_prefetch(completion: HsaSignal, success: bool) {
+fn finish_async_signal(completion: HsaSignal, success: bool) {
     if completion.handle == 0 {
         return;
     }
@@ -4165,26 +4331,9 @@ fn svm_prefetch_worker(
     size: u64,
     location: SvmLocation,
 ) {
-    for &dependency in dependencies {
-        loop {
-            if stop.load(Ordering::Acquire) {
-                return;
-            }
-            // SAFETY: Submission retains each signal until this worker exits;
-            // shutdown retains the storage until all workers have joined.
-            let Some(ready) = (unsafe {
-                crate::signal::with_signal(dependency, |signal| {
-                    signal.value.load(Ordering::Acquire) == 0
-                })
-            }) else {
-                finish_svm_prefetch(completion, false);
-                return;
-            };
-            if ready {
-                break;
-            }
-            thread::sleep(Duration::from_micros(20));
-        }
+    if !wait_async_dependencies(dependencies, &stop) {
+        finish_async_signal(completion, false);
+        return;
     }
     let result = linux_interop::set_kfd_svm_attributes(
         &session,
@@ -4192,7 +4341,31 @@ fn svm_prefetch_worker(
         size,
         &[SvmAttribute::PrefetchLocation(location)],
     );
-    finish_svm_prefetch(completion, result.is_ok());
+    finish_async_signal(completion, result.is_ok());
+}
+
+fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> bool {
+    for &dependency in dependencies {
+        loop {
+            if stop.load(Ordering::Acquire) {
+                return false;
+            }
+            // SAFETY: Submission retains every dependency until the worker
+            // exits; final shutdown joins workers before releasing storage.
+            let Some(ready) = (unsafe {
+                crate::signal::with_signal(dependency, |signal| {
+                    signal.value.load(Ordering::Acquire) == 0
+                })
+            }) else {
+                return false;
+            };
+            if ready {
+                break;
+            }
+            thread::sleep(Duration::from_micros(20));
+        }
+    }
+    true
 }
 
 #[unsafe(no_mangle)]
@@ -4249,7 +4422,7 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         if completion.handle != 0 {
             signal_handles.push(completion);
         }
-        let mut pending = match PendingPrefetchSignals::new(runtime, Arc::new(signal_handles)) {
+        let mut pending = match PendingAsyncSignals::new(runtime, Arc::new(signal_handles)) {
             Ok(pending) => pending,
             Err(status) => return status,
         };
@@ -4272,9 +4445,9 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                     );
                 }));
                 if result.is_err() {
-                    finish_svm_prefetch(completion, false);
+                    finish_async_signal(completion, false);
                 }
-                release_svm_prefetch_signals(&worker_handles);
+                release_async_resources(&worker_handles, &[], false);
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
@@ -4344,63 +4517,1422 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     })
 }
 
-// These ABI symbols stay exported, but no copy is submitted until an
-// asynchronous engine with retained dependencies is implemented.
+enum AsyncCopyRoute {
+    Noop,
+    Host {
+        destination: HostCopyDestination,
+        source: HostCopySource,
+        size: usize,
+    },
+    GpuLinear {
+        device: Box<Device>,
+        index: usize,
+        destination: u64,
+        source: u64,
+        size: u64,
+    },
+    GpuFromHost {
+        device: Box<Device>,
+        destination: u64,
+        source: HostCopySource,
+    },
+    GpuToHost {
+        device: Box<Device>,
+        destination: HostCopyDestination,
+        source: u64,
+        size: usize,
+    },
+    GpuRect {
+        device: Box<Device>,
+        rect: CopyRect,
+    },
+    GpuBatch {
+        device: Box<Device>,
+        rects: Vec<CopyRect>,
+    },
+}
 
-#[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_memory_async_copy(
-    _dst: *mut c_void,
-    _dst_agent: HsaAgent,
-    _src: *const c_void,
-    _src_agent: HsaAgent,
-    _size: usize,
-    _count: u32,
-    _dependencies: *const HsaSignal,
-    _completion: HsaSignal,
+enum SyncGpuCopyRoute {
+    Direct {
+        device: Box<Device>,
+        destination: u64,
+        source: u64,
+        size: u64,
+    },
+    FromHost {
+        device: Box<Device>,
+        destination: u64,
+        source: HostCopySource,
+    },
+    ToHost {
+        device: Box<Device>,
+        destination: HostCopyDestination,
+        source: u64,
+        size: usize,
+    },
+}
+
+enum HostCopySource {
+    Address(usize, usize),
+    LoadedAddress(usize, usize),
+    LoadedBytes(Vec<u8>),
+}
+
+#[derive(Clone, Copy)]
+enum HostSourceTiming {
+    Immediate,
+    AfterDependencies,
+}
+
+enum HostCopyDestination {
+    Address(usize),
+    LoadedAddress(usize),
+}
+
+enum SyncGpuCopyOutcome {
+    Done,
+    LoadedDestination { address: usize, bytes: Vec<u8> },
+}
+
+struct CopyRouteFailure {
+    status: Status,
+    operands_may_be_live: bool,
+}
+
+impl CopyRouteFailure {
+    fn retired(status: Status) -> Self {
+        Self {
+            status,
+            operands_may_be_live: false,
+        }
+    }
+}
+
+impl From<rocddi::gpu::CopyFailure> for CopyRouteFailure {
+    fn from(failure: rocddi::gpu::CopyFailure) -> Self {
+        Self {
+            status: map_error(failure.error),
+            operands_may_be_live: failure.operands_may_be_live,
+        }
+    }
+}
+
+struct ResolvedSyncGpuCopy {
+    route: SyncGpuCopyRoute,
+    borrowed_memory: [Option<usize>; 2],
+}
+
+struct ResolvedAsyncCopy {
+    route: AsyncCopyRoute,
+    borrowed_memory: [Option<usize>; 2],
+}
+
+fn copy_agent(
+    runtime: &Runtime,
+    requested: HsaAgent,
+    description: Option<&PointerDescription>,
+) -> Result<HsaAgent, Status> {
+    let agent = if requested.handle == 0 {
+        description.map_or(HsaAgent { handle: CPU_AGENT }, |description| {
+            description.owner
+        })
+    } else {
+        requested
+    };
+    runtime
+        .is_agent(agent)
+        .then_some(agent)
+        .ok_or(INVALID_AGENT)
+}
+
+fn selected_copy_gpu(
+    runtime: &Runtime,
+    description: &PointerDescription,
+) -> Option<(usize, HsaAgent)> {
+    std::iter::once(description.owner)
+        .chain(description.accessible.iter().copied())
+        .filter(|agent| description.accessible.contains(agent))
+        .find_map(|agent| runtime.gpu_index(agent).map(|index| (index, agent)))
+}
+
+fn copy_pointer_description(
+    runtime: &Runtime,
+    pointer: usize,
+    size: usize,
+) -> Result<Option<PointerDescription>, Status> {
+    if pointer.checked_add(size).is_none() {
+        return Err(INVALID_ARGUMENT);
+    }
+    let description = pointer_description(runtime, pointer);
+    if let Some(description) = &description {
+        if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
+            return Err(INVALID_ALLOCATION);
+        }
+        if description.offset_range(pointer, size).is_none() {
+            return Err(INVALID_ALLOCATION);
+        }
+    }
+    Ok(description)
+}
+
+fn gpu_copy_address(
+    runtime: &Runtime,
+    description: Option<&PointerDescription>,
+    pointer: usize,
+    size: usize,
+    gpu: HsaAgent,
+    required_access: u32,
+) -> Result<(u64, usize), Status> {
+    let description = description.ok_or(INVALID_ALLOCATION)?;
+    if !description.accessible.contains(&gpu) {
+        return Err(INVALID_AGENT);
+    }
+    vmem_copy_access(runtime, description, gpu, required_access)?;
+    let offset = description
+        .offset_range(pointer, size)
+        .ok_or(INVALID_ALLOCATION)?;
+    let address = description
+        .agent_base
+        .checked_add(offset)
+        .ok_or(INVALID_ALLOCATION)?;
+    Ok((
+        u64::try_from(address).map_err(|_| INVALID_ALLOCATION)?,
+        description.agent_base,
+    ))
+}
+
+fn prepare_host_copy_source(
+    runtime: &Runtime,
+    description: Option<&PointerDescription>,
+    pointer: usize,
+    host: usize,
+    size: usize,
+    timing: HostSourceTiming,
+) -> Result<HostCopySource, Status> {
+    if description.is_none() && crate::loader::loaded_host_range(runtime, pointer, size)?.is_some()
+    {
+        if matches!(timing, HostSourceTiming::AfterDependencies) {
+            return Ok(HostCopySource::LoadedAddress(pointer, size));
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        bytes.resize(size, 0);
+        // SAFETY: The registry lock retains this loaded mapping while the
+        // complete range is copied into owned host storage.
+        unsafe { std::ptr::copy_nonoverlapping(host as *const u8, bytes.as_mut_ptr(), size) };
+        Ok(HostCopySource::LoadedBytes(bytes))
+    } else {
+        Ok(HostCopySource::Address(host, size))
+    }
+}
+
+fn prepare_host_copy_destination(
+    runtime: &Runtime,
+    description: Option<&PointerDescription>,
+    pointer: usize,
+    host: usize,
+    size: usize,
+) -> Result<HostCopyDestination, Status> {
+    if description.is_none() && crate::loader::loaded_host_range(runtime, pointer, size)?.is_some()
+    {
+        Ok(HostCopyDestination::LoadedAddress(pointer))
+    } else {
+        Ok(HostCopyDestination::Address(host))
+    }
+}
+
+fn vmem_copy_access(
+    runtime: &Runtime,
+    description: &PointerDescription,
+    agent: HsaAgent,
+    required_access: u32,
+) -> Result<(), Status> {
+    if description.pointer_type != POINTER_TYPE_HSA_VMEM {
+        return Ok(());
+    }
+    let mapping = runtime
+        .vmem_mappings
+        .get(&description.agent_base)
+        .ok_or(INVALID_ALLOCATION)?;
+    if mapping
+        .access
+        .get(&agent.handle)
+        .is_none_or(|access| access.permissions & required_access != required_access)
+    {
+        return Err(INVALID_ALLOCATION);
+    }
+    Ok(())
+}
+
+fn resolve_async_copy(
+    runtime: &Runtime,
+    destination: usize,
+    dst_agent: HsaAgent,
+    source: usize,
+    src_agent: HsaAgent,
+    size: usize,
+) -> Result<ResolvedAsyncCopy, Status> {
+    if size == 0 {
+        if (dst_agent.handle != 0 && !runtime.is_agent(dst_agent))
+            || (src_agent.handle != 0 && !runtime.is_agent(src_agent))
+        {
+            return Err(INVALID_AGENT);
+        }
+        return Ok(ResolvedAsyncCopy {
+            route: AsyncCopyRoute::Noop,
+            borrowed_memory: [None, None],
+        });
+    }
+    let dst_description = copy_pointer_description(runtime, destination, size)?;
+    let src_description = copy_pointer_description(runtime, source, size)?;
+    let dst_agent = copy_agent(runtime, dst_agent, dst_description.as_ref())?;
+    let src_agent = copy_agent(runtime, src_agent, src_description.as_ref())?;
+    let dst_gpu = runtime.gpu_index(dst_agent);
+    let src_gpu = runtime.gpu_index(src_agent);
+    if let Some(index) = dst_gpu.or(src_gpu) {
+        if !runtime.gpus[index]
+            .device
+            .gpu()
+            .is_ok_and(|gpu| gpu.supports_linear_copy())
+        {
+            return Err(NOT_SUPPORTED);
+        }
+        let gpu_agent = HsaAgent {
+            handle: GPU_AGENT_BASE + index as u64,
+        };
+        let gpu_destination = gpu_copy_address(
+            runtime,
+            dst_description.as_ref(),
+            destination,
+            size,
+            gpu_agent,
+            ACCESS_PERMISSION_WO,
+        );
+        let gpu_source = gpu_copy_address(
+            runtime,
+            src_description.as_ref(),
+            source,
+            size,
+            gpu_agent,
+            ACCESS_PERMISSION_RO,
+        );
+        let device = Box::new(runtime.gpus[index].device.clone());
+        return match (gpu_destination, gpu_source) {
+            (Ok((destination, dst_base)), Ok((source, src_base))) => Ok(ResolvedAsyncCopy {
+                route: AsyncCopyRoute::GpuLinear {
+                    device,
+                    index,
+                    destination,
+                    source,
+                    size: u64::try_from(size).map_err(|_| INVALID_ARGUMENT)?,
+                },
+                borrowed_memory: [Some(dst_base), Some(src_base)],
+            }),
+            (Ok((destination, dst_base)), Err(_)) if src_gpu.is_none() => {
+                let host = host_copy_address(runtime, source, size, ACCESS_PERMISSION_RO)?;
+                let source = prepare_host_copy_source(
+                    runtime,
+                    src_description.as_ref(),
+                    source,
+                    host,
+                    size,
+                    HostSourceTiming::AfterDependencies,
+                )?;
+                Ok(ResolvedAsyncCopy {
+                    route: AsyncCopyRoute::GpuFromHost {
+                        device,
+                        destination,
+                        source,
+                    },
+                    borrowed_memory: [
+                        Some(dst_base),
+                        src_description.map(|description| description.agent_base),
+                    ],
+                })
+            }
+            (Err(_), Ok((source, src_base))) if dst_gpu.is_none() => {
+                let host = host_copy_address(runtime, destination, size, ACCESS_PERMISSION_WO)?;
+                let destination = prepare_host_copy_destination(
+                    runtime,
+                    dst_description.as_ref(),
+                    destination,
+                    host,
+                    size,
+                )?;
+                Ok(ResolvedAsyncCopy {
+                    route: AsyncCopyRoute::GpuToHost {
+                        device,
+                        destination,
+                        source,
+                        size,
+                    },
+                    borrowed_memory: [
+                        dst_description.map(|description| description.agent_base),
+                        Some(src_base),
+                    ],
+                })
+            }
+            (Err(status), _) | (_, Err(status)) => Err(status),
+        };
+    }
+    let destination_host = host_copy_address(runtime, destination, size, ACCESS_PERMISSION_WO)?;
+    let source_host = host_copy_address(runtime, source, size, ACCESS_PERMISSION_RO)?;
+    let destination = prepare_host_copy_destination(
+        runtime,
+        dst_description.as_ref(),
+        destination,
+        destination_host,
+        size,
+    )?;
+    let source = prepare_host_copy_source(
+        runtime,
+        src_description.as_ref(),
+        source,
+        source_host,
+        size,
+        HostSourceTiming::AfterDependencies,
+    )?;
+    Ok(ResolvedAsyncCopy {
+        route: AsyncCopyRoute::Host {
+            destination,
+            source,
+            size,
+        },
+        borrowed_memory: [
+            dst_description.map(|description| description.agent_base),
+            src_description.map(|description| description.agent_base),
+        ],
+    })
+}
+
+fn resolve_sync_gpu_copy(
+    runtime: &Runtime,
+    destination: usize,
+    source: usize,
+    size: usize,
+    host_destination: Result<usize, Status>,
+    host_source: Result<usize, Status>,
+) -> Result<ResolvedSyncGpuCopy, Status> {
+    match (host_destination, host_source) {
+        (Err(_), Ok(host_source)) => {
+            let description =
+                copy_pointer_description(runtime, destination, size)?.ok_or(INVALID_ALLOCATION)?;
+            let (index, agent) = selected_copy_gpu(runtime, &description).ok_or(INVALID_AGENT)?;
+            let (destination, destination_base) = gpu_copy_address(
+                runtime,
+                Some(&description),
+                destination,
+                size,
+                agent,
+                ACCESS_PERMISSION_WO,
+            )?;
+            let source_description = copy_pointer_description(runtime, source, size)?;
+            let source_base = source_description
+                .as_ref()
+                .map(|description| description.agent_base);
+            let source = prepare_host_copy_source(
+                runtime,
+                source_description.as_ref(),
+                source,
+                host_source,
+                size,
+                HostSourceTiming::Immediate,
+            )?;
+            Ok(ResolvedSyncGpuCopy {
+                route: SyncGpuCopyRoute::FromHost {
+                    device: Box::new(runtime.gpus[index].device.clone()),
+                    destination,
+                    source,
+                },
+                borrowed_memory: [Some(destination_base), source_base],
+            })
+        }
+        (Ok(host_destination), Err(_)) => {
+            let description =
+                copy_pointer_description(runtime, source, size)?.ok_or(INVALID_ALLOCATION)?;
+            let (index, agent) = selected_copy_gpu(runtime, &description).ok_or(INVALID_AGENT)?;
+            let (source, source_base) = gpu_copy_address(
+                runtime,
+                Some(&description),
+                source,
+                size,
+                agent,
+                ACCESS_PERMISSION_RO,
+            )?;
+            let destination_description = copy_pointer_description(runtime, destination, size)?;
+            let destination_base = destination_description
+                .as_ref()
+                .map(|description| description.agent_base);
+            let destination = prepare_host_copy_destination(
+                runtime,
+                destination_description.as_ref(),
+                destination,
+                host_destination,
+                size,
+            )?;
+            Ok(ResolvedSyncGpuCopy {
+                route: SyncGpuCopyRoute::ToHost {
+                    device: Box::new(runtime.gpus[index].device.clone()),
+                    destination,
+                    source,
+                    size,
+                },
+                borrowed_memory: [destination_base, Some(source_base)],
+            })
+        }
+        (Err(_), Err(_)) => {
+            let resolved = resolve_async_copy(
+                runtime,
+                destination,
+                HsaAgent { handle: 0 },
+                source,
+                HsaAgent { handle: 0 },
+                size,
+            )?;
+            let AsyncCopyRoute::GpuLinear {
+                device,
+                destination,
+                source,
+                size,
+                ..
+            } = resolved.route
+            else {
+                return Err(INVALID_ALLOCATION);
+            };
+            Ok(ResolvedSyncGpuCopy {
+                route: SyncGpuCopyRoute::Direct {
+                    device,
+                    destination,
+                    source,
+                    size,
+                },
+                borrowed_memory: resolved.borrowed_memory,
+            })
+        }
+        (Ok(_), Ok(_)) => Err(ERROR),
+    }
+}
+
+fn copy_gpu(device: &Device) -> Result<rocddi::gpu::GpuDevice<'_>, CopyRouteFailure> {
+    device
+        .gpu()
+        .map_err(|error| CopyRouteFailure::retired(map_error(error)))
+}
+
+fn loaded_source_snapshot(address: usize, size: usize) -> Result<Vec<u8>, Status> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|_| OUT_OF_RESOURCES)?;
+    bytes.resize(size, 0);
+    let guard = lock()?;
+    let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
+    let host =
+        crate::loader::loaded_host_range(runtime, address, size)?.ok_or(INVALID_ALLOCATION)?;
+    // SAFETY: The registry lock retains the complete loaded mapping while the
+    // source is snapshotted after the dependency signals have been satisfied.
+    unsafe { std::ptr::copy_nonoverlapping(host as *const u8, bytes.as_mut_ptr(), size) };
+    Ok(bytes)
+}
+
+fn copy_from_host_route(
+    device: &Device,
+    destination: u64,
+    source: &HostCopySource,
+    stop: &AtomicBool,
+) -> Result<(), CopyRouteFailure> {
+    let gpu = copy_gpu(device)?;
+    let snapshot = if let HostCopySource::LoadedAddress(address, size) = source {
+        loaded_source_snapshot(*address, *size).map_err(CopyRouteFailure::retired)?
+    } else {
+        Vec::new()
+    };
+    let host = match source {
+        HostCopySource::Address(address, size) => {
+            // SAFETY: The HSA caller keeps this valid host range live through
+            // its synchronous call or until asynchronous completion.
+            unsafe { std::slice::from_raw_parts(*address as *const u8, *size) }
+        }
+        HostCopySource::LoadedAddress(_, _) => snapshot.as_slice(),
+        HostCopySource::LoadedBytes(bytes) => bytes,
+    };
+    // SAFETY: HSA checked the GPU destination and retains its backing. rocddi
+    // copies host bytes into owned staging before native submission.
+    unsafe { gpu.copy_from_host(destination, host, stop) }.map_err(Into::into)
+}
+
+fn copy_to_host_route(
+    device: &Device,
+    destination: &HostCopyDestination,
+    source: u64,
+    size: usize,
+    stop: &AtomicBool,
+) -> Result<SyncGpuCopyOutcome, CopyRouteFailure> {
+    let gpu = copy_gpu(device)?;
+    match destination {
+        HostCopyDestination::Address(address) => {
+            // SAFETY: The HSA caller keeps this valid host range live through
+            // its synchronous call or until asynchronous completion.
+            let host = unsafe { std::slice::from_raw_parts_mut(*address as *mut u8, size) };
+            // SAFETY: HSA checked the GPU source and retains its backing.
+            unsafe { gpu.copy_to_host(host, source, stop) }.map_err(CopyRouteFailure::from)?;
+            fence(Ordering::SeqCst);
+            Ok(SyncGpuCopyOutcome::Done)
+        }
+        HostCopyDestination::LoadedAddress(address) => {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| CopyRouteFailure::retired(OUT_OF_RESOURCES))?;
+            bytes.resize(size, 0);
+            // SAFETY: HSA checked the GPU source and rocddi writes the owned
+            // host buffer after native retirement.
+            unsafe { gpu.copy_to_host(&mut bytes, source, stop) }
+                .map_err(CopyRouteFailure::from)?;
+            Ok(SyncGpuCopyOutcome::LoadedDestination {
+                address: *address,
+                bytes,
+            })
+        }
+    }
+}
+
+fn execute_sync_gpu_copy(
+    route: SyncGpuCopyRoute,
+    stop: &AtomicBool,
+) -> Result<SyncGpuCopyOutcome, CopyRouteFailure> {
+    match route {
+        SyncGpuCopyRoute::Direct {
+            device,
+            destination,
+            source,
+            size,
+        } => {
+            let gpu = copy_gpu(&device)?;
+            // SAFETY: HSA checked both mapped GPU ranges before retaining
+            // their backing through this synchronous call.
+            unsafe { gpu.copy_linear(destination, source, size, stop) }
+                .map_err(CopyRouteFailure::from)?;
+            Ok(SyncGpuCopyOutcome::Done)
+        }
+        SyncGpuCopyRoute::FromHost {
+            device,
+            destination,
+            source,
+        } => {
+            copy_from_host_route(&device, destination, &source, stop)?;
+            Ok(SyncGpuCopyOutcome::Done)
+        }
+        SyncGpuCopyRoute::ToHost {
+            device,
+            destination,
+            source,
+            size,
+        } => copy_to_host_route(&device, &destination, source, size, stop),
+    }
+}
+
+fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
+    let guard = match lock() {
+        Ok(guard) => guard,
+        Err(status) => return status,
+    };
+    let Some(runtime) = guard.as_ref() else {
+        return NOT_INITIALIZED;
+    };
+    let host = match crate::loader::loaded_host_range(runtime, address, bytes.len()) {
+        Ok(Some(host)) => host,
+        Ok(None) | Err(_) => return INVALID_ALLOCATION,
+    };
+    // SAFETY: The registry lock retains the complete loaded mapping until
+    // the copied bytes and their system-scope ordering are published.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), host as *mut u8, bytes.len()) };
+    fence(Ordering::SeqCst);
+    SUCCESS
+}
+
+fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) {
+    match route {
+        AsyncCopyRoute::Noop => (true, false),
+        AsyncCopyRoute::Host {
+            destination,
+            source,
+            size,
+        } => {
+            if stop.load(Ordering::Acquire) {
+                return (false, false);
+            }
+            let needs_loaded_mapping = matches!(&source, HostCopySource::LoadedAddress(..))
+                || matches!(&destination, HostCopyDestination::LoadedAddress(..));
+            let guard = if needs_loaded_mapping {
+                match lock() {
+                    Ok(guard) => Some(guard),
+                    Err(_) => return (false, false),
+                }
+            } else {
+                None
+            };
+            let runtime = guard.as_ref().and_then(|guard| guard.as_ref());
+            let loaded_host = |address| {
+                runtime.and_then(|runtime| {
+                    crate::loader::loaded_host_range(runtime, address, size)
+                        .ok()
+                        .flatten()
+                })
+            };
+            let source_host = match &source {
+                HostCopySource::Address(address, _) => *address,
+                HostCopySource::LoadedAddress(address, _) => {
+                    let Some(host) = loaded_host(*address) else {
+                        return (false, false);
+                    };
+                    host
+                }
+                HostCopySource::LoadedBytes(bytes) => bytes.as_ptr() as usize,
+            };
+            let destination_host = match destination {
+                HostCopyDestination::Address(address) => address,
+                HostCopyDestination::LoadedAddress(address) => {
+                    let Some(host) = loaded_host(address) else {
+                        return (false, false);
+                    };
+                    host
+                }
+            };
+            // SAFETY: The caller keeps ordinary host ranges live through
+            // completion. Runtime-owned memory is borrowed, and the registry
+            // lock keeps loaded mappings live for this copy. ptr::copy also
+            // permits overlapping ranges.
+            unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
+            fence(Ordering::SeqCst);
+            (true, false)
+        }
+        AsyncCopyRoute::GpuLinear {
+            device,
+            index: _,
+            destination,
+            source,
+            size,
+        } => {
+            let Ok(gpu) = device.gpu() else {
+                return (false, false);
+            };
+            // SAFETY: The HSA submission validated mapped ranges and retains
+            // their public owners until native retirement is proved.
+            match unsafe { gpu.copy_linear(destination, source, size, stop) } {
+                Ok(()) => (true, false),
+                Err(failure) => (false, failure.operands_may_be_live),
+            }
+        }
+        AsyncCopyRoute::GpuFromHost {
+            device,
+            destination,
+            source,
+        } => match copy_from_host_route(&device, destination, &source, stop) {
+            Ok(()) => (true, false),
+            Err(failure) => (false, failure.operands_may_be_live),
+        },
+        AsyncCopyRoute::GpuToHost {
+            device,
+            destination,
+            source,
+            size,
+        } => match copy_to_host_route(&device, &destination, source, size, stop) {
+            Ok(SyncGpuCopyOutcome::Done) => (true, false),
+            Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => (
+                write_loaded_copy_destination(address, &bytes) == SUCCESS,
+                false,
+            ),
+            Err(failure) => (false, failure.operands_may_be_live),
+        },
+        AsyncCopyRoute::GpuRect { device, rect } => {
+            let Ok(gpu) = device.gpu() else {
+                return (false, false);
+            };
+            // SAFETY: Validation covers all rows and keeps both backing owners
+            // live until the native copy reports retirement.
+            match unsafe { gpu.copy_rect(rect, stop) } {
+                Ok(()) => (true, false),
+                Err(failure) => (false, failure.operands_may_be_live),
+            }
+        }
+        AsyncCopyRoute::GpuBatch { device, rects } => {
+            let Ok(gpu) = device.gpu() else {
+                return (false, false);
+            };
+            // SAFETY: Batch validation established every mapped range and the
+            // worker retains every backing owner through native retirement.
+            match unsafe { gpu.copy_rects(&rects, stop) } {
+                Ok(()) => (true, false),
+                Err(failure) => (false, failure.operands_may_be_live),
+            }
+        }
+    }
+}
+
+struct AsyncCopyTask {
+    route: AsyncCopyRoute,
+    borrowed_memory: Vec<Option<usize>>,
+    completion: HsaSignal,
+}
+
+fn enqueue_copy_job(
+    runtime: &mut Runtime,
+    tasks: Vec<AsyncCopyTask>,
+    dependency_slice: &[HsaSignal],
 ) -> Status {
-    NOT_SUPPORTED
+    let mut handles = Vec::new();
+    let Some(handle_count) = dependency_slice.len().checked_add(tasks.len()) else {
+        return OUT_OF_RESOURCES;
+    };
+    if handles.try_reserve_exact(handle_count).is_err() || runtime.workers.try_reserve(1).is_err() {
+        return OUT_OF_RESOURCES;
+    }
+    handles.extend_from_slice(dependency_slice);
+    handles.extend(tasks.iter().map(|task| task.completion));
+    let mut pending = match PendingAsyncSignals::new(runtime, Arc::new(handles)) {
+        Ok(pending) => pending,
+        Err(status) => return status,
+    };
+    for task in &tasks {
+        for &base in &task.borrowed_memory {
+            if let Some(base) = base {
+                if let Err(status) = pending.retain_memory(base) {
+                    return status;
+                }
+            }
+        }
+    }
+    let worker_handles = pending.handles.clone();
+    let quarantine = pending.runtime.async_copy_quarantine.clone();
+    let stop = pending.runtime.stop_workers.clone();
+    let dependency_len = dependency_slice.len();
+    let worker = match thread::Builder::new()
+        .name("rocddi-hsa-copy".into())
+        .spawn(move || {
+            let mut execute = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                wait_async_dependencies(&worker_handles[..dependency_len], &stop)
+            }))
+            .unwrap_or(false);
+            for task in tasks {
+                let (success, may_be_live) = if execute {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        execute_copy_route(task.route, &stop)
+                    }))
+                    .unwrap_or((false, true))
+                } else {
+                    (false, false)
+                };
+                if may_be_live {
+                    quarantine.store(true, Ordering::Release);
+                }
+                // Release only this operation's backing before publishing its
+                // completion. Later operations keep their own borrows.
+                release_async_resources(&[], &task.borrowed_memory, may_be_live);
+                finish_async_signal(task.completion, success);
+                execute = success;
+            }
+            release_async_resources(&worker_handles, &[], false);
+        }) {
+        Ok(worker) => worker,
+        Err(_) => return OUT_OF_RESOURCES,
+    };
+    pending.transfer_to_worker();
+    pending.runtime.workers.push(worker);
+    SUCCESS
+}
+
+fn enqueue_async_copy(
+    runtime: &mut Runtime,
+    resolved: ResolvedAsyncCopy,
+    dependency_slice: &[HsaSignal],
+    completion: HsaSignal,
+) -> Status {
+    enqueue_copy_job(
+        runtime,
+        vec![AsyncCopyTask {
+            route: resolved.route,
+            borrowed_memory: resolved.borrowed_memory.to_vec(),
+            completion,
+        }],
+        dependency_slice,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn submit_async_copy(
+    dst: *mut c_void,
+    dst_agent: HsaAgent,
+    src: *const c_void,
+    src_agent: HsaAgent,
+    size: usize,
+    dependency_count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
+    engine: Option<u32>,
+) -> Status {
+    boundary(|| {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if dst.is_null()
+            || src.is_null()
+            || completion.handle == 0
+            || size > isize::MAX as usize
+            || (dependency_count == 0 && !dependencies.is_null())
+            || (dependency_count != 0 && dependencies.is_null())
+        {
+            return INVALID_ARGUMENT;
+        }
+        if !runtime.owns_signal(completion) {
+            return INVALID_SIGNAL;
+        }
+        if engine.is_some_and(|engine| engine != 1) {
+            return INVALID_ARGUMENT;
+        }
+        let dependency_slice = if dependency_count == 0 {
+            &[]
+        } else {
+            // SAFETY: The HSA caller supplies dependency_count readable handles.
+            unsafe { std::slice::from_raw_parts(dependencies, dependency_count as usize) }
+        };
+        if dependency_slice
+            .iter()
+            .any(|signal| !runtime.owns_signal(*signal))
+        {
+            return INVALID_SIGNAL;
+        }
+        if size == 0 {
+            return if runtime.is_agent(dst_agent) && runtime.is_agent(src_agent) {
+                SUCCESS
+            } else {
+                INVALID_AGENT
+            };
+        }
+        let resolved = match resolve_async_copy(
+            runtime,
+            dst as usize,
+            dst_agent,
+            src as usize,
+            src_agent,
+            size,
+        ) {
+            Ok(resolved) => resolved,
+            Err(status) => return status,
+        };
+        if engine.is_some()
+            && !matches!(
+                &resolved.route,
+                AsyncCopyRoute::GpuLinear { .. }
+                    | AsyncCopyRoute::GpuFromHost { .. }
+                    | AsyncCopyRoute::GpuToHost { .. }
+                    | AsyncCopyRoute::Noop
+            )
+        {
+            return NOT_SUPPORTED;
+        }
+        enqueue_async_copy(runtime, resolved, dependency_slice, completion)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_memory_async_copy_on_engine(
-    _dst: *mut c_void,
-    _dst_agent: HsaAgent,
-    _src: *const c_void,
-    _src_agent: HsaAgent,
-    _size: usize,
-    _count: u32,
-    _dependencies: *const HsaSignal,
-    _completion: HsaSignal,
-    _engine: u32,
+pub unsafe extern "C" fn hsa_amd_memory_async_copy(
+    dst: *mut c_void,
+    dst_agent: HsaAgent,
+    src: *const c_void,
+    src_agent: HsaAgent,
+    size: usize,
+    count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
+) -> Status {
+    // SAFETY: The caller supplies readable dependency handles and live copy
+    // ranges for the HSA asynchronous operation.
+    unsafe {
+        submit_async_copy(
+            dst,
+            dst_agent,
+            src,
+            src_agent,
+            size,
+            count,
+            dependencies,
+            completion,
+            None,
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
+    dst: *mut c_void,
+    dst_agent: HsaAgent,
+    src: *const c_void,
+    src_agent: HsaAgent,
+    size: usize,
+    count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
+    engine: u32,
     _force: bool,
 ) -> Status {
-    NOT_SUPPORTED
+    // SAFETY: The caller supplies readable dependency handles and live copy
+    // ranges for the HSA asynchronous operation.
+    unsafe {
+        submit_async_copy(
+            dst,
+            dst_agent,
+            src,
+            src_agent,
+            size,
+            count,
+            dependencies,
+            completion,
+            Some(engine),
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BatchCopyEntry {
+    destination: usize,
+    destination_agent: HsaAgent,
+    source: usize,
+    source_agent: HsaAgent,
+    size: usize,
+}
+
+/// The C caller owns the array for the duration of the entry point. Alignment
+/// and Rust slice-size limits are checked before forming a shared reference.
+#[allow(unsafe_code)]
+unsafe fn batch_slice<'a, T>(pointer: *const T, count: usize) -> Result<&'a [T], Status> {
+    if pointer.is_null()
+        || (pointer as usize) % align_of::<T>() != 0
+        || count > isize::MAX as usize / size_of::<T>()
+    {
+        return Err(INVALID_ARGUMENT);
+    }
+    // SAFETY: The HSA caller supplies count initialized, readable elements.
+    Ok(unsafe { std::slice::from_raw_parts(pointer, count) })
+}
+
+#[allow(unsafe_code)]
+unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntry>, Status> {
+    let count = usize::from(op.entry_count.max(1));
+    let mut entries = Vec::new();
+    entries
+        .try_reserve_exact(count)
+        .map_err(|_| OUT_OF_RESOURCES)?;
+    if op.entry_count == 0 {
+        if op.operation != 0 {
+            return Err(INVALID_ARGUMENT);
+        }
+        // SAFETY: The scalar members of the public C unions are active here.
+        let destination_agent = unsafe { op.destination_agent.agent };
+        let size = unsafe { op.size.bytes };
+        if op.secondary_size != 0 {
+            return Err(INVALID_ARGUMENT);
+        }
+        entries.push(BatchCopyEntry {
+            destination: op.destination as usize,
+            destination_agent,
+            source: op.source as usize,
+            source_agent: op.source_agent,
+            size,
+        });
+    } else {
+        if op.secondary_size != 0 {
+            return Err(INVALID_ARGUMENT);
+        }
+        // SAFETY: A multi-entry descriptor selects pointer, agent, and size
+        // lists. The caller keeps those arrays readable through this call.
+        let destinations = unsafe { batch_slice(op.destination.cast::<*mut c_void>(), count)? };
+        let agents = unsafe { batch_slice(op.destination_agent.list, count)? };
+        match op.operation {
+            0 => {
+                // SAFETY: LINEAR with a positive entry count selects the list
+                // members of both source and size unions.
+                let sources = unsafe { batch_slice(op.source.cast::<*mut c_void>(), count)? };
+                let sizes = unsafe { batch_slice(op.size.list, count)? };
+                for index in 0..count {
+                    entries.push(BatchCopyEntry {
+                        destination: destinations[index] as usize,
+                        destination_agent: agents[index],
+                        source: sources[index] as usize,
+                        source_agent: op.source_agent,
+                        size: sizes[index],
+                    });
+                }
+            }
+            1 => {
+                // SAFETY: BROADCAST keeps the scalar source and size members.
+                let size = unsafe { op.size.bytes };
+                for index in 0..count {
+                    entries.push(BatchCopyEntry {
+                        destination: destinations[index] as usize,
+                        destination_agent: agents[index],
+                        source: op.source as usize,
+                        source_agent: op.source_agent,
+                        size,
+                    });
+                }
+            }
+            _ => return Err(INVALID_ARGUMENT),
+        }
+    }
+    if entries.iter().any(|entry| {
+        entry.source == 0
+            || entry.destination == 0
+            || entry.size > isize::MAX as usize
+            || (op.entry_count != 0 && entry.size == 0)
+    }) {
+        return Err(INVALID_ARGUMENT);
+    }
+    Ok(entries)
+}
+
+fn resolve_batch_copy_entries(
+    runtime: &Runtime,
+    entries: &[BatchCopyEntry],
+) -> Result<(AsyncCopyRoute, Vec<Option<usize>>), Status> {
+    let mut rects = Vec::new();
+    rects
+        .try_reserve_exact(entries.len())
+        .map_err(|_| OUT_OF_RESOURCES)?;
+    let mut borrowed_memory = Vec::new();
+    borrowed_memory
+        .try_reserve_exact(entries.len().checked_mul(2).ok_or(OUT_OF_RESOURCES)?)
+        .map_err(|_| OUT_OF_RESOURCES)?;
+    let mut selected: Option<(usize, Box<Device>)> = None;
+    for entry in entries {
+        let resolved = resolve_async_copy(
+            runtime,
+            entry.destination,
+            entry.destination_agent,
+            entry.source,
+            entry.source_agent,
+            entry.size,
+        )?;
+        match resolved.route {
+            AsyncCopyRoute::GpuLinear {
+                device,
+                index,
+                destination,
+                source,
+                size,
+            } => {
+                if selected
+                    .as_ref()
+                    .is_some_and(|(selected, _)| *selected != index)
+                {
+                    return Err(NOT_SUPPORTED);
+                }
+                selected.get_or_insert((index, device));
+                rects.push(CopyRect::linear(destination, source, size));
+                borrowed_memory.extend(resolved.borrowed_memory);
+            }
+            AsyncCopyRoute::Noop if entries.len() == 1 => {
+                return Ok((AsyncCopyRoute::Noop, borrowed_memory));
+            }
+            _ => return Err(INVALID_AGENT),
+        }
+    }
+    let (_, device) = selected.ok_or(INVALID_ARGUMENT)?;
+    Ok((AsyncCopyRoute::GpuBatch { device, rects }, borrowed_memory))
+}
+
+struct PreparedBatchCopy {
+    tasks: Vec<AsyncCopyTask>,
+}
+
+#[allow(unsafe_code)]
+unsafe fn prepare_batch_copy(
+    runtime: &Runtime,
+    operations: &[HsaAmdMemoryCopyOp],
+) -> Result<PreparedBatchCopy, Status> {
+    let mut tasks = Vec::new();
+    tasks
+        .try_reserve_exact(operations.len())
+        .map_err(|_| OUT_OF_RESOURCES)?;
+    for &op in operations {
+        if op.version != 1
+            || op.operation > 5
+            || op.reserved != [0]
+            || op.wait.reserved != 0
+            || op.wait.function > 6
+            || op.wait.scope > 2
+            || op.signal.reserved != 0
+            || op.signal.operation > 3
+            || op.signal.scope > 2
+        {
+            return Err(INVALID_ARGUMENT);
+        }
+        if !runtime.owns_signal(op.completion_signal) {
+            return Err(INVALID_SIGNAL);
+        }
+        if op.operation > 1
+            || op.wait.function != 0
+            || op.signal.operation != 0
+            || op.traffic_class != 0
+        {
+            return Err(NOT_SUPPORTED);
+        }
+        if op.wait.scope != 0
+            || !op.wait.address.is_null()
+            || op.wait.value != 0
+            || op.wait.mask != 0
+            || op.signal.scope != 0
+            || !op.signal.address.is_null()
+            || op.signal.data != 0
+        {
+            return Err(INVALID_ARGUMENT);
+        }
+        if op.operation == 1 && runtime.gpu_index(op.source_agent).is_none() {
+            return Err(INVALID_AGENT);
+        }
+        // SAFETY: Each operation selects the documented scalar or array union
+        // members. All array values are copied before the caller returns.
+        let entries = unsafe { batch_copy_entries(op)? };
+        let (route, bases) = resolve_batch_copy_entries(runtime, &entries)?;
+        tasks.push(AsyncCopyTask {
+            route,
+            borrowed_memory: bases,
+            completion: op.completion_signal,
+        });
+    }
+    Ok(PreparedBatchCopy { tasks })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_memory_async_batch_copy(
-    _copy_operations: *const HsaAmdMemoryCopyOp,
-    _operation_count: u32,
-    _dependency_count: u32,
-    _dependencies: *const HsaSignal,
+pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
+    copy_operations: *const HsaAmdMemoryCopyOp,
+    operation_count: u32,
+    dependency_count: u32,
+    dependencies: *const HsaSignal,
 ) -> Status {
-    NOT_SUPPORTED
+    boundary(|| {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if operation_count == 0
+            || copy_operations.is_null()
+            || (dependency_count == 0 && !dependencies.is_null())
+            || (dependency_count != 0 && dependencies.is_null())
+        {
+            return INVALID_ARGUMENT;
+        }
+        // SAFETY: The HSA caller supplies readable descriptors and dependency
+        // handles. Every pointer list is copied into worker-owned storage
+        // before this call returns.
+        let operations = match unsafe { batch_slice(copy_operations, operation_count as usize) } {
+            Ok(operations) => operations,
+            Err(status) => return status,
+        };
+        let dependency_slice = if dependency_count == 0 {
+            &[]
+        } else {
+            // SAFETY: The HSA caller supplies readable dependency handles.
+            match unsafe { batch_slice(dependencies, dependency_count as usize) } {
+                Ok(dependencies) => dependencies,
+                Err(status) => return status,
+            }
+        };
+        if dependency_slice
+            .iter()
+            .any(|signal| !runtime.owns_signal(*signal))
+        {
+            return INVALID_SIGNAL;
+        }
+        // SAFETY: batch_slice established the descriptor storage for this call.
+        let prepared = match unsafe { prepare_batch_copy(runtime, operations) } {
+            Ok(prepared) => prepared,
+            Err(status) => return status,
+        };
+        enqueue_copy_job(runtime, prepared.tasks, dependency_slice)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_memory_async_copy_rect(
-    _dst: *const HsaPitchedPtr,
-    _dst_offset: *const HsaDim3,
-    _src: *const HsaPitchedPtr,
-    _src_offset: *const HsaDim3,
-    _range: *const HsaDim3,
-    _copy_agent: HsaAgent,
-    _direction: u32,
-    _dependency_count: u32,
-    _dependencies: *const HsaSignal,
-    _completion: HsaSignal,
+pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
+    dst: *const HsaPitchedPtr,
+    dst_offset: *const HsaDim3,
+    src: *const HsaPitchedPtr,
+    src_offset: *const HsaDim3,
+    range: *const HsaDim3,
+    copy_agent: HsaAgent,
+    direction: u32,
+    dependency_count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
 ) -> Status {
-    NOT_SUPPORTED
+    boundary(|| {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if dst.is_null()
+            || dst_offset.is_null()
+            || src.is_null()
+            || src_offset.is_null()
+            || range.is_null()
+            || completion.handle == 0
+            || !(1..=3).contains(&direction)
+            || (dependency_count == 0 && !dependencies.is_null())
+            || (dependency_count != 0 && dependencies.is_null())
+        {
+            return INVALID_ARGUMENT;
+        }
+        if !runtime.owns_signal(completion) {
+            return INVALID_SIGNAL;
+        }
+        // SAFETY: The HSA caller supplies readable descriptor storage.
+        let (dst, dst_offset, src, src_offset, range) =
+            unsafe { (*dst, *dst_offset, *src, *src_offset, *range) };
+        let Some(index) = runtime.gpu_index(copy_agent) else {
+            return INVALID_AGENT;
+        };
+        let dependency_slice = if dependency_count == 0 {
+            &[]
+        } else {
+            // SAFETY: The HSA caller supplies dependency_count readable handles.
+            unsafe { std::slice::from_raw_parts(dependencies, dependency_count as usize) }
+        };
+        if dependency_slice
+            .iter()
+            .any(|signal| !runtime.owns_signal(*signal))
+        {
+            return INVALID_SIGNAL;
+        }
+        if range.x == 0 || range.y == 0 || range.z == 0 {
+            return SUCCESS;
+        }
+        if !runtime.gpus[index]
+            .device
+            .gpu()
+            .is_ok_and(|gpu| gpu.supports_linear_copy())
+        {
+            return NOT_SUPPORTED;
+        }
+        let (destination, dst_extent) = match pitched_copy_range(dst, dst_offset, range) {
+            Some(range) => range,
+            None => return INVALID_ARGUMENT,
+        };
+        let (source, src_extent) = match pitched_copy_range(src, src_offset, range) {
+            Some(range) => range,
+            None => return INVALID_ARGUMENT,
+        };
+        let dst_description = match copy_pointer_description(runtime, destination, dst_extent) {
+            Ok(description) => description,
+            Err(status) => return status,
+        };
+        let src_description = match copy_pointer_description(runtime, source, src_extent) {
+            Ok(description) => description,
+            Err(status) => return status,
+        };
+        let (destination, dst_base) = match gpu_copy_address(
+            runtime,
+            dst_description.as_ref(),
+            destination,
+            dst_extent,
+            copy_agent,
+            ACCESS_PERMISSION_WO,
+        ) {
+            Ok(address) => address,
+            Err(status) => return status,
+        };
+        let (source, src_base) = match gpu_copy_address(
+            runtime,
+            src_description.as_ref(),
+            source,
+            src_extent,
+            copy_agent,
+            ACCESS_PERMISSION_RO,
+        ) {
+            Ok(address) => address,
+            Err(status) => return status,
+        };
+        enqueue_async_copy(
+            runtime,
+            ResolvedAsyncCopy {
+                route: AsyncCopyRoute::GpuRect {
+                    device: Box::new(runtime.gpus[index].device.clone()),
+                    rect: CopyRect {
+                        destination,
+                        source,
+                        width: u64::from(range.x),
+                        height: range.y,
+                        depth: range.z,
+                        destination_pitch: dst.pitch as u64,
+                        source_pitch: src.pitch as u64,
+                        destination_slice: dst.slice as u64,
+                        source_slice: src.slice as u64,
+                    },
+                },
+                borrowed_memory: [Some(dst_base), Some(src_base)],
+            },
+            dependency_slice,
+            completion,
+        )
+    })
+}
+
+fn pitched_copy_range(
+    pitched: HsaPitchedPtr,
+    offset: HsaDim3,
+    range: HsaDim3,
+) -> Option<(usize, usize)> {
+    let base = pitched.base as usize;
+    let pitch = pitched.pitch;
+    let slice = pitched.slice;
+    let width = range.x as usize;
+    let row_end = (offset.x as usize).checked_add(width)?;
+    if base == 0 || (base | pitch | slice | offset.x as usize | width) & 3 != 0 || row_end > pitch {
+        return None;
+    }
+    let first = (offset.z as usize)
+        .checked_mul(slice)?
+        .checked_add((offset.y as usize).checked_mul(pitch)?)?
+        .checked_add(offset.x as usize)?;
+    let extent = ((range.z - 1) as usize)
+        .checked_mul(slice)?
+        .checked_add(((range.y - 1) as usize).checked_mul(pitch)?)?
+        .checked_add(width)?;
+    let address = base.checked_add(first)?;
+    address.checked_add(extent)?;
+    Some((address, extent))
+}
+
+fn copy_engine_mask(runtime: &Runtime, dst: HsaAgent, src: HsaAgent) -> u32 {
+    let dst_gpu = runtime.gpu_index(dst);
+    let src_gpu = runtime.gpu_index(src);
+    if dst_gpu.is_some() && src_gpu.is_some() && dst_gpu != src_gpu {
+        return 0;
+    }
+    let Some(index) = dst_gpu.or(src_gpu) else {
+        return 0;
+    };
+    u32::from(
+        runtime.gpus[index]
+            .device
+            .gpu()
+            .is_ok_and(|gpu| gpu.supports_linear_copy()),
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -4424,9 +5956,14 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
         if !runtime.is_agent(dst) || !runtime.is_agent(src) {
             return INVALID_AGENT;
         }
+        let available = copy_engine_mask(runtime, dst, src);
         // SAFETY: The caller supplied writable output storage.
-        unsafe { mask.write(0) };
-        SUCCESS
+        unsafe { mask.write(available) };
+        if available == 0 {
+            OUT_OF_RESOURCES
+        } else {
+            SUCCESS
+        }
     })
 }
 
@@ -4451,9 +5988,8 @@ pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
         if !runtime.is_agent(dst) || !runtime.is_agent(src) {
             return INVALID_AGENT;
         }
-        // No engine has a stronger preference in the current native backend.
         // SAFETY: The caller supplied writable output storage.
-        unsafe { mask.write(0) };
+        unsafe { mask.write(copy_engine_mask(runtime, dst, src)) };
         SUCCESS
     })
 }
@@ -4933,58 +6469,66 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_async_copy_entry_points_return_without_touching_memory() {
+    fn async_copy_entry_points_preserve_no_init_validation() {
         let agent = HsaAgent { handle: 0 };
         let completion = HsaSignal { handle: 1 };
         let dependency = HsaSignal { handle: 2 };
         let mut destination = 0x5a_u8;
         let source = 0xa5_u8;
         assert_eq!(
-            hsa_amd_memory_async_copy(
-                (&raw mut destination).cast(),
-                agent,
-                (&raw const source).cast(),
-                agent,
-                1,
-                1,
-                &raw const dependency,
-                completion,
-            ),
-            NOT_SUPPORTED
+            unsafe {
+                hsa_amd_memory_async_copy(
+                    (&raw mut destination).cast(),
+                    agent,
+                    (&raw const source).cast(),
+                    agent,
+                    1,
+                    1,
+                    &raw const dependency,
+                    completion,
+                )
+            },
+            NOT_INITIALIZED
         );
         assert_eq!(
-            hsa_amd_memory_async_copy_on_engine(
-                (&raw mut destination).cast(),
-                agent,
-                (&raw const source).cast(),
-                agent,
-                1,
-                1,
-                &raw const dependency,
-                completion,
-                1,
-                true,
-            ),
-            NOT_SUPPORTED
+            unsafe {
+                hsa_amd_memory_async_copy_on_engine(
+                    (&raw mut destination).cast(),
+                    agent,
+                    (&raw const source).cast(),
+                    agent,
+                    1,
+                    1,
+                    &raw const dependency,
+                    completion,
+                    1,
+                    true,
+                )
+            },
+            NOT_INITIALIZED
         );
         assert_eq!(
-            hsa_amd_memory_async_batch_copy(std::ptr::null(), 1, 1, &raw const dependency),
-            NOT_SUPPORTED
+            unsafe {
+                hsa_amd_memory_async_batch_copy(std::ptr::null(), 1, 1, &raw const dependency)
+            },
+            NOT_INITIALIZED
         );
         assert_eq!(
-            hsa_amd_memory_async_copy_rect(
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                agent,
-                1,
-                1,
-                &raw const dependency,
-                completion,
-            ),
-            NOT_SUPPORTED
+            unsafe {
+                hsa_amd_memory_async_copy_rect(
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    agent,
+                    1,
+                    1,
+                    &raw const dependency,
+                    completion,
+                )
+            },
+            NOT_INITIALIZED
         );
         assert_eq!(destination, 0x5a);
     }
