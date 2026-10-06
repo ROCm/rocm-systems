@@ -18,6 +18,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iomanip>
 #include <map>
 #include <memory>
 #include <ostream>
@@ -181,7 +182,11 @@ bool operator==(const IbMsg& a, const IbMsg& b) {
 }
 
 std::ostream& operator<<(std::ostream& os, const IbMsg& m) {
-  return os << m.kind << " peer=" << m.peer << " tag=" << std::hex << m.tag << std::dec << " bytes=" << m.bytes.size();
+  os << m.kind << " peer=" << m.peer << " tag=" << std::hex << m.tag << " bytes=";
+  for (unsigned char byte : m.bytes) {
+    os << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+  }
+  return os << std::setfill(' ') << std::dec;
 }
 
 class DiagIbWriteBwMicrotest : public ::testing::Test {
@@ -394,7 +399,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   }
 
   bool RunSchedule(bool useCrossNic, bool allPairsRanPoison) {
-    std::unique_ptr<bool[]> votes(new bool[comm_->nRanks]());
+    std::unique_ptr<bool[]> votes = std::make_unique<bool[]>(comm_->nRanks);
     result_ = {7, 7};
     allPairsRan_ = allPairsRanPoison;
     return runSchedule(comm_.get(), info_.data(), votes.get(), useCrossNic, result_, allPairsRan_);
@@ -1322,7 +1327,7 @@ TEST_F(DiagIbWriteBwMicrotest, Run_SetupFailureOnAnyRankEndsBeforeSchedule) {
   info_[3].setupFailed = true;
   EXPECT_EQ(CaptureStdout([&] { Run(); }), NetInfo("setup failed on rank 1"));
   probeExit_ = 127;
-  gathers_ = 0;
+  gathers_ = 0;  // drop the first Run()'s gather; the count below covers only the next two
   EXPECT_EQ(CaptureStdout([&] { Run(); }),
             NetInfo("required external tool missing") + NetInfo("setup failed on rank 0"));
   EXPECT_TRUE(selfInfo_.setupFailed);
