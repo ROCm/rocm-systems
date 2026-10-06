@@ -13,7 +13,7 @@
 // src/ras/client.cc is the first, and the socket-facing halves of
 // ras/client_support.cc, misc/socket.cc and bootstrap.cc are the obvious next
 // ones. Such a unit needs no HIP runtime and no nccl fakes at all.
-// diagnostics/ib_write_bw.cc uses only gethostname/access; prefer them to libc_interposers.cc's process-wide gethostname.
+// diagnostics/ib_write_bw.cc uses only gethostname/access; prefer these over libc_interposers.cc's process-wide one.
 //
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot

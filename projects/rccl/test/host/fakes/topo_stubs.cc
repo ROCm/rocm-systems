@@ -16,8 +16,8 @@
 #include <vector>
 #include <sched.h>
 
-#include "graph.h"  // PATH_DIS
 #include "fakes/signature-drift.h"
+#include "graph.h"  // PATH_DIS
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
