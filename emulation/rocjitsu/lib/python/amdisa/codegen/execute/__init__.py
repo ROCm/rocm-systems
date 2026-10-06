@@ -218,7 +218,7 @@ def _register_handlers() -> None:
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
-        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
+        c.dst_ops, c.src_ops, c.is_vop3
     )
     DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
         c.dst_ops,

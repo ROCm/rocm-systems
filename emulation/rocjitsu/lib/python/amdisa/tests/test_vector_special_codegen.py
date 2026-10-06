@@ -5,9 +5,6 @@
 
 from types import SimpleNamespace
 
-import hashlib
-import re
-
 import pytest
 
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
@@ -18,9 +15,6 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
-    _TRIG_PREOP_CHUNK_BITS,
-    _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
-    _TRIG_PREOP_VALID_BITS,
     gen_vector_bitop3,
     gen_vector_cvt_pk,
     gen_vector_div_fixup,
@@ -146,44 +140,31 @@ def test_unsupported_vector_special_operations_fail_during_generation(generator,
         generator(*args)
 
 
-def test_mullit_and_trig_preop_preserve_special_fp_rules():
+def test_mullit_preserves_special_fp_rules():
     mullit = gen_vector_mullit(
         ['vdst'], ['src0', 'src1', 'src2'], is_vop3=True, has_abs=True
     )
-    trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
 
     assert 's1 == -std::numeric_limits<float>::max()' in mullit
     assert 's1 == -std::numeric_limits<float>::infinity()' in mullit
     assert 's2 <= 0.0f || std::isnan(s2)' in mullit
     assert '(s0 == 0.0f || s1 == 0.0f) ? 0.0f' in mullit
     assert 'amdgpu::clamp_floating_result(result, wf)' in mullit
-    assert '0xA2F983u' in trig
-    assert 'kTwoOverPiChunks' in trig
-    assert 'kChunkBits = 24u' in trig
-    assert 'kValidBits = 1201u' in trig
-    assert 'selector * 53u' in trig
-    assert 'if (bit >= kValidBits) return 0' in trig
-    assert 'exponent > 1077u' in trig
-    assert 'exponent >= 1968u' in trig
-    assert 'scale_u53_f64_rtz(segment, scale)' in trig
-    assert 'amdgpu::fp_mode::effective_omod' in trig
-    assert 'amdgpu::fp_mode::finish_f64' in trig
-    assert re.search(r'finish_f64\([^;]*effective_omod', trig, flags=re.DOTALL)
-    assert not re.search(r'finish_f64\([^;]*inst_\.omod', trig, flags=re.DOTALL)
 
 
-def test_trig_preop_two_over_pi_table_integrity():
-    table_bytes = b''.join(
-        chunk.to_bytes(3, byteorder='big') for chunk in _TRIG_PREOP_TWO_OVER_PI_CHUNKS
-    )
+def test_trig_preop_flushes_by_mode_before_output_modifiers():
+    trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True)
+    lookup = trig.index('amdgpu::trig_preop::lookup(')
+    flush = trig.index('amdgpu::output_denormal::flush_output<amdgpu::fp_format::F64>')
+    modifiers = trig.index('amdgpu::output_modifier::apply<amdgpu::fp_format::F64>')
 
-    assert _TRIG_PREOP_CHUNK_BITS == 24
-    assert _TRIG_PREOP_VALID_BITS == 1201
-    assert len(_TRIG_PREOP_TWO_OVER_PI_CHUNKS) == 51
+    assert lookup < flush < modifiers
+    assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in trig
     assert (
-        hashlib.sha256(table_bytes).hexdigest()
-        == '6945fb5ae75f6a3e8dec95553821e5886324e9e96181eb7944d828f508eee5b9'
+        'output_modifier_policy<amdgpu::fp_format::F64>(wf, inst_.omod, inst_.clamp)'
+        in trig
     )
+    assert 'source_modifier' not in trig
 
 
 def test_permlane_imm_selectors_are_four_bits_per_lane():

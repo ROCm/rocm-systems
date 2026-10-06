@@ -1117,13 +1117,6 @@ inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, b
   return std::bit_cast<uint64_t>(finalize_omod_f64(result, omod));
 }
 
-/// @brief Scale an exact unsigned 53-bit significand using round-toward-zero.
-/// @details The host floating-point environment is restored before returning.
-inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
-  detail::ScopedFenv environment(3);
-  return std::bit_cast<uint64_t>(std::ldexp(static_cast<double>(significand), exponent));
-}
-
 } // namespace rocjitsu::amdgpu::fp_mode
 
 namespace rocjitsu::amdgpu {

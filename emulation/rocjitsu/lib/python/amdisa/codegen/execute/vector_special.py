@@ -590,112 +590,36 @@ def gen_vector_qsad(
     return '\n'.join(L)
 
 
-_TRIG_PREOP_TWO_OVER_PI_CHUNKS = (
-    0xA2F983,
-    0x6E4E44,
-    0x1529FC,
-    0x2757D1,
-    0xF534DD,
-    0xC0DB62,
-    0x95993C,
-    0x439041,
-    0xFE5163,
-    0xABDEBB,
-    0xC561B7,
-    0x246E3A,
-    0x424DD2,
-    0xE00649,
-    0x2EEA09,
-    0xD1921C,
-    0xFE1DEB,
-    0x1CB129,
-    0xA73EE8,
-    0x8235F5,
-    0x2EBB44,
-    0x84E99C,
-    0x7026B4,
-    0x5F7E41,
-    0x3991D6,
-    0x398353,
-    0x39F49C,
-    0x845F8B,
-    0xBDF928,
-    0x3B1FF8,
-    0x97FFDE,
-    0x05980F,
-    0xEF2F11,
-    0x8B5A0A,
-    0x6D1F6D,
-    0x367ECF,
-    0x27CB09,
-    0xB74F46,
-    0x3F669E,
-    0x5FEA2D,
-    0x7527BA,
-    0xC7EBE5,
-    0xF17B3D,
-    0x0739F7,
-    0x8A5292,
-    0xEA6BFB,
-    0x5FB11F,
-    0x8D5D08,
-    0x560330,
-    0x46FC7B,
-    0x6BABF0,
-)
-_TRIG_PREOP_CHUNK_BITS = 24
-_TRIG_PREOP_VALID_BITS = 1201
+def gen_vector_trig_preop(dst: list[str], src: list[str], is_vop3: bool) -> str:
+    """Generate V_TRIG_PREOP_F64 through shared/trig_preop.h.
 
-
-def gen_vector_trig_preop(
-    dst: list[str], src: list[str], is_vop3: bool, has_abs: bool
-) -> str:
-    """Generate V_TRIG_PREOP_F64's exact 53-bit 2/pi table segment lookup."""
-    chunks = ', '.join(f'0x{chunk:06X}u' for chunk in _TRIG_PREOP_TWO_OVER_PI_CHUNKS)
-    L = [
-        '  // MSB-first 24-bit chunks of the binary expansion of 2/pi used by',
-        '  // the ISA range-reduction lookup (the fdlibm/Payne-Hanek layout).',
-        f'  static constexpr uint32_t kTwoOverPiChunks[] = {{{chunks}}};',
-        f'  static constexpr uint32_t kChunkBits = {_TRIG_PREOP_CHUNK_BITS}u;',
-        f'  static constexpr uint32_t kValidBits = {_TRIG_PREOP_VALID_BITS}u;',
-        '  auto table_bit = [](uint32_t bit) -> uint64_t {',
-        '    if (bit >= kValidBits) return 0;',
-        '    uint32_t chunk = bit / kChunkBits;',
-        '    if (chunk >= std::size(kTwoOverPiChunks)) return 0;',
-        '    return (kTwoOverPiChunks[chunk] >>',
-        '            (kChunkBits - 1u - bit % kChunkBits)) & 1u;',
-        '  };',
-        '  uint64_t exec = wf.exec();',
-        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-        '    if (!(exec & (1ULL << lane))) continue;',
-        f'    uint64_t raw0 = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);',
-        '    double s0 = std::bit_cast<double>(raw0);',
-    ]
+    The lookup ignores the sign of S0, so ABS and NEG cannot change it. Its
+    result passes through the F64 output-denormal policy, then OMOD and CLAMP.
+    """
+    L = []
     if is_vop3:
-        L.extend(vop3_src_mod('s0', 0, has_abs))
+        L.append(
+            '  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F64>('
+            'wf, inst_.omod, inst_.clamp);'
+        )
     L.extend(
         [
-            f'    uint32_t selector = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 31u;',
-            '    uint32_t exponent = static_cast<uint32_t>((std::bit_cast<uint64_t>(s0) >> 52) & 0x7ffu);',
-            '    uint32_t shift = selector * 53u;',
-            '    if (exponent > 1077u) shift += exponent - 1077u;',
-            '    uint64_t segment = 0;',
-            '    for (uint32_t bit = 0; bit < 53; ++bit)',
-            '      segment = (segment << 1) | table_bit(shift + bit);',
-            '    int scale = -53 - static_cast<int>(shift);',
-            '    if (exponent >= 1968u) scale += 128;',
-            '    uint64_t result = amdgpu::fp_mode::scale_u53_f64_rtz(segment, scale);',
+            '  const auto denormal_policy = amdgpu::output_denormal::Policy::make('
+            'wf.fp_denorm_mode_f16_f64());',
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            '    uint64_t result = amdgpu::trig_preop::lookup(',
+            f'        amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane),',
+            f'        amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));',
+            '    result = amdgpu::output_denormal::flush_output<amdgpu::fp_format::F64>('
+            'result, denormal_policy);',
         ]
     )
     if is_vop3:
-        L.extend(
-            [
-                '    uint32_t effective_omod = amdgpu::fp_mode::effective_omod(',
-                '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);',
-                '    result = amdgpu::fp_mode::finish_f64(',
-                '        result, wf.fp_round_mode_f16_f64(), effective_omod, inst_.clamp,',
-                '        amdgpu::floating_clamp_nan_to_zero(wf));',
-            ]
+        L.append(
+            '    result = amdgpu::output_modifier::apply<amdgpu::fp_format::F64>('
+            'result, output_policy);'
         )
     L.extend(
         [

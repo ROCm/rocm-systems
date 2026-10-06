@@ -6350,6 +6350,8 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 2, 1), std::bit_cast<uint32_t>(0.0f));
 
   wf->set_exec(0x3FFu);
+  // Enable F64 output denormals so lane 8 keeps its subnormal segment.
+  wf->set_mode_raw(3u << 6);
   struct TrigCase {
     uint32_t exponent;
     uint32_t selector;

@@ -2515,6 +2515,39 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
   return cases;
 }
 
+// V_TRIG_PREOP_F64 lanes captured on gfx1201. MODE 0x30 flushes F64 output
+// denormals and keeps F32 ones; 0xc0 does the reverse. The table lanes select
+// a segment whose last bits come from 2/pi bits 1184-1200, which gfx1201 reads
+// as zero.
+std::vector<ArithmeticCase> trig_preop_cases() {
+  constexpr uint16_t V0 = 256, V2 = 258;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const std::string &name, rdna4::Vop3BuilderFields fields, uint64_t source,
+                       uint32_t select, uint64_t result, uint32_t mode) {
+    fields.vdst = 6;
+    fields.src0 = V0;
+    fields.src1 = V2;
+    const auto words = rdna4::build_vop3(rdna4::kVTrigPreopF64Vop3, fields);
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, uint32_t(source)}, {1, uint32_t(source >> 32)}, {2, select}},
+                     {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  add("NormalMode30", {}, 0x3fe0000000000000u, 0xdeadbeefu, 0x0e26b414da3eda6cu, 0x30u);
+  add("SubnormalModeC0", {}, 0x002b99dc2c3f6575u, 0xffff8c94u, 0x294au, 0xc0u);
+  add("SubnormalMode30", {}, 0x002b99dc2c3f6575u, 0xffff8c94u, 0u, 0x30u);
+  add("TableEndModeC0", {}, 0xfb0b729045cd52f7u, 0xfffffd05u, 0x180cc1180000u, 0xc0u);
+  add("TableEndMode30", {}, 0xfb0b729045cd52f7u, 0xfffffd05u, 0u, 0x30u);
+  add("TableEndNeg", {.neg = 1}, 0x7f85b3d75b4c12c7u, 0x0d9a7764u, 0x1180000u, 0xf0u);
+  add("TableEndClamp", {.clamp = 1}, 0x7b96d014f889b7f6u, 0x1c1d06e5u, 0xcc1180000u, 0xf0u);
+  // OMOD turns the subnormal lookup into +0 even with output denormals enabled.
+  add("SubnormalMul2", {.omod = 1}, 0x68b6bd57cfd4edafu, 0x0002c808u, 0u, 0xf0u);
+  return cases;
+}
+
 // CEIL and FLOOR flush a subnormal source to a signed zero when MODE disables
 // input denormals, so ceil(+tiny) = +0 and floor(-tiny) = -0. Results are
 // gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
@@ -2715,6 +2748,12 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                          testing::ValuesIn(rounded_result_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(TrigPreopF64, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(trig_preop_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
