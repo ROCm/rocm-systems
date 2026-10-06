@@ -699,3 +699,63 @@ def test_torch_operator_intersects_kernel_id(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "operator filter selected 1 kernel" in out
+
+
+@pytest.mark.torch_trace
+def test_torch_operator_with_dispatch_filter(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    capsys.readouterr()
+    dispatch_csv = Path(torch_trace_profiled_workload) / "pmc_dispatch_info.csv"
+    dispatch_df = pd.read_csv(dispatch_csv)
+    row_one = dispatch_df[dispatch_df["Dispatch_ID"].astype(int) == 1]
+    assert not row_one.empty
+    dispatch_one_kernel = str(row_one.iloc[0]["Kernel_Name"])
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*",
+        "--dispatch",
+        "1",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    kernel_top = pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")
+    assert set(kernel_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
+    assert "operator filter selected" in out
+    miss = dispatch_df[
+        ~dispatch_df["Kernel_Name"]
+        .astype(str)
+        .str.contains("addmm", case=False, na=False)
+    ]
+    assert not miss.empty
+    miss_id = str(int(miss.iloc[0]["Dispatch_ID"]))
+    miss_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*addmm*",
+        "--dispatch",
+        miss_id,
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert miss_code == 0
+    captured = capsys.readouterr()
+    miss_out = captured.out + captured.err
+    assert (
+        "No PyTorch kernels mapped to kernel-top IDs" in miss_out
+        or "No PyTorch operators matched" in miss_out
+    )
