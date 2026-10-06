@@ -160,30 +160,42 @@ Keep cleanup gated on Phase 1 + Phase 2 (collectables) acceptance so rollback vi
 
 ## 5. Evaluation / Verification Plan
 
-1. **CTest / unit tests** — Existing CTest suite still passes, plus new unit tests for each component:
-   - Phase 1: packing (`test_counter_grouping_single_pass`, buckets, `soc_base` packing path) and same-pass bind (`test_pass_provenance`, DB bind).
-   - Phase 2: collectables / `WEIGHTED_AVG` / `COLLECT_RATIO` (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`).
+### 5.1 CTest / unit tests
 
-2. **Manual offline grouping checks** — Inspector + `eval_single_pass_packable.py`:
-   - `packable_multi == 0`, pass count ≈ **14**, SPU residual fill **+0** on gfx942.
-   - After Phase 2: `slot_limit_metrics == 0`.
+Existing CTest suite still passes, plus new unit tests for each component:
 
-3. **End-to-end / multi-arch regression (3 workloads)** — Run health runners + report on both Phase 1 and Phase 2 stacks across gfx908 / gfx90a / gfx942 / gfx950 / gfx115x / gfx1250 as available. **CPX mode only on MI300 (gfx942).**
+- Phase 1: packing (`test_counter_grouping_single_pass`, buckets, `soc_base` packing path) and same-pass bind (`test_pass_provenance`, DB bind).
+- Phase 2: collectables / `WEIGHTED_AVG` / `COLLECT_RATIO` (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`).
 
-   Workloads:
+### 5.2 Manual offline grouping checks
 
-   - `vcopy`
-   - `nbody` (`mini-nbody`)
-   - `mega_kernel`
+Inspector + `eval_single_pass_packable.py`:
 
-   Each run should cover:
+- `packable_multi == 0`, pass count ≈ **14**, SPU residual fill **+0** on gfx942.
+- After Phase 2: `slot_limit_metrics == 0`.
 
-   - **(a) High-level metric validation** — panel / SoL-style sanity (avg/max ≤ 100% where expected; no impossible ratios).
-   - **(b) Delta comparison before/after** — SPP (and Phase 2 where applicable) vs legacy packing / legacy pass-merge baselines (`compare_spp_legacy_medians` / health-report deltas).
+### 5.3 End-to-end / multi-arch regression (3 workloads)
 
-4. **SPU collectables (Phase 2 only)** — gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
+Run health runners + report on both Phase 1 and Phase 2 stacks across gfx908 / gfx90a / gfx942 / gfx950 / gfx115x / gfx1250 as available. **CPX mode only on MI300 (gfx942).**
 
-5. **Blocking-ticket validation** — Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
+Workloads:
+
+- `vcopy`
+- `nbody` (`mini-nbody`)
+- `mega_kernel`
+
+Each run should cover:
+
+- **(a) High-level metric validation** — panel / SoL-style sanity (avg/max ≤ 100% where expected; no impossible ratios).
+- **(b) Delta comparison before/after** — SPP (and Phase 2 where applicable) vs legacy packing / legacy pass-merge baselines (`compare_spp_legacy_medians` / health-report deltas).
+
+### 5.4 SPU collectables (Phase 2 only)
+
+gfx942 SLOT→composite conversions, `slot_limit_metrics == 0`, and before/after comparison (`compare_slot16_phase2.py` / health deltas) for the 16 SPU parents.
+
+### 5.5 Blocking-ticket validation
+
+Re-check the metric classes called out by these tickets after SPP (Phase 1) and again after SPU collectables (Phase 2) where applicable. AIPROFCOMP-865 is the umbrella; these are expected to clear once it lands:
 
    | Ticket | Symptom |
    |--------|---------|
