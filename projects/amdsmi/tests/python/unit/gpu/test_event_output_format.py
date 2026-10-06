@@ -43,29 +43,35 @@ def _load_logger_module():
 
 
 def _records():
+    """Event payloads in the shape the read loop hands to ``store_event_output``:
+    a device handle plus a ``{timestamp, event, message}`` dict with a nested
+    message. Routing through the real store path means these tests lock in the
+    schema the product actually emits (``gpu,timestamp,event,message``)."""
     return [
-        {
-            "gpu": 1,
-            "timestamp": 1790357343,
-            "event": "PROCESS_START",
-            "PID": 1604545,
-            "task": "rocminfo",
-        },
-        {
-            "gpu": 0,
-            "timestamp": 1790357343,
-            "event": "PROCESS_START",
-            "PID": 1604545,
-            "task": "rocminfo",
-        },
+        (
+            1,
+            {
+                "timestamp": 1790357343,
+                "event": "PROCESS_START",
+                "message": {"PID": "1604545", "task": "rocminfo"},
+            },
+        ),
+        (
+            0,
+            {
+                "timestamp": 1790357343,
+                "event": "PROCESS_START",
+                "message": {"PID": "1604545", "task": "rocminfo"},
+            },
+        ),
     ]
 
 
 def _capture_event_stream(logger, records):
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-        for record in records:
-            logger.output = dict(record)
+        for device_handle, values in records:
+            logger.store_event_output(device_handle, values)
             logger.print_event_output()
     return buffer.getvalue()
 
@@ -79,7 +85,7 @@ class _LoggerTestBase(unittest.TestCase):
         cls.module = _load_logger_module()
 
     def _make_logger(self, output_format):
-        return self.module.AMDSMILogger(format=output_format)
+        return self.module.AMDSMILogger(format=output_format, helpers=_IdentityHelpers())
 
 
 class _IdentityHelpers:
@@ -97,12 +103,16 @@ class TestEventCsvOutput(_LoggerTestBase):
         output = _capture_event_stream(logger, records)
         lines = [line for line in output.splitlines() if line != ""]
 
-        header = "gpu,timestamp,event,PID,task"
+        header = "gpu,timestamp,event,message"
         self.assertEqual(lines[0], header)
         self.assertEqual(sum(1 for line in lines if line == header), 1)
         self.assertEqual(len(lines), len(records) + 1)
-        self.assertEqual(lines[1], "1,1790357343,PROCESS_START,1604545,rocminfo")
-        self.assertEqual(lines[2], "0,1790357343,PROCESS_START,1604545,rocminfo")
+        self.assertEqual(
+            lines[1], '1,1790357343,PROCESS_START,"{""PID"":""1604545"",""task"":""rocminfo""}"'
+        )
+        self.assertEqual(
+            lines[2], '0,1790357343,PROCESS_START,"{""PID"":""1604545"",""task"":""rocminfo""}"'
+        )
 
     def test_no_blank_separator_lines(self):
         logger = self._make_logger("csv")
@@ -157,5 +167,11 @@ class TestEventJsonOutput(_LoggerTestBase):
         lines = [line for line in output.splitlines() if line != ""]
 
         self.assertEqual(len(lines), len(records))
-        for line, record in zip(lines, records):
-            self.assertEqual(json.loads(line), record)
+        for line, (device_handle, values) in zip(lines, records):
+            expected = {
+                "gpu": device_handle,
+                "timestamp": values["timestamp"],
+                "event": values["event"],
+                "message": values["message"],
+            }
+            self.assertEqual(json.loads(line), expected)

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import signal
+import sys
 import threading
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -93,24 +94,32 @@ class EventCommands:
                     # with its own processor_handle. A single listener's read()
                     # therefore drains every GPU, not just listeners[0].
                     events = listeners[0].read(2000)
-                    for event in events:
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
+                        print(e, file=sys.stderr)
+                    continue
+
+                for event in events:
+                    try:
                         values_dict["timestamp"] = event["timestamp"]
                         values_dict["event"] = event["event"]
                         # parse message as it's own dictionary
                         message_list = event["message"].split("  ")
                         message_dict = {}
                         for item in message_list:
-                            if not item == "":
-                                item_list = item.split(": ")
-                                message_dict.update({item_list[0]: item_list[1]})
+                            if item == "":
+                                continue
+                            item_list = item.split(": ", 1)
+                            if len(item_list) == 2:
+                                message_dict[item_list[0]] = item_list[1]
                         values_dict["message"] = message_dict
                         commands.logger.store_event_output(event["processor_handle"], values_dict)
                         commands.logger.print_event_output()
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
-                        print(e)
-                except Exception as e:
-                    print(e)
+                    except Exception as e:
+                        # Isolate per-event failures (e.g. a malformed message) so
+                        # one bad record can't drop its batch siblings; keep the
+                        # stdout record stream clean by logging to stderr.
+                        print(e, file=sys.stderr)
         finally:
             for listener in listeners:
                 listener.stop()
