@@ -51,6 +51,8 @@ struct BlockHandle {
   AWF_Queue_statusT *default_ctx_status{nullptr};
   AWF_Queue_ret_buffT *default_ctx_g_ret{nullptr};
   AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
+  // Sticky: set once a non-blocking network op is queued; fence skips the proxy round trip while it is 0.
+  volatile uint64_t network_nbi_posted{};
 };
 
 class DefaultBlockHandleProxy {
@@ -84,6 +86,7 @@ class DefaultBlockHandleProxy {
     block_handle->default_ctx_status = default_ctx_status;
     block_handle->default_ctx_g_ret = default_ctx_g_ret;
     block_handle->default_ctx_atomic_ret = default_ctx_atomic_ret;
+    block_handle->network_nbi_posted = 0;
   }
 
   DefaultBlockHandleProxy(const DefaultBlockHandleProxy& other) = delete;
@@ -127,6 +130,7 @@ class BlockHandleProxy {
       block_handle->atomic_ret = reinterpret_cast<uint64_t*>(atomic_ret) +
                                  block_offset;
       block_handle->lock = 0;
+      block_handle->network_nbi_posted = 0;
     }
   }
 

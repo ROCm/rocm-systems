@@ -117,6 +117,7 @@ __device__ void ROContext::putmem_nbi(void *dest, const void *source,
     if (!must_send_message) {
       return;
     }
+    mark_network_nbi_posted();
     build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
                         nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                         ro_net_win_id, block_handle, false);
@@ -136,25 +137,28 @@ __device__ void ROContext::getmem_nbi(void *dest, const void *source,
     if (!must_send_message) {
       return;
     }
+    mark_network_nbi_posted();
     build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
                         nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                         ro_net_win_id, block_handle, false);
   }
 }
 
+__device__ void ROContext::mark_network_nbi_posted() {
+  block_handle->network_nbi_posted = 1;
+}
+
 __device__ void ROContext::fence() {
-  build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
+  // Blocking proxy ops complete before returning, so only queued NBI ops need the proxy round trip.
+  if (block_handle->network_nbi_posted) {
+    proxy_fence();
+  }
   ipcImpl_.ipcFence();
 }
 
 __device__ void ROContext::fence([[maybe_unused]] int pe) {
   // TODO(khamidou): need to check if per pe has any special handling
-  build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
-  ipcImpl_.ipcFence();
+  fence();
 }
 
 __device__ void ROContext::quiet() {
@@ -327,6 +331,7 @@ __device__ void ROContext::putmem_nbi_wg(void *dest, const void *source,
                         const_cast<void *>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
+      mark_network_nbi_posted();
       build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
                           nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                           ro_net_win_id, block_handle, false);
@@ -345,6 +350,7 @@ __device__ void ROContext::getmem_nbi_wg(void *dest, const void *source,
     ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
+      mark_network_nbi_posted();
       build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
                           nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                           ro_net_win_id, block_handle, false);
@@ -400,6 +406,7 @@ __device__ void ROContext::putmem_nbi_wave(void *dest, const void *source,
                           const_cast<void *>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
+      mark_network_nbi_posted();
       build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
                           nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                           ro_net_win_id, block_handle, false);
@@ -418,6 +425,7 @@ __device__ void ROContext::getmem_nbi_wave(void *dest, const void *source,
                           nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
+      mark_network_nbi_posted();
       build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
                           nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
                           ro_net_win_id, block_handle, false);
@@ -567,6 +575,21 @@ __device__ uint64_t broadcast_shfl_up(uint64_t value) {
 
 __device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
   return broadcast_lds(lowest_active, value);
+}
+
+__device__ void ROContext::proxy_fence() {
+  uint64_t active{__ballot(1)};
+  int leader{__ffsll(static_cast<unsigned long long>(active)) - 1};
+  uint64_t handle{reinterpret_cast<uint64_t>(block_handle)};
+  uint64_t leader_handle{__shfl(handle, leader)};
+  // The host fence drains the whole queue, so one lane can fence for every active lane that shares the queue.
+  bool shared_queue{__ballot(handle == leader_handle) == active};
+  bool is_leader{static_cast<int>(__lane_id()) == leader};
+  if (!shared_queue || is_leader) {
+    build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
+                        nullptr, NULL, ro_net_win_id, block_handle,
+                        true, get_status_flag(), is_default_ctx);
+  }
 }
 
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,

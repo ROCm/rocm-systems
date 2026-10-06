@@ -18,6 +18,11 @@
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
 
+### Resolved issues
+* Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
+  It now skips the proxy when no non-blocking network operation was queued and otherwise fences once per wavefront.
+  The `fence_*` functional tests now run on RO.
+
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
