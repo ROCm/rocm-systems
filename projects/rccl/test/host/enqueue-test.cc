@@ -1499,6 +1499,8 @@ ncclTaskColl CostTask(ncclFunc_t f, ncclDataType_t dt = ncclFloat32,
   t.func = f;
   t.datatype = dt;
   t.opDev.op = devOp;
+  // Match the nccl.h.in default (1), so a case relying on 0 has to say so.
+  t.forceAlgSelection = 1;
   return t;
 }
 
@@ -1843,8 +1845,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_ZeroCostNamedRowCountsAsEligible) {
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowExcludesPatWhenNothingNamesIt) {
   // The negative control for the case below: on the automatic path the window really does keep
-  // PAT out at 64 MiB, so the lift that follows is a lift and not a no-op. One rank per node,
-  // which is the only shape where ncclPatEnable can be true.
+  // PAT out at 64 MiB, so the lift that follows is a lift and not a no-op. nNodes=8 selects the
+  // nNodes <= 8 branch, whose window is [32 KiB, 4 MiB], and 64 MiB sits outside it.
   CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
