@@ -13,13 +13,6 @@ class TestReset(TestCliBase):
         msg = f"{self.tab}### amd-smi reset"
         self.common.print(msg)
 
-        # TODO allow reset commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-                # self.common.print(msg)
-                self.skipTest(msg)
-
         cmds = self.CreateCmds(
             "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )

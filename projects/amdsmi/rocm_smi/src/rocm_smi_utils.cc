@@ -69,7 +69,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
@@ -924,9 +924,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-  unsigned char buff[bytesPerLine + 1];
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
@@ -1350,7 +1350,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {

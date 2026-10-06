@@ -102,6 +102,24 @@ option(
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
+    ROCJITSU_ENABLE_PERFSIM_PLUGIN
+    "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
+    OFF
+)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_PERFSIM_PLUGIN is supported only on Linux"
+        )
+    endif()
+endif()
+option(
+    ROCJITSU_ENABLE_VFIO
+    "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
+    OFF
+)
+option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF
@@ -340,6 +358,19 @@ include(rj_flatbuffers)
 set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
 set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
 
+if(ROCJITSU_ENABLE_VFIO)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_VFIO=ON is Linux-only: the vfio-user protocol reuses the Linux VFIO uapi definitions and the transport relies on AF_UNIX file-descriptor passing."
+        )
+    endif()
+    include(rj_libvfio_user)
+endif()
+
+# Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
+include(rj_host_cpu)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -358,6 +389,7 @@ target_link_libraries(
     PRIVATE
         rocjitsu_analysis
         rocjitsu_code
+        rocjitsu_code_object
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
@@ -371,6 +403,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         rocjitsu_drm_headers
         util
         flatbuffers
@@ -400,6 +433,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

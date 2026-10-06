@@ -16,6 +16,7 @@ class NodeCommands:
         power_management=None,
         base_board_temps=None,
         gtt=None,
+        tray=None,
     ):
         """List node information
 
@@ -27,6 +28,7 @@ class NodeCommands:
             power_management (bool, optional): Value override for args.power_management. Defaults to None.
             base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
             gtt (bool, optional): Value override for args.gtt. Defaults to None.
+            tray (bool, optional): Value override for args.tray. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -36,8 +38,10 @@ class NodeCommands:
             args.nodes = nodes
         if gtt:
             args.gtt = gtt
+        if tray:
+            args.tray = tray
         # Store args that are applicable to the current platform
-        current_platform_args = ["power_management", "base_board_temps", "gtt"]
+        current_platform_args = ["power_management", "base_board_temps", "gtt", "tray"]
 
         # Check if any node-specific options were passed via command line
         current_platform_values = []
@@ -47,6 +51,8 @@ class NodeCommands:
             current_platform_values += [args.base_board_temps]
         if args.gtt:
             current_platform_values += [args.gtt]
+        if args.tray:
+            current_platform_values += [args.tray]
 
         # If no node options are passed, enable all by default
         if not any(current_platform_values):
@@ -60,11 +66,17 @@ class NodeCommands:
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A"}
+        npm_dict = {
+            "limit": "N/A",
+            "status": "N/A",
+            "threshold": "N/A",
+            "current_node_power": "N/A",
+        }
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
         gtt_dict = {}
+        tray_dict = {}
 
         # Get NPM info
         if args.power_management:
@@ -82,6 +94,7 @@ class NodeCommands:
                 limit = npm_info.get("limit", "N/A")
                 status = npm_info.get("status", npm_info.get("current", "N/A"))
                 ubb_power_threshold = npm_info.get("ubb_power_threshold", "N/A")
+                current_node_power = npm_info.get("current_node_power", "N/A")
 
                 if limit != "N/A":
                     npm_dict["limit"] = limit
@@ -94,6 +107,9 @@ class NodeCommands:
                 # Add UBB power threshold if available
                 if ubb_power_threshold != "N/A":
                     npm_dict["threshold"] = ubb_power_threshold
+                # Add current node power if available
+                if current_node_power != "N/A":
+                    npm_dict["current_node_power"] = current_node_power
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -132,6 +148,14 @@ class NodeCommands:
                 logging.debug("Failed to get GTT info | %s", e.get_error_info())
                 gtt_dict = {}
 
+        # Get compute tray type and accelerator count
+        if args.tray:
+            try:
+                tray_dict = amdsmi_interface.amdsmi_get_tray_info()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get tray info | %s", e.get_error_info())
+                tray_dict = {}
+
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == "stdout":
             node_output = ["NODE:"]
@@ -141,6 +165,8 @@ class NodeCommands:
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
                 threshold = npm_dict.get("threshold", "N/A")
                 node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
+                current_node_power = npm_dict.get("current_node_power", "N/A")
+                node_output.append(f"        CURRENT_NODE_POWER: {current_node_power} {power_unit}")
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -157,14 +183,23 @@ class NodeCommands:
                     node_output.append(
                         f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
                     )
+            if args.tray and tray_dict:
+                node_output.append("    TRAY:")
+                node_output.append(
+                    f"        MAX_ACC_PER_TRAY: {tray_dict.get('max_acc_per_tray', 'N/A')}"
+                )
+                node_output.append(f"        TRAY_TYPE: {tray_dict.get('tray_type', 'N/A')}")
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
-                csv_dict = {}
+                # Only node 0 is currently supported; mirror the gpu/cpu/nic
+                # CSV surfaces, which always lead with a device identifier.
+                csv_dict = {"node": 0}
                 if args.power_management:
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
+                    csv_dict["current_node_power"] = npm_dict.get("current_node_power", "N/A")
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:
@@ -173,6 +208,9 @@ class NodeCommands:
                     if "pending_size_gb" in gtt_dict:
                         csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
                         csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
+                if args.tray and tray_dict:
+                    csv_dict["max_acc_per_tray"] = tray_dict.get("max_acc_per_tray", "N/A")
+                    csv_dict["tray_type"] = tray_dict.get("tray_type", "N/A")
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
@@ -184,11 +222,18 @@ class NodeCommands:
                         npm_dict["threshold"] = self.helpers.unit_format(
                             self.logger, threshold, power_unit
                         )
+                    current_node_power_value = npm_dict.get("current_node_power", "N/A")
+                    if current_node_power_value != "N/A":
+                        npm_dict["current_node_power"] = self.helpers.unit_format(
+                            self.logger, current_node_power_value, power_unit
+                        )
                     node_output["power_management"] = npm_dict
                 if args.base_board_temps and base_board_temp_dict:
                     node_output["base_board"] = {"temperature": base_board_temp_dict}
                 if args.gtt and gtt_dict:
                     node_output["gtt"] = gtt_dict
+                if args.tray and tray_dict:
+                    node_output["tray"] = tray_dict
                 self.logger.output = {"node": node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()

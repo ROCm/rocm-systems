@@ -23,7 +23,7 @@
       status = amdsmi_get_esmi_err_msg(RET, &err_str);                                        \
       std::cout << "AMDSMI call returned " << status << " at line " << __LINE__ << std::endl; \
       std::cout << err_str << std::endl;                                                      \
-      return RET;                                                                             \
+      return static_cast<int>(RET);                                                           \
     }                                                                                         \
   }
 
@@ -109,8 +109,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
            << "." << (unsigned)smu_fw.debug << "\t\t |" << endl;
       cout << "------------------------------------------\n";
 
-      uint32_t err_bits = 0;
-
       uint32_t prochot;
       cout << setprecision(3) << " CPU " << index << "\t|";
       cout << "\n-------------------------------------------------";
@@ -123,7 +121,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << setprecision(7) << (prochot ? "active" : "inactive") << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";
@@ -138,7 +135,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
       len = strlen(str);
       uint32_t fclk, mclk;
-      err_bits = 0;
 
       ret = amdsmi_get_cpu_fclk_mclk(plist[index], &fclk, &mclk);
       if (ret != AMDSMI_STATUS_SUCCESS)
@@ -148,7 +144,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << setprecision(7) << " " << fclk << "\t\t|";
         retVal = snprintf(str + len, SHOWLINESZ - len, " %d\t\t|", mclk);
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err: " << setprecision(2) << ret << "     |";
         retVal = snprintf(str + len, SHOWLINESZ - len, " NA (Err: %-2d)     |", ret);
       }
@@ -172,7 +167,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << fixed << setprecision(3) << static_cast<double>(socket_power) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
 
@@ -187,7 +181,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
 
@@ -202,7 +195,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << fixed << setprecision(3) << static_cast<double>(power_max) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";
@@ -245,7 +237,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";

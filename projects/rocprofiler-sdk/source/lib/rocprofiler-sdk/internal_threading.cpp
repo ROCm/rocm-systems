@@ -48,6 +48,20 @@ namespace rocprofiler
 {
 namespace internal_threading
 {
+// Constant-initialised so no lazy init hides behind the atfork child handler,
+// which must be async-signal-safe (one atomic RMW, no lock/alloc/join).
+std::atomic<uint64_t> g_fork_generation{0};
+static_assert(std::atomic<uint64_t>::is_always_lock_free,
+              "g_fork_generation must be lock-free for async-signal-safe atfork bump");
+
+bool
+fork_stale()
+{
+    // Acquire pairs with the atfork child handler's release bump, so a stale
+    // stamp comparison and any post-fork inline-pool state are seen consistently.
+    return g_fork_generation.load(std::memory_order_acquire) != 0;
+}
+
 namespace
 {
 using task_group_vec_t     = common::container::stable_vector<task_group_t*>;
@@ -79,10 +93,15 @@ get_thread_pool_config(size_t pool_size = 1)
 TaskGroup::TaskGroup(size_t pool_size)
 : parent_type{new thread_pool_t{get_thread_pool_config(pool_size)}, false}
 , m_pool{parent_type::thread_pool()}
+, m_fork_generation{g_fork_generation.load(std::memory_order_acquire)}
 {}
 
 TaskGroup::~TaskGroup()
 {
+    // A pool stamped in an earlier generation was inherited across a fork: its
+    // worker threads do not exist in this child, so destroy_threadpool() would
+    // join threads that never ran. Leak m_pool deliberately rather than hang.
+    if(m_fork_generation != g_fork_generation.load(std::memory_order_acquire)) return;
     m_pool->destroy_threadpool();
     delete m_pool;
 }
@@ -251,6 +270,12 @@ get_task_groups()
 void
 create_forked_callback_threads()
 {
+    // Bump BEFORE any replacement TaskGroup is constructed, so child-created pools
+    // carry the new generation and destroy normally while inherited pools stay
+    // stale. First statement so no third atfork registration can reorder ahead of
+    // it. Release pairs with fork_stale()/the destructor guard's acquire.
+    g_fork_generation.fetch_add(1, std::memory_order_release);
+
     if(get_task_groups())
     {
         for(auto& itr : *get_task_groups())

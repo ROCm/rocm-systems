@@ -20,6 +20,7 @@ on:
       - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
+      - 'shared/sha256/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
@@ -33,6 +34,7 @@ on:
       - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
+      - 'shared/sha256/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,6 +43,7 @@ concurrency:
 env:
   ROCM_PATH: "/opt/rocm"
   PATH: "/usr/bin:$PATH"
+  CMAKE_PREFIX_PATH: "/opt/rocm/lib/rocm_sysdeps:/opt/rocm"
 
 jobs:
   rocm-release-compatibility:

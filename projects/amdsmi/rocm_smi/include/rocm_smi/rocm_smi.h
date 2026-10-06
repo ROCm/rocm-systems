@@ -5,17 +5,20 @@
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -618,10 +621,15 @@ typedef enum { RSMI_NPM_STATUS_DISABLED, RSMI_NPM_STATUS_ENABLED } rsmi_npm_stat
  *
  */
 typedef struct {
-  rsmi_npm_status_t status;      //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  rsmi_npm_status_t status;       //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit).
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in Watts
+                                  //!< (board/node_power).
+  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
+                                  //!< current_node_power.
 } rsmi_npm_info_t;
 
 /**
@@ -3165,6 +3173,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);
 
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
+
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
 
 /**
@@ -3515,7 +3525,7 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t* od);
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *  If multiple current frequencies are found, a warning is shown. If no
- *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  current frequency is found, it is reflected as UINT32_MAX. If frequencies are not
  *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful

@@ -8,9 +8,7 @@
 #include <cstdint>
 #include <string>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 struct scope_filter
 {
@@ -28,9 +26,9 @@ struct scope_filter
         FUNCTION_FILTER  = (1 << 3)
     };
 
-    filter_mode  mode       = FILTER_INCLUDE;
-    filter_scope scope      = UNIVERSAL_FILTER;
-    std::string  expression = {};
+    filter_mode  mode  = FILTER_INCLUDE;
+    filter_scope scope = UNIVERSAL_FILTER;
+    std::string  expression;
 
     bool operator()(std::string_view _value) const;
 
@@ -48,9 +46,11 @@ scope_filter::satisfies_filter(const ContainerT& _filters, filter_scope _scope,
     {
         // if the filter is for the specified scope and itr does not satisfy the
         // include/exclude mode, return false
-        if((itr.scope & _scope) > 0 && !itr(_value)) return false;
+        if((itr.scope & _scope) > 0 && !itr(_value))
+        {
+            return false;
+        }
     }
     return true;
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

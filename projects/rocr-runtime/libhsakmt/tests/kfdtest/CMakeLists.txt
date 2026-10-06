@@ -230,6 +230,11 @@ include_directories(${PROJECT_SOURCE_DIR}/../../libhsakmt/include)
 
 include_directories(${DRM_INCLUDE_DIRS})
 
+# Platform specific includes (i.e kfd_ioct.h on Linux)
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      include_directories(${PROJECT_SOURCE_DIR}/../../include/hsakmt/linux)
+endif()
+
 set (SRC_FILES gtest-1.6.0/gtest-all.cpp
 
   src/AqlQueue.cpp
@@ -277,7 +282,8 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDRASTest.cpp
   src/KFDPCSamplingTest.cpp
   src/KFDNegativeTest.cpp
-  src/RDMATest.cpp)
+  src/RDMATest.cpp
+  src/KFDAISTest.cpp)
 
 message( STATUS "PROJECT_SOURCE_DIR:" ${PROJECT_SOURCE_DIR} )
 #message( STATUS "SRC_FILES: ")

@@ -1,0 +1,51 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+include(${CMAKE_CURRENT_LIST_DIR}/check_model_only_symbols.cmake)
+
+# Inspect all checker members even when the final link did not extract one.
+execute_process(
+    COMMAND "${NM}" -C "${WAITCHECK_ARCHIVE}"
+    RESULT_VARIABLE _archive_result
+    OUTPUT_VARIABLE _archive_symbols
+    ERROR_VARIABLE _archive_error
+)
+if(NOT _archive_result EQUAL 0)
+    message(FATAL_ERROR "nm failed on checker archive: ${_archive_error}")
+endif()
+foreach(
+    _required
+    "rocjitsu::analyze_waitcheck_stream("
+    "WaitcheckTarget::classify_events("
+)
+    string(FIND "${_archive_symbols}" "${_required}" _match)
+    if(_match EQUAL -1)
+        message(FATAL_ERROR "checker archive is missing symbol: ${_required}")
+    endif()
+endforeach()
+# The archive must leave registry selection to its consumer.
+string(
+    FIND "${_archive_symbols}"
+    "rocjitsu::default_isa_target_registry()"
+    _registry
+)
+if(NOT _registry EQUAL -1)
+    message(FATAL_ERROR "checker archive owns a default ISA registry")
+endif()
+string(APPEND _symbols "\n${_archive_symbols}")
+list(
+    APPEND _forbidden_symbols
+    "rocjitsu::BinaryTranslator::"
+    "rocjitsu::Instrumentor::"
+    "rocjitsu::Executable::"
+    "rocjitsu::SimulatedKfd::"
+    "rocjitsu::VirtualMachine::"
+    "hsa_init"
+    " OnLoad"
+)
+foreach(_forbidden IN LISTS _forbidden_symbols)
+    string(FIND "${_symbols}" "${_forbidden}" _match)
+    if(NOT _match EQUAL -1)
+        message(FATAL_ERROR "checker contains runtime symbol: ${_forbidden}")
+    endif()
+endforeach()

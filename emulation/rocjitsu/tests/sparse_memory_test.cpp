@@ -77,7 +77,7 @@ TEST(SparseMemoryThreadingTest, ConcurrentSamePageWritesArePreserved) {
   for (uint32_t tid = 0; tid < kThreads; ++tid) {
     workers.emplace_back([&, tid] {
       std::array<uint8_t, kBytesPerThread> bytes{};
-      std::fill(bytes.begin(), bytes.end(), static_cast<uint8_t>(0x20 + tid));
+      std::ranges::fill(bytes, static_cast<uint8_t>(0x20 + tid));
       start.arrive_and_wait();
       for (uint32_t iteration = 0; iteration < 64; ++iteration)
         memory.write_block(kBase + tid * kBytesPerThread, bytes);
@@ -92,7 +92,7 @@ TEST(SparseMemoryThreadingTest, ConcurrentSamePageWritesArePreserved) {
   for (uint32_t tid = 0; tid < kThreads; ++tid) {
     const auto begin = actual.begin() + tid * kBytesPerThread;
     const auto end = begin + kBytesPerThread;
-    EXPECT_TRUE(std::all_of(
+    EXPECT_TRUE(std::ranges::all_of(
         begin, end, [tid](uint8_t byte) { return byte == static_cast<uint8_t>(0x20 + tid); }));
   }
 }
@@ -171,10 +171,8 @@ TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) 
   for (size_t page = 0; page < 2; ++page) {
     const auto bytes = std::span<const uint8_t>(actual).subspan(
         page * simdojo::SparseMemory::PAGE_SIZE, simdojo::SparseMemory::PAGE_SIZE);
-    const bool is_first =
-        std::all_of(bytes.begin(), bytes.end(), [](uint8_t byte) { return byte == 0x3C; });
-    const bool is_second =
-        std::all_of(bytes.begin(), bytes.end(), [](uint8_t byte) { return byte == 0xC3; });
+    const bool is_first = std::ranges::all_of(bytes, [](uint8_t byte) { return byte == 0x3C; });
+    const bool is_second = std::ranges::all_of(bytes, [](uint8_t byte) { return byte == 0xC3; });
     EXPECT_TRUE(is_first || is_second) << "page=" << page;
   }
 }

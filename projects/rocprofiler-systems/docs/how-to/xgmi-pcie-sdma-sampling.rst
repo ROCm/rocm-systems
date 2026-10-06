@@ -151,18 +151,18 @@ Edit ``.rocprofsys.cfg`` with the following settings:
 
 .. note::
 
-   Refer to these steps to `Install and build TransferBench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/install.html#install-transferbench>`_.
+   For information on installing TransferBench, refer to `Building TransferBench from source <https://rocm.docs.amd.com/projects/TransferBench/en/latest/install/build_from_source.html>`_.
 
 At the end of the run, a similar message appears::
 
-  [rocprofiler-systems][964294][perfetto]> Outputting '/home/demo/rocprofsys-transferBench-output/2025-04-25_15.52/perfetto-trace-964294.proto'
+  [rocprofiler-systems][964294][perfetto]> Outputting '/home/demo/rocprofsys-transferBench-output/2025-04-25_15.52/perfetto-trace-964294.pftrace'
   (3124.52 KB / 3.12 MB / 0.00 GB)... Done
 
 
-To view the generated ``.proto`` file in the browser, open the `Perfetto UI page
+To view the generated ``.pftrace`` file in the browser, open the `Perfetto UI page
 <https://ui.perfetto.dev/>`_.
 
-Then, click on ``Open trace file`` and select the ``.proto`` file. In the browser, you can
+Then, click on ``Open trace file`` and select the ``.pftrace`` file. In the browser, you can
 visualize the XGMI and PCIe metrics.
 
 .. image:: ../data/rocprof-sys-xgmi.png

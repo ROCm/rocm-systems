@@ -6,7 +6,7 @@
 #pragma once
 
 #include "hip_capture.h"
-#include "hrr_api_args.h"
+#include "hrr/hrr_api_args.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,10 +16,12 @@ namespace hrr_cap {
 namespace writer {
 
 // Open events.bin for writing in output_dir. Creates directory tree.
-// Must be called before any write_* functions.
+// Must be called before any write_* functions. Returns false, leaving capture
+// off, when the file system holding the archive has less than the reserve free.
 bool open(const char* output_dir);
 
-// Returns true if open() has been called successfully.
+// True while events.bin is open: from a successful open() until close(), or
+// until capture stops because the file system fell to the reserve.
 bool is_open();
 
 // Cache process-level metadata JSON for manifest writers. The emergency
@@ -71,11 +73,28 @@ void mark_incomplete(const char* reason);
 // Returns true if mark_incomplete() has been called.
 bool is_incomplete();
 
-// Write a buffer as a content-addressed blob. Returns hash.
+// Record that `api` was captured but cannot be replayed faithfully — the call
+// is in the archive, its effect is not reproducible (a host callback belonging
+// to this process, a handle only meaningful to another rank, an argument
+// truncated at capture, ...). Warns once per distinct (api, reason) at capture
+// time, so the gap is visible when the recording is made rather than only when
+// someone tries to replay it, and lists it in manifest.json as
+// "unreplayable_apis": {"<api>": ["<reason>", ...]}. Both strings are
+// JSON-escaped on write, so any text is safe to pass.
+//
+// Deliberately NOT mark_incomplete(): that means an event was dropped or torn
+// and suppresses the clean-shutdown trailer. Here every event is present and
+// the archive is well-formed; what is missing is the ability to re-execute
+// this particular call. Thread-safe; the warning fires once per (api, reason)
+// per process.
+void note_unreplayable(const char* api, const char* reason);
+
+// Write a buffer as a content-addressed blob. Returns hash, or {} when the
+// writer is not open or capture has stopped for lack of space.
 // Thread-safe. Skips write if blob already exists on disk.
 Hash128 write_blob(const void* data, size_t len);
 
-// Write a code object (.hsaco) blob. Returns hash.
+// Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.
 Hash128 write_code_object(const void* image, size_t image_size);
 
 // Number of events written so far.

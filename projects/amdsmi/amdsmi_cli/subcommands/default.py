@@ -89,13 +89,16 @@ class DefaultCommands:
             except amdsmi_exception.AmdSmiLibraryException:
                 current_mem = "N/A"
             try:
-                current_comp = amdsmi_interface.amdsmi_get_gpu_compute_partition(processor)
+                current_accel_profile_dict = (
+                    amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(processor)
+                )
+                current_accel = current_accel_profile_dict["partition_profile"]["profile_type"]
             except amdsmi_exception.AmdSmiLibraryException:
-                current_comp = "N/A"
-            if current_comp == "N/A" or current_mem == "N/A":
+                current_accel = "N/A"
+            if current_accel == "N/A" or current_mem == "N/A":
                 partition_mode = "N/A"
             else:
-                partition_mode = f"{current_comp}/{current_mem}"
+                partition_mode = f"{current_accel}/{current_mem}"
             gpu_info_dict.update({"partition_mode": partition_mode})
 
             # GPU name market name and OAM ID

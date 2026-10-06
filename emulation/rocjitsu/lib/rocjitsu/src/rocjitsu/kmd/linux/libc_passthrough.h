@@ -16,6 +16,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+// Forward declaration keeps legacy aliases independent of feature-macro order.
+struct stat64;
+
 namespace rocjitsu {
 
 /// @brief Real libc function pointers resolved with dlsym(RTLD_NEXT).
@@ -31,9 +34,11 @@ public:
   ssize_t (*read)(int, void *, size_t) = nullptr;
   ssize_t (*write)(int, const void *, size_t) = nullptr;
   int (*ioctl)(int, unsigned long, ...) = nullptr;
+  long (*syscall)(long, ...) = nullptr;
   void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
   int (*munmap)(void *, size_t) = nullptr;
   int (*mprotect)(void *, size_t, int) = nullptr;
+  void *(*mremap)(void *, size_t, size_t, int, ...) = nullptr;
   int (*madvise)(void *, size_t, int) = nullptr;
   int (*memfd_create)(const char *, unsigned int) = nullptr;
   int (*dup)(int) = nullptr;
@@ -50,23 +55,24 @@ public:
   int (*access)(const char *, int) = nullptr;
   int (*fstat_fn)(int, struct stat *) = nullptr;
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
+  char *(*realpath_fn)(const char *, char *) = nullptr;
+  char *(*realpath_chk_fn)(const char *, char *, size_t) = nullptr;
   /// @brief The nine legacy stat aliases rocJITsu also exports.
   /// @details Resolved EAGERLY here rather than through a function-local static in
   /// each wrapper. A lazy static's C++ initialization guard can be inherited
   /// mid-initialization by a forked child whose initializing thread no longer
   /// exists, deadlocking the child before it can even reach the owner-PID gate. The
   /// interposer constructor is single-threaded, so resolving here has no such
-  /// window. struct stat64 is spelled void* to keep this header free of
-  /// _LARGEFILE64_SOURCE ordering constraints; the wrappers cast back.
-  int (*fstat64_fn)(int, void *) = nullptr;
+  /// window. Keep exact function types when calling another instrumented preload.
+  int (*fstat64_fn)(int, struct stat64 *) = nullptr;
   int (*fxstat_fn)(int, int, struct stat *) = nullptr;
-  int (*fxstat64_fn)(int, int, void *) = nullptr;
-  int (*stat64_fn)(const char *, void *) = nullptr;
-  int (*lstat64_fn)(const char *, void *) = nullptr;
+  int (*fxstat64_fn)(int, int, struct stat64 *) = nullptr;
+  int (*stat64_fn)(const char *, struct stat64 *) = nullptr;
+  int (*lstat64_fn)(const char *, struct stat64 *) = nullptr;
   int (*xstat_fn)(int, const char *, struct stat *) = nullptr;
-  int (*xstat64_fn)(int, const char *, void *) = nullptr;
+  int (*xstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   int (*lxstat_fn)(int, const char *, struct stat *) = nullptr;
-  int (*lxstat64_fn)(int, const char *, void *) = nullptr;
+  int (*lxstat64_fn)(int, const char *, struct stat64 *) = nullptr;
   pid_t (*fork)() = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.

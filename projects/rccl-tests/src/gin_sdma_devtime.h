@@ -30,6 +30,21 @@
 
 namespace gin_devtime {
 
+// Shared skip/loop tier selection for gin_devtime hooks (per-peer/per-rank bytes).
+static inline void resolveLoopSkip(size_t perPeerBytes, int& loop, int& skip) {
+  loop = devtimeLoop;
+  skip = devtimeSkip < 0 ? 0 : devtimeSkip;
+  if (devtimeLoopLarge > 0 && perPeerBytes >= (size_t)64 * 1024 * 1024) {
+    loop = devtimeLoopLarge;
+    if (devtimeSkipLarge >= 0) skip = devtimeSkipLarge;
+    else skip = (skip < 1) ? skip : 1;
+  } else if (devtimeLoopMid > 0 && perPeerBytes >= (size_t)8 * 1024 * 1024) {
+    loop = devtimeLoopMid;
+    if (devtimeSkipMid >= 0) skip = devtimeSkipMid;
+    else skip = (skip < 2) ? skip : 2;
+  }
+}
+
 // GPU fixed-frequency wall-clock rate (kHz) for a specific device ordinal. Sampled
 // per-GPU (rather than once from the current device) so each GPU's cycle delta is
 // converted with its own rate on mixed-clock nodes.

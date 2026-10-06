@@ -71,7 +71,6 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/string_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/units.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/version.hpp
 )
 
@@ -98,6 +97,8 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-policies-library>
 )
+
+add_subdirectory(units)
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

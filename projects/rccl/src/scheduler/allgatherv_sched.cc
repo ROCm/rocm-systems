@@ -93,6 +93,10 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
 
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0, 0, NCCL_ALGO_RING, proto);
+    if (funcIndex < 0) {
+      WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
+      return ncclInvalidUsage;
+    }
     if (!plan->kernelSpecialized) {
       // RCCL doesn't expose the upstream ncclDevKernelForFunc[] lookup. The
       // unroll-indexed ncclKerns table (file-local in enqueue.cc) is the
@@ -178,8 +182,8 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
             channelWorkBytes[channelId] += sizeof(ncclDevWorkBcast);
           }
           nBcasts += 1;
-          ncclAddWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeBcast, funcIndex, plan->workBytes,
-                                 /*p2pEpoch=*/-1, /*p2pRound=*/-1, newBatch);
+          ncclAddWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeBcast, funcIndex, ncclFuncAllGatherV,
+                                 plan->workBytes, /*p2pEpoch=*/-1, /*p2pRound=*/-1, newBatch);
           newBatch = false;
           plan->workBytes += sizeof(ncclDevWorkBcast);
         }

@@ -24,8 +24,14 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLAgSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
+// Packets one per-rank slot holds, derived from the scratch bank the host picked
+// rather than a fixed constant, so the tier's reach follows the allocation.
+//
+// Both the kernel and the eligibility check call this, so the size the host
+// admits is exactly the geometry the kernel addresses.
+constexpr size_t ddaLLAgSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
 
 // LL all-gather kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
@@ -44,7 +50,8 @@ __launch_bounds__(512)
                                        size_t perRankBytes,                   // per-rank payload; multiple of 16
                                        int selfRank, int nRanksRt,
                                        uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-                                       int epochLen) {                        // number of cells in epochDev
+                                       int epochLen,                          // number of cells in epochDev
+                                       size_t bankSize) {                     // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -54,15 +61,17 @@ __launch_bounds__(512)
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perRankBytes >> 3;    // 8 payload bytes per packet
-  const size_t slot = kDdaLLAgSlotStridePkts;
+  const size_t slot = ddaLLAgSlotPkts(bankSize, nRanks);
 
   // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
   // cells hold the same value) and derives this launch's flag on the device, so
-  // nothing is baked into a HIP graph capture. bank = flag & 1.
+  // nothing is baked into a HIP graph capture. bank = flag & 1, and bank 1 sits
+  // at bankSize rather than right after the slots, so every DDA LL tier sharing
+  // this scratch and epoch counter puts its banks at the same byte offsets.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
   const size_t pkPerChunk = (nPk + (size_t)nChunks - 1) / (size_t)nChunks;

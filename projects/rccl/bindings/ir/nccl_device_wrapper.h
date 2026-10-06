@@ -32,6 +32,56 @@
  * This header intentionally excludes nccl_device/impl/xxx__funcs.h so user IR
  * bitcode can resolve NCCL Device API implementations from libnccl_device.bc.
  */
+
+/*
+ * Emit __activemask() as inline asm, like CUDA's sm_30_intrinsics.hpp does.
+ * Clang's version returns __nvvm_activemask(), which libNVVM 13.3.27 fails to
+ * lower: the PTX calls an .extern llvm.nvvm.activemask that ptxas rejects.
+ *
+ * Must precede the NCCL and cooperative_groups includes below so all call sites
+ * expand. Device pass only: CUDA declares __activemask in the host pass.
+ */
+#if defined(__clang__) && defined(__CUDA_ARCH__)
+#undef __activemask
+#define __activemask()                                                        \
+  (__extension__({                                                            \
+    unsigned _nccl_activemask_ret;                                            \
+    asm volatile("activemask.b32 %0;" : "=r"(_nccl_activemask_ret));          \
+    _nccl_activemask_ret;                                                     \
+  }))
+#endif
+
+/*
+ * Production's __forceinline__ (__inline__ __attribute__((always_inline))) is
+ * linkonce_odr and emits no symbol. Drop __inline__ so the device API has
+ * external linkage: the bitcode lib emits symbols that consumers resolve from
+ * libnccl_device.bc. Must precede the API includes below.
+ */
+#include "nccl_device/utility.h"
+#undef NCCL_DEVICE_INLINE
+#undef NCCL_HOST_DEVICE_INLINE
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__NCCL_DEVICE_LTOIR_LIB__)
+#define NCCL_DEVICE_INLINE __device__ __inline_hint__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
+#elif defined(__clang_llvm_bitcode_lib__)
+#define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
+#else
+// Consumer hipcc compile (IR_test.exe): hip_compat sets NCCL_DEVICE_COMPILE
+// for both host and device passes, so coop.h bodies are parsed on the host
+// pass. They must stay __device__ or HIP rejects __popcll/__syncthreads.
+// NVIDIA's empty define is fine on CUDA; HIP device builtins are host-invisble.
+#if defined(__HIPCC__)
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ inline __attribute__((always_inline))
+#else
+#define NCCL_DEVICE_INLINE
+#define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#endif
+#endif
+#endif
+
 #include "nccl_device/coop.h"
 #include "nccl_device/core.h"
 #include "nccl_device/ll_a2a.h"
@@ -122,9 +172,7 @@ NCCL_IR_EXTERN_C __device__ size_t ncclBarrierSession_C_size();
 
 /* ncclDevComm field accessors
  *
- * ncclDevComm is a public C struct, but its full layout (~200 bytes with
- * embedded arrays and structs) is not mirrored in Python. The Python device
- * layer reads its public fields through these accessor functions.
+ * ncclDevComm is a public C struct, the following accessors are deprecated and will be removed.
  */
 NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_Rank(ncclDevComm const* comm);
 NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_NRanks(ncclDevComm const* comm);
@@ -219,12 +267,15 @@ struct ncclGinBarrierSession_C {
 struct ncclBarrierSession_C {
   ncclBarrierSession<ncclCoopAny> bar;
 };
+// Collectively finalize the placement-new object and persist its epoch. Does not free storage.
+NCCL_IR_EXTERN_C __device__
+void ncclLsaBarrierSessionDestroy(ncclLsaBarrierSession_C* session);
 
 /* GIN Barrier Session APIs */
 NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
-    ncclGin_C net,
+    ncclGin_C const* net,
     ncclTeam team,
     ncclGinBarrierHandle handle,
     uint32_t index);
@@ -234,6 +285,10 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclCoopAny coop,
     cuda::memory_order order,
     ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
+// Finalize the placement-new object. Currently a no-op -- the underlying destructor is
+// empty -- but required for lifetime symmetry with Init. Does not free storage.
+NCCL_IR_EXTERN_C __device__
+void ncclGinBarrierSessionDestroy(ncclGinBarrierSession_C* session);
 
 /* Composite (LSA + GIN) Barrier Session APIs */
 NCCL_IR_EXPORT void ncclBarrierSessionInit(
@@ -241,7 +296,7 @@ NCCL_IR_EXPORT void ncclBarrierSessionInit(
     ncclCoopAny coop,
     ncclTeam innerTeam,
     ncclTeam outerTeam,
-    ncclGin_C net,
+    ncclGin_C const* net,
     ncclLsaBarrierHandle const innerBarHandle,
     ncclGinBarrierHandle const outerBarHandle,
     uint32_t index,
@@ -253,5 +308,242 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclCoopAny coop,
     cuda::memory_order order,
     ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
+// Collectively finalize all nested sessions and persist the inner LSA epoch. Does not free storage.
+NCCL_IR_EXTERN_C __device__
+void ncclBarrierSessionDestroy(ncclBarrierSession_C* session);
+
+/* ReduceCopy APIs */
+#if defined(__HIPCC__)
+/* [RCCL] This header is not hipified: spell bf16 the HIP way. RCCL's device
+ * ReduceSum/Copy has no fp8 support, so the F8E4M3/F8E5M2 entry points are CUDA-only. */
+#include <hip/hip_bf16.h>
+#define NCCL_IR_BF16_T __hip_bfloat16
+#else
+#define NCCL_IR_BF16_T __nv_bfloat16
+#endif
+NCCL_IR_EXPORT void ncclLsaReduceSum_I8(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    int8_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_U8(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    uint8_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_I32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    int32_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_U32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    uint32_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_I64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    int64_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_U64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    uint64_t* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_F16(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    half* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_F32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    float* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_F64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    double* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_BF16(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    NCCL_IR_BF16_T* dst, size_t count, ncclTeam team);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclLsaReduceSum_F8E4M3(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    __nv_fp8_e4m3* dst, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSum_F8E5M2(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    __nv_fp8_e5m2* dst, size_t count, ncclTeam team);
+#endif
+
+NCCL_IR_EXPORT void ncclMultimemReduceSum_I32(
+    ncclCoopAny coop, int32_t* mcSrc, int32_t* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_U32(
+    ncclCoopAny coop, uint32_t* mcSrc, uint32_t* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_I64(
+    ncclCoopAny coop, int64_t* mcSrc, int64_t* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_U64(
+    ncclCoopAny coop, uint64_t* mcSrc, uint64_t* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_F16(
+    ncclCoopAny coop, half* mcSrc, half* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_F32(
+    ncclCoopAny coop, float* mcSrc, float* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_F64(
+    ncclCoopAny coop, double* mcSrc, double* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_BF16(
+    ncclCoopAny coop, NCCL_IR_BF16_T* mcSrc, NCCL_IR_BF16_T* dst, size_t count);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclMultimemReduceSum_F8E4M3(
+    ncclCoopAny coop, __nv_fp8_e4m3* mcSrc, __nv_fp8_e4m3* dst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSum_F8E5M2(
+    ncclCoopAny coop, __nv_fp8_e5m2* mcSrc, __nv_fp8_e5m2* dst, size_t count);
+#endif
+
+NCCL_IR_EXPORT void ncclLsaCopy_I8(
+    ncclCoopAny coop, int8_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_U8(
+    ncclCoopAny coop, uint8_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_I32(
+    ncclCoopAny coop, int32_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_U32(
+    ncclCoopAny coop, uint32_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_I64(
+    ncclCoopAny coop, int64_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_U64(
+    ncclCoopAny coop, uint64_t* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_F16(
+    ncclCoopAny coop, half* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_F32(
+    ncclCoopAny coop, float* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_F64(
+    ncclCoopAny coop, double* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_BF16(
+    ncclCoopAny coop, NCCL_IR_BF16_T* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclLsaCopy_F8E4M3(
+    ncclCoopAny coop, __nv_fp8_e4m3* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaCopy_F8E5M2(
+    ncclCoopAny coop, __nv_fp8_e5m2* src, ncclWindow_t dstWindow,
+    size_t dstOffset, size_t count, ncclTeam team);
+#endif
+
+NCCL_IR_EXPORT void ncclMultimemCopy_I32(
+    ncclCoopAny coop, int32_t* src, int32_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_U32(
+    ncclCoopAny coop, uint32_t* src, uint32_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_I64(
+    ncclCoopAny coop, int64_t* src, int64_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_U64(
+    ncclCoopAny coop, uint64_t* src, uint64_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_F16(
+    ncclCoopAny coop, half* src, half* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_F32(
+    ncclCoopAny coop, float* src, float* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_F64(
+    ncclCoopAny coop, double* src, double* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_BF16(
+    ncclCoopAny coop, NCCL_IR_BF16_T* src, NCCL_IR_BF16_T* mcDst, size_t count);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclMultimemCopy_F8E4M3(
+    ncclCoopAny coop, __nv_fp8_e4m3* src, __nv_fp8_e4m3* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemCopy_F8E5M2(
+    ncclCoopAny coop, __nv_fp8_e5m2* src, __nv_fp8_e5m2* mcDst, size_t count);
+#endif
+
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_I8(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_U8(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_I32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_U32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_I64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_U64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_F16(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_F32(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_F64(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_BF16(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_F8E4M3(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+NCCL_IR_EXPORT void ncclLsaReduceSumCopy_F8E5M2(
+    ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset,
+    ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team);
+#endif
+
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_I32(
+    ncclCoopAny coop, int32_t* mcSrc, int32_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_U32(
+    ncclCoopAny coop, uint32_t* mcSrc, uint32_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_I64(
+    ncclCoopAny coop, int64_t* mcSrc, int64_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_U64(
+    ncclCoopAny coop, uint64_t* mcSrc, uint64_t* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_F16(
+    ncclCoopAny coop, half* mcSrc, half* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_F32(
+    ncclCoopAny coop, float* mcSrc, float* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_F64(
+    ncclCoopAny coop, double* mcSrc, double* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_BF16(
+    ncclCoopAny coop, NCCL_IR_BF16_T* mcSrc, NCCL_IR_BF16_T* mcDst, size_t count);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_F8E4M3(
+    ncclCoopAny coop, __nv_fp8_e4m3* mcSrc, __nv_fp8_e4m3* mcDst, size_t count);
+NCCL_IR_EXPORT void ncclMultimemReduceSumCopy_F8E5M2(
+    ncclCoopAny coop, __nv_fp8_e5m2* mcSrc, __nv_fp8_e5m2* mcDst, size_t count);
+#endif
+
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_I8(
+    ncclCoopAny coop, int nSrc, int8_t* srcBase, size_t srcDispl,
+    int nDst, int8_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_U8(
+    ncclCoopAny coop, int nSrc, uint8_t* srcBase, size_t srcDispl,
+    int nDst, uint8_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_I32(
+    ncclCoopAny coop, int nSrc, int32_t* srcBase, size_t srcDispl,
+    int nDst, int32_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_U32(
+    ncclCoopAny coop, int nSrc, uint32_t* srcBase, size_t srcDispl,
+    int nDst, uint32_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_I64(
+    ncclCoopAny coop, int nSrc, int64_t* srcBase, size_t srcDispl,
+    int nDst, int64_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_U64(
+    ncclCoopAny coop, int nSrc, uint64_t* srcBase, size_t srcDispl,
+    int nDst, uint64_t* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_F16(
+    ncclCoopAny coop, int nSrc, half* srcBase, size_t srcDispl,
+    int nDst, half* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_F32(
+    ncclCoopAny coop, int nSrc, float* srcBase, size_t srcDispl,
+    int nDst, float* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_F64(
+    ncclCoopAny coop, int nSrc, double* srcBase, size_t srcDispl,
+    int nDst, double* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_BF16(
+    ncclCoopAny coop, int nSrc, NCCL_IR_BF16_T* srcBase, size_t srcDispl,
+    int nDst, NCCL_IR_BF16_T* dstBase, size_t dstDispl, size_t count);
+#if !defined(__HIPCC__)
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_F8E4M3(
+    ncclCoopAny coop, int nSrc, __nv_fp8_e4m3* srcBase, size_t srcDispl,
+    int nDst, __nv_fp8_e4m3* dstBase, size_t dstDispl, size_t count);
+NCCL_IR_EXPORT void ncclLocalReduceSumCopy_F8E5M2(
+    ncclCoopAny coop, int nSrc, __nv_fp8_e5m2* srcBase, size_t srcDispl,
+    int nDst, __nv_fp8_e5m2* dstBase, size_t dstDispl, size_t count);
+#endif
 
 #endif  /* _NCCL_DEVICE_WRAPPER_H_ */

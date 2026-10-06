@@ -5,7 +5,14 @@
 #define INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
 
 #include <cstdint>
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <functional>
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 #include <limits>
 #include <map>
 #include <memory>

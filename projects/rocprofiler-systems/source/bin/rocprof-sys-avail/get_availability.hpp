@@ -8,11 +8,10 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
-#include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/type_list.hpp>
@@ -35,11 +34,11 @@ struct component_value_type
 template <has_value_type Type>
 struct component_value_type<Type>
 {
-    using type = typename Type::value_type;
+    using type = Type::value_type;
 };
 
 template <typename Type>
-using component_value_type_t = typename component_value_type<Type>::type;
+using component_value_type_t = component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
@@ -68,7 +67,7 @@ struct get_availability<type_list<Types...>>
 
     static data_type get_info(data_type& _v)
     {
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace_back(get_availability<Types>::get_info()));
+        (_v.emplace_back(get_availability<Types>::get_info()), ...);
         return _v;
     }
 
@@ -93,33 +92,36 @@ get_availability<Type>::get_info()
 {
     using namespace tim;
     using value_type     = component_value_type_t<Type>;
-    using category_types = typename trait::component_apis<Type>::type;
+    using category_types = trait::component_apis<Type>::type;
 
-    auto _cleanup = [](std::string _type, const std::string& _pattern) {
+    auto const _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.erase(_pos, _pattern.length());
+        }
         return _type;
     };
-    auto _replace = [](std::string _type, const std::string& _pattern,
-                       const std::string& _with) {
+    auto const _replace = [](std::string _type, const std::string& _pattern,
+                             const std::string& _with) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.replace(_pos, _pattern.length(), _with);
+        }
         return _type;
     };
 
-    bool has_metadata   = metadata_t::specialized();
-    bool has_properties = property_t::specialized();
-    bool is_available   = trait::is_available<Type>::value;
-    bool file_output    = trait::generates_output<Type>::value;
-    auto name           = component::metadata<Type>::name();
-    auto label          = (file_output)
-                              ? ((has_metadata) ? metadata_t::label() : Type::get_label())
-                              : std::string("");
-    auto description =
-        (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = rocprofsys::utility::demangle<value_type>();
+    bool const has_metadata   = metadata_t::specialized();
+    bool const has_properties = property_t::specialized();
+    bool const is_available   = trait::is_available<Type>::value;
+    bool const file_output    = trait::generates_output<Type>::value;
+    auto const name           = component::metadata<Type>::name();
+    auto const label          = file_output
+                                    ? (has_metadata ? metadata_t::label() : Type::get_label())
+                                    : std::string("");
+    auto description = has_metadata ? metadata_t::description() : Type::get_description();
+    auto data_type   = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
     string_t id_type   = property_t::id();
     auto     ids_set   = property_t::ids();
@@ -133,8 +135,8 @@ get_availability<Type>::get_info()
     string_t ids_str = {};
     {
         auto     itr = ids_set.begin();
-        string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
-        string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
+        string_t db  = markdown ? "`\"" : csv ? "" : "\"";
+        string_t de  = markdown ? "\"`" : csv ? "" : "\"";
         if(has_metadata)
         {
             description += ". " + metadata_t::extra_description();
@@ -157,9 +159,9 @@ get_availability<Type>::get_info()
         }
     }
 
-    string_t categories = get_categories(category_types{});
-    description         = _replace(_replace(description, ". .", "."), "..", ".");
-    data_type           = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
+    string_t const categories = get_categories(category_types{});
+    description               = _replace(_replace(description, ". .", "."), "..", ".");
+    data_type                 = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
     return info_type{ name, is_available,
                       str_vec_t{ data_type, enum_type, id_type, ids_str, label,
                                  description, categories } };

@@ -1,0 +1,7 @@
+/lib/
+/include/nccl.h
+/include/nccl_device.h
+/include/nccl_device
+/include/gpunetio
+/gpunetio/build*/
+/perftest/build*/

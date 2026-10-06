@@ -13,12 +13,15 @@ include(GoogleTest)
 
 set(rocprofiler_lib_sources
     agent.cpp
+    agent_mapping.cpp
+    parse_gfx_target_version_test.cpp
     buffer.cpp
     contexts.cpp
     enum_string.cpp
     hsa.cpp
     late_start.cpp
     naming.cpp
+    queue_controller.cpp
     queue_interposition.cpp
     timestamp.cpp
     version.cpp
