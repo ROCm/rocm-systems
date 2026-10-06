@@ -334,3 +334,21 @@ def test_encode_marker_name_wrap_chars():
     assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
     assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
     assert encode_marker_name("aten::addmm") == "aten::addmm"
+
+
+def test_compose_marker_python_wrap_wire():
+    from utils.inject_roctx.core import compose_marker
+
+    expected = (
+        "nn.Module.Linear.forward:simple_net.py:51"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=n/a|torch"
+    )
+    assert (
+        compose_marker("nn.Module.Linear.forward", "simple_net.py:51", backend="torch")
+        == expected
+    )
+    empty_backend = compose_marker(
+        "nn.Module.Linear.forward", "simple_net.py:51", backend=""
+    )
+    assert empty_backend.endswith("args=n/a")
+    assert not empty_backend.endswith("args=n/a|")
