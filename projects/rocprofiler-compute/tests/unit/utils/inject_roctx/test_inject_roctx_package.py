@@ -359,3 +359,12 @@ def test_encode_args_wrap_delimiters():
 
     assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
     assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
+
+
+def test_cap_args_balanced_parens():
+    from utils.inject_roctx.marker_format import cap_args
+
+    assert cap_args("x" * 512) == "x" * 512
+    assert cap_args("x" * 513).endswith("...")
+    blob = "(" + "float32[2x4], " * 40 + ")"
+    assert cap_args(blob).endswith("...)")
