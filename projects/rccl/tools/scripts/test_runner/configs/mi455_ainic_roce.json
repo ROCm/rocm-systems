@@ -6088,7 +6088,7 @@
       "timeout": 300,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
