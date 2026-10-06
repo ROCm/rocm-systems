@@ -101,6 +101,16 @@ static ncclIbCastUBMA ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* crea
     return useHighUdma ? ncclIbCastUBMAHigh : ncclIbCastUBMALow;
   }
 
+  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
+    // When only one sharing group exists, alternate UDMA engine per QP within
+    // the group so both DMA engines are utilized.  With multiple groups the
+    // existing per-group alternation already distributes across engines.
+    int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
+                        ? createQpAttrs->qpIdx
+                        : createQpAttrs->qpSharingGroupIdx;
+    return (udmaSelector % 2 == 0) ? ncclIbCastUBMALow : ncclIbCastUBMAHigh;
+  }
+  
   enum ncclIbChannelType channelType =
     createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts;
   ncclChannelToUd* channelToUd =
@@ -544,22 +554,12 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   // device lock from selection through ibv_create_qp so concurrent creators
   // cannot overwrite the mask, and so policy 0's channel map stays consistent.
   std::lock_guard<std::mutex> lock(IbCastDevs[createQpAttrs->ibDevN].mutex);
-  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
-    // When only one sharing group exists, alternate UDMA engine per QP within
-    // the group so both DMA engines are utilized.  With multiple groups the
-    // existing per-group alternation already distributes across engines.
-    int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
-                        ? createQpAttrs->qpIdx
-                        : createQpAttrs->qpSharingGroupIdx;
-    uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
-  } else {
-    enum ncclIbCastUBMA udma_id = ncclIbCastSelectUDMA(createQpAttrs);
-    if (udma_id == ncclIbCastUBMAHigh) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-    } else if (udma_id == ncclIbCastUBMALow) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-    }
+
+  enum ncclIbCastUBMA udma_id = ncclIbCastSelectUDMA(createQpAttrs);
+  if (udma_id == ncclIbCastUBMAHigh) {
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
+  } else if (udma_id == ncclIbCastUBMALow) {
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
