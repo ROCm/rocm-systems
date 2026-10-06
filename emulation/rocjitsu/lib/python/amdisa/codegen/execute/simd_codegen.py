@@ -3160,9 +3160,9 @@ def _simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->b32 VOP3
-        # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
-        # so routing through the existing cvt glue is bit-exact. The b32->f64
+        # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->integer
+        # bodies apply ABS/NEG to the source, so their functor does too; they
+        # take no output modifiers. The b32->f64
         # bodies apply OMOD and CLAMP, so they use the glue only without them. (A symmetric
         # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
         # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
@@ -3177,6 +3177,12 @@ def _simd_probe_line(
             if base in _VOP3_UNARY_SKIP:
                 return None
             out_t, cpp_op = speccvtoutv3
+            if base in ('v_cvt_i32_f64', 'v_cvt_u32_f64'):
+                cpp_op = (
+                    '[&inst](auto s) { return ('
+                    + cpp_op
+                    + ')(amdgpu::apply_vop3_src_mod_f64<0>(s, inst.inst_.abs, inst.inst_.neg)); }'
+                )
             return f'  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});'
         speccvtinv3 = SIMD_CVT_B32_TO_F64.get(base + '_vop1')
         if speccvtinv3 is not None:

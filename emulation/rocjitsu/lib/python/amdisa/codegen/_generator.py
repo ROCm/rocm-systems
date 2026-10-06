@@ -52,6 +52,7 @@ from amdisa.fieldless_policy import (
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    F64_TO_INTEGER_DTYPES,
     InstructionSemantics,
     SemanticsSpec,
 )
@@ -6386,8 +6387,8 @@ class CodeGenerator:
                     'f64_i32',
                     'f64_u32',
                 )
-                is_f32_to_integer = (
-                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                is_float_to_integer = cls == 'vector_unary' and dtype in (
+                    F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
                 )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
@@ -6397,7 +6398,7 @@ class CodeGenerator:
                     and (
                         is_float_op
                         or is_integer_to_float
-                        or is_f32_to_integer
+                        or is_float_to_integer
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -6409,9 +6410,9 @@ class CodeGenerator:
                     if has_abs and not is_integer_to_float:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields and not is_f32_to_integer:
+                    if 'clamp' in inst_fields and not is_float_to_integer:
                         ef.add('clamp')
-                    if 'omod' in inst_fields and not is_f32_to_integer:
+                    if 'omod' in inst_fields and not is_float_to_integer:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand

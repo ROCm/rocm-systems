@@ -617,6 +617,36 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
         assert cpp.index(modifiers) < cpp.index('util::f32_to_f16_rtz')
 
 
+@pytest.mark.parametrize('op', ['u16_f32', 'i16_f32'])
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_cvt_pk',
+        op,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    for source in (0, 1):
+        modifiers = (
+            f'f{source} = amdgpu::source_modifier::apply_to_float('
+            f'f{source}, {source}, {abs_field}, inst_.neg);'
+        )
+        assert modifiers in cpp
+        assert cpp.index(modifiers) < cpp.index('std::clamp(f0')
+
+
+@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
+def test_f64_to_integer_simd_applies_source_modifiers(name):
+    vop3 = simd_probe_line(f'{name}_vop3')
+    modifiers = 'amdgpu::apply_vop3_src_mod_f64<0>(s, inst.inst_.abs, inst.inst_.neg)'
+    assert vop3.startswith('  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(')
+    assert modifiers in vop3
+    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
+
+
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
 @pytest.mark.parametrize('op', ['u16', 'i16'])
 @pytest.mark.parametrize('has_abs', [False, True])

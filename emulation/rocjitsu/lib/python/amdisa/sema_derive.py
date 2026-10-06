@@ -36,6 +36,7 @@ from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    F64_TO_INTEGER_DTYPES,
     is_float_relation,
 )
 
@@ -1151,6 +1152,10 @@ class _VectorUnary(_ScalarDeriver):
                         _cast(_src(0, SemaType.F32), SemaType.F32),
                     ),
                 )
+            elif dtype in F64_TO_INTEGER_DTYPES:
+                # Expose the floating source to VOP3 modifier enrichment; the
+                # conversion helper takes the decoded double.
+                src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             float_result = {
                 'f32_f16': SemaType.F32,
                 'f32_i32': SemaType.F32,

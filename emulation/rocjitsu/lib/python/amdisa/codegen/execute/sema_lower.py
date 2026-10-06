@@ -1438,12 +1438,13 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
-    'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
+    # The decoded F64 source includes ABS/NEG.
+    'cvt_i32_f64': '[&]() -> uint32_t {{ double s = {0};'
     ' if (std::isnan(s)) return 0;'
     ' if (s >= 2147483648.0) return static_cast<uint32_t>(INT32_MAX);'
     ' if (s < -2147483648.0) return static_cast<uint32_t>(INT32_MIN);'
     ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
-    'cvt_u32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
+    'cvt_u32_f64': '[&]() -> uint32_t {{ double s = {0};'
     ' if (std::isnan(s) || s < 0.0) return 0u;'
     ' if (s >= 4294967296.0) return UINT32_MAX;'
     ' return static_cast<uint32_t>(s); }}()',

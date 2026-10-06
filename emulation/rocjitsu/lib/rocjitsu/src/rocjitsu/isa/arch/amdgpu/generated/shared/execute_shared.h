@@ -9213,8 +9213,7 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
           if (std::isnan(s))
             return 0;
           if (s >= 2147483648.0)
@@ -9229,9 +9228,11 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
-    auto r = util::cvt_i32_f64_saturate_input_simd(s);
-    return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [&inst](auto s) {
+    return ([](auto s) {
+      auto r = util::cvt_i32_f64_saturate_input_simd(s);
+      return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
+    })(amdgpu::apply_vop3_src_mod_f64<0>(s, inst.inst_.abs, inst.inst_.neg));
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9239,8 +9240,11 @@ inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = [&]() {
+            double sv =
+                std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
+          }();
           if (std::isnan(s))
             return 0;
           if (s >= 2147483648.0)
@@ -10009,8 +10013,7 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
           if (std::isnan(s) || s < 0.0)
             return 0u;
           if (s >= 4294967296.0)
@@ -10023,9 +10026,11 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
-    auto r = util::cvt_u32_f64_saturate_input_simd(s);
-    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [&inst](auto s) {
+    return ([](auto s) {
+      auto r = util::cvt_u32_f64_saturate_input_simd(s);
+      return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
+    })(amdgpu::apply_vop3_src_mod_f64<0>(s, inst.inst_.abs, inst.inst_.neg));
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -10033,8 +10038,11 @@ inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = [&]() {
+            double sv =
+                std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
+          }();
           if (std::isnan(s) || s < 0.0)
             return 0u;
           if (s >= 4294967296.0)

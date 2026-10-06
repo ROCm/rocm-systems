@@ -1567,6 +1567,9 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
+            if is_vop3:
+                L.extend(vop3_src_mod('f0', 0, has_abs))
+                L.extend(vop3_src_mod('f1', 1, has_abs))
             if op == 'u16_f32':
                 L.append(
                     '    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));'

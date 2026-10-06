@@ -2585,6 +2585,56 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// VOP3 ABS/NEG apply to the floating source of a float-to-integer conversion.
+// Results are gfx1201 captures under MODE 0xf0.
+std::vector<ArithmeticCase> conversion_source_modifier_cases() {
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     {{6, result}},
+                     0xf0u,
+                     FE_TONEAREST});
+  };
+  const auto f64 = [](uint64_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, uint32_t(bits)},
+                                                      {1, uint32_t(bits >> 32)}};
+  };
+  const auto i32_f64 = [](uint8_t abs, uint8_t neg) {
+    return rdna4::build_vop3(rdna4::kVCvtI32F64Vop3,
+                             {.vdst = 6, .abs = abs, .src0 = 256, .neg = neg});
+  };
+  const auto u32_f64 = [](uint8_t abs, uint8_t neg) {
+    return rdna4::build_vop3(rdna4::kVCvtU32F64Vop3,
+                             {.vdst = 6, .abs = abs, .src0 = 256, .neg = neg});
+  };
+  add("I32F64NegOne", i32_f64(0, 1), f64(0x3ff0000000000000u), 0xffffffffu);
+  add("I32F64AbsNegative", i32_f64(1, 0), f64(0xbff8000000000000u), 1u);
+  add("I32F64AbsNegativeInfinity", i32_f64(1, 0), f64(0xfff0000000000000u), 0x7fffffffu);
+  add("U32F64NegNegative", u32_f64(0, 1), f64(0xbff0000000000000u), 1u);
+  add("U32F64NegInfinity", u32_f64(0, 1), f64(0x7ff0000000000000u), 0u);
+  add("U32F64AbsNegative", u32_f64(1, 0), f64(0xc1e0000000000000u), 0x80000000u);
+
+  const auto pk = [](uint16_t op, uint8_t abs, uint8_t neg) {
+    return rdna4::build_vop3(op, {.vdst = 6, .abs = abs, .src0 = 256, .src1 = 257, .neg = neg});
+  };
+  const auto pair = [](uint32_t low, uint32_t high) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, low}, {1, high}};
+  };
+  add("PkI16F32NegLow", pk(rdna4::kVCvtPkI16F32Vop3, 0, 1), pair(0x3f800000u, 0u), 0x0000ffffu);
+  add("PkI16F32NegLowInfinity", pk(rdna4::kVCvtPkI16F32Vop3, 0, 1), pair(0x7f800000u, 0u),
+      0x00008000u);
+  add("PkI16F32AbsHigh", pk(rdna4::kVCvtPkI16F32Vop3, 2, 0), pair(0u, 0xbf800000u), 0x00010000u);
+  add("PkU16F32NegLow", pk(rdna4::kVCvtPkU16F32Vop3, 0, 1), pair(0xbf800000u, 0u), 1u);
+  add("PkU16F32NegLowInfinity", pk(rdna4::kVCvtPkU16F32Vop3, 0, 1), pair(0xff800000u, 0u),
+      0x0000ffffu);
+  add("PkU16F32AbsHigh", pk(rdna4::kVCvtPkU16F32Vop3, 2, 0), pair(0u, 0xc0000000u), 0x00020000u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2826,6 +2876,23 @@ INSTANTIATE_TEST_SUITE_P(MinmaxInputFlush, ValuMinmaxFpModeTest,
 
 INSTANTIATE_TEST_SUITE_P(MinmaxOutputModifiers, ValuMinmaxFpModeTest,
                          testing::ValuesIn(minmax_output_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuConversionTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuConversionTest, MatchesGfx1201OnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(SourceModifiers, ValuConversionTest,
+                         testing::ValuesIn(conversion_source_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

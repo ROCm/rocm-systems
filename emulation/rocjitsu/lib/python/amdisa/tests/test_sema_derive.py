@@ -917,6 +917,21 @@ class TestDeriveVectorUnary:
             assert 'inst_.clamp' not in cpp
             assert cpp.index(modifier) < cpp.index('std::isnan(s)')
 
+    @pytest.mark.parametrize('suffix', ['I32', 'U32'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_i32_u32_f64_modifiers_precede_conversion(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_{suffix}_F64', 'ENC_VOP3')
+        fields = {'neg'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        modifier = 'source_modifier::apply_to_float(sv, 0'
+        assert 'double sv = std::bit_cast<double>' in cpp
+        assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+        assert ('inst_.abs' in cpp) == has_abs
+        assert 'inst_.neg' in cpp
+
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
         sem = derive_semantics('V_COS_BF16', enc)
