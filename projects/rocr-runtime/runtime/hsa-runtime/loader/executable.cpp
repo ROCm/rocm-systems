@@ -225,19 +225,30 @@ static constexpr size_t kTrampolineStubStride =
 // and readable, which the allocation's zero-fill already guarantees.
 static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
 
+// Instruction encodings the GFX1250 start-of-kernel workaround is built from. Both
+// forms of the workaround below are spelled in terms of these, so the prefetch's two
+// SADDR spellings -- which live in the low byte of the first prefetch dword, and are
+// one of the two things separating the forms, the other being instruction order --
+// stay visible instead of being buried in duplicated literals.
+static constexpr uint32_t kGfx1250VNop = 0x7E000000;              // v_nop
+static constexpr uint32_t kGfx1250MovB64S64Zero = 0xBEC00180;     // s_mov_b64 s[64:65], 0
+// global_prefetch_b8 v0, <saddr> -- SADDR is the low byte of this first dword.
+static constexpr uint32_t kGfx1250PrefetchB8SaddrS0 = 0xEE174000;   // ... [s0, s1]
+static constexpr uint32_t kGfx1250PrefetchB8SaddrS64 = 0xEE174040;  // ... s[64:65]
+static constexpr uint32_t kGfx1250PrefetchB8Mod = 0x00040000;  // scope:SCOPE_SE th:TH_LOAD_RT
+static constexpr uint32_t kGfx1250PrefetchB8Tail = 0x00000000;  // :
+
 // The GFX1250 unclaused-VMEM workaround prologue. The compiler (SIInsertWaitcnts)
 // emits these 4 dwords -- global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE
 // th:TH_LOAD_RT followed by v_nop -- at every hardware kernel entry so the first
 // VMEM instruction is unclaused. It is exactly the sequence the entry trampoline
 // prepends, so when a kernel's entry already begins with it the trampoline would
-// only duplicate the workaround. gfx1250 encoding verified with
-// llvm-mc --mcpu=gfx1250 --show-encoding (TH_LOAD_RT is the default TH=0;
-// SCOPE_SE sets bit 0x04 in the third encoding byte).
+// only duplicate the workaround.
 static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
-    0xEE174000,  // global_prefetch_b8 v0, [s0, s1] ...
-    0x00040000,  // ... scope:SCOPE_SE th:TH_LOAD_RT
-    0x00000000,  // :
-    0x7E000000,  // v_nop
+    kGfx1250PrefetchB8SaddrS0,
+    kGfx1250PrefetchB8Mod,
+    kGfx1250PrefetchB8Tail,
+    kGfx1250VNop,
 };
 
 // The compiler's start-of-kernel workaround sequence has since changed shape. It
@@ -251,12 +262,14 @@ static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
 // kGfx1250UnclausedVmemPrologue above matches neither the order nor the prefetch's
 // SADDR field of that sequence, so on a current code object the entry scan misses
 // and the loader installs a stub for a kernel that already carries the workaround.
+// The two stay separate rather than folding into one pattern: they differ in operand
+// and in order, and the prologue array doubles as the dwords the stub itself emits.
 static constexpr uint32_t kGfx1250NullPrefetchSequence[5] = {
-    0xBEC00180,  // s_mov_b64 s[64:65], 0
-    0x7E000000,  // v_nop
-    0xEE174040,  // global_prefetch_b8 v0, s[64:65] ...
-    0x00040000,  // ... scope:SCOPE_SE th:TH_LOAD_RT
-    0x00000000,  // :
+    kGfx1250MovB64S64Zero,
+    kGfx1250VNop,
+    kGfx1250PrefetchB8SaddrS64,
+    kGfx1250PrefetchB8Mod,
+    kGfx1250PrefetchB8Tail,
 };
 
 // The compiler also enables multi-group replay mode on every gfx125x wave by
