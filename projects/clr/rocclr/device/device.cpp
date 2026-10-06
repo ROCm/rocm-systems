@@ -6,7 +6,6 @@
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
-#include "utils/flags.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
 
