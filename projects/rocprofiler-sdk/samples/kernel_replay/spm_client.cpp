@@ -25,6 +25,7 @@ rocprofiler_context_id_t g_replay_ctx{0};
 rocprofiler_context_id_t g_counters_ctx{0};
 rocprofiler_context_id_t g_spm_ctx{0};
 rocprofiler_kernel_id_t  g_target_kernel = UINT64_MAX;
+thread_local uint64_t    tl_pass         = 0;
 
 std::atomic<int> g_counter_records{0};
 std::atomic<int> g_spm_records{0};
@@ -49,13 +50,11 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         return;
     }
 
-    if(record.operation != ROCPROFILER_KERNEL_REPLAY_PASS ||
-       record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER)
-        return;
-
-    const bool counters = p->current_pass != kSpmPass;
-    KR_CHECK((counters ? p->replay_start_context : p->replay_stop_context)(g_counters_ctx));
-    KR_CHECK((counters ? p->replay_stop_context : p->replay_start_context)(g_spm_ctx));
+    // Each pass is submitted on this thread right after this callback, so the dispatch callbacks
+    // below read the pass from here to decide which service collects on it.
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        tl_pass = p->current_pass;
 }
 
 void
@@ -64,7 +63,7 @@ counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
                     rocprofiler_user_data_t*,
                     void*)
 {
-    if(d.dispatch_info.kernel_id != g_target_kernel)
+    if(d.dispatch_info.kernel_id != g_target_kernel || tl_pass == kSpmPass)
     {
         *config = rocprofiler_counter_config_id_t{.handle = 0};
         return;
@@ -88,7 +87,7 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
                 rocprofiler_user_data_t*,
                 void*)
 {
-    if(!data || data->dispatch_info.kernel_id != g_target_kernel)
+    if(!data || data->dispatch_info.kernel_id != g_target_kernel || tl_pass != kSpmPass)
     {
         *config = rocprofiler_counter_config_id_t{.handle = 0};
         return;

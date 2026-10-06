@@ -129,9 +129,10 @@ every dispatch-scoped service calls the tool's own dispatch callback for each re
 that thread, while the pass is current. A tool publishes `current_pass` at `PASS` `PHASE_ENTER` (for
 example in thread-local state), withdraws it at `PHASE_EXIT`, and lets each dispatch callback decide
 from it: return no counter configuration, or `ROCPROFILER_THREAD_TRACE_CONTROL_NONE` for thread
-trace, on a pass that service should skip. This is the same contract as kernel replay's; see the
-[kernel replay callback API](../kernel_replay/kernel_replay_callback_api.md). PC sampling and device
-counting are agent-wide rather than dispatch-scoped: they collect on every pass.
+trace, on a pass that service should skip. This is the same contract as kernel replay's; see
+[Kernel replay — selecting services per pass](../kernel_replay/kernel_replay_callback_api.md#selecting-services-per-pass).
+PC sampling and device counting are agent-wide rather than dispatch-scoped: they collect on every
+pass.
 
 The one behavioral difference follows from pass 0 being the application's: its dispatches run before
 any `PASS` callback, so they reach the dispatch callbacks with no pass published. A tool that wants a

@@ -37,10 +37,10 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 # handed its path, and skip them when it is absent.
 rocprofiler_sdk_find_trace_decoder()
 
-# PC sampling is agent-wide and does not consult localized pass overrides yet. Samples
-# that assign counters and PC sampling to different replay passes still run both on every
-# pass and can hit the MI2xx/MI3xx clock-gating conflict. Keep those ctests disabled until
-# the service honors local_context_override() at collection time.
+# PC sampling is agent-wide and has no dispatch callback to select replay passes with, so
+# once started it samples every pass. Samples that give counters and PC sampling different
+# replay passes still run both on the counter passes and can hit the MI2xx/MI3xx
+# clock-gating conflict, so keep those ctests disabled.
 set(KR_PC_SAMPLING_PASS_PARTITION_UNSUPPORTED ON)
 
 function(add_kernel_replay_sample NAME CLIENT_SRC)

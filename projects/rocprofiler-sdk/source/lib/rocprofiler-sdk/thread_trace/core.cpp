@@ -37,7 +37,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #ifndef _WIN32
@@ -571,12 +570,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     // untraced one: with SERIALIZE_ALL it must still take the barriers, or it overlaps a traced
     // dispatch that is still running. Once serialization is disabled the serializer ignores it.
     if(!enabled.load(std::memory_order_acquire)) return {nullptr, parameters.bSerialize};
-
-    // Kernel-replay localized context control: a replay pass may disable this ATT context for the
-    // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
-    // loop. See kernel_replay/local_context.hpp.
-    if(auto ov = kernel_replay::local_context_override(parameters.context_id); ov && !*ov)
-        return {nullptr, parameters.bSerialize};
 
     auto control_flags = parameters.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
                                                    queue.get_id(),

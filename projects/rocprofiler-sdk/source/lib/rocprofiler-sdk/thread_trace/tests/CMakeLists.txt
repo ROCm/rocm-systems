@@ -3,7 +3,7 @@ rocprofiler_deactivate_clang_tidy()
 include(GoogleTest)
 
 set(ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES
-    "att_packet_test.cpp" "local_context.cpp" "kfd_resource_test.cpp")
+    "att_packet_test.cpp" "serialization_test.cpp" "kfd_resource_test.cpp")
 
 add_executable(thread-trace-packet-test)
 

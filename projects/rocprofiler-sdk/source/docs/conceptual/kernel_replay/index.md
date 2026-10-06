@@ -38,7 +38,6 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
         |
         +-- kernel_replay/
         |     replay_callbacks.cpp      CONFIG + PASS callbacks, pass-count/continue decisions
-        |     local_context.cpp         per-pass localized context control (thread-local overrides)
         |     memory_tracker.cpp        HSA allocate/free hooks, per-agent allocation inventory
         |     memory_snapshot.cpp       snap()/restore(), module-scope variable capture
         |     utils.cpp                 trackable-allocation classifier
@@ -47,8 +46,8 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
 ```
 
 Because replay is a callback tracing service rather than a counter-collection mode, it is not tied to
-hardware counters. A tool decides what each pass is for and, through localized context control, which
-of its services are active on which pass. `rocprofv3` uses that to collect every `--pmc` group in one
+hardware counters. A tool decides what each pass is for and, in each service's own dispatch callback,
+which of its services collect on which pass. `rocprofv3` uses that to collect every `--pmc` group in one
 run (`--replay-mode kernel --kernel-replay-beta-enabled`; {ref}`using-kernel-replay-rocprofv3`). A custom tool can use the
 same domain for timing, PC sampling, or thread trace.
 
@@ -62,7 +61,7 @@ same domain for timing, PC sampling, or thread trace.
 
 - **[Callback API and tool configuration](kernel_replay_callback_api.md)** — the public API surface:
   the `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` domain, its two operations, the payload struct,
-  pass-count semantics, localized context control, and how a tool configures replay.
+  pass-count semantics, selecting services per pass, and how a tool configures replay.
 - **[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md)** — how the
   snapshot-to-restore window is isolated: the per-agent reader/writer lock, the agent-wide drain,
   agent-scoped snapshots, the async completion handler drain, the bounded-wait and abort convention,

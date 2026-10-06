@@ -351,4 +351,4 @@ configure function. Cast ``record.payload`` to
 ``rocprofiler_callback_tracing_kernel_replay_data_t*``.
 
 See :ref:`kernel-replay-sdk-api` for the tool-author walkthrough and
-:ref:`kernel-replay-callback-api` for pass-count semantics and localized context control.
+:ref:`kernel-replay-callback-api` for pass-count semantics and selecting services per pass.

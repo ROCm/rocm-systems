@@ -53,12 +53,6 @@ typedef int (*rocprofiler_kernel_replay_continue_cb_t)(
     rocprofiler_user_data_t            user_data);
 
 /**
- * @brief SDK-provided callback marking a context enabled or disabled for the current replay loop.
- */
-typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
-    rocprofiler_context_id_t context_id);
-
-/**
  * @brief ROCProfiler Kernel Replay Callback Tracer Record.
  *
  * Payload for @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY callbacks.
@@ -90,6 +84,16 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * pointed-to object is visible from every callback, whereas overwriting the union value is
  * per-pass. See `samples/kernel_replay/basic_client_with_user_data.cpp` for a worked example.
  *
+ * Each pass is submitted through the queue interceptor on the thread that received its PASS
+ * @ref ROCPROFILER_CALLBACK_PHASE_ENTER, before its PASS @ref ROCPROFILER_CALLBACK_PHASE_EXIT, so
+ * every dispatch-scoped service calls the tool's own dispatch callback once per pass, on that
+ * thread. That callback is where a tool selects what a pass collects: leave the counter
+ * configuration unset (dispatch counting, SPM) or return @c ROCPROFILER_THREAD_TRACE_CONTROL_NONE
+ * (dispatch thread trace) on a pass the service should skip, keyed on the pass index the tool
+ * published from PASS PHASE_ENTER (for example in thread-local state). Kernel dispatch tracing
+ * reports every pass. PC sampling and device counting are agent-wide rather than dispatch-scoped,
+ * so they collect across every pass. See `samples/kernel_replay/att_client.cpp`.
+ *
  * Exactly one context may configure a KERNEL_REPLAY service; a second
  * @ref rocprofiler_configure_callback_tracing_service for this domain returns
  * @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED.
@@ -120,8 +124,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     uint64_t                                  total_passes;
     rocprofiler_kernel_replay_pass_count_cb_t replay_pass_count;
     rocprofiler_kernel_replay_continue_cb_t   replay_continue;
-    rocprofiler_kernel_replay_context_cb_t    replay_start_context;
-    rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -158,29 +160,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// @var total_passes
     /// @brief [PASS] Total passes if known (the value passed to @c replay_pass_count),
     /// else 0. Read-only.
-    ///
-    /// @var replay_start_context
-    /// @var replay_stop_context
-    /// @brief [PASS] Per-pass context enable/disable mask. The SDK populates these function
-    /// pointers before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool calls them
-    /// to mark an already-active context enabled or disabled for the current replay loop
-    /// only. They record overrides in a thread-scoped map and do **not** invoke global
-    /// @ref rocprofiler_start_context / @ref rocprofiler_stop_context. Semantics:
-    ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
-    ///  - Sticky across passes: a context disabled in one pass stays disabled until it
-    ///    is enabled again within the same replay loop (and vice versa). A tool therefore
-    ///    positions a context once rather than re-issuing the same mask every pass.
-    ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
-    ///    is restored once the loop completes. Global context state is never modified.
-    ///  - A local enable only undoes a prior local disable; it cannot promote a context that is
-    ///    globally inactive (its service/callback thread may already be stopped).
-    ///  - Coverage varies by service. Kernel dispatch tracing and dispatch thread trace
-    ///    observe a local stop only: they skip a dispatch whose context is forced off, and
-    ///    have no means to add a context that is not already collecting. Dispatch counter
-    ///    collection and SPM consult the override on every dispatch (and likewise refuse to
-    ///    promote a globally stopped context). PC sampling is agent-wide and device counting
-    ///    is not dispatch-scoped, so neither consults the override at all -- a call naming
-    ///    such a context reports success but has no effect.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */

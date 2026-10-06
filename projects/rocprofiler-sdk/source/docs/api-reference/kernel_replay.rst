@@ -31,9 +31,9 @@ device memory between those executions so each pass observes identical inputs. I
    * A drain that does not complete within roughly 60 seconds aborts the process rather than
      hanging.
 
-For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
-pass-count semantics, localized context control, and source maps, see
-:ref:`kernel-replay-callback-api`.
+For the configure / ``replay_pass_count`` / per-pass service selection how-to, see
+:ref:`using-kernel-replay`. For pass-count semantics, selecting services per pass, and source maps,
+see :ref:`kernel-replay-callback-api`.
 
 This page is the tool-author counterpart of :ref:`rocprofiler_sdk_callback_tracing_services`: how to
 subscribe, what the payload contains, and how replay interacts with dispatch counting.
@@ -83,8 +83,8 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - Replay of this dispatch has finished (or was declined).
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_ENTER``
-     - Read ``current_pass`` / ``total_passes``. Optionally call
-       ``replay_start_context`` / ``replay_stop_context``.
+     - Read ``current_pass`` / ``total_passes``. Publish the pass for the tool's service dispatch
+       callbacks, which run on this thread during the pass.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
      - Pass complete; ``replay_continue`` (if set) runs after this.
@@ -122,22 +122,20 @@ Replay does **not** replace dispatch counting. Typical pattern:
 4. In the dispatch-counting callback, select the counter config for that pass.
 5. Clear the thread-local pass index on PASS ``PHASE_EXIT``.
 
-To run SPM or thread trace on only some passes, put those services on their own contexts and stop or
-start them with the localized toggles during PASS ``PHASE_ENTER``. Which services honor a toggle
-varies:
+SPM and thread trace are placed on passes the same way, from their own dispatch callbacks: the SPM
+callback leaves the counter configuration unset on a pass it should skip, and the thread trace
+callback returns ``ROCPROFILER_THREAD_TRACE_CONTROL_NONE``. Services without a dispatch callback
+cannot be placed on passes:
 
-* Dispatch counter collection and SPM consult the override on every dispatch, so they can be placed
-  on specific passes.
-* Kernel dispatch tracing and dispatch thread trace observe a local *stop* only: they skip a
-  dispatch whose context is forced off, but cannot be added to a context that is not already
-  collecting.
-* PC sampling is agent-wide and device counting is not dispatch-scoped, so neither consults the
-  override. A toggle naming such a context reports success and has no effect.
+* Kernel dispatch tracing reports every pass, each record under the shared ``dispatch_id`` with its
+  own timestamps.
+* PC sampling is agent-wide and device counting is not dispatch-scoped, so both collect across every
+  pass.
 
-Because PC sampling ignores the override, it cannot be isolated from dispatch counters by putting
-them on separate passes, and the two must not be combined under replay: on MI2xx and MI3xx,
-collecting them together hits the documented clock-gating conflict. ``rocprofv3`` does not expose
-SPM or PC sampling together with kernel replay — that requires a custom tool. Do not call the global
+Because PC sampling runs on every pass, it cannot be isolated from dispatch counters by putting them
+on separate passes, and the two must not be combined under replay: on MI2xx and MI3xx, collecting
+them together hits the documented clock-gating conflict. ``rocprofv3`` does not expose SPM or PC
+sampling together with kernel replay — that requires a custom tool. Do not call the global
 ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
 leak into non-replayed dispatches.
 
@@ -154,7 +152,7 @@ There is no separate ``kernel_replay_service`` Doxygen group.
 See also
 --------
 
-* :ref:`using-kernel-replay` — configure, ``replay_pass_count``, local context
+* :ref:`using-kernel-replay` — configure, ``replay_pass_count``, per-pass service selection
 * :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --replay-mode kernel --kernel-replay-beta-enabled``
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model

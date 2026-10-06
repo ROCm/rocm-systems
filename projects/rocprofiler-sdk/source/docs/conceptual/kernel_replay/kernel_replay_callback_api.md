@@ -67,10 +67,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     // [PASS] read-only, populated by the SDK
     uint64_t current_pass;    // 0-indexed
     uint64_t total_passes;    // 0 for an indefinite loop
-
-    // [PASS] SDK-provided; the tool calls these during PASS PHASE_ENTER
-    rocprofiler_kernel_replay_context_cb_t replay_start_context;
-    rocprofiler_kernel_replay_context_cb_t replay_stop_context;
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 ```
 
@@ -156,44 +152,63 @@ collected data -- a target sample count, a convergence check -- needs a fallback
 the data never satisfies it. A tool that cannot make that guarantee should return a fixed `N > 1`
 and stop early with `replay_continue` instead, which is bounded by construction.
 
-## Localized context control
+## Selecting services per pass
 
-Tools frequently want different services active on different passes — for example collect hardware
-counters on passes 0..N-2 and kernel dispatch timing on the last pass only. Calling the global
+Tools frequently want different services active on different passes — for example a different
+counter group on each pass, or thread trace on one pass only. Calling the global
 `rocprofiler_start_context()` / `rocprofiler_stop_context()` would leak those changes into other,
-non-replayed dispatches. Instead the tool calls the localized enable/disable callbacks delivered in
-the `PASS` payload:
+non-replayed dispatches, and the SDK offers no per-pass context mask. It does not need one: every
+service is driven by an explicit queue hook, and each pass is a separate submit through those
+hooks, so every dispatch-scoped service already asks the tool once per pass, through the tool's own
+dispatch callback, what to collect. That callback is the per-pass switch:
+
+| Service | Dispatch callback | Skip this pass by |
+|---|---|---|
+| Dispatch counter collection | `rocprofiler_dispatch_counting_service_cb_t` | leaving the counter configuration unset |
+| SPM | `rocprofiler_spm_dispatch_counting_service_cb_t` | leaving the counter configuration unset |
+| Dispatch thread trace | `rocprofiler_thread_trace_dispatch_callback_t` | returning `ROCPROFILER_THREAD_TRACE_CONTROL_NONE` |
+
+The callback needs the pass index, which the `PASS` payload carries and the service payloads do
+not. Because the replay loop runs synchronously on the submitting thread, the tool publishes
+`current_pass` in thread-local state during `PASS` `PHASE_ENTER` and its dispatch callbacks read
+it, exactly as the `publish_current_pass()` example under *Configuring the service* below does for
+counter groups. Withdraw it at `PASS` `PHASE_EXIT` so ordinary dispatches never observe a stale
+pass:
 
 ```c
-payload->replay_stop_context(my_timing_ctx);
+rocprofiler_thread_trace_control_flags_t
+tool_att_dispatch_callback(rocprofiler_agent_id_t             agent_id,
+                           rocprofiler_queue_id_t             queue_id,
+                           rocprofiler_async_correlation_id_t correlation_id,
+                           rocprofiler_kernel_id_t            kernel_id,
+                           rocprofiler_dispatch_id_t          dispatch_id,
+                           void*                              userdata_config,
+                           rocprofiler_user_data_t*           userdata_shader)
+{
+    // trace only the last pass of the replayed dispatch
+    return (current_pass() == last_pass) ? ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP
+                                         : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+}
 ```
 
-Contexts are configured and started **globally before replay** (outside the replay callbacks).
-The localized enable/disable calls only mask which of those already-active contexts participate in
-each pass; they do not create contexts, do not invoke global start/stop, and never mutate global
-state.
+A record produced by a pass can be attributed to it through the dispatch's `user_data`: the
+counting and SPM dispatch callbacks receive a `rocprofiler_user_data_t*` that the SDK hands back
+with that dispatch's records, so a tool can store the pass there (``rocprofv3`` does this).
 
-Semantics:
-
-- **Only legal during `PASS` `PHASE_ENTER`.** Calls made outside that window return
-  `ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR` and record nothing.
-- **Sticky across passes.** A context disabled in one pass stays disabled until it is enabled again
-  within the same replay loop, and vice versa.
-- **Scoped to the replay loop.** Each context's pre-replay active or inactive state is in effect
-  again once the loop completes.
+Services that are not dispatch-scoped have no such callback. **Kernel dispatch tracing** reports
+every pass; its records carry the shared `dispatch_id` and the pass's own timestamps, so a tool
+that wants one of them keeps or drops it per pass itself. **PC sampling** and **device counting**
+are agent-wide: once their contexts are started they collect across every pass.
 
 **Service combination limits.** Dispatch counter collection and PC sampling are mutually exclusive
 on MI2xx/MI3xx when both would run on the **same** replay pass (clock gating). ATT and SPM cannot
-safely share one pass because both inject AQL instrumentation. Use separate passes and separate
-contexts — locally stop one service before starting another — for services that **consult** the
-override map at dispatch time (dispatch counters, SPM, kernel dispatch tracing, and dispatch thread
-trace). PC sampling and device counting are agent-wide today and **ignore** localized toggles, so
-they keep collecting on every pass even when a tool records a local stop. Do not combine dispatch
-counter collection with PC sampling under replay until PC sampling honors localized overrides.
+safely share one pass because both inject AQL instrumentation. Give such services separate passes
+by having each dispatch callback collect only on its own. PC sampling cannot be kept off a pass, so
+do not combine dispatch counter collection with PC sampling under replay.
 
 See
-[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
-for how the override map is scoped.
+[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#per-pass-service-selection-and-thread-scope)
+for why the per-thread pass state is safe while other threads keep dispatching.
 
 ### Correlation IDs across passes
 
@@ -280,7 +295,8 @@ The payload struct is documented in the `CALLBACK_TRACING_SERVICE` Doxygen group
 {ref}`callback_tracing_reference` page along with the rest of the callback tracing API. There is no
 separate kernel replay Doxygen group. A walkthrough for tool authors is
 {ref}`kernel-replay-sdk-api`. See
-{ref}`using-kernel-replay` for a configure / `replay_pass_count` / local-context how-to.
+{ref}`using-kernel-replay` for a configure / `replay_pass_count` / per-pass service selection
+how-to.
 
 ## rocprofv3 integration
 
@@ -294,7 +310,8 @@ rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled 
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. The tool derives the pass count from the number of counter groups
   collectable on the dispatch's agent and returns it from `replay_pass_count`.
-- The flag does not wire `replay_continue` or the localized start/stop context callbacks.
+- The flag does not wire `replay_continue`. Counter group `i` is selected on pass `i` by the
+  tool's dispatch counting callback.
 - Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
   application is re-run once per group.
 
@@ -316,9 +333,9 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Continue decision | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `should_continue_replay()` |
 | Dispatch info population | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `make_dispatch_info()` |
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
-| Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
 | Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
 | Tool-side flag | `source/lib/rocprofiler-sdk-tool/config.hpp` | `kernel_replay` |
 | CLI flags | `source/bin/rocprofv3.py` | `--replay-mode kernel`, `--kernel-replay-beta-enabled` |
-| Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |
+| Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `replay_phases.cpp`, `replay_abi.cpp` |
+| Per-pass selection tests | `tests/kernel-replay-pass-selection/` | `client.cpp` |
