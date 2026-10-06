@@ -7,13 +7,11 @@ metric's PMC set is co-collected. Analyze must evaluate those metrics using
 values from one qualifying pass, not a name-keyed mega-table last-write.
 """
 
-from __future__ import annotations
-
 import os
 import re
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Dict, FrozenSet, List, Mapping, Match, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -65,7 +63,7 @@ def legacy_pass_merge_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def natural_pass_sort_key(key: str) -> tuple[int | str, ...]:
+def natural_pass_sort_key(key: str) -> Tuple[Union[int, str], ...]:
     """Sort ``pmc_perf_2`` before ``pmc_perf_10``."""
     parts = _DIGIT_SPLIT_RE.split(key)
     return tuple(int(part) if part.isdigit() else part for part in parts)
@@ -75,9 +73,9 @@ def natural_pass_sort_key(key: str) -> tuple[int | str, ...]:
 class PassLayout:
     """Counters observed per profiling pass (from results, not perfmon YAML)."""
 
-    pass_keys: tuple[str, ...]
-    counters_by_pass: Mapping[str, frozenset[str]]
-    duplicated: frozenset[str]
+    pass_keys: Tuple[str, ...]
+    counters_by_pass: Mapping[str, FrozenSet[str]]
+    duplicated: FrozenSet[str]
 
     @property
     def has_duplicates(self) -> bool:
@@ -89,7 +87,7 @@ class PassLayout:
     def qualified_column(self, counter: str, pass_key: str) -> str:
         return f"{counter}{PASS_COLUMN_SEP}{pass_key}"
 
-    def passes_containing(self, counters: frozenset[str]) -> list[str]:
+    def passes_containing(self, counters: FrozenSet[str]) -> List[str]:
         return [
             pass_key
             for pass_key in self.pass_keys
@@ -97,14 +95,14 @@ class PassLayout:
         ]
 
     @classmethod
-    def empty(cls) -> PassLayout:
+    def empty(cls) -> "PassLayout":
         return cls(pass_keys=(), counters_by_pass={}, duplicated=frozenset())
 
 
 @dataclass(frozen=True)
 class MetricRowRefs:
-    direct_counters: frozenset[str]
-    builtin_vars: frozenset[str]
+    direct_counters: FrozenSet[str]
+    builtin_vars: FrozenSet[str]
 
 
 def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
@@ -112,7 +110,7 @@ def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
     if long_df.empty or PASS_KEY_COLUMN not in long_df.columns:
         return PassLayout.empty()
 
-    counters_by_pass: dict[str, frozenset[str]] = {}
+    counters_by_pass: Dict[str, FrozenSet[str]] = {}
     for pass_key, group in long_df.groupby(PASS_KEY_COLUMN, sort=False):
         counters_by_pass[str(pass_key)] = frozenset(
             str(name) for name in group["Counter_Name"].dropna().unique()
@@ -132,10 +130,10 @@ def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
     )
 
 
-def extract_row_refs(built_exprs: list[str]) -> MetricRowRefs:
+def extract_row_refs(built_exprs: List[str]) -> MetricRowRefs:
     """Collect ``raw_pmc_df`` counters and ``ammolite__`` vars from built strings."""
-    counters: set[str] = set()
-    builtins: set[str] = set()
+    counters: Set[str] = set()
+    builtins: Set[str] = set()
     for expr in built_exprs:
         if not isinstance(expr, str) or not expr:
             continue
@@ -156,7 +154,7 @@ def extract_row_refs(built_exprs: list[str]) -> MetricRowRefs:
 def expand_required_counters(
     refs: MetricRowRefs,
     gpu_series: str,
-) -> frozenset[str]:
+) -> FrozenSet[str]:
     """Direct counters plus HW counters pulled in by referenced built-ins."""
     required = set(refs.direct_counters)
     build_ins = get_build_in_vars(gpu_series)
@@ -171,11 +169,11 @@ def expand_required_counters(
     return frozenset(required)
 
 
-def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> frozenset[str]:
+def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> FrozenSet[str]:
     """Built-ins whose formulas touch a duplicated counter."""
     if not layout.has_duplicates:
         return frozenset()
-    scoped: set[str] = set()
+    scoped: Set[str] = set()
     for var_name, formula in get_build_in_vars(gpu_series).items():
         hw, _ = extract_counters_and_variables(
             formula, gpu_series, include_supported_denom=False
@@ -186,9 +184,9 @@ def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> frozenset[str]:
 
 
 def select_pass(
-    required: frozenset[str],
+    required: FrozenSet[str],
     layout: PassLayout,
-) -> str | None:
+) -> Optional[str]:
     """Choose the earliest pass (natural order) that contains every required counter."""
     if not required:
         return None
@@ -199,10 +197,10 @@ def select_pass(
 
 
 def select_pass_with_normalization_fallback(
-    required: frozenset[str],
+    required: FrozenSet[str],
     layout: PassLayout,
     gpu_series: str,
-) -> tuple[str | None, bool]:
+) -> Tuple[Optional[str], bool]:
     """Select one pass, relaxing only runtime normalization counters if needed.
 
     Returns ``(pass_key, relaxed)``. ``pass_key`` is ``None`` when no pass was
@@ -213,7 +211,7 @@ def select_pass_with_normalization_fallback(
     if chosen is not None:
         return chosen, False
 
-    normalization_counters: set[str] = set()
+    normalization_counters: Set[str] = set()
     for formula in SUPPORTED_DENOM.values():
         counters, _ = extract_counters_and_variables(
             formula,
@@ -235,7 +233,7 @@ def bind_expression(
     expr: str,
     pass_key: str,
     layout: PassLayout,
-    scoped_builtins: frozenset[str],
+    scoped_builtins: FrozenSet[str],
 ) -> str:
     """Rewrite duplicated counters and pass-scoped built-ins onto ``pass_key``.
 
@@ -243,7 +241,7 @@ def bind_expression(
     a prefix with a scoped built-in, is left unchanged.
     """
 
-    def _replace_counter(match: re.Match[str]) -> str:
+    def _replace_counter(match: Match[str]) -> str:
         counter = match.group(1)
         if counter in layout.duplicated and counter in layout.counters_by_pass.get(
             pass_key, frozenset()
@@ -252,7 +250,7 @@ def bind_expression(
             return f"raw_pmc_df['{qualified}']"
         return match.group(0)
 
-    def _replace_builtin(match: re.Match[str]) -> str:
+    def _replace_builtin(match: Match[str]) -> str:
         var_name = match.group(1)
         if var_name not in scoped_builtins:
             return match.group(0)
@@ -269,8 +267,8 @@ def ordered_scoped_builtin_bindings(
     build_in_vars: Mapping[str, str],
     pass_key: str,
     layout: PassLayout,
-    scoped_builtins: frozenset[str],
-) -> list[tuple[str, str]]:
+    scoped_builtins: FrozenSet[str],
+) -> List[Tuple[str, str]]:
     """Bind scoped built-in formulas for one pass, ``PER_XCD`` names first."""
     per_xcd = [key for key in build_in_vars if "PER_XCD" in key]
     dependents = [key for key in build_in_vars if "PER_XCD" not in key]
@@ -293,8 +291,8 @@ def bind_metric_tables_to_passes(
     dfs_type: dict,
     pass_layout: PassLayout,
     gpu_series: str,
-    supported_fields: frozenset[str],
-) -> set[str]:
+    supported_fields: FrozenSet[str],
+) -> Set[str]:
     """Rewrite metric-table expression cells onto a co-located pass.
 
     Mutates ``dfs`` in place. Evaluation then stores numeric results in those
@@ -307,13 +305,13 @@ def bind_metric_tables_to_passes(
         return set()
 
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
-    used_passes: set[str] = set()
+    used_passes: Set[str] = set()
     unbound = 0
 
     for table_id, df in dfs.items():
         if dfs_type.get(table_id) != "metric_table":
             continue
-        row_pass: dict[object, str] = {}
+        row_pass: Dict[object, str] = {}
         for row_id, row in df.iterrows():
             exprs = [
                 row[field]
@@ -371,7 +369,7 @@ def bind_expression_dataframe(
     expression_df: pd.DataFrame,
     pass_layout: PassLayout,
     gpu_series: str,
-) -> set[str]:
+) -> Set[str]:
     """Bind long-form DB expression rows onto co-located passes.
 
     Expects columns ``metric_id`` and ``value``. Mutates ``value`` in place and
@@ -390,8 +388,8 @@ def bind_expression_dataframe(
         return set()
 
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
-    used_passes: set[str] = set()
-    metric_pass: dict[object, str] = {}
+    used_passes: Set[str] = set()
+    metric_pass: Dict[object, str] = {}
     unbound = 0
 
     for metric_id, group in expression_df.groupby("metric_id", sort=False):
@@ -447,7 +445,7 @@ def resolve_weight_counter_column(
     weight_counter: str,
     sub_metric_name: str,
     df: pd.DataFrame,
-    pass_layout: PassLayout | None,
+    pass_layout: Optional[PassLayout],
 ) -> str:
     """Qualify a WEIGHTED_AVG weight counter to the sub-metric's bound pass."""
     if pass_layout is None or not pass_layout.has_duplicates:
