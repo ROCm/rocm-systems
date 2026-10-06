@@ -44,7 +44,12 @@ constexpr const char* kArch = "aie2p";
 // so what they feed the parser differs from a known-good image in exactly the one way named.
 // ---------------------------------------------------------------------------
 
-/** @brief The ELF header of `image`. */
+/**
+ * @brief The ELF header of an image.
+ *
+ * @param image ELF contents
+ * @return a copy of the ELF header
+ */
 Elf32_Ehdr Header(const std::vector<std::uint8_t>& image) {
   Elf32_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
@@ -258,8 +263,8 @@ std::uint32_t RenameSpareSection(std::vector<std::uint8_t>& image, const char* n
 
 TEST(AieElfParse, ParsesTwoPatchSitesForOnePdi) {
   // A control code may load the same PDI more than once (MLIR-AIR's loads its empty PDI before and
-  // after the design runs). Both sites must be kept -- dropping one would leave that load_pdi
-  // pointing at the ELF's placeholder -- and the PDI itself held once. Turn the first argument
+  // after the design runs). Both sites must be kept, since a dropped one leaves that load_pdi
+  // pointing at the ELF's placeholder, and the PDI itself held once. Turn the first argument
   // relocation into a second relocation of .pdi.1 (symbol 1, as the ELF's relocation 0 already is).
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
@@ -282,9 +287,8 @@ TEST(AieElfParse, ParsesTwoPatchSitesForOnePdi) {
 TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
   // A control code may load two different PDIs. The artifact has one PDI section, so build a
   // second: rename a section the reader ignores to ".pdi.2" and point a PDI relocation at a symbol
-  // of that name. The new symbol name does not fit the existing .dynstr, so .dynstr is relocated
-  // to the end of the image and grown; nothing refers to its file offset but its own section
-  // header.
+  // of that name. Moving .dynstr to the end of the image to grow it is safe because nothing but its
+  // own section header refers to its file offset.
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
 
@@ -294,7 +298,7 @@ TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
 
   ASSERT_NE(RenameSpareSection(image, ".pdi.2"), 0u) << "no spare section to rename";
 
-  // Relocate and grow .dynstr so it can hold the new symbol name.
+  // Move and grow .dynstr so it can hold the new symbol name.
   const std::uint32_t dynstr_index = FindSection(image, ".dynstr");
   ASSERT_NE(dynstr_index, 0u);
   Elf32_Shdr dynstr = SectionHeader(image, dynstr_index);
@@ -375,9 +379,8 @@ TEST(AieElfParse, AcceptsRepeatedPdiNameWithSameContents) {
 
 TEST(AieElfParse, RejectsArgumentPatchSiteOutOfRange) {
   // An argument patch site is where the driver folds a buffer address into the control code, three
-  // dwords wide. An offset past the end would make it write past the buffer it allocated from
-  // ctrl_code_size, so the reader has to bound it -- the PDI patch site has been bounded all
-  // along, the argument sites were not.
+  // dwords wide. The driver sizes its buffer from the control code, so the reader must refuse a
+  // site that would make the patch write past the end.
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
 
@@ -487,7 +490,7 @@ TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
 }
 
 TEST(AieElfPatch, ShimDma48IsAdditive) {
-  // Two applications must not equal one: this is why §4 copies from pristine.
+  // Two applications must not equal one: this is why the driver patches a pristine copy.
   std::uint32_t once[3] = {0, 0x1000, 0};
   std::uint32_t twice[3] = {0, 0x1000, 0};
   rocr::AMD::aie_elf::PatchShimDma48(once, 0x2000);

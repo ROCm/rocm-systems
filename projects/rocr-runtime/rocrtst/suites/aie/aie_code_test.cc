@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Exercises AMD::AieCode::Create/Parse (core/inc/amd_aie_code.hpp) directly: the parser sources
-// are compiled directly into this binary because core/inc is not installed alongside the runtime,
-// and amd::elf::Image (which AieCode depends on) is built with hidden visibility inside
-// libhsa-runtime64.so, so it cannot be linked against from outside that shared library.
+// Exercises AMD::AieCode::Create (core/inc/amd_aie_code.hpp) directly. The parser sources are
+// compiled into this binary because core/inc is not installed alongside the runtime, and
+// amd::elf::Image (which AieCode depends on) has hidden visibility in libhsa-runtime64.so.
 
 #include <gtest/gtest.h>
 
@@ -104,7 +103,11 @@ class AieCodeMutation : public ::testing::Test {
     ASSERT_EQ(ParseArchSection(hsaco_, kArch, &code), HSA_STATUS_SUCCESS);
   }
 
-  /** @brief The AIE section header of the hsaco under test. */
+  /**
+   * @brief The AIE section header of the hsaco under test.
+   *
+   * @return a copy of the header
+   */
   aie_section_header Header() const {
     aie_section_header hdr{};
     std::memcpy(&hdr, hsaco_.data() + section_, sizeof(hdr));
@@ -233,9 +236,8 @@ TEST_F(AieCodeMutation, RejectsBlobBeforeTheBlobPool) {
 }
 
 TEST_F(AieCodeMutation, RejectsNameOutsideTheStringTable) {
-  // Past the end of the table, not at it: an offset at the end leaves no room for even a
-  // terminator, which the terminator check catches by itself. One byte further, the room left in
-  // the table is negative, and only the bound keeps the name from being read out of the blob pool.
+  // Past the end of the table, not at it: an offset at the end is caught by the terminator check
+  // alone. One byte further, only the bound keeps the name from being read out of the blob pool.
   SetEntryField(offsetof(aie_kernel_entry, name_offset), Header().string_table_size + 1);
   std::unique_ptr<AieCode> code;
   EXPECT_EQ(ParseArchSection(hsaco_, kArch, &code), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);

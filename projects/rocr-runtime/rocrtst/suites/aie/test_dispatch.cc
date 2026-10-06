@@ -296,8 +296,8 @@ std::uint64_t enqueue_aie_packet(hsa_queue_t* q, const hsa_amd_aie_kernel_dispat
 //
 // The suite's CMake packages each design's artifacts into an AIE hsaco: the PDI + instruction
 // sequence build into <design>.hsaco and the full-ELF build into <design>_elf.hsaco. A dispatch
-// packet names a kernel loaded from one of these and carries nothing else about it -- which of
-// the two shapes it turns into is the loader's business, not the application's.
+// packet names a kernel loaded from one of these and carries nothing else about it; which of the
+// two shapes it turns into is the loader's business, not the application's.
 // ---------------------------------------------------------------------------
 const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
 // vsmul in an aie2 section followed by vsadd in an aie2p section.
@@ -843,8 +843,7 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
 
   // --- Load the kernel ---
   // The runtime places the kernel's own buffers in the XDNA dev heap; only the I/O buffers and
-  // kernargs below go through the vmem API, which the dev heap is incompatible with (see
-  // docs/bug-vmem-map-dev-heap.md).
+  // kernargs below go through the vmem API, which the dev heap is incompatible with.
   if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
   const std::uint64_t kernel_object = LoadAddKernel();
   ASSERT_NE(kernel_object, 0u);
@@ -1461,7 +1460,7 @@ TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
 //
 // The runtime reads the ELF at load: it places the PDI in device memory, keeps a pristine copy of
 // the control code, and records where the arguments go. A dispatch names the kernel object and
-// nothing else -- the runtime copies the control code per packet, patches the packet's arguments
+// nothing else. The runtime copies the control code per packet, patches the packet's arguments
 // into the copy, and dispatches that. The application cannot tell this apart from a PDI dispatch
 // except by which artifacts its hsaco was built from.
 //
@@ -1492,8 +1491,8 @@ class pool_buffer {
   /**
    * @brief Allocates a buffer from a pool, releasing anything already held.
    *
-   * The class has value semantics, so a caller may reasonably reuse one buffer, and overwriting
-   * ptr_ would leak the previous allocation silently.
+   * Releasing first lets a caller reuse one buffer without silently leaking the previous
+   * allocation.
    *
    * @param pool pool to allocate from
    * @param size size in bytes
@@ -1556,8 +1555,7 @@ void VerifyMul(const std::uint32_t* inout, std::size_t count, std::size_t base_i
 /**
  * @brief Dispatches one add-kernel packet, waits for it, and checks the whole output buffer.
  *
- * Both PDI-cache tests walk the cache one kernel object at a time exactly like this; call it
- * under ASSERT_NO_FATAL_FAILURE so a mismatch stops the caller too.
+ * Call it under ASSERT_NO_FATAL_FAILURE so a mismatch stops the caller too.
  *
  * @param queue HSA queue to which the packet will be submitted
  * @param kernel_object kernel object handle of the loaded vsadd kernel
@@ -1609,10 +1607,9 @@ void DispatchMulAndVerify(hsa_queue_t* queue, std::uint64_t kernel_object, std::
 // ---------------------------------------------------------------------------
 // Unified hsaco loader
 //
-// The suite's CMake packages the vsadd PDI+insts artifacts above into a single
-// AIE hsaco (kind = PdiInsts) via aie-hsaco, so this test can exercise
-// hsa_executable_load_agent_code_object end to end. The suite also packages the vsadd full-ELF
-// artifact into a second hsaco (kind = FullElf); see the HsacoFullElf* tests below.
+// Loads the vsadd PDI + instruction sequence hsaco (kind = PdiInsts) through
+// hsa_executable_load_agent_code_object and checks what the loader publishes and what it refuses.
+// The full-ELF hsaco (kind = FullElf) is covered by the HsacoFullElf* tests below.
 // ---------------------------------------------------------------------------
 TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
   if (!hsaco_available()) {
@@ -1647,10 +1644,9 @@ TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(kernel_object, 0u) << "kernel object must be zero before freeze";
 
-  // Pins the hardcoded kernarg size aie-hsaco packaged this hsaco with (see the --kernel
-  // argument in CMakeLists.txt) as a checked invariant, rather than trusting it silently.
-  // num_cols=1 is packaged the same way but is not asserted here: unlike kernarg size, it has
-  // no HSA_EXECUTABLE_SYMBOL_INFO_* accessor to check it against.
+  // Checks the kernarg size aie-hsaco packaged this hsaco with (the --kernel argument in
+  // CMakeLists.txt). num_cols=1 is packaged the same way but is not checked here: it has no
+  // HSA_EXECUTABLE_SYMBOL_INFO_* accessor.
   std::uint32_t kernarg_segment_size = 0;
   ASSERT_EQ(
       hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
@@ -1677,13 +1673,12 @@ TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
  * @brief Finds the AIE section in an hsaco by walking the raw ELF section headers for the section
  * whose contents start with kAieSectionMagic.
  *
- * This is a minimal, header-only re-scan (not a use of AieCode: that parser is internal to
- * hsa-runtime64 and not exported, see amd_aie_code.cpp) good enough to corrupt one field for the
- * negative tests below; it does not need to be a general-purpose reader.
+ * A minimal re-scan rather than a use of AieCode, which is internal to hsa-runtime64 and not
+ * exported. It only needs to be good enough to corrupt fields for the negative tests below.
  *
  * @param hsaco hsaco contents
- * @return the file offset of the AIE section, or 0 (never a valid offset -- it always falls inside
- * the ELF header) if no such section is found
+ * @return the file offset of the AIE section, or 0 if no such section is found (0 is never a
+ * valid offset, since it falls inside the ELF header)
  */
 std::size_t FindAieSectionOffset(const std::vector<std::uint8_t>& hsaco) {
   if (hsaco.size() < sizeof(Elf64_Ehdr)) return 0;
@@ -1722,9 +1717,9 @@ std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
 /**
  * @brief Builds a PdiInsts hsaco whose first kernel's instruction blob the NPU cannot execute.
  *
- * Everything host-side still accepts it -- the blob is the right size and the loader places it in
- * the device heap exactly as before -- so a batch naming it builds normally and the device faults
- * on the contents.
+ * Everything host-side still accepts it: the blob is the right size and the loader places it in
+ * the device heap as usual, so a batch naming it builds normally and the device faults on the
+ * contents.
  *
  * @return the corrupted hsaco, or an empty vector if the section cannot be located
  */
@@ -1743,13 +1738,10 @@ std::vector<std::uint8_t> BadInstsHsaco() {
   return hsaco;
 }
 
-// Closes I-4/Concern-2: the kind-validation switch in LoadAieCodeObject (executable.cpp) is
-// otherwise unreachable via this hsaco, since aie-hsaco packages it with kind=PdiInsts.
-// kind=FullElf is exercised for real by HsacoFullElfLoads below; here it is reached by corrupting
-// an already-built PdiInsts hsaco's bytes directly, which still must fail -- a PdiInsts kernel
-// table entry patched to claim kind=FullElf does not contain a nested ELF, so the load now fails
-// while trying to parse the (non-ELF) insts blob as one, rather than at the kind-range check
-// itself. The unknown-kind (99) half still fails at the kind-range check, unchanged.
+// A kernel table entry whose kind does not match its payload must be refused at load. aie-hsaco
+// only emits consistent entries, so the test patches the kind of a built PdiInsts hsaco: as
+// FullElf, the entry still carries a separate PDI, which a full ELF never has, so the section
+// parser rejects it; as an unknown kind (99), LoadAieCodeObject's kind-range check rejects it.
 TEST_F(DispatchTest, AieKindIsValidated) {
   if (!hsaco_available()) {
     GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
@@ -2250,9 +2242,9 @@ class FullElfDispatchTest : public DispatchTest {
 // Unified hsaco loader: FullElf
 //
 // The suite's CMake packages the vsadd full-ELF artifact into a single AIE hsaco (kind =
-// FullElf) via aie-hsaco's "elf:" kernel spec, so these tests can exercise
-// hsa_executable_load_agent_code_object on the FullElf path added by Task 5, mirroring the
-// PdiInsts coverage above (HsacoKernelObjectIsPublished, AieKindIsValidated).
+// FullElf) via aie-hsaco's "elf:" kernel spec. These tests cover
+// hsa_executable_load_agent_code_object on that path, mirroring the PdiInsts coverage above
+// (HsacoKernelObjectIsPublished, AieKindIsValidated).
 // ---------------------------------------------------------------------------
 /**
  * @brief Loads a code object without asserting on the result, so a caller can check a specific
@@ -2487,7 +2479,7 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
   // because each one costs a compute-unit slot. Full-ELF loads the PDI from the control code
   // instead, so there is no such ceiling: use more than 32 separate PDIs on one queue. Each load
   // of the hsaco places its own copy of the PDI, so these are distinct buffer objects holding
-  // identical bytes -- which is what the PDI cache would key on.
+  // identical bytes, which the PDI path's cache would count as distinct PDIs.
   constexpr std::uint32_t num_pdis = 40;
 
   hsa_queue_t* queue = nullptr;
@@ -2570,7 +2562,7 @@ TEST_F(FullElfDispatchTest, ControlCodeIsAlignedForDispatch) {
   // The driver rejects a control code whose device address is not 16 KiB aligned, so a completed
   // dispatch is the assertion: the runtime's own allocation satisfied it. A single dispatch would
   // only show that one starting address happened to work, and the rounding is arithmetic on
-  // whatever base the allocator returned -- so walk a range of bases instead.
+  // whatever base the allocator returned. So walk a range of bases instead.
   //
   // Each round holds a device buffer of a different, deliberately unaligned size across the
   // dispatch, so the next control-code allocation starts somewhere else in the heap. The sizes
@@ -2801,7 +2793,7 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
 
   // One more kernel than the cache holds. Each load places its own copy of the PDI, so these are
-  // identical bytes in distinct buffer objects -- and the cache keys on the handle.
+  // identical bytes in distinct buffer objects, and the cache keys on the handle.
   std::vector<std::uint64_t> kernels(cache_capacity + 1);
   for (std::uint32_t i = 0; i < kernels.size(); ++i) {
     SCOPED_TRACE(i);
@@ -2990,7 +2982,7 @@ TEST_F(DispatchTest, PdiChainSplit) {
 //
 // The failure is induced with a second kernel whose instruction sequence has been overwritten with
 // bytes the NPU cannot execute. It loads and builds normally, and unlike the PDI the instruction
-// sequence takes no part in configuring the hardware context -- so the failure lands at the device,
+// sequence takes no part in configuring the hardware context, so the failure lands at the device,
 // mid-batch, instead of before submission. Only the driver's ~6 s watchdog catches it, which is
 // what makes this test slow.
 //
@@ -3307,10 +3299,9 @@ class FullElfInterleaveTest : public FullElfDispatchTest {
 };
 
 // The full-ELF counterpart of DispatchTest.InterleavedKernels. This path has no PDI cache and no
-// CU masks -- each packet gets its own control-code copy, which carries both its arguments and the
-// PDI it loads -- so what is being checked is the other half of interleaving: that alternating
-// designs in one chain each run against their own control code and PDI rather than the previous
-// packet's.
+// CU masks: each packet gets its own control-code copy, which carries both its arguments and the
+// PDI it loads. What is checked is the other half of interleaving: that alternating designs in
+// one chain each run against their own control code and PDI rather than the previous packet's.
 TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
   constexpr std::uint32_t num_pairs = 4;
   constexpr std::size_t n = aie_full_elf_kernel::element_count;

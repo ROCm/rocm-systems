@@ -320,12 +320,11 @@ add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale
 # ---------------------------------------------------------------------------
 # Unified hsaco packaging
 #
-# Packages the vsadd PDI+insts artifacts into a single AIE hsaco via
-# aie-hsaco, so the loader test in test_dispatch.cc can exercise
-# hsa_executable_load_agent_code_object on a PdiInsts hsaco.
+# Packages each design's artifacts into an AIE hsaco with aie-hsaco. test_dispatch.cc loads
+# every kernel it dispatches from these through hsa_executable_load_agent_code_object.
 #
-# aie-hsaco's --arch uses "aie2"/"aie2p", while NPU_TARGET (detected above)
-# uses "npu"/"npu2" -- map the latter onto the former.
+# aie-hsaco's --arch takes "aie2"/"aie2p", while NPU_TARGET (detected above) is "npu"/"npu2",
+# so map the latter onto the former.
 # ---------------------------------------------------------------------------
 if(NPU_TARGET STREQUAL "npu2")
   set(AIE_HSACO_ARCH "aie2p")
@@ -340,8 +339,9 @@ add_custom_command(
   COMMAND "${AIE_HSACO}"
           --hsaco "${vsadd_HSACO}"
           --arch "${AIE_HSACO_ARCH}"
-          # vsadd's kernarg buffer is 2 pointers + 2 sizes (see aie_vector_scalar_kernel::kernarg_bytes
-          # in test_dispatch.cc); the design uses a single NPU column (NPU1Col1/NPU2Col1).
+          # vsadd's kernarg buffer is 2 pointers + 2 sizes (see
+          # aie_vector_scalar_kernel::kernarg_bytes in test_dispatch.cc); the design uses a single
+          # NPU column (NPU1Col1/NPU2Col1).
           --kernel "${VSADD_HSACO_KERNEL_NAME}:${vsadd_INSTS_BIN}:${vsadd_DESIGN_PDI}:32:1"
   # Depend on the target, not its output files: two custom commands racing aiecc in the same
   # build directory produce concurrent runs that clobber each other's intermediates.
@@ -391,11 +391,10 @@ add_custom_command(
 )
 add_custom_target(multiarch_hsaco_artifact DEPENDS "${multiarch_HSACO}")
 
-# Packages the vsadd full-ELF artifact into a single AIE hsaco with kind=FullElf, so the
-# loader test in test_dispatch.cc can exercise hsa_executable_load_agent_code_object on a
-# FullElf hsaco. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so the test's
-# file-existence check has something to point at; the packaging command itself only runs when the
-# toolchain can emit full ELFs.
+# Packages the vsadd full-ELF artifact into an AIE hsaco with kind=FullElf, for the full-ELF
+# tests in test_dispatch.cc. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so
+# the tests' file-existence check has something to point at; the packaging command itself only
+# runs when the toolchain can emit full ELFs.
 set(vsadd_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
 if(AIE_FULL_ELF_SUPPORTED)
   add_custom_command(
@@ -448,7 +447,7 @@ target_compile_options(test_dispatch
     -Wpedantic
 )
 # core/inc is not installed alongside the runtime; needed for amd_aie_section.h, a header-only
-# dependency used to locate and corrupt the AIE `kind` field in AieKindIsValidated.
+# dependency used to locate and corrupt kernel-table fields in the negative tests.
 target_include_directories(test_dispatch PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
 target_compile_definitions(test_dispatch
