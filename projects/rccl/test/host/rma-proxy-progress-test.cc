@@ -193,11 +193,10 @@ protected:
     // vectors stable so ops.data() stays valid).
     std::deque<std::vector<ncclRmaPutSignalOp>> groupOpsStore_;
 
-    void SetUp() override {
-        comm_ = std::make_unique<ncclComm>();
-        comm_->rank = 0;
-        comm_->nRanks = nRanks_;
-
+    // Size the per-rank queues to nRanks_ and point ctx_ at them.
+    // ncclRmaProxyProgress walks the persistent queues, so they have to exist
+    // and be empty even when a test only issues non-persistent descriptors.
+    void WireRankStorage() {
         cis_.assign(nRanks_, 0);
         pis_.assign(nRanks_, 0);
         inflight_.assign(nRanks_, 0);
@@ -206,26 +205,31 @@ protected:
         for (auto& q : inProgress_) {
             ncclIntruQueueConstruct(&q);
         }
-        // ncclRmaProxyProgress also walks the persistent queues. Tests that
-        // call the per-peer poll helpers never touch them; the progress entry
-        // point does, so they have to exist and be empty.
         persistent_.resize(nRanks_);
         for (auto& q : persistent_) {
             ncclIntruQueueConstruct(&q);
         }
 
-        ctx_ = std::make_unique<ncclRmaProxyCtx>();
-        ctx_->comm = comm_.get();
-        ctx_->queueSize = kQueueSize;
         ctx_->circularBuffers = circular_.data();
         ctx_->cis = cis_.data();
         ctx_->pis = pis_.data();
         ctx_->inProgressQueues = inProgress_.data();
         ctx_->persistentQueues = persistent_.data();
         ctx_->inflightRequests = inflight_.data();
+    }
+
+    void SetUp() override {
+        comm_ = std::make_unique<ncclComm>();
+        comm_->rank = 0;
+        comm_->nRanks = nRanks_;
+
+        ctx_ = std::make_unique<ncclRmaProxyCtx>();
+        ctx_->comm = comm_.get();
+        ctx_->queueSize = kQueueSize;
         ctx_->maxInflightRequests = 256;
         ctx_->rmaCtx = &net_.ctxH;
         ctx_->rmaCollComm = &net_.collH;
+        WireRankStorage();
 
         net_.poolSize = 256;
         rma_ = net_.vtable();
@@ -239,26 +243,7 @@ protected:
         nRanks_ = nRanks;
         comm_->rank = rank;
         comm_->nRanks = nRanks;
-
-        cis_.assign(nRanks, 0);
-        pis_.assign(nRanks, 0);
-        inflight_.assign(nRanks, 0);
-        circular_.assign(static_cast<size_t>(nRanks) * kQueueSize, nullptr);
-        inProgress_.resize(nRanks);
-        for (auto& q : inProgress_) {
-            ncclIntruQueueConstruct(&q);
-        }
-        persistent_.resize(nRanks);
-        for (auto& q : persistent_) {
-            ncclIntruQueueConstruct(&q);
-        }
-
-        ctx_->circularBuffers = circular_.data();
-        ctx_->cis = cis_.data();
-        ctx_->pis = pis_.data();
-        ctx_->inProgressQueues = inProgress_.data();
-        ctx_->persistentQueues = persistent_.data();
-        ctx_->inflightRequests = inflight_.data();
+        WireRankStorage();
     }
 
     // Allocate a single PutSignal descriptor targeting `targetRank`, ready to

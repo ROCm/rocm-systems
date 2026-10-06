@@ -34,6 +34,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
+int64_t      ncclParamCeChunkSize();
 
 // Fixture: skip if no CE driver; create comm; warmup AllGather → ncclCeInit; TearDown destroys comm.
 class CeInternalMPITest : public MPITestBase
@@ -637,16 +638,19 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
     // srcGuards, dstGuards, and params freed automatically on scope exit.
 }
 
-// Chunked launch: sizes that are not multiples of the default 8 MiB wave, plus a
-// short op that finishes in the first wave. A sentinel past each destination must
-// stay put, which fails if a wave copies past the op's own size.
+// Chunked launch: one op a wave-and-a-tail past the runtime chunk, one two
+// waves past it, and a short op that finishes in the first wave. A sentinel
+// past each destination must stay put, which fails if a wave copies past the
+// op's own size. The pattern mixes the high bits of the byte index so a wave
+// that dropped its source offset cannot match.
 //
-// ASSERT_* here returns from this helper, not from the test. Callers check
-// HasFatalFailure() before using the result.
+// ASSERT_* here returns from this helper. Nothing in the test follows the call.
 static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
 {
     using namespace RCCLTestGuards;
-    constexpr size_t kChunk    = 8u * 1024u * 1024u; // NCCL_CE_CHUNK_SIZE default
+    const int64_t chunkParam = ncclParamCeChunkSize();
+    ASSERT_GT(chunkParam, 100) << "NCCL_CE_CHUNK_SIZE must exceed the short op";
+    const size_t kChunk      = static_cast<size_t>(chunkParam);
     constexpr size_t kSentinel = 16;
     constexpr int    kOps      = 3;
     const size_t sizes[kOps]   = {kChunk + 32, 2 * kChunk + 32, 100};
@@ -657,7 +661,8 @@ static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
     {
         patterns[i].resize(sizes[i]);
         for(size_t b = 0; b < sizes[i]; ++b)
-            patterns[i][b] = static_cast<uint8_t>((i + 1) * 17u + b);
+            patterns[i][b] = static_cast<uint8_t>(
+                (((i + 1) * 0x9E3779B97F4A7C15ull) + (b * 0xBF58476D1CE4E5B9ull)) >> 56);
 
         void* p = nullptr;
         ASSERT_EQ(hipMalloc(&p, sizes[i]), hipSuccess);
@@ -706,7 +711,6 @@ static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
 TEST_F(CeInternalMPITest, LaunchChunkedUnequalSizes)
 {
     CheckChunkedBatch(ceComm, getActiveStream());
-    if(HasFatalFailure()) return;
 }
 
 // ===========================================================================

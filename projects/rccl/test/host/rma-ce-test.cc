@@ -888,7 +888,8 @@ protected:
     return nullptr;
   }
 
-  // Self resolves to the local window base, not to the IPC image of world rank 0.
+  // Self resolves to the local window base. That base is the PeerData(4) image
+  // (LSA slot 0), not the IPC image of world rank 0.
   void* SelfData() const { return dataWin_.userPtr; }
 };
 
@@ -1000,6 +1001,25 @@ TEST_F(RmaCeNonPersistTest, NonPersist_SparseUnequalRemotes_DoesNotRequestChunki
   // Cyclic order still applies: peer 3 is visited before peer 1.
   EXPECT_EQ(data->ops[0].dst, PeerData(3));
   EXPECT_EQ(data->ops[1].dst, PeerData(1));
+}
+
+// Three unequal remotes are still one short of every other LSA rank
+// (lsaSize - 1 == 4). A looser "at least lsaSize - 2" predicate would chunk this.
+TEST_F(RmaCeNonPersistTest, NonPersist_ThreeRemotesUnequal_DoesNotRequestChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 3u);
+  // Visit order with peer 2 absent: 4, 3, 1.
+  EXPECT_EQ(data->ops[0].dst, PeerData(4));
+  EXPECT_EQ(data->ops[1].dst, PeerData(3));
+  EXPECT_EQ(data->ops[2].dst, PeerData(1));
 }
 
 // A self put is not a remote peer, so it cannot arm chunking.
