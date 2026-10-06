@@ -7,6 +7,9 @@
 // Async-to-LDS path for the LL128 user source and destination buffers. The FIFO legs
 // are not eligible: they interleave flag words into the payload. Both legs share one
 // per-warp staging window, so each write to it drains first.
+//
+// Every entry point is gated on tdmEnable, captured from shmem in the Primitives
+// constructor, so the off case costs one register test per slice and no shmem read.
 
 static constexpr int TdmAlign = 128;
 // loadUser128 is system scope on gfx1250 either way, since RCCL_LL_FIFO_SYS_SCOPE is 1 there.
@@ -39,6 +42,7 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
   constexpr int DataBytes = WireBytes - WireBytes / NCCL_LL128_LINEELEMS;
   static_assert(ncclShmemScratchWarpSize() >= DataBytes + TdmAlign - 1,
                 "LL128 TDM needs one aligned data slice of per-warp scratch");
+  if (!tdmEnable) return false;  // nothing was ever issued, so nothing to drain
   // Drain before any return: loadRegsBegin's fallback also stages through this window.
   asyncWait<0>();
   if (!tdmLoadAllowed) return false;
@@ -72,6 +76,7 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
 // Stages the destination slice in LDS and pushes it out as one async store.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
+  if (!tdmEnable) return false;
   asyncWait<0>();  // drain the previous slice before overwriting the window
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
 #pragma unroll
@@ -91,4 +96,6 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
 }
 
 // The last store must land before the barrier that publishes completion.
-__device__ __forceinline__ void tdmDrain() { asyncWait<0>(); }
+__device__ __forceinline__ void tdmDrain() {
+  if (tdmEnable) asyncWait<0>();
+}

@@ -11,6 +11,7 @@
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
 // gfx1250 async-to-LDS path for the LL128 user buffers; see tdm/ll128Tdm.h.
+// Built in with --enable-tdm-prim-ll128, then selected per comm with RCCL_TDM_LL128_ENABLE=1.
 #ifndef ENABLE_TDM_PRIM_LL128
 #define ENABLE_TDM_PRIM_LL128 0
 #endif
@@ -135,6 +136,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+#if TDM_LL128_ON
+  // Read from shmem once here, not per slice: the hot path tests a register.
+  bool tdmEnable = false;
+#endif
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -609,6 +614,9 @@ public:
     loadSendSync();
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
+#if TDM_LL128_ON
+    tdmEnable = ncclShmem.comm.tdmLl128Enable;
+#endif
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
