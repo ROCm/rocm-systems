@@ -114,6 +114,20 @@ def test_saturating_pack_codegen_covers_all_narrowing_modes():
         gen_vector_sat_pack(['vdst'], ['src0'], 'unknown')
 
 
+def test_saturating_pack_vop3_writes_the_opsel_destination_half():
+    vop3 = gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16', true16_dst=True)
+    vop1 = gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16')
+    write = (
+        'write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_), result, true)'
+    )
+    assert write in vop3
+    assert 'write_lane(vdst, lane, result)' not in vop3
+    assert write not in vop1
+    # The 32-bit results of the 4-bit packs are unaffected.
+    i4 = gen_vector_sat_pack(['vdst'], ['src0'], 'i4_i8', true16_dst=True)
+    assert 'write_lane(vdst, lane, result)' in i4
+
+
 def test_perm_and_qsad_codegen_cover_multiword_results():
     perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
     qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True, True)

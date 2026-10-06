@@ -2692,6 +2692,30 @@ std::vector<ArithmeticCase> float_to_integer_nan_and_flush_cases() {
   return cases;
 }
 
+// V_SAT_PK_U8_I16 writes a 16-bit result. On gfx1201 its VOP3 form writes the
+// half selected by OP_SEL[3] and keeps the other half, like the VOP1 form.
+std::vector<ArithmeticCase> saturating_pack_half_cases() {
+  constexpr uint32_t kOld = 0xa5a5a5a5u;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
+                       uint32_t result) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, input}, {6, kOld}},
+                     {{6, result}},
+                     0xf0u,
+                     FE_TONEAREST});
+  };
+  const auto low = rdna4::build_vop3(rdna4::kVSatPkU8I16Vop3, {.vdst = 6, .src0 = 256});
+  const auto high =
+      rdna4::build_vop3(rdna4::kVSatPkU8I16Vop3, {.vdst = 6, .opsel = 8, .src0 = 256});
+  add("Vop3LowHalf", low, 0x7fff8000u, 0xa5a5ff00u);
+  add("Vop3HighHalf", high, 0x7fff8000u, 0xff00a5a5u);
+  add("Vop3InRange", low, 0x00010002u, 0xa5a50102u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2956,6 +2980,12 @@ INSTANTIATE_TEST_SUITE_P(SourceModifiers, ValuConversionTest,
 
 INSTANTIATE_TEST_SUITE_P(FloatToIntegerNanAndFlush, ValuConversionTest,
                          testing::ValuesIn(float_to_integer_nan_and_flush_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(SaturatingPackHalf, ValuConversionTest,
+                         testing::ValuesIn(saturating_pack_half_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

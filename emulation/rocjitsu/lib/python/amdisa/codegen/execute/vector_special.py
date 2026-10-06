@@ -337,8 +337,14 @@ def gen_vector_swaprel(
     return '\n'.join(L)
 
 
-def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
-    """Generate signed/unsigned saturating narrow-and-pack operations."""
+def gen_vector_sat_pack(
+    dst: list[str], src: list[str], op: str | None, *, true16_dst: bool = False
+) -> str:
+    """Generate signed/unsigned saturating narrow-and-pack operations.
+
+    V_SAT_PK_U8_I16 has a 16-bit result. With ``true16_dst`` its VOP3 form
+    writes the half selected by OP_SEL[3] and keeps the other half.
+    """
     if op not in ('u8_i16', 'i4_i8', 'u4_u8'):
         raise ValueError(f'unsupported saturating-pack operation: {op}')
     L = [
@@ -374,9 +380,16 @@ def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
                 '      result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);',
             ]
         )
+    if true16_dst and op == 'u8_i16':
+        write = (
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '
+            'amdgpu::vop3_opsel(inst_), result, true);'
+        )
+    else:
+        write = f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);'
     L.extend(
         [
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);',
+            write,
             '  }',
         ]
     )
