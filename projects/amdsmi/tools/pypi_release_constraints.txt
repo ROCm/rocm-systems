@@ -1,0 +1,10 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Build tools for the PyPI release wheel; see build_pypi_release.sh.
+auditwheel==6.8.2
+packaging==26.3
+pip==26.2.1
+pyelftools==0.33
+setuptools==84.0.0
+wheel==0.48.0
