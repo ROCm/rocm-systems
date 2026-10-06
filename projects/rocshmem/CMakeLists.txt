@@ -551,6 +551,7 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
     target_link_libraries(${PROJECT_NAME}
                           PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
