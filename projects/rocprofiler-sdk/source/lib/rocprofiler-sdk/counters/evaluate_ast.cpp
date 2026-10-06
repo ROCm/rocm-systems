@@ -36,7 +36,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
@@ -427,7 +427,7 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
             if(_type == NodeType::ACCUMULATE_NODE)
             {
                 ROCP_FATAL_IF(ast.accumulate_op != ACCUMULATE_OP_TYPE::NONE &&
-                              _metric.block() != "SQ")
+                              _metric.block() != "SQ" && _metric.block() != "SQG")
                     << fmt::format("Accumulate High_RES/Low_RES only works for counters from SQ "
                                    "block: invalid operation on {} counter.",
                                    _metric.name());

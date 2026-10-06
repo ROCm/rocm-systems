@@ -53,11 +53,11 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
     "Enables Perfetto support"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
-    "Use SQLite3 for rocpd data storage"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
+)
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
@@ -91,13 +91,19 @@ target_include_directories(
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-dl>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-user>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-causal-api>
 )
 
 # include threading because of rooflines
+#
+# the common-api target is defined later by add_subdirectory(source); linking it
+# by name here is resolved at generate time and carries its include directory,
+# so this file no longer hard-codes source/lib/rocprof-sys-common-api
 target_link_libraries(
     rocprofiler-systems-headers
-    INTERFACE rocprofiler-systems::rocprofiler-systems-threading
+    INTERFACE
+        rocprofiler-systems::rocprofiler-systems-threading
+        rocprofiler-systems::rocprofiler-systems-common-api-library
 )
 
 # ensure the env overrides the appending /opt/rocm later
@@ -160,33 +166,9 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(ROCmVersion)
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
-if(NOT ROCmVersion_FOUND)
-    find_package(
-        hip
-        ${rocprofiler_systems_FIND_QUIETLY}
-        REQUIRED
-        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-endif()
-
-if(NOT ROCmVersion_FOUND)
-    rocm_version_compute("${hip_VERSION}" _local)
-
-    foreach(_V ${ROCmVersion_VARIABLES})
-        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-        set(_LOCAL_VAR _local_${_V}_VERSION)
-        set(ROCmVersion_${_V}_VERSION
-            "${${_LOCAL_VAR}}"
-            CACHE STRING
-            "ROCm ${_V} version"
-        )
-        rocm_version_watch_for_change(${_CACHE_VAR})
-    endforeach()
-else()
+if(ROCmVersion_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
 endif()
 
@@ -263,147 +245,171 @@ endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-# Detect AMD SMI library version from header
-set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
-if(EXISTS "${_AMDSMI_HEADER}")
-    file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MINOR "${CMAKE_MATCH_1}")
-
+# AMD SMI version is provided by config-mode find_package(amd_smi) above.
+# If the package does not report a version, treat it as 0.0 (AI NIC unsupported).
+if(amd_smi_VERSION)
+    message(STATUS "AMD SMI version detected: ${amd_smi_VERSION}")
+else()
+    set(amd_smi_VERSION "0.0")
     message(
         STATUS
-        "AMD SMI version detected: ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR}"
+        "AMD SMI version not reported by find_package; assuming ${amd_smi_VERSION}"
     )
 endif()
 
 # AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
 set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support" FORCE)
 if(ROCPROFSYS_USE_AINIC)
-    if(
-        ROCPROFSYS_AMDSMI_VERSION_MAJOR GREATER 26
-        OR (
-            ROCPROFSYS_AMDSMI_VERSION_MAJOR EQUAL 26
-            AND ROCPROFSYS_AMDSMI_VERSION_MINOR GREATER 2
-        )
-    )
+    if(amd_smi_VERSION VERSION_GREATER_EQUAL 26.3)
         set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
         message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
     else()
-        message(
-            STATUS
-            "AINIC disabled: AMD SMI ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR} < 26.3"
-        )
+        message(STATUS "AINIC disabled: AMD SMI ${amd_smi_VERSION} < 26.3")
     endif()
 else()
     message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
 endif()
 
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
+endif()
+
 # ----------------------------------------------------------------------------------------#
 #
-# ROCpd
+# hipFile (Infinity Storage I/O stats)
 #
 # ----------------------------------------------------------------------------------------#
 
-function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
+# hipFile telemetry is requested with ROCPROFSYS_USE_HIPFILE (ON / OFF / AUTO).
+# The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE) is what every
+# downstream if(), compile definition, and add_subdirectory consults.
+# The user-facing cache is never overwritten:
+#
+#   AUTO + package missing  -> SUPPORT OFF, STATUS (default; a box without hipFile still builds)
+#   ON   + package missing  -> FATAL_ERROR naming the version found, the version required,
+#                              and how to point CMake at a different prefix
+#   OFF                     -> never search
+set(ROCPROFSYS_HIPFILE_MIN_VERSION
+    "0.5.0"
+    CACHE STRING
+    "Minimum hipFile version required for GPU-direct storage I/O telemetry"
+)
+
+set(ROCPROFSYS_HIPFILE_SUPPORT
+    OFF
+    CACHE INTERNAL
+    "Whether hipFile GPU-direct storage I/O telemetry is being built"
+    FORCE
+)
+
+if(NOT ROCPROFSYS_HIPFILE_MIN_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(
+        FATAL_ERROR
+        "ROCPROFSYS_HIPFILE_MIN_VERSION must be major.minor.patch (for example 0.5.0), got '${ROCPROFSYS_HIPFILE_MIN_VERSION}'"
     )
+endif()
 
-    set(SCHEMA_FILES
-        "rocpd_tables.sql"
-        "rocpd_views.sql"
-        "data_views.sql"
-        "marker_views.sql"
-        "summary_views.sql"
+rocprofiler_systems_resolve_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    _rocprofsys_use_hipfile
+)
+
+set(_rocprofsys_hipfile_prefix_hint
+    "Set -Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add the install prefix to CMAKE_PREFIX_PATH"
+)
+
+if(_rocprofsys_use_hipfile STREQUAL "OFF")
+    message(STATUS "hipFile stats support disabled: ROCPROFSYS_USE_HIPFILE is OFF")
+else()
+    find_package(
+        hipfile
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+        PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
     )
-
-    set(SCHEMA_SOURCE_DIR
-        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
+    set(_rocprofsys_hipfile_usable FALSE)
+    if(
+        hipfile_FOUND
+        AND hipfile_VERSION VERSION_GREATER_EQUAL ROCPROFSYS_HIPFILE_MIN_VERSION
     )
-    set(SCHEMA_BINARY_DIR
-        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-    foreach(SCHEMA_FILE ${SCHEMA_FILES})
-        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
-
-        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
-        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
-
-        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
-    endforeach()
-
-    target_include_directories(
-        rocprofiler-systems-headers
-        INTERFACE
-            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-    )
-endfunction()
-
-set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
-find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
-
-if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
-
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
-        endif()
+        set(_rocprofsys_hipfile_usable TRUE)
     endif()
 
-    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
-        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
-
-        rocprofiler_systems_target_compile_definitions(
-            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
+    if(_rocprofsys_hipfile_usable)
+        set(ROCPROFSYS_HIPFILE_SUPPORT
+            ON
+            CACHE INTERNAL
+            "Whether hipFile GPU-direct storage I/O telemetry is being built"
+            FORCE
         )
-
-        target_link_libraries(
-            rocprofiler-systems-rocm
-            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        )
-
         message(
             STATUS
-            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
+            "hipFile stats support enabled (version: ${hipfile_VERSION}, headers: "
+            "${hipfile_INCLUDE_DIRS})"
         )
     else()
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
-        )
+        if(hipfile_VERSION)
+            set(_rocprofsys_hipfile_found_desc "hipFile ${hipfile_VERSION} was found")
+        elseif(hipfile_FOUND)
+            set(_rocprofsys_hipfile_found_desc
+                "a hipFile package with no reported version was found"
+            )
+        else()
+            set(_rocprofsys_hipfile_found_desc "no hipFile package was found")
+        endif()
+        if(_rocprofsys_use_hipfile STREQUAL "ON")
+            message(
+                FATAL_ERROR
+                "ROCPROFSYS_USE_HIPFILE=ON requires hipFile >= ${ROCPROFSYS_HIPFILE_MIN_VERSION}, but ${_rocprofsys_hipfile_found_desc} "
+                "(the per-GPU stats API is not present before ${ROCPROFSYS_HIPFILE_MIN_VERSION}). "
+                "${_rocprofsys_hipfile_prefix_hint}. "
+                "Configure with -DROCPROFSYS_USE_HIPFILE=OFF to disable the feature, or "
+                "-DROCPROFSYS_USE_HIPFILE=AUTO to disable it only when hipFile is missing."
+            )
+        else()
+            message(
+                STATUS
+                "hipFile stats support disabled: ${_rocprofsys_hipfile_found_desc}; "
+                "${ROCPROFSYS_HIPFILE_MIN_VERSION} or later is required (the per-GPU stats API is not "
+                "present before then). ${_rocprofsys_hipfile_prefix_hint}."
+            )
+        endif()
     endif()
-else()
-    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
 endif()
 
-if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
-    rocprofsys_configure_rocpd_schema_files()
+unset(_rocprofsys_use_hipfile)
+unset(_rocprofsys_hipfile_usable)
+unset(_rocprofsys_hipfile_found_desc)
+unset(_rocprofsys_hipfile_prefix_hint)
+
+rocprofiler_systems_add_feature(
+    ROCPROFSYS_HIPFILE_SUPPORT
+    "hipFile GPU-direct storage I/O telemetry compiled in"
+)
+
+# Expose support as a global compile definition so core (and rocprof-sys-avail) can
+# guard setting registration, matching AINIC. The hipFile backend already defines
+# ROCPROFSYS_BUILD_HIPFILE=1 on its INTERFACE target, but core does not link that
+# target, so without this the settings would still be advertised in builds that
+# cannot collect them.
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_HIPFILE=1
+    )
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# Profiler Hub
+#
+# ----------------------------------------------------------------------------------------#
+
+include(ProfilerHub)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -721,11 +727,11 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
-# SQLite3
+# Fmt
 #
 # ----------------------------------------------------------------------------------------#
 
-include(SQLite3)
+include(FmtLib)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -751,24 +757,6 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -918,7 +906,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH rocprofiler-systems-cppstd20
+    REPO_BRANCH rocprofiler-systems
 )
 
 rocprofiler_systems_save_variables(

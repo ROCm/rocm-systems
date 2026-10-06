@@ -225,6 +225,12 @@ public:
         if (!decoder) throw std::exception();
         return decoder->getFuncmap();
     }
+
+    MarkerValue decodeMarkerValue(uint32_t raw) const
+    {
+        if (!decoder) return decode_marker_value(raw);
+        return decode_marker_value(raw, decoder->getFuncmap());
+    }
     const uint64_t load_addr;
 
 private:
@@ -307,6 +313,20 @@ public:
     // Throws std::out_of_range when `id` is unknown (matches the lookup
     // pattern used by getSymbolName via decoders.at(id)).
     const Funcmap& getFuncmap(code_object_id_t id) const { return decoders.at(id)->getFuncmap(); }
+
+    MarkerValue decodeMarkerValue(code_object_id_t id, uint32_t raw) const
+    {
+        auto it = decoders.find(id);
+        if (it == decoders.end()) return decode_marker_value(raw);
+        try
+        {
+            return it->second->decodeMarkerValue(raw);
+        }
+        catch (...)
+        {
+            return decode_marker_value(raw);
+        }
+    }
 
 protected:
     std::unordered_map<code_object_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};

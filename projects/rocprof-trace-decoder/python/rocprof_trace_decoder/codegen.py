@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import bisect
+import functools
 import logging
 import os
 import re
@@ -35,12 +36,32 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bindings import _therock_package_roots
 from .code_index import CodeIndex
 
 TOOL_VERSION = "snapshot_dwarf-1.1"
 HEADER = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle"
 SEPARATOR = " -> "  # matches Instruction::separator in code_printing.hpp
 LOGGER = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _elftools() -> tuple[object, object]:
+    """Return ``(exceptions, ELFFile)``, importing pyelftools on first use.
+
+    Imported lazily so this package remains importable without pyelftools,
+    which some distribution channels do not install.
+    """
+    try:
+        from elftools.common import exceptions
+        from elftools.elf.elffile import ELFFile
+    except ImportError as e:
+        raise ImportError(
+            "pyelftools is required to read symbol labels, marker metadata and "
+            "source ranges from code objects. Install it with "
+            "'pip install pyelftools'."
+        ) from e
+    return exceptions, ELFFile
 
 
 @dataclass(frozen=True)
@@ -53,6 +74,22 @@ class CodeObject:
 class CodeArtifacts:
     code_index: CodeIndex
     source_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class _SqttFuncmapEntry:
+    marker_id: int
+    kind: str
+    name: str
+    source_loc: str
+
+
+@dataclass(frozen=True)
+class _SqttFuncmap:
+    entries: tuple[_SqttFuncmapEntry, ...]
+    shader_clock_bits: int
+    shader_clock_shift: int
+    extra_payload_counts: dict[int, int]
 
 
 def _find_tool(name: str) -> str:
@@ -82,6 +119,14 @@ def _rocm_roots() -> list[Path]:
                 roots.append(root)
                 seen.add(root)
 
+    # ROCm installed as Python wheels: the tools live under the platform
+    # package, e.g. <site-packages>/_rocm_sdk_core/lib/llvm/bin.
+    for package_root in _therock_package_roots():
+        root = package_root / "lib"
+        if root not in seen:
+            roots.append(root)
+            seen.add(root)
+
     default = Path("/opt/rocm")
     if default not in seen:
         roots.append(default)
@@ -105,6 +150,133 @@ def is_elf(path: str | Path) -> bool:
             return f.read(4) == b"\x7fELF"
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# SQTT marker metadata
+# ---------------------------------------------------------------------------
+
+
+def _parse_u32(value: str) -> int | None:
+    if not value or any(char < "0" or char > "9" for char in value):
+        return None
+    parsed = int(value)
+    return parsed if parsed <= 0xFFFFFFFF else None
+
+
+def _split_funcmap_name(value: str) -> tuple[str, str]:
+    name, sep, source_loc = value.partition("@")
+    return (name, source_loc if sep else "")
+
+
+def _parse_sqtt_funcmap(data: bytes) -> _SqttFuncmap:
+    """Parse the subset of ``.sqtt_funcmap`` needed by code.json.
+
+    The output intentionally mirrors the C++ funcmap reader, but malformed
+    rows are ignored here: generating code metadata must remain best-effort
+    for ordinary code objects and older marker producers.
+    """
+
+    entries: list[_SqttFuncmapEntry] = []
+    extra_payload_counts: dict[int, int] = {}
+    shader_clock_bits = 0
+    shader_clock_shift = 0
+
+    for raw_line in re.split(r"[\n\x00]", data.decode("utf-8", errors="replace")):
+        line = raw_line.rstrip("\r \t")
+        if len(line) < 2 or line[1] != ":":
+            continue
+
+        kind = line[0]
+        payload = line[2:]
+        if kind == "M":
+            bits = 0
+            shift = 0
+            saw_bits = False
+            saw_shift = False
+            valid = True
+            for attribute in payload.split(";"):
+                key, separator, value = attribute.partition("=")
+                if not separator:
+                    continue
+                parsed = _parse_u32(value)
+                if key == "shader_clock_bits":
+                    if parsed is None:
+                        valid = False
+                    else:
+                        bits = parsed
+                        saw_bits = True
+                elif key == "shader_clock_shift":
+                    if parsed is None:
+                        valid = False
+                    else:
+                        shift = parsed
+                        saw_shift = True
+
+            if valid and saw_bits and (bits == 0 or saw_shift) and bits <= 29 and (
+                bits == 0 or (shift < 32 and bits <= 32 - shift)
+            ):
+                shader_clock_bits = bits
+                shader_clock_shift = shift if bits else 0
+            continue
+
+        if kind == "R":
+            marker_id_text, separator, attributes = payload.partition(":")
+            marker_id = _parse_u32(marker_id_text) if separator else None
+            if marker_id is None:
+                continue
+            for attribute in attributes.split(";"):
+                key, equals, value = attribute.partition("=")
+                if key != "extra_payload_count" or not equals:
+                    continue
+                count = _parse_u32(value)
+                if count is not None:
+                    extra_payload_counts[marker_id] = count
+            continue
+
+        if kind == "K":
+            name, source_loc = _split_funcmap_name(payload)
+            if name:
+                entries.append(_SqttFuncmapEntry(0, kind, name, source_loc))
+            continue
+
+        if kind not in {"F", "U", "P"}:
+            continue
+
+        marker_id_text, separator, name_and_source = payload.partition(":")
+        marker_id = _parse_u32(marker_id_text) if separator else None
+        if marker_id is None:
+            continue
+        name, source_loc = _split_funcmap_name(name_and_source)
+        if name:
+            entries.append(_SqttFuncmapEntry(marker_id, kind, name, source_loc))
+
+    return _SqttFuncmap(
+        entries=tuple(entries),
+        shader_clock_bits=shader_clock_bits,
+        shader_clock_shift=shader_clock_shift,
+        extra_payload_counts=extra_payload_counts,
+    )
+
+
+def _read_sqtt_funcmap(elf_path: str) -> _SqttFuncmap | None:
+    """Return embedded marker metadata, or ``None`` when no section exists."""
+
+    elftools_exceptions, ELFFile = _elftools()
+
+    try:
+        with Path(elf_path).open("rb") as file:
+            section = ELFFile(file).get_section_by_name(".sqtt_funcmap")
+            if section is None:
+                return None
+            data = section.data()
+    except (OSError, elftools_exceptions.ELFError, ValueError):
+        return None
+    except Exception:
+        LOGGER.debug("Unexpected error reading .sqtt_funcmap from %s", elf_path, exc_info=True)
+        return None
+
+    return _parse_sqtt_funcmap(data) if data else None
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +465,7 @@ def _build_die_tree(die, dwarfinfo, cu, line_program) -> _Inlined:
 
 def build_address_ranges(elf_path: str) -> list[tuple[int, int, str]]:
     """Return sorted ``(begin, end, comment)`` source ranges."""
-    from elftools.common import exceptions as elftools_exceptions
-    from elftools.elf.elffile import ELFFile
+    elftools_exceptions, ELFFile = _elftools()
 
     expected_errors = (
         OSError,
@@ -448,7 +619,7 @@ def _normalize_branch_operand(inst: str, raw_words: str) -> str:
 
 def read_symbol_labels(elf_path: str) -> tuple[dict[int, tuple[str, str]], dict[int, list[str]]]:
     """Return (function labels, debug labels) keyed by virtual address."""
-    from elftools.elf.elffile import ELFFile
+    _, ELFFile = _elftools()
 
     functions: dict[int, tuple[str, str]] = {}
     labels: dict[int, list[str]] = {}
@@ -569,6 +740,9 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
     rows: list[list] = []
     comments: list[str] = []
     kernels_out: list[dict] = []
+    sqtt_funcmap_rows: list[list[object]] = []
+    sqtt_funcmap_layouts: list[list[int]] = []
+    sqtt_funcmap_payloads: list[list[int]] = []
     line_no = 1
 
     for code_object in normalized:
@@ -577,6 +751,27 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
         range_map = build_address_ranges(elf_path)
         insts = parse_disassembly(elf_path)
         kernels, debug_labels = read_symbol_labels(elf_path)
+        funcmap = _read_sqtt_funcmap(elf_path)
+
+        if funcmap is not None:
+            # Keep the existing sqtt_funcmap row shape used by rocprofv3
+            # consumers. The two new side tables below are additive, so older
+            # readers can ignore them without losing their original schema.
+            if funcmap.shader_clock_bits:
+                sqtt_funcmap_layouts.append(
+                    [codeobj_id, funcmap.shader_clock_bits, funcmap.shader_clock_shift]
+                )
+            symbol_vaddrs: dict[str, int] = {}
+            for address, (name, _demangled) in sorted(kernels.items()):
+                symbol_vaddrs.setdefault(name, address)
+            for entry in funcmap.entries:
+                vaddr = symbol_vaddrs.get(entry.name, 0) if entry.kind in {"F", "K"} else 0
+                sqtt_funcmap_rows.append(
+                    [codeobj_id, entry.marker_id, entry.kind, entry.name, entry.source_loc, vaddr]
+                )
+                payload_count = funcmap.extra_payload_counts.get(entry.marker_id, 0)
+                if entry.kind != "K" and payload_count:
+                    sqtt_funcmap_payloads.append([codeobj_id, entry.marker_id, payload_count])
 
         for vaddr, inst in insts:
             # Kernel and debug labels are emitted as code rows immediately
@@ -639,6 +834,12 @@ def generate_code_artifacts(code_objects: Iterable[CodeObject]) -> CodeArtifacts
         "kernels": kernels_out,
         "hsaco": [str(code_object.path) for code_object in normalized],
     }
+    if sqtt_funcmap_rows:
+        code_doc["sqtt_funcmap"] = sqtt_funcmap_rows
+    if sqtt_funcmap_layouts:
+        code_doc["sqtt_funcmap_layout"] = sqtt_funcmap_layouts
+    if sqtt_funcmap_payloads:
+        code_doc["sqtt_funcmap_payloads"] = sqtt_funcmap_payloads
 
     source_paths = tuple(Path(path) for path in extract_paths_from_comments(comments))
     return CodeArtifacts(CodeIndex.from_document(code_doc), source_paths)

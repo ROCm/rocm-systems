@@ -8,6 +8,17 @@ Currently detects intra-workgroup races — cases where the value read from a
 register or LDS is not deterministic due to missing `s_waitcnt` or `s_barrier`
 instructions.
 
+## Target scope
+
+The race detector focuses on pre-GFX12 architectures. Its current end-to-end
+coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+and later architectures are not supported. Some GFX12 split-counter behavior
+is already modeled and covered by plugin tests, including partial load waits
+and generic FLAT stores that require both STORECNT and DSCNT waits. This partial
+coverage does not establish complete counter, scheduling, or writeback support;
+issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
+and GFX11.
+
 ## Quick start
 
 This section is a standalone guide to getting up and running with race
@@ -58,7 +69,7 @@ int main() {
 
 Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-`gfx950_cdna4.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+`gfx950_mi355x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
 higher — the emulator does not currently support unoptimized (`-O0`) GPU code
 objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
@@ -67,16 +78,23 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Run it under the emulator with `RJ_RACE=1` to enable the race detector:
+Enable the race detector by adding it to the `plugins` section of your
+rocjitsu config file (`my_config.json`):
+
+```json
+{ "plugins": { "race": {} } }
+```
+
+Run it under the emulator:
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 You should see output:
 
 ```
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -84,8 +102,11 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
 END_RACE
 ```
 
-This tells you that wave 1 wrote to LDS (`ds_write_b32`) and wave 0 read from
-the same address (`ds_read_b32`) without a barrier in between. The fix is to add
+This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
+without a barrier in between. The `kernel` field is a compact display name, and
+`symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
+be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
 ### Running your own application
@@ -95,16 +116,22 @@ Replace the binary path with your application. This works with any ROCm workload
 launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- python my_script.py
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
 ```
 
-To capture reports to a file instead of stderr, set `RJ_SINKS=file` and
-`RJ_SINK_DIR`:
+To capture reports to a file instead of stderr (useful for CI or
+scripted workflows), add a `sinks` section to your config:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
 
 ```bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
@@ -120,18 +147,28 @@ races. Some examples:
 1. A wave issues a global load into a VGPR, then reads that VGPR before issuing
    `s_waitcnt vmcnt(0)`. The load may not have completed, so the read value is
    undefined.
+1. A wave issues a load into a VGPR, then an instruction overwrites that VGPR
+   before the load completes. The load may complete later and clobber the
+   instruction result.
 1. One wave in a workgroup writes to an LDS address. Another wave reads from
    the same address without an intervening `s_barrier`. The read may see stale
    data because the write may not have completed from the reader's perspective.
 
 ## What this plugin detects
 
-- **VGPR races**: a vector register is read before a pending global or LDS load
-  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient).
-- **SGPR races**: a scalar register is read before a pending scalar load has
-  completed (`s_waitcnt lgkmcnt` insufficient).
-- **LDS races**: an LDS byte is read or written by one wave while another wave
-  has an outstanding write to the same byte, without an intervening `s_barrier`.
+- **VGPR races**: a vector register is read or overwritten by an instruction
+  before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
+  `s_waitcnt lgkmcnt` insufficient).
+- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
+  pending scalar-memory load has completed. A later scalar load to the same
+  destination is also checked because scalar-memory results can complete out
+  of order.
+- **LDS races**: an LDS byte is read by one wave while another wave has an
+  outstanding write to the same byte, or written by one wave while another
+  wave has an outstanding read of the same byte, without an intervening
+  `s_barrier`;
+  or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
+  before the required `s_waitcnt vmcnt`.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -141,21 +178,101 @@ the affected bytes, and LDS races are tracked per byte.
 Every in-flight memory operation has an **event** that goes through the
 following lifecycle:
 
-1. **ACTIVE** — the operation is in flight.
-1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
-   This means the event is no longer in flight from the perspective of the wave
-   that issued the operation, but is still in flight from the perspective of
-   other waves in the same workgroup.
+1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
+   the same wave remain ordered with respect to each other, so a later
+   same-wave DS read or write does not race solely because the earlier DS event
+   is still active. Direct-to-LDS VMEM writes still require the owning wave to
+   wait for `vmcnt` before reading the destination bytes.
+1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
+   event. This means the event is no longer in flight from the perspective of
+   the wave that issued the operation, but is still in flight from the
+   perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
+
+Generic `FLAT_*` instructions have two independent completion obligations:
+the vector-memory counter and the LDS counter. A wait on only one domain does
+not complete the race-detector event; both domains must be satisfied. The
+resolved route still determines whether the event accesses global memory or
+LDS. This currently assumes that all active lanes select the same memory space;
+mixed LDS/global lanes are tracked separately in #11456.
+
+An all-ones wait-count field is the architectural “do not wait” value. CDNA's
+four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
+`lgkmcnt(14)` and `vmcnt(62)` are the largest values that can impose an
+explicit wait. Hardware also prevents counter overflow by stalling issue.
+
+The physical LGKMCNT capacity is shared by every event accounted to LGKMCNT,
+including LDS, GDS, scalar-memory, and message operations. Sharing that counter
+does not mean those event classes complete in order with each other. The
+detector therefore retires only the oldest prefix that is provably complete in
+an ordered class. For example, a new LGKM-counted instruction issued after 15
+pending local-LDS operations proves that the oldest LDS operation completed,
+even when the new instruction is scalar memory or GDS. Mixed-class pressure
+that does not identify a completed event remains conservatively pending. VMCNT
+is handled the same way for its 63-entry ordered non-FLAT VMEM class.
+
+The detector's persistent counter accounting is limited to operations routed
+through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
+token of issue-time LGKMCNT pressure, but message occupancy and returning
+message results are not retained as pending events. Timestamp-query operations
+such as `s_memtime` and `s_memrealtime` are not accounted for. These operations
+therefore remain unsupported rather than being treated as complete message or
+timestamp modeling.
+
+For example, CDNA cannot issue the final scalar load below while all 15 earlier
+LGKM tokens remain outstanding:
+
+```asm
+ds_read_b32 v0, v16
+ds_read_b32 v1, v16
+; ... 13 more ordered LDS reads, through v14 ...
+s_load_dword s4, s[2:3], 0
+```
+
+The scalar load can issue only after the LGKMCNT value drops below its
+four-bit capacity. Because all preceding operations are ordered LDS reads, this
+proves that the oldest read into `v0` completed. If those pending operations
+belonged to different or unordered classes, the capacity stall would not prove
+which individual event completed.
+
+The detector records the target-specific wait-counter family on every event.
+It handles both the combined wait fields and the standalone counter forms on
+supported targets, for example:
+
+```asm
+s_waitcnt vmcnt(0) lgkmcnt(0)  ; combined fields
+s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
+s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
+```
+
+Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
+CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
+GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
+domain and therefore do not create VMCNT pressure. Generic FLAT contributes to
+both modeled domains, so both capacity constraints are applied before operand
+reads.
+
+The same completion-order distinction is used for nonzero partial waits; a
+zero wait still completes every event on the selected counter. The detector
+also uses these classes to determine whether two asynchronous writes to the
+same VGPR are ordered.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-Similar logic applies for VGPR and SGPR accesses.
+For VGPRs and scalar registers, the detector also flags WAW when an instruction
+write can be clobbered by a pending asynchronous load. The detector also reports
+WAW between scalar loads targeting the same SGPR or TTMP.
+
+On architectures where scalar-memory and data-share operations use a combined
+`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
+completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
+same partial wait can still retire older data-share operations that are provably
+complete from their in-order completion rule.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -244,14 +361,15 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with `RJ_RACE=1`.
+  kernel tests run under the emulator with the `race` plugin enabled in the
+  config file.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
-ctest --test-dir build -R "RaceTest"
+# End-to-end HIP tests (the test config enables the race plugin)
+ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
 
 ## Limitations
@@ -266,10 +384,16 @@ ctest --test-dir build -R "RaceTest"
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **No WAW detection**: write-after-write hazards are not currently flagged.
-  This includes both LDS WAW (two waves writing to the same LDS byte without a
-  barrier) and VGPR WAW (an ALU instruction overwriting a register that has a
-  pending global load).
+- **Limited WAW detection**: VGPR WAW covers instruction writes and
+  asynchronous memory writes that overlap a pending load. Scalar-register WAW
+  covers instruction writes and scalar loads that overlap pending scalar-memory
+  destinations. LDS WAW is not currently reported.
+
+- **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
+  plugin's instruction-write lane and byte masks. DPP destinations can currently
+  report all active lanes, and SDWA preserve-mode destinations can report a full
+  dword, so writes to architecturally preserved lanes or bytes may be
+  conservatively reported as races.
 
 - **Kernel name resolution**: kernel names in race reports may show as `"?"` if
   symbol information is not available in the code object.

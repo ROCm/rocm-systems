@@ -304,20 +304,17 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
 
-  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // @brief Pick the k-th engine (wrapping) from a preferred-engine mask.
   // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
-  // if mask is empty. When advance=true (default) the counter is incremented so
-  // successive body assignments spread across engines. Pass advance=false to
-  // peek at the current position without consuming a slot — used when selecting
-  // a coordinator engine so it rotates independently of body assignments.
-  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+  // if mask is empty. Rotation is driven by the caller-supplied index (e.g. the
+  // per-entry index of a fan-out copy), so engine assignment stays *within* a
+  // single copy and is deterministic per call -- it does not march across
+  // successive API calls.
+  inline uint32_t NthSdmaEngine(uint32_t engine_mask, uint32_t k) {
     if (!engine_mask) return 0;
-    int count = rocr::os::Popcount(engine_mask);
-    if (count == 1) return rocr::os::Ffs(engine_mask);
-    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
-                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    const int count = rocr::os::Popcount(engine_mask);
     uint32_t m = engine_mask;
-    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+    for (uint32_t i = 0, pick = k % count; i < pick; ++i)
       m &= m - 1;
     return rocr::os::Ffs(m);
   }
@@ -345,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -445,6 +443,11 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief returns true if agent uses MES scheduler
   __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
+
+  // @brief returns true for gfx12.5+ parts (used by the PC sampling drain path)
+  __forceinline bool is_gfx1250() const {
+    return supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5;
+  }
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
@@ -575,6 +578,10 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
+
+  /// @brief Check if the accelerator is ready to be used.
+  /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
+  hsa_status_t CheckAcceleratorReadiness();
 
  protected:
   // Sizes are in packets.
@@ -775,6 +782,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
 
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
+
   // @brief Create internal queues and blits.
   void InitDma();
 
@@ -820,6 +831,14 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // SDMA-disabled shader-blit fallback for a single DmaCopyBatch op.  Selects
+  // the blit shader based on op type: plain LINEAR uses the BlitDevToDev linear
+  // copy shader (one entry at a time).  Broadcast/swap/indirect have no shader
+  // equivalent yet and are rejected until those shaders are added.
+  hsa_status_t DmaCopyBatchFallback(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Linear swap: exchanges the contents of src and dst buffers.
   // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
   // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
@@ -838,7 +857,7 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyBatch,
   // swap and indirect operations.  Submits prologue, per-entry bodies
   // (selected by @p op), and epilogue with one signal.
   // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
@@ -853,7 +872,9 @@ class GpuAgent : public GpuAgentInt {
       const void* const* src_list,
       void* const* dst_list,
       const hsa_agent_t* dst_agent_list,
-      const size_t* size_list);
+      const size_t* size_list,
+      uint32_t coord_engine = 0,
+      uint32_t max_engines = 0);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -976,7 +997,7 @@ class GpuAgent : public GpuAgentInt {
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC's flush thread
-    uint32_t which_buffer;                    // Current buffer selector (0 or 1)
+    std::atomic<uint32_t> which_buffer{0};    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
     uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
@@ -985,7 +1006,7 @@ class GpuAgent : public GpuAgentInt {
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
     std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
 
-    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    /* PM4 drain resources (per-XCC to avoid races when multiple XCC threads submit concurrently) */
     uint64_t* old_val;                        // Staging area for PM4 atomic return value
     uint32_t* cmd_data;                       // PM4 command buffer
     size_t cmd_data_sz;                       // PM4 command buffer size
@@ -1017,10 +1038,10 @@ class GpuAgent : public GpuAgentInt {
 
     /* Consumer thread for aggregated callback delivery */
     std::thread consumer_thread;            // Aggregates data and delivers callbacks
-    std::mutex consumer_mutex;              // Protects consumer_cv and pending_flush_count
+    std::mutex consumer_mutex;              // Protects consumer_cv, pending_flush_count, consumer_exit (for notify)
     std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
-    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit
-    std::atomic<uint32_t> pending_flush_count;  // How many XCCs have notified consumer
+    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit (atomic for lockless loop check)
+    uint32_t pending_flush_count;           // How many XCCs have notified consumer (protected by consumer_mutex)
     std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
 
     pcs::PcsRuntime::PcSamplingSession* session;
@@ -1046,7 +1067,7 @@ class GpuAgent : public GpuAgentInt {
                                                   pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
 
-  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  // @brief Flush device buffers using PM4 commands on the command processor (fallback for non-large-BAR systems)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
                                                       pcs::PcsRuntime::PcSamplingSession& session,
                                                       uint32_t xcc_id);
@@ -1065,9 +1086,6 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
-  // Round-robin index for spreading SDMA work across engines (gfx1250+).
-  std::atomic<uint32_t> sdma_rr_index_{0};
-
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
@@ -1077,6 +1095,14 @@ class GpuAgent : public GpuAgentInt {
 
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
+
+  // Serializes PM4 submit-and-wait sequences on queues_[QueuePCSampling].
+  // AqlQueue::ExecutePM4 stages commands in a single per-queue indirect buffer that it
+  // reuses as soon as it returns, so only one asynchronous PM4 submission may be in
+  // flight on that queue at a time. The per-XCC flush threads and PcSamplingFlush all
+  // share the queue, as do the hosttrap and stochastic sessions.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
 
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
@@ -1091,6 +1117,10 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
+
+  std::atomic<bool> accelerator_ready_{false};
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };

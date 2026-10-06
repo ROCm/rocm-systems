@@ -57,14 +57,9 @@ class tui_analysis(OmniAnalyze_Base):
             )
             return
 
-        # Join results_*.csv source files into pmc_perf.csv if needed (Phase 2)
-        self.join_workload_csvs(Path(self.path))
-
         workload.raw_pmc = file_io.create_df_pmc(
             self.path,
-            self.args.kernel_verbose,
             self.args.verbose,
-            self._profiling_config,
         )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
@@ -73,7 +68,6 @@ class tui_analysis(OmniAnalyze_Base):
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=self.args.time_unit,
-            kernel_verbose=self.args.kernel_verbose,
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df

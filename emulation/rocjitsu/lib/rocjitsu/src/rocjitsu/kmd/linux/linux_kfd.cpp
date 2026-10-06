@@ -119,6 +119,8 @@ const char *LinuxKfd::ioctl_name(unsigned long request) {
     return "CREATE_QUEUE";
   case AMDKFD_IOC_UPDATE_QUEUE:
     return "UPDATE_QUEUE";
+  case AMDKFD_IOC_SET_CU_MASK:
+    return "SET_CU_MASK";
   case AMDKFD_IOC_DESTROY_QUEUE:
     return "DESTROY_QUEUE";
   case AMDKFD_IOC_CREATE_EVENT:
@@ -137,6 +139,8 @@ const char *LinuxKfd::ioctl_name(unsigned long request) {
     return "SET_SCRATCH_VA";
   case AMDKFD_IOC_SET_TRAP_HANDLER:
     return "SET_TRAP_HANDLER";
+  case AMDKFD_IOC_DBG_TRAP:
+    return "DBG_TRAP";
   case AMDKFD_IOC_SET_XNACK_MODE:
     return "SET_XNACK";
   case AMDKFD_IOC_SET_MEMORY_POLICY:

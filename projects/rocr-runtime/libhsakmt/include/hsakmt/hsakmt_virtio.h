@@ -26,9 +26,7 @@
 #ifndef HSAKMT_VIRTIO_H
 #define HSAKMT_VIRTIO_H
 
-#if defined(__linux__)
-#include "hsakmt/linux/kfd_ioctl.h"
-#endif
+#include "kfd_ioctl.h"
 
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
@@ -47,7 +45,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
 HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
-                                                   HsaMemMapFlags MemMapFlags,
+                                                   HsaMemFlags MemFlags,
                                                    HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapMemoryToGPU(void* MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAvailableMemory(HSAuint32 Node, HSAuint64* AvailableBytes);

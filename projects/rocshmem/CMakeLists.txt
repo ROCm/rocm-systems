@@ -50,21 +50,16 @@ option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
-option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
-option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
-option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
-option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
-option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-register so rocprofiler-sdk tools can trace host-stream APIs." ON)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
-option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
@@ -76,16 +71,37 @@ option(BUILD_DEBUG_TRACE_DEVICE "Compile in device-side trace logging (LOGD_API/
 option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GDA error checking)" OFF)
 
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
-option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
+option(GDA_BNXT "Build for Broadcom BNXT RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
 
-if (ASAN)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
-  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+set(GDA_PROVIDERS "")
+foreach(gda_provider IN ITEMS IONIC BNXT MLX5)
+  if(GDA_${gda_provider})
+    list(APPEND GDA_PROVIDERS "${gda_provider}")
+  endif()
+endforeach()
+list(LENGTH GDA_PROVIDERS GDA_PROVIDER_COUNT)
+
+# default to provider multiplexer only when multiple providers enabled
+if(GDA_PROVIDER_COUNT GREATER 1)
+  set(GDA_MUX_DEFAULT ON)
+else()
+  set(GDA_MUX_DEFAULT OFF)
+endif()
+option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
+       ${GDA_MUX_DEFAULT})
+
+if(USE_GDA)
+  if(GDA_PROVIDER_COUNT EQUAL 0)
+    message(WARNING "GDA support requested, but no GDA provider enabled - disabling GDA")
+    set(USE_GDA OFF)
+    set(GDA_MUX OFF)
+  elseif(GDA_PROVIDER_COUNT EQUAL 1 AND GDA_MUX)
+    message(WARNING "GDA provider multiplexer enabled, but only ${GDA_PROVIDERS} provider enabled")
+  elseif(GDA_PROVIDER_COUNT GREATER 1 AND NOT GDA_MUX)
+    message(FATAL_ERROR "Multiple GDA providers enabled, but provider multiplexer support disabled")
+  endif()
 endif()
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
@@ -97,10 +113,21 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.5.0)
+set(VERSION_STRING 3.8.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
+
+# Must run after project(... LANGUAGES CXX) so CMAKE_CXX_COMPILER is populated;
+# querying it any earlier silently returns an empty path here, which then
+# corrupts the -Wl,-rpath, link flag added for ASAN builds below.
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
 
 find_package(ROCmCMakeBuildTools)
 include(ROCMCreatePackage)
@@ -108,15 +135,6 @@ include(ROCMInstallTargets)
 include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
-
-#############################################################################
-# VALIDATE VMM POSIX ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_POSIX)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-endif()
 
 #############################################################################
 # DETECT POD CAPABILITY
@@ -137,9 +155,17 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  # Check if HIP runtime has hipMemFabricHandle_t
+  find_path(_hip_include_dir
+    hip/hip_runtime_api.h
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  if(_hip_include_dir)
+    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  endif()
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
     #include <hip/hip_runtime_api.h>
     int main() {
@@ -167,25 +193,6 @@ else()
 endif()
 
 #############################################################################
-# VALIDATE VMM FABRIC ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_FABRIC)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-
-  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
-  if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
-                        "  1. AMD SMI library with amdsmi_get_gpu_fabric_info support\n"
-                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
-                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
-  endif()
-
-  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
-endif()
-
-#############################################################################
 # SET GPU ARCHITECTURES
 #############################################################################
 include(cmake/rocm_local_targets.cmake)
@@ -201,7 +208,7 @@ if(${ROCM_MAJOR_VERSION} GREATER 6)
 endif()
 
 if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
-  list(APPEND DEFAULT_GPUS gfx1250)
+  list(APPEND DEFAULT_GPUS gfx1250 gfx1250-strict)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -222,60 +229,78 @@ set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
 
 # When the user supplies GPU_TARGETS:
 #   - Normalise comma/semicolon separators
-#   - Build a base→full map so feature suffixes (e.g. gfx950:sramecc+:xnack-)
-#     can be restored after validation
-#   - Produce a bare-arch list for rocm_check_target_ids and HIP compilation,
-#     which both reject feature-suffixed entries in --offload-arch
+#   - Dedupe on the exact string, since the same base arch may legitimately
+#     appear more than once with different feature suffixes (e.g.
+#     gfx90a:xnack+;gfx90a:xnack-) to fat-binary both variants
+# rocm_check_target_ids validates each entry with a real compiler-flag check
+# (-xhip --offload-arch=<entry>), so feature-suffixed entries like
+# gfx950:sramecc+:xnack- are validated natively and echoed back verbatim on
+# success — no separate bare/full bookkeeping is needed.
 if(GPU_TARGETS)
   string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
-  set(_bare_targets "")
-  foreach(_t ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _base "${_t}")
-    set(_USER_FULL_${_base} "${_t}")
-    list(APPEND _bare_targets "${_base}")
-  endforeach()
-  list(REMOVE_DUPLICATES _bare_targets)
+  list(REMOVE_DUPLICATES GPU_TARGETS)
+endif()
+
+include(cmake/AsanGpuTargets.cmake)
+
+# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so the policy would
+# otherwise feed on its own output and a later -DASAN=OFF would never bring
+# back the dropped families. Re-derive from the request instead; still matching
+# what we wrote last time means nobody edited it.
+if(DEFINED ROCSHMEM_GPU_TARGETS_DERIVED AND GPU_TARGETS STREQUAL ROCSHMEM_GPU_TARGETS_DERIVED)
+  set(GPU_TARGETS "${ROCSHMEM_GPU_TARGETS_REQUESTED}")
+else()
+  set(ROCSHMEM_GPU_TARGETS_REQUESTED "${GPU_TARGETS}" CACHE INTERNAL
+      "GPU_TARGETS as requested, before ASAN normalisation and validation")
+endif()
+
+if(ASAN)
+  if(GPU_TARGETS)
+    rocshmem_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+  else()
+    rocshmem_asan_adjust_gpu_targets(DEFAULT_GPU_TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
+endif()
+
+if(GPU_TARGETS)
+  set(_requested_gpus ${GPU_TARGETS})
+else()
+  set(_requested_gpus ${DEFAULT_GPU_TARGETS})
 endif()
 
 if(COMMAND rocm_check_target_ids)
-  if(GPU_TARGETS)
-    message(STATUS "Checking for ROCm support for GPU targets: " "${_bare_targets}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_bare_targets})
-  else()
-    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
-  endif()
+  message(STATUS "Checking for ROCm support for GPU targets: " "${_requested_gpus}")
+  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_requested_gpus})
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  if(GPU_TARGETS)
-    set(SUPPORTED_GPUS ${_bare_targets})
-  else()
-    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
-  endif()
+  set(SUPPORTED_GPUS ${_requested_gpus})
 endif()
 
-# GPU_TARGETS_FULL: validated arch strings with feature suffixes restored.
+# The ASAN policy already failed if it kept nothing; this catches the compiler
+# rejecting everything it kept, e.g. because of conflicting CXXFLAGS.
+if(ASAN AND NOT SUPPORTED_GPUS)
+  message(FATAL_ERROR
+    "ASAN requires a GPU target that supports xnack, but none of the "
+    "requested GPU targets passed rocm_check_target_ids: ${_requested_gpus}")
+endif()
+
+# GPU_TARGETS_FULL: validated arch strings with feature suffixes intact.
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
-# HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
-# match the active feature configuration of the GPU.
-# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
-# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
-if(GPU_TARGETS)
-  set(_full_validated "")
-  foreach(_base ${SUPPORTED_GPUS})
-    if(DEFINED _USER_FULL_${_base})
-      list(APPEND _full_validated "${_USER_FULL_${_base}}")
-    else()
-      list(APPEND _full_validated "${_base}")
-    endif()
-  endforeach()
-  set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
+# the device bitcode — HIP error 209 occurs if the suffix in the bitcode
+# metadata does not match the active feature configuration of the GPU.
+# Keyed on whether SUPPORTED_GPUS carries a suffix, not on whether the user set
+# GPU_TARGETS: under ASAN the defaults path produces :xnack+ too. Cleared
+# otherwise, which costs nothing since the fallback is the same bare list.
+if(SUPPORTED_GPUS MATCHES ":")
+  set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
 else()
   unset(GPU_TARGETS_FULL CACHE)
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
+set(ROCSHMEM_GPU_TARGETS_DERIVED "${GPU_TARGETS}" CACHE INTERNAL
+    "Last value written to GPU_TARGETS above, so the next configure can tell a user edit from this project's own output")
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
@@ -309,12 +334,16 @@ if (NOT BUILD_TESTS_ONLY)
       endif()
     endif()
 
-    if(USE_GDA AND NOT TARGET numa::numa)
-      message(STATUS "libnuma not found. Unable to build GDA")
+    if(NOT TARGET numa::numa AND (USE_GDA OR USE_SDMA))
+      message(WARNING "libnuma not found. Unable to build GDA or SDMA")
+      set(USE_SDMA OFF)
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
       set(GDA_BNXT OFF)
       set(GDA_MLX5 OFF)
+      set(GDA_MUX OFF)
+      set(GDA_PROVIDERS "")
+      set(GDA_PROVIDER_COUNT 0)
     endif()
   endif()
 
@@ -338,11 +367,63 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
+  # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
+  # reconfigure of an existing build directory it can retain a stale value
+  # (e.g. from before ASAN was enabled, or from a previous GPU_TARGETS) even
+  # though GPU_TARGETS itself was correctly refreshed above. Force it to match
+  # on every configure so hip::device's --offload-arch flags stay in sync.
+  set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
+
+  # DeviceBitcode.cmake caches this without FORCE too, so it goes stale the
+  # same way in both directions: a pre-ASAN directory loses the :xnack+, and
+  # without the else arm a suffixed value outlives a bare-arch configure.
+  if(GPU_TARGETS_FULL)
+    set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
+      "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
+  else()
+    unset(BITCODE_GPU_ARCHS_FULL CACHE)
+  endif()
+
+  # Same staleness, and this is the list DeviceBitcode.cmake iterates: a
+  # pre-ASAN directory keeps the dropped families and builds them instrumented.
+  set(_bitcode_archs "")
+  foreach(_target ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _bare "${_target}")
+    list(APPEND _bitcode_archs "${_bare}")
+  endforeach()
+  if(_bitcode_archs)
+    list(REMOVE_DUPLICATES _bitcode_archs)
+    set(BITCODE_GPU_ARCHS "${_bitcode_archs}" CACHE STRING
+      "GPU architectures for device bitcode (semicolon-separated)" FORCE)
+  endif()
+
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -381,26 +462,23 @@ if (NOT BUILD_TESTS_ONLY)
 
   string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
 
-  set(_backends "")
+  set(backends "")
   if(USE_GDA)
-    set(_gda_nics "")
-    foreach(_nic IN ITEMS IONIC BNXT MLX5)
-      if(GDA_${_nic})
-        list(APPEND _gda_nics "${_nic}")
-      endif()
-    endforeach()
-    list(JOIN _gda_nics "/" _gda_providers)
-    list(APPEND _backends "GDA(${_gda_providers})")
+    list(JOIN GDA_PROVIDERS "/" gda_provider_string)
+    if(GDA_MUX)
+      string(PREPEND gda_provider_string "MUX:")
+    endif()
+    list(APPEND backends "GDA(${gda_provider_string})")
   endif()
   if(USE_RO)
-    list(APPEND _backends "RO")
+    list(APPEND backends "RO")
   endif()
   if(USE_IPC)
-    list(APPEND _backends "IPC")
+    list(APPEND backends "IPC")
   endif()
 
-  if(_backends)
-    list(JOIN _backends "+" ROCSHMEM_BACKEND)
+  if(backends)
+    list(JOIN backends "+" ROCSHMEM_BACKEND)
   else()
     set(ROCSHMEM_BACKEND "NONE")
   endif()
@@ -455,7 +533,8 @@ if (NOT BUILD_TESTS_ONLY)
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
-      $<$<BOOL:${USE_GDA}>:numa::numa>
+    PRIVATE
+      $<$<OR:$<BOOL:${USE_GDA}>,$<BOOL:${USE_SDMA}>>:numa::numa>
   )
 
   target_link_options(
@@ -465,15 +544,17 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (ASAN)
-    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
-    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-
     # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
     target_link_options(
       ${PROJECT_NAME}
       PUBLIC
         -Wl,-rpath,${ASAN_RUNTIME_DIR}
     )
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_link_libraries(${PROJECT_NAME}
+                          PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -519,11 +600,72 @@ if (NOT BUILD_TESTS_ONLY)
       rocm-dev
   )
 
+  set(_rocshmem_export_deps)
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
+  endif()
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
+  endif()
+
+  # ROCm 7.13+ ships NUMAConfig.cmake in rocm_sysdeps so find_dependency(NUMA)
+  # works cleanly for consumers. On older ROCm, bake the resolved paths into an
+  # included file since no config-mode NUMA package exists.
+  # For ROCm >= 7.13 NUMAConfig.cmake ships in rocm_sysdeps alongside the ROCm
+  # install. Inject a CMAKE_PREFIX_PATH prepend into the generated config using
+  # the hip package location (stable relative to rocm_sysdeps) so internal
+  # find_dependency(NUMA) resolves without requiring downstream project awareness.
+  # For older ROCm, bake the resolved numa::numa target directly.
+  set(_rocshmem_numa_include)
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR
+     (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 13))
+    if(USE_GDA OR USE_SDMA)
+      list(APPEND _rocshmem_export_deps PACKAGE NUMA)
+    endif()
+  elseif(TARGET numa::numa)
+    # Older ROCm: bake resolved paths so consumers need no FindNUMA.cmake.
+    get_target_property(_numa_lib numa::numa IMPORTED_LOCATION)
+    get_target_property(_numa_inc numa::numa INTERFACE_INCLUDE_DIRECTORIES)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
+      "if(NOT TARGET numa::numa)\n"
+      "  add_library(numa::numa SHARED IMPORTED)\n"
+      "  set_target_properties(numa::numa PROPERTIES\n"
+      "    IMPORTED_LOCATION \"${_numa_lib}\"\n"
+      "    INTERFACE_INCLUDE_DIRECTORIES \"${_numa_inc}\")\n"
+      "endif()\n"
+      "set(NUMA_FOUND TRUE)\n")
+    unset(_numa_lib)
+    unset(_numa_inc)
+    set(_rocshmem_numa_include "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake")
+  endif()
+
+  set(_rocshmem_include_arg)
+  if(_rocshmem_numa_include)
+    set(_rocshmem_include_arg INCLUDE "${_rocshmem_numa_include}")
+  endif()
   rocm_export_targets(
     TARGETS roc::rocshmem
     NAMESPACE roc::
-    DEPENDS PACKAGE NUMA
+    DEPENDS ${_rocshmem_export_deps}
+    ${_rocshmem_include_arg}
   )
+  unset(_rocshmem_include_arg)
+  unset(_rocshmem_export_deps)
+  # Patch the generated config to expand CMAKE_PREFIX_PATH with rocm_sysdeps
+  # before find_dependency(NUMA) so NUMAConfig.cmake is found on ROCm >= 7.13
+  # without consumers needing to add rocm_sysdeps to their CMAKE_PREFIX_PATH.
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR
+     (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 13))
+    set(_config_out "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-config.cmake")
+    file(READ "${_config_out}" _config_content)
+    string(REPLACE
+      "find_dependency(NUMA)"
+      "string(REGEX REPLACE \"/lib/cmake/hip$\" \"\" _rocshmem_rocm_root \"\${hip_DIR}\")\nlist(APPEND CMAKE_PREFIX_PATH \"\${_rocshmem_rocm_root}/lib/rocm_sysdeps\")\nunset(_rocshmem_rocm_root)\nfind_dependency(NUMA)\nlist(REMOVE_AT CMAKE_PREFIX_PATH -1)"
+      _config_content "${_config_content}")
+    file(WRITE "${_config_out}" "${_config_content}")
+    unset(_config_out)
+    unset(_config_content)
+  endif()
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
   rocm_package_setup_component(clients)
@@ -554,4 +696,10 @@ add_subdirectory(tests)
 if (BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
+
+# NOTE: The rocshmem4py Python binding is no longer built from this project.
+# It now lives as a standalone Python project at rocm-systems/python/rocshmem
+# and builds independently against an installed rocSHMEM via
+# `find_package(rocshmem CONFIG)` (CMAKE_PREFIX_PATH). See that project's
+# README for build/packaging.
 

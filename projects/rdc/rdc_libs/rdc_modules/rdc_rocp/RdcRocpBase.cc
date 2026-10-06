@@ -166,83 +166,45 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
 }
 
 rdc_status_t RdcRocpBase::map_entity_to_profiler() {
-  // std::map<uint32_t, uint32_t> entity_to_index_map;
-  // kfd_id_t is only used inside this function
   typedef uint64_t kfd_id_t;
   std::map<uint32_t, kfd_id_t> prof_kfd_map;
 
-  // populate profiler map
   for (uint32_t prof_gpu_index = 0; prof_gpu_index < agents.size(); prof_gpu_index++) {
     prof_kfd_map.insert({prof_gpu_index, agents[prof_gpu_index].gpu_id});
   }
 
-  std::vector<amdsmi_socket_handle> sockets;
-  auto amdsmi_status = get_socket_handles(sockets);
-  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Failed to get socket handles: " << amdsmi_status);
-    return Smi2RdcError(amdsmi_status);
-  }
+  const auto& flat_table = get_flat_gpu_table();
 
-  for (int socket_index = 0; socket_index < sockets.size(); socket_index++) {
-    auto* socket = sockets[socket_index];
-    std::vector<amdsmi_processor_handle> processors;
-    amdsmi_status = get_processor_handles(socket, processors);
+  for (uint32_t flat_idx = 0; flat_idx < flat_table.size(); flat_idx++) {
+    auto* processor = flat_table[flat_idx].handle;
+
+    amdsmi_kfd_info_t kfd_info;
+    auto amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
     if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to get processor handles for socket " << socket_index << ": "
-                                                                       << amdsmi_status);
-      return Smi2RdcError(amdsmi_status);
+      RDC_LOG(RDC_ERROR, "Failed to get KFD info for flat GPU "
+                             << flat_idx << " (socket " << flat_table[flat_idx].socket_index
+                             << ", proc " << flat_table[flat_idx].proc_index
+                             << "): " << amdsmi_status);
+      continue;
     }
 
-    for (int processor_index = 0; processor_index < processors.size(); processor_index++) {
-      auto* processor = processors[processor_index];
-      processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
-      amdsmi_status = amdsmi_get_processor_type(processor, &processor_type);
-      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR, "Failed to get processor type for processor "
-                               << processor_index << " on socket " << socket_index << ": "
-                               << amdsmi_status);
-        return Smi2RdcError(amdsmi_status);
-      }
-      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        continue;
-      }
+    for (const auto& [prof_index, prof_id] : prof_kfd_map) {
+      if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
+        RDC_LOG(RDC_DEBUG, "Flat[" << flat_idx << "] <-> Profiler[" << prof_index << "] = KFD_ID["
+                                   << prof_id << "]");
+        entity_to_prof_map.insert({flat_idx, prof_index});
 
-      amdsmi_kfd_info_t kfd_info;
-      amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
-      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR, "Failed to get KFD info for processor "
-                               << processor_index << " on socket " << socket_index << ": "
-                               << amdsmi_status);
-        return Smi2RdcError(amdsmi_status);
-      }
-
-      rdc_entity_info_t entity_info = {
-          .device_index = static_cast<uint32_t>(socket_index),
-          .instance_index = static_cast<uint32_t>(processor_index),
-          .entity_role = RDC_DEVICE_ROLE_PHYSICAL,
-          .device_type = RDC_DEVICE_TYPE_GPU,
-      };
-
-      uint32_t entity_index = rdc_get_entity_index_from_info(entity_info);
-
-      for (const auto& [prof_index, prof_id] : prof_kfd_map) {
-        if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
-          // match found
-          // clang-format off
-          RDC_LOG(RDC_DEBUG, "SMI[" << entity_index << "] <-> Profiler[" << prof_index << "] = KFD_ID[" << prof_id << "]");
-          // clang-format on
-          if (entity_info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
-            entity_index = rdc_get_entity_index_from_info(entity_info);
-            entity_to_prof_map.insert({entity_index, prof_index});
-          }
-          if (processors.size() > 1) {
-            // if there are multiple processors, also add entity with partition instance type
-            entity_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
-            entity_index = rdc_get_entity_index_from_info(entity_info);
-            entity_to_prof_map.insert({entity_index, prof_index});
-          }
-          break;
-        }
+        // Downstream telemetry may key lookups by the encoded partition-instance entity
+        // index (gS.P) rather than the bare flat index. Register that key too so CPX
+        // partition entities resolve. In SPX the two coincide and the duplicate insert is
+        // a no-op.
+        rdc_entity_info_t part_info{};
+        part_info.device_index = flat_table[flat_idx].socket_index;
+        part_info.instance_index = flat_table[flat_idx].proc_index;
+        part_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+        uint32_t encoded_idx = rdc_get_entity_index_from_info(part_info);
+        entity_to_prof_map.insert({encoded_idx, prof_index});
+        break;
       }
     }
   }
@@ -335,8 +297,13 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   // default type
   *type = DOUBLE;
 
-  // convert from entity to flat index
-  uint32_t agent_index = entity_to_prof_map[gpu_field.gpu_index];
+  // look up the profiler agent index for the given flat GPU index
+  auto entity_it = entity_to_prof_map.find(gpu_field.gpu_index);
+  if (entity_it == entity_to_prof_map.end()) {
+    RDC_LOG(RDC_ERROR, "gpu_index=" << gpu_field.gpu_index << " not found in entity_to_prof_map");
+    return RDC_ST_BAD_PARAMETER;
+  }
+  uint32_t agent_index = entity_it->second;
   const auto& field = gpu_field.field_id;
 
   if (data == nullptr) {
@@ -345,7 +312,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   init_rocp_if_not();
 
-  const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
   double read_dbl = 0.0;
   const auto status = run_profiler(agent_index, field, &read_dbl);
@@ -355,8 +321,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
     return status;
   }
 
-  const auto stop_time = std::chrono::high_resolution_clock::now();
-  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+  // Divide eval-field rates by the fixed collection window, not wall-clock, for stable values.
+  const double sample_time_ms = static_cast<double>(collection_duration_us_k) / 1000.0;
 
   // For OCC_ELAPSED, we need to read the occupancy metric as well
   std::map<std::string, double> sampled_values;
@@ -374,8 +340,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   }
 
   // Apply field transformations using the helper function
-  return apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values, data,
-                                    type);
+  return apply_field_transformation(field, agent_index, read_dbl, sample_time_ms, sampled_values,
+                                    data, type);
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
@@ -393,8 +359,14 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   types.resize(fields.size());
   statuses.resize(fields.size());
 
-  // All fields should be for the same GPU
-  uint32_t agent_index = entity_to_prof_map[fields[0].gpu_index];
+  // All fields share one GPU; look up its profiler agent index (keyed by flat GPU index)
+  auto entity_it = entity_to_prof_map.find(fields[0].gpu_index);
+  if (entity_it == entity_to_prof_map.end()) {
+    RDC_LOG(RDC_ERROR, "gpu_index=" << fields[0].gpu_index << " not found in entity_to_prof_map");
+    statuses.assign(fields.size(), RDC_ST_BAD_PARAMETER);
+    return RDC_ST_BAD_PARAMETER;
+  }
+  uint32_t agent_index = entity_it->second;
 
   // Collect all unique metric names needed for sampling
   std::vector<std::string> metrics_to_sample;
@@ -455,7 +427,6 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   const uint32_t duration_us =
       needs_simd_window ? simd_utilization_duration_us_k : collection_duration_us_k;
 
-  const auto start_time = std::chrono::high_resolution_clock::now();
   if (!metrics_to_sample.empty()) {
     try {
       counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values, duration_us);
@@ -467,8 +438,9 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
       return RDC_ST_BAD_PARAMETER;
     }
   }
-  const auto stop_time = std::chrono::high_resolution_clock::now();
-  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+
+  // Divide eval-field rates by this batch's actual window (duration_us), not wall-clock.
+  const double sample_time_ms = static_cast<double>(duration_us) / 1000.0;
 
   // Process results for each field
   for (size_t i = 0; i < fields.size(); i++) {
@@ -496,15 +468,15 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     double read_dbl = sampled_it->second;
 
     // Apply field transformation using the helper function
-    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values,
-                                             &values[i], &types[i]);
+    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, sample_time_ms,
+                                             sampled_values, &values[i], &types[i]);
   }
 
   return RDC_ST_OK;
 }
 
 rdc_status_t RdcRocpBase::apply_field_transformation(
-    rdc_field_t field, uint32_t agent_index, double raw_value, double elapsed_time_ms,
+    rdc_field_t field, uint32_t agent_index, double raw_value, double sample_time_ms,
     const std::map<std::string, double>& sampled_values, rdc_field_value_data* output,
     rdc_field_type_t* type) {
   // Default type is DOUBLE
@@ -515,10 +487,10 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
   // Calculate divided value for eval fields
   double divided_dbl = NAN;
   if (is_eval_field) {
-    if (elapsed_time_ms != 0.0) {
-      divided_dbl = raw_value / elapsed_time_ms;
+    if (sample_time_ms != 0.0) {
+      divided_dbl = raw_value / sample_time_ms;
     } else {
-      RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
+      RDC_LOG(RDC_ERROR, "Error: Sample time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
     }
   }

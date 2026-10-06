@@ -222,6 +222,11 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
     "Enable AI NIC profiling through AMD SMI" ON
 )
+rocprofiler_systems_add_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    "Enable hipFile's AMD Infinity Storage I/O telemetry (ON, OFF, or AUTO)"
+    "AUTO"
+)
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
     "Compiler specific language extensions" OFF
 )
@@ -257,9 +262,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from su
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
-    OFF
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON
 )
@@ -275,8 +277,8 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
 )
 
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-    "Enable building sqlite3 library internally" ON
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FMT
+    "Enable building fmt library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
@@ -312,8 +314,8 @@ endif()
 include(ProcessorCount)
 ProcessorCount(ROCPROFSYS_PROCESSOR_COUNT)
 
-if(ROCPROFSYS_PROCESSOR_COUNT LESS 8)
-    set(ROCPROFSYS_THREAD_COUNT 128)
+if(ROCPROFSYS_PROCESSOR_COUNT LESS 128)
+    set(ROCPROFSYS_THREAD_COUNT 2048)
 else()
     math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
     compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
@@ -335,7 +337,7 @@ set(ROCPROFSYS_MAX_THREADS
 )
 rocprofiler_systems_add_feature(
     ROCPROFSYS_MAX_THREADS
-    "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
+    "Maximum number of total threads supported in the host application (default: max of 2048 or 16 * nproc)"
 )
 
 compute_pow2_ceil(_MAX_THREADS "${ROCPROFSYS_MAX_THREADS}")
@@ -517,6 +519,18 @@ configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/modulefile.in
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${ROCPROFSYS_VERSION}
     @ONLY
+)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/CTestConfig.cmake
+    ${PROJECT_BINARY_DIR}/CTestConfig.cmake
+    COPYONLY
+)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/CTestCustom.cmake
+    ${PROJECT_BINARY_DIR}/CTestCustom.cmake
+    COPYONLY
 )
 
 configure_file(

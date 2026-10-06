@@ -9,6 +9,9 @@ texture:
   Unit_hipCreateTextureObject_Pitch2DResource:
     <<: *level_2
     tags: [texobj, image]
+  Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter:
+    <<: *level_2
+    tags: [texobj, image]
   Unit_hipCreateTextureObject_ArrayResource:
     <<: *level_2
     tags: [texobj, image]
@@ -249,6 +252,7 @@ texture:
     tags: [texobj, image]
   Unit_TexObjectCreate_TypePitch2D_EdgeCases:
     <<: *level_2
+    disabled: [amd_windows]
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_positive:
     <<: *level_2

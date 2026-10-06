@@ -25,13 +25,15 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -200,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     try {
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         std::cout << "info: Using built-in bitstream reader" << std::endl;
         RocdecBitstreamReader bs_reader = nullptr;
@@ -225,9 +227,9 @@ int main(int argc, char **argv) {
 
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
         if(!viddec.CodecSupported(device_id, rocdec_codec_id, bit_depth)) {
-            std::cerr << "GPU doesn't support codec!" << std::endl;
-            return 0;
-        }        
+            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+            return 1;
+        }
         std::string device_name, gcn_arch_name;
         int pci_bus_id, pci_domain_id, pci_device_id;
 
@@ -244,7 +246,6 @@ int main(int argc, char **argv) {
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         // initialize reconfigure params: the following is configured to dump to output which is relevant for this sample
@@ -289,7 +290,7 @@ int main(int argc, char **argv) {
             total_dec_time += time_per_decode;
             n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+            if (num_decoded_frames && num_decoded_frames <= static_cast<uint32_t>(n_frame)) {
                 break;
             }
 
@@ -298,6 +299,10 @@ int main(int argc, char **argv) {
         n_frame += viddec.GetNumOfFlushedFrames();
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::cout << "info: avg decoding time per picture: " << total_dec_time / n_pic_decoded << " ms" <<std::endl;
             std::cout << "info: avg decode FPS: " << (n_pic_decoded / total_dec_time) * 1000 << std::endl;

@@ -26,6 +26,8 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
+#include <map>
+#include <vector>
 #include "ibv_core.hpp"
 #include "gda/nic_policy.hpp"
 
@@ -36,8 +38,11 @@
 #include "memory/hip_allocator.hpp"
 #include "context_incl.hpp"
 #include "gda_context_proxy.hpp"
-#include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "gda/queue_pair/queue_pair_common.hpp"
+#include "gda/queue_pair/queue_pair_device.hpp"
+#include "gda/queue_pair/queue_pair_host.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
@@ -46,12 +51,7 @@ namespace rocshmem {
 
 class GDAContext;
 class GDAHostContext;
-class QueuePair;
 class HostInterface;
-
-inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
-inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
-inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
 
 struct NicDevice {
   std::string nic_name;
@@ -86,11 +86,60 @@ class GDABackend : public Backend {
 
   uint32_t *heap_rkey = nullptr;
 
+  /**
+   * @brief Device-visible flat table of symmetric user-buffer registrations.
+   *
+   * Sized num_pes * num_nics_ * symm_capacity_ SymmBufferInfo records, allocated
+   * in setup_gpu_qps() so QPs capture stable slice pointers. Layout: the slice
+   * for (pe, nic) starts at (pe * num_nics_ + nic) * symm_capacity_ and holds
+   * one entry per registration slot, pre-specialized to that (pe, nic). Each QP
+   * points at the slice for its own (dest_pe, nic_idx). Null pre-ROCm-7.0.
+   */
+  SymmBufferInfo *symm_buffers_{nullptr};
+
+  /**
+   * @brief Device-resident shared registration count (live slots per slice).
+   *
+   * A single int pointed to by every QueuePair (QueuePair::symm_count).
+   * register/unregister mutate the entry table contents and this count. Null
+   * when symmetric registration is unavailable.
+   */
+  int *symm_count_{nullptr};
+
+  /**
+   * @brief Host mirror of symm_buffers_ and its capacity/count.
+   *
+   * The mirror is updated on the host at register/unregister and (re-)uploaded
+   * to symm_buffers_; symm_count_host_ mirrors *symm_count_.
+   */
+  std::vector<SymmBufferInfo> host_symm_buffers_{};
+  int symm_capacity_{0};
+  int symm_count_host_{0};
+
+  /**
+   * @brief GDA-specific per-registration state kept on the host.
+   *
+   * The common alias/length bookkeeping lives in Backend::symm_buffer_regions;
+   * this holds the transport-specific resources needed to tear a registration
+   * down, keyed by the registered alias base address.
+   */
+  struct GdaSymmRecord {
+    int slot{-1};                       // registration slot in each QP slice
+    std::vector<struct ibv_mr*> mrs{};  // per-NIC MRs for the buffer
+    std::vector<int> mr_fds{};          // per-NIC dmabuf fds (kept open for MR lifetime)
+    hipMemGenericAllocationHandle_t gen_handle{};  // retained backing handle
+    bool has_gen_handle{false};         // whether gen_handle must be released
+  };
+
+  /**
+   * @brief Host-side map of GDA-specific symmetric registration state.
+   */
+  std::map<uintptr_t, GdaSymmRecord> gda_symm_records_{};
+
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
 
-  uint32_t inline_threshold = 8;
-  QueuePair *host_qps = nullptr;
+  std::vector<QueuePairHost> host_qps;
   QueuePair *gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;
@@ -133,7 +182,7 @@ class GDABackend : public Backend {
    * Total number of QPs created =
    * num_qps_per_pe * num_pes;
    */
-  uint32_t num_qps {1};
+  size_t num_qps {1};
 
   /**
    * @brief Select one or more NICs based on topology/env vars.
@@ -154,6 +203,17 @@ class GDABackend : public Backend {
 
   NicDevice& nic_for_qp(int qp_idx) {
     return nic_devices_[nic_idx_for_qp(qp_idx)];
+  }
+
+  size_t flat_pe_nic_idx(int pe, int nic_idx) const {
+    return static_cast<size_t>(pe) * static_cast<size_t>(num_nics_) + static_cast<size_t>(nic_idx);
+  }
+
+  const SymmBufferInfo * get_symm_buffers_slice(int pe, int nic_idx) const {
+    if (!symm_buffers_) {
+      return nullptr;
+    }
+    return &symm_buffers_[flat_pe_nic_idx(pe, nic_idx) * symm_capacity_];
   }
 
   /**
@@ -242,6 +302,24 @@ class GDABackend : public Backend {
    * @brief Unregister all previously registered user buffers.
    */
   void buffer_unregister_all() override;
+
+  /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Collective. Restricted to VMM allocations. Registered buffers are reached
+   * over the NIC (including for node-local peers), so registration exchanges a
+   * per-PE alias base and per-PE/per-NIC remote keys and publishes them into a
+   * device-visible table consulted by the RMA/AMO paths.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Collective.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
 
   /**
    * @brief Abort the application.
@@ -342,7 +420,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Holds a copy of the default context for host functions
@@ -393,6 +471,76 @@ class GDABackend : public Backend {
   void cleanup_ipc();
 
   /**
+   * @brief Allocate the device-visible symmetric-registration table.
+   */
+  void setup_symm_registration();
+
+  /**
+   * @brief Unregister all symmetric buffers and free the registration table.
+   */
+  void cleanup_symm_registration();
+
+  /**
+   * @brief Register a symmetric alias buffer with one NIC's protection domain.
+   *
+   * Uses the dmabuf path (matching the symmetric heap MR) when supported so
+   * the GPUDirect-RDMA-capable VMM alias can be reached by the NIC.
+   *
+   * @param[in]  pd          Protection domain of the NIC.
+   * @param[in]  gen_handle  Backing VMM allocation handle (retained by the
+   *                         caller and kept alive for the MR's lifetime, so the
+   *                         dmabuf export does not leave the user unable to
+   *                         later hipMemUnmap the buffer). Unused when
+   *                         @p use_dmabuf is false.
+   * @param[in]  use_dmabuf  Whether to register via the dmabuf path.
+   * @param[in]  iova        Buffer virtual address registered as the MR iova.
+   * @param[in]  length      Length in bytes.
+   * @param[out] out_fd      Filled with the dmabuf fd backing the MR (or -1 for
+   *                         the plain path). The fd must stay open for the MR's
+   *                         lifetime and is closed only after deregistration.
+   * @return The registered ibv_mr on success, nullptr otherwise.
+   */
+#if HIP_VERSION >= 70200000
+  struct ibv_mr *register_symm_buffer_mr(
+      struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
+      bool use_dmabuf, void *iova, size_t length, int *out_fd);
+#endif
+
+  /**
+   * @brief Tear down the NIC-side state of a symmetric registration.
+   *
+   * Deregisters the per-NIC MRs, closes their dmabuf fds, releases the retained
+   * VMM handle, compacts the device NIC table, frees the per-registration
+   * device arrays, and drops the GDA record. Used by both the normal
+   * unregister path and the registration rollback path.
+   *
+   * @return ROCSHMEM_SUCCESS if a matching record was found and torn down,
+   *         ROCSHMEM_ERROR otherwise.
+   */
+  int gda_nic_unregister(uintptr_t key);
+
+  /**
+   * @brief Release the NIC-side resources held by one registration record:
+   * the per-NIC MRs, their dmabuf fds, and the retained VMM handle.
+   *
+   * Does not touch the device-visible entry table or @ref gda_symm_records_;
+   * the caller owns those updates. Shared by the single-registration teardown
+   * (@ref gda_nic_unregister) and the bulk shutdown path
+   * (@ref symmetric_buffer_unregister_all).
+   */
+  void release_symm_record_nic_resources(GdaSymmRecord &rec);
+
+  /**
+   * @brief Tear down every outstanding symmetric registration at shutdown.
+   *
+   * Unregisters each record in place (IPC exposure, NIC resources, and common
+   * base-class bookkeeping) without per-item device-table compaction, then
+   * clears @ref gda_symm_records_ and resets the shared count. The flat entry
+   * table itself is freed later in cleanup_gpu_qps().
+   */
+  void symmetric_buffer_unregister_all();
+
+  /**
    * @brief Allocate and initialize barrier operation addresses on
    * symmetric heap.
    *
@@ -410,9 +558,24 @@ class GDABackend : public Backend {
   void cleanup_heap_memory_rkey();
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
-  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  QueuePairInitInfo gpu_qp_init_info(int conn_num);
+
+#if defined(GDA_IONIC)
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void ionic_create_cqs(int ncqes);
+  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void bnxt_create_cqs(int ncqes);
+  void bnxt_create_qps(int sq_length);
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
   void mlx5_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void mlx5_create_qps(int sq_length);
+#endif // defined(GDA_MLX5)
 
   /**
    * @brief Setup InfiniBand Resources
@@ -458,15 +621,11 @@ class GDABackend : public Backend {
    * @brief Create all CQs with a of length ncqes
    */
   void create_cqs(int ncqes);
-  void bnxt_create_cqs(int ncqes);
-  void ionic_create_cqs(int ncqes);
 
   /**
    * @brief Create all QPs with a SQ of length sq_length
    */
   void create_qps(int sq_length);
-  void bnxt_create_qps(int sq_length);
-  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs
@@ -504,7 +663,6 @@ class GDABackend : public Backend {
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
   void create_parent_domain(NicDevice &nic);
-  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -607,22 +765,23 @@ class GDABackend : public Backend {
    * @brief structures holding the function pointers to the direct verbs functionality
    * of each network driver.
    */
+  ionicdv_funcs_t ionic_dv;
+
+  /**
+   * @brief handle used for the dlopen of the IONIC library
+   */
+  void *ionicdv_handle_{nullptr};
+
+  /**
+   * @brief structures holding the function pointers to the direct verbs functionality
+   * of each network driver.
+   */
   bnxtdv_funcs_t bnxt_re_dv;
 
   /**
    * @brief handle used for the dlopen of the BCOM library
    */
   void *bnxtdv_handle_{nullptr};
-
-  /**
-   * @brief initialize function table for BCOM direct verbs support
-   */
-  int bnxt_dv_dl_init();
-
-  /**
-   * @brief open bnxt dv lib
-   */
-  static void* bnxt_dv_dlopen();
 
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
@@ -635,27 +794,7 @@ class GDABackend : public Backend {
    */
   void *mlx5dv_handle_{nullptr};
 
-  /**
-   * @brief initialize function table for MLNX direct verbs support
-   */
-  int mlx5_dv_dl_init();
-
-  /**
-   * @brief open mlx5 dv lib
-   */
-  static void* mlx5_dv_dlopen();
-
-  /**
-   * @brief structures holding the function pointers to the direct verbs functionality
-   * of each network driver.
-   */
-  ionicdv_funcs_t ionic_dv;
-
-  /**
-   * @brief handle used for the dlopen of the IONIC library
-   */
-  void *ionicdv_handle_{nullptr};
-
+#if defined(GDA_IONIC)
   /**
    * @brief initialize function table for IONIC direct verbs support
    */
@@ -665,6 +804,31 @@ class GDABackend : public Backend {
    * @brief open ionic dv lib
    */
   static void* ionic_dv_dlopen();
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  /**
+   * @brief initialize function table for BCOM direct verbs support
+   */
+  int bnxt_dv_dl_init();
+
+  /**
+   * @brief open bnxt dv lib
+   */
+  static void* bnxt_dv_dlopen();
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
+  /**
+   * @brief initialize function table for MLNX direct verbs support
+   */
+  int mlx5_dv_dl_init();
+
+  /**
+   * @brief open mlx5 dv lib
+   */
+  static void* mlx5_dv_dlopen();
+#endif // defined(GDA_MLX5)
 };
 
 }  // namespace rocshmem

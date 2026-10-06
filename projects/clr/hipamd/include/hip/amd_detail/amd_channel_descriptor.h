@@ -15,8 +15,8 @@
 
 #ifdef __cplusplus
 
-extern "C" HIP_PUBLIC_API hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
-                                                                    hipChannelFormatKind f);
+extern "C" hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
+                                                     hipChannelFormatKind f);
 
 static inline hipChannelFormatDesc hipCreateChannelDescHalf() {
   int e = (int)sizeof(unsigned short) * 8;

@@ -16,11 +16,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+import getpass
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
+from .cache import resolve_username
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -80,15 +83,18 @@ class TestResult:
 
     @property
     def perfetto_file(self) -> Optional[Path]:
-        candidates = [
-            self.output_dir / "perfetto-trace.proto",
-            self.output_dir / "perfetto-trace-0.proto",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        protos = list(self.output_dir.glob("perfetto-trace*.proto"))
-        return protos[0] if protos else None
+        for ext in ("pftrace", "proto"):
+            candidates = [
+                self.output_dir / f"perfetto-trace.{ext}",
+                self.output_dir / f"perfetto-trace-0.{ext}",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+            traces = sorted(self.output_dir.glob(f"perfetto-trace*.{ext}"))
+            if traces:
+                return traces[0]
+        return None
 
     @property
     def rocpd_files(self) -> list[Path]:
@@ -181,6 +187,7 @@ class BaseRunner(ABC):
         num_procs: int = 0,
         working_directory: Optional[Path] = None,
         no_base_env: bool = False,
+        python_version: Optional[str] = None,
     ):
         self.config = config
         self.target = target
@@ -198,14 +205,15 @@ class BaseRunner(ABC):
             ) from exc
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
+        self.python_version = python_version
         self.environment = TestEnvironment()
         self.environment.set_base_environment(
-            config, TestEnvKind.NONE if no_base_env else test_type
+            config, TestEnvKind.NONE if no_base_env else test_type, python_version
         )
         # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
         # next) may override it (e.g. Julia adds extra lib dirs).
         self.environment.set_test_environment(
-            {"LD_LIBRARY_PATH": config.get_library_path()}
+            {"LD_LIBRARY_PATH": config.get_library_path(python_version)}
         )
         # LD_PRELOAD default (sanitizer builds prepend the asan runtime).
         preload = config.get_preload_path()
@@ -213,9 +221,17 @@ class BaseRunner(ABC):
             self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
             self.environment.set_test_environment(env)
-        # ROCPROFSYS_OUTPUT_PATH is framework-controlled
+        # ROCPROFSYS_OUTPUT_PATH and ROCPROFSYS_TMPDIR are framework-controlled.
+        # Use a user-scoped tmpdir to prevent cross-user permission collisions on
+        # shared machines where multiple users run the same test as different OS
+        # users: the second user cannot write into a /tmp/<test-name>/ directory
+        # that was created (and is owned) by the first user.
+        tmpdir = Path(tempfile.gettempdir()) / resolve_username()
         self.environment.set_test_environment(
-            {"ROCPROFSYS_OUTPUT_PATH": str(self.output_dir)}
+            {
+                "ROCPROFSYS_OUTPUT_PATH": str(self.output_dir),
+                "ROCPROFSYS_TMPDIR": str(tmpdir),
+            }
         )
         self.environment.set_user_environment()
 
@@ -546,9 +562,14 @@ class BinaryRewriteRunner(BaseRunner):
         if self.cleanup_on_success and run_result.success:
             run_result.cleanup_instrumented_binaries()
 
-        # Combine rewrite and run output
+        # Combine rewrite and run output. Surface the rewrite command (the
+        # rocprof-sys-instrument invocation that produces the .inst) too, since
+        # the reported result only carries the run-phase command.
+        rewrite_cmd = " ".join(str(c) for c in rewrite_result.command)
         run_result.test_output = (
-            f"=== REWRITE PHASE ===\n{rewrite_result.test_output}\n"
+            f"=== REWRITE PHASE ===\n"
+            f"Command: {rewrite_cmd}\n\n"
+            f"{rewrite_result.test_output}\n"
             f"=== RUN PHASE ===\n{run_result.test_output}"
         )
         run_result.duration = rewrite_result.duration + run_result.duration
@@ -697,9 +718,15 @@ class PythonRunner(BaseRunner):
         standalone: bool = False,
         **kwargs,
     ):
-        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
+        super().__init__(
+            config,
+            TestEnvKind.PYTHON,
+            target,
+            output_dir,
+            python_version=python_version,
+            **kwargs,
+        )
 
-        self.python_version = python_version
         self.annotated = annotated
         self.standalone = standalone
         self.profile_args = profile_args or []

@@ -29,14 +29,10 @@ using namespace MPITestConstants;
 // Internal CE helpers not in ce_coll.h; accessible in Debug builds (-fvisibility=hidden not applied).
 ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
                             hipStreamBatchMemOpParams* batchParams,
-                            size_t* opIdx);
+                            size_t* opIdx, hipStream_t stream);
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
-ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
-                                  struct ncclCeCollArgs* args,
-                                  struct ncclCeBatchOpsParams* params,
-                                  hipStream_t stream);
 
 // Fixture: skip if no CE driver; create comm; warmup AllGather → ncclCeInit; TearDown destroys comm.
 class CeInternalMPITest : public MPITestBase
@@ -100,10 +96,10 @@ protected:
         debugGuard_.reset();
     }
 
-    // Batch buffer for ncclPrepUCSync: capacity = NCCL_CE_SYNC_OPS_PER_RANK_UC * nRanks.
+    // Batch buffer for ncclPrepUCSync: capacity is based on the LSA-local team.
     std::vector<hipStreamBatchMemOpParams> makePrepSyncBatch() const
     {
-        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->nRanks;
+        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaSize;
         return std::vector<hipStreamBatchMemOpParams>(batchSize);
     }
 
@@ -112,6 +108,17 @@ protected:
     {
         if(ceComm->nRanks < n)
             GTEST_SKIP() << "Need >= " << n << " MPI ranks";
+    }
+
+    // Skip if the LSA team has fewer than n ranks. Assertions scoped to the LSA
+    // domain must guard on it: 2 nodes x 1 rank gives nRanks=2 but lsaSize=1,
+    // which would otherwise satisfy requireMinRanks(2) and then assert on an
+    // empty batch.
+    void requireMinLsaRanks(int n)
+    {
+        if(ceComm->devrState.lsaSize < n)
+            GTEST_SKIP() << "Need >= " << n << " ranks in the LSA team, have "
+                         << ceComm->devrState.lsaSize;
     }
 
     // Allocate a batch, call ncclPrepUCSync once, and return both for inspection.
@@ -125,7 +132,8 @@ protected:
     {
         PrepSyncResult res;
         res.batch = makePrepSyncBatch();
-        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx),
+        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx,
+                                 getActiveStream()),
                   ncclSuccess);
         return res;
     }
@@ -264,6 +272,82 @@ TEST_F(CeInternalMPITest, FiniAfterZeroCollectives)
 }
 
 // ===========================================================================
+// CeInternal_GraphLatch – graph-captured AllReduce immediately followed by an
+// eager AllReduce on the same comm. Regression for a latch bug where CE
+// 2-shot AllReduce could be selected right after a graph capture, deadlocking
+// if ranks disagreed on whether CE was allowed for a given call.
+// ===========================================================================
+
+// LATCH-01: with the captured plan still live, an eager AllReduce at a
+// CE-eligible size on the same comm must not hang and must be correct.
+// hipStreamSynchronize has no timeout; a regression here either corrupts
+// data (latch silently cleared) or hangs, caught by the test runner's
+// external --timeout (same pattern as the CE dispatch tests above).
+TEST_F(CeInternalMPITest, GraphThenEagerAllReduceDoesNotHang)
+{
+    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES];
+    // 8MiB of float32 sits comfortably inside it.
+    constexpr size_t kElem = (8ull * 1024 * 1024) / sizeof(float);
+    const int nRanks = ceComm->nRanks;
+    const int rank = ceComm->rank;
+
+    RCCLTestHelpers::SymBuf sendSym, recvSym;
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), kElem * sizeof(float), sendSym),
+              ncclSuccess) << "ncclSymBufAlloc for sendBuf failed";
+    ASSERT_EQ(RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), kElem * sizeof(float), recvSym),
+              ncclSuccess) << "ncclSymBufAlloc for recvBuf failed";
+    ASSERT_EQ(hipSuccess, ceFillRankScalarFloat(sendSym.ptr, kElem, rank));
+
+    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2); // sum(1..nRanks)
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+
+    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+    ncclResult_t ncclErr = ncclAllReduce(sendSym.ptr, recvSym.ptr, kElem, ncclFloat32, ncclSum,
+                                          getActiveCommunicator(), getActiveStream());
+    ASSERT_EQ(ncclSuccess, ncclErr);
+    ASSERT_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_NE(nullptr, graph);
+    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+    SCOPE_EXIT(if(graphExec) (void)hipGraphExecDestroy(graphExec); if(graph) (void)hipGraphDestroy(graph));
+
+    ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0, kElem * sizeof(float)));
+    ASSERT_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    size_t errIdx; float errExp, errAct;
+    ASSERT_TRUE(RCCLTestHelpers::verifyBufferData<float>(
+                    recvSym.ptr, kElem,
+                    [expectedSum](size_t) { return expectedSum; },
+                    0, 1e-3, &errIdx, &errExp, &errAct))
+        << "Captured AllReduce result mismatch at idx=" << errIdx
+        << " expected=" << errExp << " got=" << errAct;
+
+    // White-box: graphExec is still live, so the CE latch must still be
+    // engaged -- otherwise the eager call below could pick CE while another
+    // rank is still mid-teardown of its own captured plan.
+    EXPECT_TRUE(ceComm->ceColl.graphModeSeen)
+        << "CE AllReduce graph latch should still be set right after launch";
+
+    // Eager AllReduce, same comm/stream, CE-eligible size, issued immediately.
+    ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0, kElem * sizeof(float)));
+    ncclErr = ncclAllReduce(sendSym.ptr, recvSym.ptr, kElem, ncclFloat32, ncclSum,
+                             getActiveCommunicator(), getActiveStream());
+    ASSERT_EQ(ncclSuccess, ncclErr);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(RCCLTestHelpers::verifyBufferData<float>(
+                    recvSym.ptr, kElem,
+                    [expectedSum](size_t) { return expectedSum; },
+                    0, 1e-3, &errIdx, &errExp, &errAct))
+        << "Eager AllReduce immediately after graph capture produced wrong data"
+        << " at idx=" << errIdx << " expected=" << errExp << " got=" << errAct;
+    // SCOPE_EXIT above destroys graphExec/graph on return.
+}
+
+// ===========================================================================
 // CeInternal_Sync – ncclPrepUCSync op-count and self-target checks
 // ===========================================================================
 
@@ -276,29 +360,33 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     for(int n = 1; n <= kCallCount; ++n)
     {
         size_t opIdx = 0;
-        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+                  ncclSuccess)
             << "call " << n;
         EXPECT_EQ(ceComm->ceColl.ceSeqNum, initialSeq + static_cast<uint32_t>(n))
             << "ceSeqNum should increment by 1 per call, call " << n << "/" << kCallCount;
     }
 }
 
-// SYNC-02: ncclPrepUCSync produces exactly 2*(nRanks-1) ops (one WRITE +
-//          one WAIT per remote rank).
+// SYNC-02: ncclPrepUCSync produces exactly 2*(lsaSize-1) ops (one WRITE +
+//          one WAIT per remote LSA rank). On a single node lsaSize == nRanks.
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
-    const int nRanks = ceComm->nRanks;
+    requireMinLsaRanks(2);
+    const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
-    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (nRanks - 1)))
-        << "expected 2*(nRanks-1) ops for nRanks=" << nRanks;
+    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
+        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize
+        << " nRanks=" << ceComm->nRanks;
 }
 
 // SYNC-03: No WRITE_VALUE op targets the local rank's own ready slot.
 TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
-    const int rank = ceComm->rank;
+    requireMinLsaRanks(2);
+    const int lsaRank = ceComm->devrState.lsaSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
 
@@ -307,7 +395,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
     // on the host-side pointer is valid for comparison with batch op addresses,
     // which are also expressed as host-visible hipDeviceptr_t values.
     uint32_t*      readyPtrs = reinterpret_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr);
-    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[rank]);
+    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[lsaRank]);
     int selfTargets = 0;
     for(size_t i = 0; i < opIdx; ++i)
     {
@@ -316,7 +404,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
             ++selfTargets;
     }
     EXPECT_EQ(selfTargets, 0)
-        << "A WRITE_VALUE op targeted rank " << rank << "'s own ready slot";
+        << "A WRITE_VALUE op targeted LSA rank " << lsaRank << "'s own ready slot";
 }
 
 // SYNC-04: ceSeqNum wraps correctly from UINT32_MAX → 0.
@@ -377,6 +465,51 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
     }
 }
 
+// BATCH-01: ncclCeFreeBatchOpsParams is idempotent. Hierarchical AllGather frees
+// per-chunk scratch inside its chunk loop and once more at function exit, both on
+// the same object, so a release that does not clear the pointers double-frees.
+// Single-node, so this pins the invariant wherever the suite runs.
+TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
+{
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, 4), ncclSuccess);
+    ASSERT_NE(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    ASSERT_NE(params.attrs, nullptr);
+    ASSERT_NE(params.attrIdxs, nullptr);
+#endif
+
+    // ncclCeInitBatchOpsParams already leaves the counters and the sync flag at
+    // 0/false, so drive them off those values first. Otherwise the assertions
+    // below would pass without the release ever clearing anything.
+    params.numOps         = 4;
+    params.intraBatchSync = true;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    params.numAttrs = 4;
+#endif
+
+    ncclCeFreeBatchOpsParams(&params);
+    ASSERT_EQ(params.srcs, nullptr);
+    ASSERT_EQ(params.dsts, nullptr);
+    ASSERT_EQ(params.sizes, nullptr);
+    EXPECT_EQ(params.numOps, 0);
+    EXPECT_FALSE(params.intraBatchSync);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    // Also allocated by ncclCeInitBatchOpsParams, so the release has to clear them
+    // too or the second free in ncclHierCeAllGather passes dangling pointers.
+    ASSERT_EQ(params.attrs, nullptr);
+    ASSERT_EQ(params.attrIdxs, nullptr);
+    EXPECT_EQ(params.numAttrs, 0);
+#endif
+
+    // Must not double-free.
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    EXPECT_EQ(params.attrs, nullptr);
+#endif
+}
+
 // ===========================================================================
 // CeInternal_Launch – ncclCeLaunchBatchOps with zero and real ops
 // ===========================================================================
@@ -386,7 +519,7 @@ TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -428,7 +561,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -488,7 +621,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, nullStream), ncclSuccess)
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, nullStream, &collArgs), ncclSuccess)
         << "ncclCeLaunchBatchOps must succeed on the legacy null stream";
     ASSERT_EQ(hipStreamSynchronize(nullStream), hipSuccess);
 
@@ -508,15 +641,23 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
 // ===========================================================================
 
 // NEG-01: ncclCeImplemented returns false for collectives CE does not handle.
+//
+// NOTE: ncclFuncAllReduce was moved out of this negative list in PR #8443
+// ("Users/galaband/rccl ce ar no pipeline"), which added CE AllReduce support
+// (ce_coll.cc's ncclCeImplemented() switch now returns true for
+// ncclFuncAllReduce). That PR updated the switch statement but never updated
+// this test, leaving a stale assertion that CE_Internal_Neg has failed on
+// ever since (verified identical on rccl/gfx1250:f43c171 and PR #8945 tip).
+// AllReduce's positive expectation now lives in NEG-02 below, alongside the
+// driver-gated checks for the other CE-supported collectives.
 TEST(CeInternalNeg, CeImplementedReturnsFalseForUnsupported)
 {
-    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncBroadcast,    ncclDevSum, ncclFloat32));
     EXPECT_FALSE(ncclCeImplemented(ncclFuncReduceScatter, ncclDevSum, ncclFloat32));
 }
 
 // NEG-02: On ROCm 7.12+ or 7.0.2.x, ncclCeImplemented returns true for
-//         the four supported CE collectives.
+//         the five supported CE collectives.
 TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
@@ -527,8 +668,18 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAllv, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
+}
+
+// NEG-03: ncclCeAlltoAllv rejects missing size metadata before launching transfers.
+TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
+{
+    ncclCeCollArgs args{};
+    args.sizes = nullptr;
+    EXPECT_EQ(ncclCeAlltoAllv(ceComm, &args, getActiveStream()), ncclInvalidUsage);
 }
 
 // ===========================================================================
@@ -560,13 +711,14 @@ TEST_F(CeFaultInjTest, SyncPrepErrorPropagates)
     size_t opIdx = 0;
 
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_SYNC_PREP), ncclSuccess);
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_SYNC_PREP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
 }
 
@@ -602,12 +754,12 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
 
     ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -647,20 +799,21 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     auto   batch = makePrepSyncBatch();
     size_t opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError);
 
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream(), &collArgs),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
     EXPECT_EQ(ncclCeFaultGet(ceComm), 0u) << "All faults should be cleared";
 
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess);
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess);
 }
 
 #endif // ENABLE_FAULT_INJECTION

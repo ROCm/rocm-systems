@@ -16,6 +16,10 @@
 #include "gin/gin_host.h"
 #include "plugin/nccl_gin.h"
 
-ncclResult_t ncclGinProxyInit(ncclGin_t** proxyGin);
+extern ncclGin_t ncclGinProxy;
+extern int ncclGinProxyVersion;
+
+ncclResult_t ncclGinProxyInit(struct ncclComm* comm);
+ncclResult_t ncclGinProxyFlushesAllPutsOnAnySignal(void* collComm, bool* flushesAll);
 
 #endif

@@ -74,59 +74,7 @@ struct legal_instruction_t
 };
 inline constexpr legal_instruction_t legal_instruction{};
 
-/* Holds one instruction's words. A word is the smallest type on which the
-   instruction is aligned.  The ::instruction_t is associated with an
-   architecture, and can be validated for that architecture.  Once validated,
-   the exact instruction size is known if it is a valid encoding for that
-   architecture.  */
-class instruction_t
-{
-private:
-  std::vector<std::byte> m_bytes;
-  mutable std::optional<size_t> m_size{};
-  std::reference_wrapper<const architecture_t> m_architecture;
-
-public:
-  instruction_t (const architecture_t &architecture,
-                 std::vector<std::byte> bytes)
-    : m_bytes (std::move (bytes)), m_architecture (architecture)
-  {
-  }
-  instruction_t (legal_instruction_t, const architecture_t &architecture,
-                 std::vector<std::byte> bytes)
-    : m_bytes (std::move (bytes)), m_architecture (architecture)
-  {
-    /* The instruction is guaranteed to be valid, and its byte size is exactly
-       that of the bytes vector passed in.  */
-    m_size.emplace (m_bytes.size ());
-  }
-
-  /* The number of bytes reserved in the instruction bytes storage.  Not all
-     bytes in the storage belong to the instruction, the instruction could have
-     been created from memory for the largest instruction byte size the
-     architecture supports.  */
-  size_t capacity () const { return m_bytes.size (); }
-
-  /* The instruction size in bytes, or 0 if the instruction is invalid.  An
-     instruction is invalid if the architecture's disassembler does not
-     recognize the instruction, or if the instruction's encoding is known to be
-     invalid (for example, misaligned register pair index).  */
-  size_t size () const;
-
-  /* Return a pointer to the instruction bytes.  */
-  const void *data () const { return m_bytes.data (); }
-
-  /* A valid instruction has a non-zero size.  */
-  bool is_valid () const { return size () != 0; }
-
-  /* Return the Nth instruction word.  */
-  template <size_t pos> uint32_t word () const
-  {
-    dbgapi_assert (capacity () >= sizeof (uint32_t[pos + 1]));
-    return *std::launder (
-      reinterpret_cast<const uint32_t *> (&m_bytes[pos * sizeof (uint32_t)]));
-  }
-};
+class instruction_t;
 
 /* Architecture.  */
 
@@ -201,7 +149,16 @@ public:
     virtual bool spi_ttmps_setup_enabled () const = 0;
     /* Return the globally unique wave identifier.  */
     virtual amd_dbgapi_wave_id_t id () const = 0;
-    /* The 3-dimensional workgroup coordinates.  */
+    /* The 3-dimensional cluster coordinates within the grid.  If a
+       dispatch could not be associated, this is nullopt.  */
+    virtual std::optional<std::array<uint32_t, 3>> cluster_ids () const;
+    /* The number of workgroups in each of 3-dimensions in the cluster
+       that this wave belongs to.  Even when the dispatch is not in
+       cluster mode, we imagine that each workgroup belongs to a
+       cluster, which is (1, 1, 1) in size.  */
+    virtual std::array<uint32_t, 3> nwg_in_cluster () const;
+    /* The 3-dimensional workgroup coordinates within the grid.  If a
+       dispatch could not be associated, this is nullopt.  */
     virtual std::optional<std::array<uint32_t, 3>> group_ids () const = 0;
     /* Return the record's position in the workgroup.  */
     virtual std::optional<uint32_t> position_in_group () const = 0;
@@ -212,6 +169,10 @@ public:
     virtual bool is_last_wave () const = 0;
     /* First wave of threadgroup.  */
     virtual bool is_first_wave () const = 0;
+    /* Last wave of cluster.  */
+    virtual bool is_last_of_cluster () const { return false; }
+    /* First wave of cluster  */
+    virtual bool is_first_of_cluster () const { return false; }
 
     /* Size of the local data share.  */
     virtual size_t lds_size () const = 0;
@@ -370,9 +331,9 @@ public:
 
   virtual std::pair<amd_dbgapi_wave_state_t, amd_dbgapi_wave_stop_reasons_t>
   wave_get_state (wave_t &wave) const = 0;
-  virtual void wave_set_state (wave_t &wave,
-                               amd_dbgapi_wave_state_t state) const
-    = 0;
+  virtual void wave_set_state (wave_t &wave, amd_dbgapi_wave_state_t state,
+                               amd_dbgapi_exceptions_t reasons
+                               = AMD_DBGAPI_EXCEPTION_NONE) const = 0;
 
   virtual bool wave_get_halt (const wave_t &wave) const = 0;
   virtual void wave_set_halt (wave_t &wave, bool halt) const = 0;
@@ -456,6 +417,8 @@ public:
   void get_info (amd_dbgapi_architecture_info_t query, size_t value_size,
                  void *value) const;
 
+  virtual bool supports_clusters () const { return false; }
+
   template <typename Object, typename... Args> auto &create (Args &&...args)
   {
     return get_base_type_element<Object> (m_handle_object_sets)
@@ -536,6 +499,60 @@ public:
 
     return std::get<handle_object_set_t<object_type>> (m_handle_object_sets)
       .find_if (predicate, all);
+  }
+};
+
+/* Holds one instruction's words. A word is the smallest type on which the
+   instruction is aligned.  The ::instruction_t is associated with an
+   architecture, and can be validated for that architecture.  Once validated,
+   the exact instruction size is known if it is a valid encoding for that
+   architecture.  */
+class instruction_t
+{
+private:
+  std::vector<std::byte> m_bytes;
+  mutable std::optional<size_t> m_size{};
+  std::reference_wrapper<const architecture_t> m_architecture;
+
+public:
+  instruction_t (const architecture_t &architecture,
+                 std::vector<std::byte> bytes)
+    : m_bytes (std::move (bytes)), m_architecture (architecture)
+  {
+  }
+  instruction_t (legal_instruction_t, const architecture_t &architecture,
+                 std::vector<std::byte> bytes)
+    : m_bytes (std::move (bytes)), m_architecture (architecture)
+  {
+    /* The instruction is guaranteed to be valid, and its byte size is exactly
+       that of the bytes vector passed in.  */
+    m_size.emplace (m_bytes.size ());
+  }
+
+  /* The number of bytes reserved in the instruction bytes storage.  Not all
+     bytes in the storage belong to the instruction, the instruction could have
+     been created from memory for the largest instruction byte size the
+     architecture supports.  */
+  size_t capacity () const { return m_bytes.size (); }
+
+  /* The instruction size in bytes, or 0 if the instruction is invalid.  An
+     instruction is invalid if the architecture's disassembler does not
+     recognize the instruction, or if the instruction's encoding is known to be
+     invalid (for example, misaligned register pair index).  */
+  size_t size () const;
+
+  /* Return a pointer to the instruction bytes.  */
+  const void *data () const { return m_bytes.data (); }
+
+  /* A valid instruction has a non-zero size.  */
+  bool is_valid () const { return size () != 0; }
+
+  /* Return the Nth instruction word.  */
+  template <size_t pos> uint32_t word () const
+  {
+    dbgapi_assert (capacity () >= sizeof (uint32_t[pos + 1]));
+    return *std::launder (
+      reinterpret_cast<const uint32_t *> (&m_bytes[pos * sizeof (uint32_t)]));
   }
 };
 

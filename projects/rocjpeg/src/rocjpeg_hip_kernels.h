@@ -28,6 +28,42 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 
 /**
+ * @brief Compile-time selection of the YUV-to-RGB color conversion standard.
+ *
+ * Define CC_STANDARD at build time to choose the coefficient set:
+ *   CC_STANDARD_BT601 (default) - ITU-R BT.601 full-range (JFIF/JPEG)
+ *   CC_STANDARD_BT709           - ITU-R BT.709 full-range
+ *
+ * The coefficients expand to float literals, so the compiler keeps them as
+ * immediate operands in the fmaf instructions (no memory load, no register
+ * pressure, identical codegen to hardcoded constants).
+ */
+#define CC_STANDARD_BT601 601
+#define CC_STANDARD_BT709 709
+
+#ifndef CC_STANDARD
+#define CC_STANDARD CC_STANDARD_BT601
+#endif
+
+#if CC_STANDARD == CC_STANDARD_BT601
+#define CC_CR0  0.0000f
+#define CC_CR1  1.4020f
+#define CC_CG0 -0.3441f
+#define CC_CG1 -0.7141f
+#define CC_CB0  1.7720f
+#define CC_CB1  0.0000f
+#elif CC_STANDARD == CC_STANDARD_BT709
+#define CC_CR0  0.0000f
+#define CC_CR1  1.5748f
+#define CC_CG0 -0.1873f
+#define CC_CG1 -0.4681f
+#define CC_CB0  1.8556f
+#define CC_CB1  0.0000f
+#else
+#error "Unsupported CC_STANDARD: use CC_STANDARD_BT601 or CC_STANDARD_BT709"
+#endif
+
+/**
  * @brief Converts YUV444 image to RGB image.
  *
  * This function takes a YUV444 image and converts it to an RGB image.
@@ -39,11 +75,12 @@ THE SOFTWARE.
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image buffer.
  * @param src_yuv_image Pointer to the source YUV444 image buffer.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV444 image buffer.
- * @param src_u_image_offset The offset (in bytes) of the U component in the source YUV444 image buffer.
+ * @param src_u_image Pointer to the U plane of the source YUV444 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV444 image (already ROI-adjusted).
  */
 void ColorConvertYUV444ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts YUV440 image to RGB image.
@@ -57,11 +94,12 @@ void ColorConvertYUV444ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t ds
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image buffer.
  * @param src_yuv_image Pointer to the source YUV440 image buffer.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV440 image buffer.
- * @param src_u_image_offset The offset (in bytes) of the U component in the source YUV440 image buffer.
+ * @param src_u_image Pointer to the U plane of the source YUV440 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV440 image (already ROI-adjusted).
  */
 void ColorConvertYUV440ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts an image in YUYV format to RGB format.
@@ -152,11 +190,12 @@ void ColorConvertRGBAToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image.
  * @param src_yuv_image Pointer to the source YUV444 image.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV444 image.
- * @param src_u_image_offset The offset (in bytes) of the U plane in the source YUV444 image.
+ * @param src_u_image Pointer to the U plane of the source YUV444 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV444 image (already ROI-adjusted).
  */
 void ColorConvertYUV444ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * @brief Converts YUV440 image to RGB planar format.
@@ -173,11 +212,12 @@ void ColorConvertYUV444ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
  * @param dst_image_stride_in_bytes The stride (in bytes) of the destination RGB image.
  * @param src_yuv_image Pointer to the source YUV440 image.
  * @param src_yuv_image_stride_in_bytes The stride (in bytes) of the source YUV440 image.
- * @param src_u_image_offset The offset (in bytes) of the U plane in the source YUV440 image.
+ * @param src_u_image Pointer to the U plane of the source YUV440 image (already ROI-adjusted).
+ * @param src_v_image Pointer to the V plane of the source YUV440 image (already ROI-adjusted).
  */
 void ColorConvertYUV440ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, const uint8_t *src_yuv_image,
-    uint32_t src_yuv_image_stride_in_bytes, uint32_t src_u_image_offset, uint32_t src_v_image_offset);
+    uint32_t src_yuv_image_stride_in_bytes, const uint8_t *src_u_image, const uint8_t *src_v_image);
 
 /**
  * Converts a YUYV image to RGB planar format.
@@ -300,6 +340,110 @@ void ExtractYFromPackedYUYV(hipStream_t stream, uint32_t dst_width, uint32_t dst
 void ConvertPackedYUYVToPlanarYUV(hipStream_t stream, uint32_t dst_width, uint32_t dst_height,
     uint8_t *destination_y, uint8_t *destination_u, uint8_t *destination_v, uint32_t dst_luma_stride_in_bytes,
     uint32_t dst_chroma_stride_in_bytes, const uint8_t *src_image, uint32_t src_image_stride_in_bytes);
+
+// ---- batched param structs + prototypes ----
+
+struct RGBAToRGBBatchParams {
+    uint32_t dst_width;
+    uint32_t dst_height;
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+};
+void ColorConvertRGBAToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const RGBAToRGBBatchParams *d_params, uint32_t n_images);
+
+struct InterleavedUVToPlanarUVBatchParams {
+    uint32_t dst_width;
+    uint32_t dst_height;
+    uint8_t *dst_image1;
+    uint8_t *dst_image2;
+    uint32_t dst_image_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+};
+void ConvertInterleavedUVToPlanarUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const InterleavedUVToPlanarUVBatchParams *d_params, uint32_t n_images);
+
+struct YFromPackedYUYVBatchParams {
+    uint32_t dst_height;
+    uint8_t *destination_y;
+    uint32_t dst_luma_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
+};
+void ExtractYFromPackedYUYVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YFromPackedYUYVBatchParams *d_params, uint32_t n_images);
+
+struct PackedYUYVToPlanarYUVBatchParams {
+    uint32_t dst_height;
+    uint8_t *destination_y;
+    uint8_t *destination_u;
+    uint8_t *destination_v;
+    uint32_t dst_luma_stride_in_bytes;
+    uint32_t dst_chroma_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
+};
+void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);
+
+// ---- Unified YUV->RGB batched kernels (cover NV12/YUV444/YUV440/YUYV/YUV400) ----
+
+// Per-image source layout selector for the unified kernels.
+enum YUVSurfaceLayout : uint32_t {
+    YUV_LAYOUT_NV12 = 0,   // 2-plane: luma + interleaved UV (4:2:0)
+    YUV_LAYOUT_YUV444,     // 3-plane 4:4:4
+    YUV_LAYOUT_YUV440,     // 3-plane 4:4:0 (422V), chroma half-height
+    YUV_LAYOUT_YUYV,       // 1-plane packed YUYV (4:2:2)
+    YUV_LAYOUT_YUV400,     // 1-plane luma only (grayscale)
+};
+
+// Superset of per-image source params; which fields are read depends on `layout`.
+// Each thread of the unified kernels converts an 8-pixel-wide by 2-row block, so the
+// "*_in_8px_blocks" / "*_in_2row_blocks" extents are the per-image grid bounds and the
+// "*_row_pair_stride_in_bytes" values are the byte distance between consecutive row pairs.
+struct YUVToRGBBatchParams {
+    uint32_t       layout;
+    uint8_t       *dst_image;
+    uint32_t       dst_image_stride_in_bytes;
+    uint32_t       dst_image_row_pair_stride_in_bytes; // dst_image_stride_in_bytes * 2 (one thread writes 2 rows)
+    const uint8_t *src_y_image;
+    uint32_t       src_y_image_stride_in_bytes;
+    uint32_t       src_y_image_row_pair_stride_in_bytes; // src_y_image_stride_in_bytes * 2 (one thread reads 2 rows)
+    const uint8_t *src_u_image;                 // YUV444 / YUV440
+    const uint8_t *src_v_image;                 // YUV444 / YUV440
+    const uint8_t *src_chroma_image;            // NV12 interleaved UV
+    uint32_t       src_chroma_image_stride_in_bytes; // NV12
+    uint32_t       dst_width_in_8px_blocks;  // ceil(dst_width / 8)
+    uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
+};
+
+struct YUVToRGBPlanarBatchParams {
+    uint32_t       layout;
+    uint8_t       *dst_image_r;
+    uint8_t       *dst_image_g;
+    uint8_t       *dst_image_b;
+    uint32_t       dst_image_stride_in_bytes;
+    uint32_t       dst_image_row_pair_stride_in_bytes; // dst_image_stride_in_bytes * 2 (one thread writes 2 rows)
+    const uint8_t *src_y_image;
+    uint32_t       src_y_image_stride_in_bytes;
+    uint32_t       src_y_image_row_pair_stride_in_bytes; // src_y_image_stride_in_bytes * 2 (one thread reads 2 rows)
+    const uint8_t *src_u_image;
+    const uint8_t *src_v_image;
+    const uint8_t *src_chroma_image;
+    uint32_t       src_chroma_image_stride_in_bytes;
+    uint32_t       dst_width_in_8px_blocks;  // ceil(dst_width / 8)
+    uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
+};
+
+void ColorConvertYUVToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBBatchParams *d_params, uint32_t n_images);
+void ColorConvertYUVToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBPlanarBatchParams *d_params, uint32_t n_images);
 
 /**
  * @brief Structure representing an array of 6 unsigned integers.

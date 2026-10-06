@@ -56,9 +56,8 @@ class ROHostContext;
  * the host (which is an inversion of the normal behavior).
  */
 class ROBackend : public Backend {
-  using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
-  using StatusProxyT =
-          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
+  using RetBufferProxyT = DeviceProxy<uint64_t>;
+  using StatusProxyT = DeviceProxy<char>;
 
  public:
   /**
@@ -123,6 +122,24 @@ class ROBackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Not supported by the RO backend: symmetric user-buffer registration is
+   * only implemented for the IPC and GDA backends. Always returns
+   * ROCSHMEM_ERROR without registering anything.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Not supported by the RO backend (see buffer_register_symmetric). Always
+   * returns ROCSHMEM_ERROR.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
+
+  /**
    * @brief Free all resources associated with the backend.
    *
    * The memory allocated to the handle param is deallocated during this
@@ -151,12 +168,12 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to block resources
    */
-  BlockHandleProxyT block_handle_proxy_;
+  BlockHandleProxy block_handle_proxy_;
 
   /**
    * @brief Handle to block resources
    */
-  DefaultBlockHandleProxyT default_block_handle_proxy_;
+  DefaultBlockHandleProxy default_block_handle_proxy_;
 
  protected:
   /**
@@ -250,7 +267,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Handle to device profiler memory
@@ -329,6 +346,7 @@ class ROBackend : public Backend {
   /**
    * @brief Return buffer for rocshmem_g API
    */
+  HIPAllocator ret_buffer_alloc_{};
   RetBufferProxyT g_ret_buffer_;
   RetBufferProxyT g_ret_buffer_default_ctx_;
 
@@ -345,6 +363,7 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
+  HIPAllocatorFinegrained status_alloc_{};
   StatusProxyT status_;
   StatusProxyT status_default_ctx_;
 };

@@ -47,15 +47,15 @@ struct BackendRegister {
 };
 
 class BackendProxy {
-  using ProxyT = DeviceProxy<HIPHostAllocator, BackendRegister>;
+  using ProxyT = DeviceProxy<BackendRegister>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  BackendProxy([[maybe_unused]] const HIPHostAllocator& alloc = HIPHostAllocator(),
+  BackendProxy(const HIPHostAllocator& alloc = HIPHostAllocator(),
                size_t num_elems = 1)
-    : proxy_{num_elems} {
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) BackendRegister();
   }
 
@@ -71,6 +71,7 @@ class BackendProxy {
   __host__ __device__ BackendRegister *get() { return proxy_.get(); }
 
  private:
+  HIPHostAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */

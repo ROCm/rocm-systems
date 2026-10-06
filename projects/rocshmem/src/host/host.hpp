@@ -171,7 +171,7 @@ class HostInterface {
   __host__ void putmem_nbi(void* dest, const void* source, size_t nelems,
                            int pe, WindowInfo* window_info);
 
-  __host__ void getmem_nbi(void* dest, const void* source, size_t size, int pe,
+  __host__ void getmem_nbi(void* dest, const void* source, size_t nelems, int pe,
                            WindowInfo* window_info);
 
   template <typename T>
@@ -207,7 +207,7 @@ class HostInterface {
   __host__ void sync_on_stream(rocshmem_team_t team, hipStream_t stream);
 
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                      const void *source, size_t size,
+                                      const void *source, size_t nelems,
                                       hipStream_t stream);
 
   __host__ void broadcastmem_on_stream(rocshmem_team_t team, void *dest,

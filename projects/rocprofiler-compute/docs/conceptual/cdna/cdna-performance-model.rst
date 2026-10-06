@@ -10,11 +10,11 @@ AMD CDNA architecture (CDNA-CDNA4)
 
 ROCm Compute Profiler makes available an extensive list of metrics to better understand the
 achieved application performance on AMD Instinct™ MI-series GPUs
-including: 
+including:
 
 * CDNA™ architecture based GPUs: AMD Instinct MI100
 * CDNA2 architecture based GPUs: AMD Instinct MI210, MI250, and MI250X
-* CDNA3 architecture based GPUs: AMD Instinct MI300A, MI300X, and MI325X, and 
+* CDNA3 architecture based GPUs: AMD Instinct MI300A, MI300X, and MI325X, and
 * CDNA4 architecture based GPUs: AMD Instinct MI350X and MI355X.
 
 .. note::
@@ -49,6 +49,12 @@ The table provides key details and support available for the different CDNA arch
   |Spatial partition|❌         |❌                               |Compute partition mode and           |Compute partition mode   |
   |mode             |           |                                 |Memory partition mode                |and Memory partition mode|
   +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
+
+On CDNA3 and CDNA4 Instinct GPUs, compute and memory partition modes change how
+ROCm Compute Profiler normalizes kernel time, L2, and HBM peak metrics during
+analysis. See :doc:`compute-memory-partition` for how active modes affect
+reported metrics. For hardware configuration and mode selection, see the
+`MI300X GPU partitioning overview <https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/overview.html>`_.
 
 **Data type support**
 

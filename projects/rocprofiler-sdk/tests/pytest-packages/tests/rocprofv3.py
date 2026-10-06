@@ -35,6 +35,7 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
+        "hipfile_api",
         "counter_collection",
         "scratch_memory",
     ),
@@ -49,6 +50,8 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
         "ompt": ("openmp", "ompt"),
@@ -121,6 +124,9 @@ def test_otf2_data(
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
         "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
+        "hip_event": ("hip_event", "hip_event"),
     }
 
     # make sure they specified valid categories
@@ -196,7 +202,7 @@ def test_otf2_system_tree_node(otf2_data):
                 ), f"SystemTreeNode {node['name']} with class {node['class_name']} validation failed: domain is {node['domain']}, expected 'ACCELERATOR_DEVICE'"
 
     # Each OTF2 file should have at least 1 node with SystemTreeNodeDomain == ACCELERATOR_DEVICE
-    assert count > 0, f"No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
+    assert count > 0, "No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
 
 
 def test_rocpd_data(
@@ -247,7 +253,7 @@ def test_rocpd_data(
         "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
         "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
         "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
-        "ompt": ("ompt", ("OMPT",)),
+        "hipfile_api": ("hipfile_api", ("HIPFILE_API")),
     }
 
     view_mapping = {
@@ -257,6 +263,7 @@ def test_rocpd_data(
         "rccl_api": "regions",
         "rocdecode_api": "regions",
         "rocjpeg_api": "regions",
+        "hipfile_api": "regions",
         "kernel_dispatch": "kernels",
         "memory_copy": "memory_copies",
         "memory_allocation": "memory_allocations",
@@ -595,7 +602,6 @@ def test_perfetto_event_id_annotations(pftrace_reader):
     destroys = event_ops[event_ops["operation"] == "hipEventDestroy"]
 
     # Get unique event IDs for each operation
-    created_ids = set(creates["event_id"].unique())
     recorded_ids = set(records["event_id"].unique())
     destroyed_ids = set(destroys["event_id"].unique())
 
@@ -603,9 +609,6 @@ def test_perfetto_event_id_annotations(pftrace_reader):
     num_creates = len(creates)
     num_records = len(records)
     num_destroys = len(destroys)
-    num_unique_created = len(created_ids)
-    num_unique_recorded = len(recorded_ids)
-    num_unique_destroyed = len(destroyed_ids)
 
     assert num_creates > 0, "No hipEventCreate operations found"
     assert num_records > 0, "No hipEventRecord operations found"

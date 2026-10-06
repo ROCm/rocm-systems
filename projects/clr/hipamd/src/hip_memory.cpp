@@ -178,7 +178,9 @@ hipError_t ihipFree(void* ptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
-        amd::SvmBuffer::free(memory_object->getContext(), ptr);
+        if (!amd::SvmBuffer::free(memory_object->getContext(), ptr)) {
+          return hipErrorInvalidValue;
+        }
       }
     }
     return hipSuccess;
@@ -645,9 +647,13 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
   hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
   switch (type) {
     case hipCopyBufferP2P:
+      if (kind == hipMemcpyDeviceToDeviceNoCU) {
+        helper.copyMetadata().copyEnginePreference_ =
+            amd::CopyMetadata::CopyEnginePreference::SDMA;
+      }
       command = new amd::CopyMemoryP2PCommand(
           stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes, helper.copyMetadata());
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
         if (status != hipSuccess) {
@@ -3100,10 +3106,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
-  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
-  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
-  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory. All other combinations are rejected up front.
+  // Swap and indirect operations require the SDMA batch path. Allow device-to-device
+  // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
@@ -3113,9 +3117,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
       type = hipHostToHost;
     } else if (srcMemories[i] == nullptr) {
-      type = hipWriteBuffer;
+      type = (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
     } else if (dstMemories[i] == nullptr) {
-      type = hipReadBuffer;
+      type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
     } else {
       type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
     }
@@ -3124,20 +3128,21 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
-          // Narrow to H<->D for both swap and indirect.
+        case hipCopyBufferSDMA: {
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+          if (sMem == nullptr || dMem == nullptr ||
+              (getMemoryType(sMem) == hipMemoryTypeHost &&
+               getMemoryType(dMem) == hipMemoryTypeHost)) {
             return hipErrorNotSupported;
           }
           break;
         }
+        case hipCopyBufferP2P:
+          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-
           return hipErrorNotSupported;
       }
     }
@@ -4721,6 +4726,26 @@ hipError_t ihipMipmappedArrayDestroy(hipMipmappedArray_t mipmapped_array_ptr) {
   auto image = as_amd(mem_obj);
   // Wait on the device, associated with the current memory object during allocation
   g_devices[image->getUserData().deviceId]->SyncAllStreams();
+
+  // Release all level array views created by hipGetMipmappedArrayLevel.
+  std::vector<hipArray*> level_arrays;
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    for (auto* arr : hip::hipArraySet) {
+      cl_mem level_mem = reinterpret_cast<cl_mem>(arr->data);
+      if (is_valid(level_mem) && as_amd(level_mem)->parent() == image) {
+        level_arrays.push_back(arr);
+      }
+    }
+    for (auto* arr : level_arrays) {
+      hip::hipArraySet.erase(arr);
+    }
+  }
+  for (auto* arr : level_arrays) {
+    as_amd(reinterpret_cast<cl_mem>(arr->data))->release();
+    delete arr;
+  }
+
   image->release();
 
   delete mipmapped_array_ptr;
@@ -4902,18 +4927,26 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
                                    (size_t)mipmapDesc->offset, buf));
 }
 
+// ================================================================================================
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
-  // We do not support any flags at this time.
-  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd || flags != 0) {
+  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
+      (flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (!device->GetHandleForAddressRange(dptr, size, handle)) {
+
+  // ensure exported handle is reachable by third party devices via pcie, hence the owning device
+  // must be xgmi or pcie with large BAR enabled.
+  if (flags == hipMemRangeFlagDmaBufMappingTypePcie && !device->isXgmi() &&
+      !device->info().largeBar_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  if (!device->GetHandleForAddressRange(dptr, size, handle, flags)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

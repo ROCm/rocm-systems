@@ -7,6 +7,7 @@
 
 #include "alloc.h"
 #include "collectives.h"
+#include "cudawrap.h"
 #include "common_kernel.h"
 #include <cuda_runtime.h>
 
@@ -19,59 +20,78 @@
 #endif
 
 namespace {
-  template<typename RedOp>
-  __global__ __launch_bounds__(512, 1)
-  void oneRankReduce(void* dst, void* src, void* acc, size_t nElts, uint64_t redOpArg, bool redOpArgIsPtr) {
-    using T = typename RedOp::EltType;
-    int tid = threadIdx.x;
-    int tn = blockDim.x;
-    int bid = blockIdx.x;
-    int bn = gridDim.x;
+// rccl_float8 and rccl_bfloat8 are different types in the host pass and the gfx942 device
+// pass (rccl_float8.h), so a kernel templated on them is registered under a name the gfx942
+// code object does not contain. The fp8 kernels are instantiated on these stand-ins instead,
+// and the element type is resolved in the kernel body, which only the device pass compiles.
+struct OneRankFloat8e4m3 {};
+struct OneRankFloat8e5m2 {};
+
+template <typename T>
+struct OneRankEltType {
+  using Type = T;
+};
+#if defined(RCCL_FLOAT8)
+template <>
+struct OneRankEltType<OneRankFloat8e4m3> {
+  using Type = rccl_float8;
+};
+template <>
+struct OneRankEltType<OneRankFloat8e5m2> {
+  using Type = rccl_bfloat8;
+};
+#endif
+
+template <template <typename> class Func, typename Elt>
+__global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, void* acc, size_t nElts,
+                                                        uint64_t redOpArg, bool redOpArgIsPtr) {
+  using T = typename OneRankEltType<Elt>::Type;
+  using RedOp = Func<T>;
+  int tid = threadIdx.x;
+  int tn = blockDim.x;
+  int bid = blockIdx.x;
+  int bn = gridDim.x;
 
     // each block/channel gets a roughly equal segment of 16 byte packs
-    constexpr int EltPerPack = 16/sizeof(T);
-    intptr_t i0 = (bid+0)*alignUp(divUp(nElts, bn), EltPerPack);
-    intptr_t i1 = (bid+1)*alignUp(divUp(nElts, bn), EltPerPack);
-    i0 = min(i0, nElts);
-    i1 = min(i1, nElts);
+  constexpr int EltPerPack = 16 / sizeof(T);
+  intptr_t i0 = (bid + 0) * alignUp(divUp(nElts, bn), EltPerPack);
+  intptr_t i1 = (bid + 1) * alignUp(divUp(nElts, bn), EltPerPack);
+  i0 = min(i0, nElts);
+  i1 = min(i1, nElts);
 
-    if (redOpArgIsPtr) {
-      if (redOpArg%2 != 0) {
-        redOpArg = *reinterpret_cast<uint8_t*>(redOpArg);
-      } else if (redOpArg%4 != 0) {
-        redOpArg = *reinterpret_cast<uint16_t*>(redOpArg);
-      } else if (redOpArg%8 != 0) {
-        redOpArg = *reinterpret_cast<uint32_t*>(redOpArg);
-      } else {
-        redOpArg = *reinterpret_cast<uint64_t*>(redOpArg);
-      }
-    }
+  // As in common.h: RedOpArg knows how the scalar in user memory maps onto opArg, which
+  // for fp8 is not simply its own bits.
+  if (RedOpArg<RedOp>::ArgUsed && redOpArgIsPtr) {
+    redOpArg = RedOpArg<RedOp>::loadArg(reinterpret_cast<void*>(redOpArg));
+  }
 
-    if (acc != nullptr) {
-      void* srcPtr = (T*)src + i0;
-      void* accPtr = (T*)acc + i0;
-      void* dstPtr = (T*)dst + i0;
-      void* srcs[2] = {srcPtr, accPtr};
-      void* dsts[1] = {dstPtr};
-      reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,2,2, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, true, 2, srcs, 1, dsts, i1-i0);
-    } else {
-      src = (T*)src + i0;
-      dst = (T*)dst + i0;
-      reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,1,1, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, true, 1, &src, 1, &dst, i1-i0);
-    }
+  if (acc != nullptr) {
+    void* srcPtr = (T*)src + i0;
+    void* accPtr = (T*)acc + i0;
+    void* dstPtr = (T*)dst + i0;
+    void* srcs[2] = {srcPtr, accPtr};
+    void* dsts[1] = {dstPtr};
+    reduceCopy<COLL_UNROLL, 0, RedOp, T, 0, 2, 2, 0, 1, 1, /*PreOpSrcs=*/1>(tid, tn, redOpArg, true, 2, srcs, 1, dsts,
+                                                                            i1 - i0);
+  } else {
+    src = (T*)src + i0;
+    dst = (T*)dst + i0;
+    reduceCopy<COLL_UNROLL, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/1>(tid, tn, redOpArg, true, 1, &src, 1, &dst,
+                                                                            i1 - i0);
   }
 }
+} // namespace
 
-ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp, ncclDataType_t eltType, cudaStream_t stream, void const* acc) {
+ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
+                               ncclDataType_t eltType, cudaStream_t stream, cudaEvent_t launchCompletionEvent,
+                               void const* acc) {
   size_t eltSize = ncclTypeSize(eltType);
 
   // handles all_reduce for non-PreMulSum ops
   // for 1 rank, out-of-place is memcpy to self, and in-place is nop
   if (acc == nullptr && redOp.op != ncclDevPreMulSum) {
     if (dst != src) {
-      NCCLCHECK(ncclCudaMemcpyAsync((char*)dst, (char*)src, nElts*eltSize, stream));
+      NCCLCHECK(ncclCudaMemcpyAsync((char*)dst, (char*)src, nElts * eltSize, stream));
     }
     return ncclSuccess;
   }
@@ -92,41 +112,79 @@ ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct 
 #define CASE(ncclDataType, dataType) \
   case ncclDataType: \
     switch (redOp.op) { \
-    case ncclDevSum: kernel = (void const*)&oneRankReduce<FuncSum<dataType>>; break; \
-    case ncclDevProd: kernel = (void const*)&oneRankReduce<FuncProd<dataType>>; break; \
-    case ncclDevMinMax: kernel = (void const*)&oneRankReduce<FuncMinMax<dataType>>; break; \
-    case ncclDevPreMulSum: kernel = (void const*)&oneRankReduce<FuncPreMulSum<dataType>>; break; \
-    case ncclDevSumPostDiv: kernel = (void const*)&oneRankReduce<FuncSum<dataType>>; break; \
-    default: return ncclInvalidArgument; \
-    } break;
+    case ncclDevSum: \
+      kernel = (void const*)&oneRankReduce<FuncSum, dataType>; \
+      break; \
+    case ncclDevProd: \
+      kernel = (void const*)&oneRankReduce<FuncProd, dataType>; \
+      break; \
+    case ncclDevMinMax: \
+      kernel = (void const*)&oneRankReduce<FuncMinMax, dataType>; \
+      break; \
+    case ncclDevPreMulSum: \
+      kernel = (void const*)&oneRankReduce<FuncPreMulSum, dataType>; \
+      break; \
+    case ncclDevSumPostDiv: \
+      kernel = (void const*)&oneRankReduce<FuncSum, dataType>; \
+      break; \
+    default: \
+      return ncclInvalidArgument; \
+    } \
+    break;
 
   switch (eltType) {
-  CASE(ncclInt8, int8_t)
-  CASE(ncclUint8, uint8_t)
-  CASE(ncclInt32, int32_t)
-  CASE(ncclUint32, uint32_t)
-  CASE(ncclInt64, int64_t)
-  CASE(ncclUint64, uint64_t)
+    CASE(ncclInt8, int8_t)
+    CASE(ncclUint8, uint8_t)
+    CASE(ncclInt32, int32_t)
+    CASE(ncclUint32, uint32_t)
+    CASE(ncclInt64, int64_t)
+    CASE(ncclUint64, uint64_t)
 #if defined(RCCL_FLOAT8)
-  CASE(ncclFloat8e4m3, rccl_float8)
-  CASE(ncclFloat8e5m2, rccl_bfloat8)
+    CASE(ncclFloat8e4m3, OneRankFloat8e4m3)
+    CASE(ncclFloat8e5m2, OneRankFloat8e5m2)
 #endif
-  CASE(ncclFloat16, half)
+    CASE(ncclFloat16, half)
 #if defined(RCCL_BFLOAT16)
-  CASE(ncclBfloat16, hip_bfloat16)
+    CASE(ncclBfloat16, hip_bfloat16)
 #endif
-  CASE(ncclFloat32, float)
-  CASE(ncclFloat64, double)
-  default: return ncclInvalidArgument;
+    CASE(ncclFloat32, float)
+    CASE(ncclFloat64, double)
+  default:
+    return ncclInvalidArgument;
   }
 #undef CASE
 
   dim3 grid = {0, 1, 1};
-  grid.x = std::min(32, (int)divUp(nElts*eltSize, 16<<10));
+  grid.x = std::min(32, (int)divUp(nElts * eltSize, 16 << 10));
   dim3 block = {512, 1, 1};
   void* mutableSrc = const_cast<void*>(src);
   void* mutableAcc = const_cast<void*>(acc);
   void* args[6] = {&dst, &mutableSrc, &mutableAcc, &nElts, &redOp.scalarArg, &redOp.scalarArgIsPtr};
+
+#if CUDART_VERSION >= 12030
+  if (launchCompletionEvent != nullptr) {
+    int driverVersion;
+    NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
+    if (driverVersion >= 12030) {
+      cudaLaunchAttribute attr = {};
+      attr.id = cudaLaunchAttributeLaunchCompletionEvent;
+      attr.val.launchCompletionEvent.event = launchCompletionEvent;
+      attr.val.launchCompletionEvent.flags = 0;
+      cudaLaunchConfig_t config = {};
+      config.gridDim = grid;
+      config.blockDim = block;
+      config.stream = stream;
+      config.attrs = &attr;
+      config.numAttrs = 1;
+      CUDACHECK(cudaLaunchKernelExC(&config, kernel, args));
+      return ncclSuccess;
+    }
+  }
+#endif
+  if (launchCompletionEvent != nullptr) {
+    WARN("CUDA launch-completion events require CUDA 12.3 or newer; recording the user event before launch");
+    CUDACHECK(cudaEventRecord(launchCompletionEvent, stream));
+  }
   CUDACHECK(cudaLaunchKernel(kernel, grid, block, args, 0, stream));
   return ncclSuccess;
 }

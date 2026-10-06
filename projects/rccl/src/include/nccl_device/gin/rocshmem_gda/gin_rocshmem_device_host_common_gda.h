@@ -9,9 +9,9 @@
 
 #include <stdint.h>
 
-#define NCCL_GIN_ROCSHMEM_VERSION 100
+#include "gda/queue_pair_provider.hpp"
 
-namespace rocshmem { class QueuePair; }
+#define NCCL_GIN_ROCSHMEM_VERSION 100
 
 struct ncclGinRocshmemGdaGPUContext {
   rocshmem::QueuePair** qps;        // Array of nRanks QP pointers (GPU-accessible)
@@ -27,9 +27,9 @@ struct ncclGinRocshmemGdaGPUContext {
 
 struct ncclGinRocshmemGdaMemHandle {
   uintptr_t local_va;    // This rank's VA of the registered buffer (for src laddr)
-  uintptr_t *remote_vas; // Per-peer VAs (GPU array, nRanks entries, allgathered)
+  uintptr_t* remote_vas; // Per-peer VAs (GPU array, nRanks entries, allgathered)
   uint32_t lkey;          // Local key for this MR
-  uint32_t *rkeys;        // Per-peer rkeys (GPU array, nRanks entries, allgathered)
+  uint32_t* rkeys;        // Per-peer rkeys (GPU array, nRanks entries, allgathered)
 };
 
 #endif // _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_GDA_H_

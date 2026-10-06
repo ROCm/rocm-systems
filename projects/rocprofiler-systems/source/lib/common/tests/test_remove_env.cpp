@@ -18,10 +18,13 @@ namespace
 std::string
 find_env_var(const std::vector<std::string>& env, std::string_view var_name)
 {
-    std::string prefix = std::string(var_name) + "=";
+    const std::string prefix = std::string(var_name) + "=";
     for(const auto& entry : env)
     {
-        if(std::string_view{ entry }.find(prefix) == 0) return entry;
+        if(std::string_view{ entry }.starts_with(prefix))
+        {
+            return entry;
+        }
     }
     return "";
 }
@@ -152,7 +155,7 @@ TEST_F(RemoveEnvTest, RealWorld_LD_PRELOAD)
     remove_env(m_env_vars, "LD_PRELOAD", m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    EXPECT_FALSE(find_env_var(m_env_vars, "LD_PRELOAD").length() > 0);
+    EXPECT_FALSE(!find_env_var(m_env_vars, "LD_PRELOAD").empty());
     EXPECT_EQ(find_env_var(m_env_vars, "LD_LIBRARY_PATH"), "LD_LIBRARY_PATH=/usr/lib");
     EXPECT_EQ(find_env_var(m_env_vars, "PATH"), "PATH=/usr/bin");
 }
@@ -205,8 +208,8 @@ TEST_F(RemoveEnvTest, VariableWithSpecialCharactersInValue)
 
 TEST_F(RemoveEnvTest, LongVariableName)
 {
-    std::string long_var_name = "VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_TESTING";
-    m_env_vars                = { long_var_name + "=some_value", "SHORT=val" };
+    const std::string long_var_name = "VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_TESTING";
+    m_env_vars                      = { long_var_name + "=some_value", "SHORT=val" };
 
     remove_env(m_env_vars, long_var_name, m_original_envs);
 

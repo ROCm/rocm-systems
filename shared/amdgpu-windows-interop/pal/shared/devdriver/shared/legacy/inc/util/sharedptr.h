@@ -52,7 +52,7 @@ namespace DevDriver
         // public functions available to all subclasses
     public:
         // check to see if the class has been set
-        bool IsNull() const { return m_pObject == nullptr; }
+        bool IsNull() const;
 
         // clear the pointer and, if required, delete the underlying allocation
         void Clear()
@@ -76,28 +76,30 @@ namespace DevDriver
         class ContainerBase
         {
         public:
+            using AtomicValueType = decltype(+Platform::Atomic{});
+            static_assert(sizeof(AtomicValueType) == sizeof(Platform::Atomic), "Atomic storage must match Platform::Atomic size.");
+            static_assert(alignof(AtomicValueType) == alignof(Platform::Atomic), "Atomic storage must match Platform::Atomic alignment.");
+
             // Construct container and initialize ref count to zero. This class should never be
             // constructed directly by anything other than a subclass.
-            constexpr ContainerBase(const AllocCb &allocCb)
-                : m_allocCb(allocCb)
-                , m_refCount(0)
-            {
-                //DD_PRINT(LogLevel::Never, "Created reference counted container %i", m_refCount);
-            }
+            ContainerBase(const AllocCb &allocCb);
+
+            ContainerBase& operator=(const ContainerBase&) = delete;
+            ContainerBase& operator=(ContainerBase&&) = delete;
 
             // Destroy the container. Since this class is never directly created, this ensures
             // subclasses (and the contained object) are always destroyed correctly.
             virtual ~ContainerBase()
             {
-                DD_ASSERT(m_refCount == 0);
-                DD_PRINT(LogLevel::Never, "Deleted reference counted container %i", m_refCount);
+                DD_ASSERT(RefCountValue() == 0);
+                DD_PRINT(LogLevel::Never, "Deleted reference counted container %i", RefCountValue());
             }
 
             // Increments the reference count of the container
             int32 Retain(void)
             {
-                DD_ASSERT(m_refCount >= 0);
-                int32 result = Platform::AtomicIncrement(&m_refCount);
+                DD_ASSERT(RefCountValue() >= 0);
+                int32 result = Platform::AtomicIncrement(RefCountAtomic());
                 DD_ASSERT(result >= 1);
                 DD_PRINT(LogLevel::Never, "Incremented reference count: %i", result);
                 return result;
@@ -106,62 +108,54 @@ namespace DevDriver
             // Decrements the reference count of the container
             int32 Release(void)
             {
-                int32 result = Platform::AtomicDecrement(&m_refCount);
+                int32 result = Platform::AtomicDecrement(RefCountAtomic());
                 DD_ASSERT(result >= 0);
                 DD_PRINT(LogLevel::Never, "Decremented reference count: %i", result);
                 return result;
             }
 
             // Returns the reference count of the container
-            int32 QueryReferenceCount(void) const
-            {
-                return m_refCount;
-            }
+            int32 QueryReferenceCount(void) const;
 
             // Retrieve the allocator callbacks so it can be destroyed
             const AllocCb& GetAllocCb() const { return m_allocCb; }
         private:
+            Platform::Atomic* RefCountAtomic()
+            {
+                return &m_refCount;
+            }
+
+            const Platform::Atomic* RefCountAtomic() const
+            {
+                return &m_refCount;
+            }
+
+            int32 RefCountValue() const
+            {
+                return Platform::AtomicAdd(const_cast<Platform::Atomic*>(RefCountAtomic()), 0);
+            }
+
             // Allocator callbacks
             const AllocCb       m_allocCb;
             // Reference count
-            Platform::Atomic    m_refCount;
+            AtomicValueType     m_refCount;
 
         };
 
-        // Default constructor that is constexpr. Allows the compiler to inline this if it wants to.
-        constexpr SharedPointerBase()
-            : m_pContainer(nullptr)
-            , m_pObject(nullptr)
-        {
-        }
+        // Default constructor that initializes an empty shared pointer base.
+        SharedPointerBase();
 
         // Initialize the object using the provided pointer
-        SharedPointerBase(ContainerBase* pContainer, void* pObject)
-            : m_pContainer(pContainer)
-            , m_pObject(pObject)
-        {
-            // We should always have a valid object if the container is valid.
-            DD_ASSERT((m_pContainer == nullptr) || (m_pObject != nullptr));
-
-            // If we have a valid container, increment the reference count.
-            if (m_pContainer != nullptr)
-            {
-                m_pContainer->Retain();
-            }
-        }
+        SharedPointerBase(ContainerBase* pContainer, void* pObject);
 
         // Copy constructor copies the container pointer and increments the reference count
-        SharedPointerBase(const SharedPointerBase &right)
-            : SharedPointerBase(right.m_pContainer, right.m_pObject)
-        {
-        }
+        SharedPointerBase(const SharedPointerBase &right);
 
         // Move constructor takes the container pointer and clears the other container's pointer
-        SharedPointerBase(SharedPointerBase &&right)
-            : m_pContainer(Platform::Exchange(right.m_pContainer, nullptr))
-            , m_pObject(Platform::Exchange(right.m_pObject, nullptr))
-        {
-        }
+        SharedPointerBase(SharedPointerBase &&right);
+
+        SharedPointerBase& operator=(const SharedPointerBase&) = delete;
+        SharedPointerBase& operator=(SharedPointerBase&&) = delete;
 
         // On deletion of the object clear the pointer
         ~SharedPointerBase()
@@ -181,7 +175,7 @@ namespace DevDriver
     {
     public:
         // Create SharedPointer object with the default constructor
-        constexpr SharedPointer() : SharedPointerBase() {};
+        SharedPointer() : SharedPointerBase() {};
 
         SharedPointer(const SharedPointer<T>&) = default;
 
@@ -223,14 +217,14 @@ namespace DevDriver
             return Get();
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator== (const SharedPointer< U >&right) const
         {
             return m_pObject == right.m_pObject;
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator!= (const SharedPointer< U >&right) const
         {
@@ -272,7 +266,7 @@ namespace DevDriver
         public:
             // Constructor that initializes ContainerBase class and the object using the provided parameters
             template<typename... Args>
-            explicit constexpr Container(const AllocCb& allocCb, Args&&... args)
+            explicit Container(const AllocCb& allocCb, Args&&... args)
                 : ContainerBase(allocCb)
                 , m_object(Platform::Forward<Args>(args)...)
             {

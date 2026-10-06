@@ -19,32 +19,42 @@ output_file_registry::make_entry(std::string path, output_format format,
     switch(format)
     {
         case output_format::perfetto:
-            return { "Perfetto trace", std::move(path),
-                     "Open in https://ui.perfetto.dev" };
+            return { .label  = "Perfetto trace",
+                     .path   = std::move(path),
+                     .viewer = "Open in https://ui.perfetto.dev" };
         case output_format::rocpd:
-            return { "RocPD database", std::move(path),
-                     "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd "
-                     "Python module for conversion to other formats" };
+            return { .label  = "RocPD database",
+                     .path   = std::move(path),
+                     .viewer = "sqlite3, ROCm Optiq, or rocprofiler-sdk provided rocpd "
+                               "Python module for conversion to other formats" };
         case output_format::json:
-            return { component_name.empty() ? "JSON output"
-                                            : fmt::format("JSON ({})", component_name),
-                     path, fmt::format("jq . {}", path) };
+            return { .label  = component_name.empty()
+                                   ? "JSON output"
+                                   : fmt::format("JSON ({})", component_name),
+                     .path   = path,
+                     .viewer = fmt::format("jq . {}", path) };
         case output_format::text:
-            return { component_name.empty() ? "Text profile"
-                                            : fmt::format("Profile ({})", component_name),
-                     path, fmt::format("cat {}", path) };
+            return { .label  = component_name.empty()
+                                   ? "Text profile"
+                                   : fmt::format("Profile ({})", component_name),
+                     .path   = path,
+                     .viewer = fmt::format("cat {}", path) };
         case output_format::causal_json:
-            return { "Causal profile (JSON)", path, fmt::format("jq . {}", path) };
+            return { .label  = "Causal profile (JSON)",
+                     .path   = path,
+                     .viewer = fmt::format("jq . {}", path) };
         case output_format::causal_text:
-            return { "Causal profile (text)", path, fmt::format("cat {}", path) };
+            return { .label  = "Causal profile (text)",
+                     .path   = path,
+                     .viewer = fmt::format("cat {}", path) };
     }
-    return { "Unknown", std::move(path), "" };
+    return { .label = "Unknown", .path = std::move(path), .viewer = "" };
 }
 
 void
 output_file_registry::register_file(std::string path, output_format format)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back(make_entry(std::move(path), format));
 }
 
@@ -52,15 +62,18 @@ void
 output_file_registry::register_file(std::string path, output_format format,
                                     std::string component_name)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back(make_entry(std::move(path), format, component_name));
 }
 
 void
 output_file_registry::print_summary() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if(m_files.empty()) return;
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    if(m_files.empty())
+    {
+        return;
+    }
 
     constexpr std::string_view header =
         "\n"
@@ -73,8 +86,8 @@ output_file_registry::print_summary() const
     auto it = m_files.begin();
     while(it != m_files.end())
     {
-        auto        next    = std::next(it);
-        bool        is_last = (next == m_files.end());
+        auto const  next    = std::next(it);
+        const bool  is_last = (next == m_files.end());
         const auto* branch  = is_last ? "└─" : "├─";
         const auto* cont    = is_last ? "  " : "│ ";
 
@@ -82,7 +95,10 @@ output_file_registry::print_summary() const
                             "  {}   File: {}\n"
                             "  {}   View with: {}\n",
                             branch, it->label, cont, it->path, cont, it->viewer);
-        if(!is_last) _msg += "  │\n";
+        if(!is_last)
+        {
+            _msg += "  │\n";
+        }
         it = next;
     }
 
@@ -92,7 +108,7 @@ output_file_registry::print_summary() const
 void
 output_file_registry::clear()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.clear();
 }
 

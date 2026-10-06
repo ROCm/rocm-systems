@@ -18,6 +18,19 @@
 // ncclDevr[_]: runtime implements for symmetric API.
 
 struct ncclDevrMemory;
+
+// No public NCCL_WIN_REGISTER_* flag means all capabilities. Specifying one or more
+// registration flags selects only those capabilities. Add future public flags here.
+enum ncclDevrRegisterCapability {
+  ncclDevrRegisterGin = 1 << 0,
+  ncclDevrRegisterLsa = 1 << 1,
+  ncclDevrRegisterCft = 1 << 2,
+  ncclDevrRegisterRma = 1 << 3,
+  ncclDevrRegisterAll = ncclDevrRegisterGin | ncclDevrRegisterLsa | ncclDevrRegisterCft | ncclDevrRegisterRma,
+};
+
+bool ncclDevrWinRegEnabled(int winFlags, enum ncclDevrRegisterCapability capability);
+
 struct ncclDevrWindow {
   struct ncclDevrMemory* memory;
   void* userPtr;
@@ -42,7 +55,7 @@ struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {
-  struct ncclDevrRegTask *next;
+  struct ncclDevrRegTask* next;
   void* userPtr;
   size_t userSize;
   int winFlags;
@@ -50,10 +63,14 @@ struct ncclDevrRegTask {
 };
 
 struct ncclDevrCommCreateTask {
-  struct ncclDevrCommCreateTask *next;
+  struct ncclDevrCommCreateTask* next;
   struct ncclDevCommRequirements* reqs;
   struct ncclDevComm* outDevComm;
-  struct ncclDevCommCompat* devCompat;
+  uint32_t deviceCodeVersion;
+};
+
+struct ncclDevrStateCftUc {
+  ncclCftLeId baseId;
 };
 
 struct ncclDevrState {
@@ -65,10 +82,17 @@ struct ncclDevrState {
   int* lsaRankList;
   int nLsaTeams;
 
+  int cftSelf;
+  int cftSize;
+  int cftMcSelf;
+  int cftMcSize;
+  struct ncclDevrStateCftUc le[2]; // 0: UC LE ID base, 1: Counted UC LE ID base (rank_i le = base + i)
+
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
   bool rmaProxyEnabled;
   struct ncclDevrMemory* memHead;
+  uint64_t nextRegistryId; // next value for ncclDevrMemory::registryId
   struct ncclDevrWindowSorted* winSorted;
   int winSortedCapacity, winSortedCount;
   struct ncclDevrTeam* teamHead;
@@ -97,6 +121,10 @@ bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
 // value from the comm topology.
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm);
 
+// Returns the CUDA version supported by CFT on this GPU, or 0 when CFT is unsupported.
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport, bool* gpuCftMulticastSupport,
+                               bool* gpuCftCountedSupport);
+
 // We assume ncclComm has a `ncclDevrState symState` member.
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm);
@@ -104,34 +132,44 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm);
 // If found *outWinHost will be populated and *outWinId >= 0, otherwise *outWinId == -1
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin);
 
-ncclResult_t ncclDevrWindowRegisterInGroup(
-  struct ncclComm* comm, void* ptr, size_t size, int winFlags, ncclWindow_t* outWinDev
-);
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, size_t size, int winFlags,
+                                           ncclWindow_t* outWinDev);
 
-ncclResult_t ncclDevrCommCreateInternal(
-  struct ncclComm* comm, struct ncclDevCommRequirements* reqs, struct ncclDevComm* outDevComm,
-  bool isInternal = false, struct ncclDevCommCompat* devCompat = nullptr
-);
-void freeDevCommRequirements(
-  struct ncclDevCommRequirements* reqs
-);
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
+                                        struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion);
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
 
-
 // Get the corresponding pointer in another lsa rank's symmetric memory window
-ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr);
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr);
 
 // Convert a world rank to an LSA rank.
 ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, int* peerLsaRank);
 
-// Get the RMA device window handle for a specific context
-ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx);
+// Get the host RMA-proxy MR handle for a physical RMA connection.
+void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx);
+
+// Get the byte offset of a window within its backing memory allocation.
+size_t ncclDevrGetWinOffset(struct ncclDevrWindow* winHost);
 
 // Get the multicast address for a given team
-ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, struct ncclTeam lsaTeam, void** outPtr);
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset,
+                                     struct ncclTeam lsaTeam, void** outPtr);
 
 // Copies the devComm data from "rank" to "lsaBarrier".  Assumes the same memory layout at source and destination.
 void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
+
+// RCCL: Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+// If addr is already in the LSA flat range, returns addr unchanged.
+// If addr matches a registered memory's primaryAddr, returns lsaFlatBase + lsaSelf*bigSize + bigOffset.
+// outAddr is set to nullptr if addr cannot be resolved.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
+
+// RCCL: LSA flat window base + stride for GIN Anvil symmetric registration (ncclGetLsaPointer layout).
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G);
+
 #endif

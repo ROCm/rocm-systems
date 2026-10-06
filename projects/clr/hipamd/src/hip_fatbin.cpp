@@ -7,6 +7,9 @@
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
+#include <algorithm>
+#include <cstddef>
+#include <limits>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -14,7 +17,6 @@
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
-#include "hotswap.hpp"
 
 #if ROCM_KPACK_ENABLED
 #include <rocm_kpack/kpack.h>
@@ -135,6 +137,7 @@ static std::string TargetGenericMap(const std::string& input) {
       {"amdgcn-amd-amdhsa--gfx1153", "amdgcn-amd-amdhsa--gfx11-generic"  },
       {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
+      {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
       // clang-format on
   };
   if (auto i = target_map.find(input); i != target_map.end()) {
@@ -183,25 +186,84 @@ static std::string TargetToGeneric(const std::string &input) {
   return generic_name;
 }
 
-static bool IsCodeObjectUncompressed(const void* image) {
+static bool IsCodeObjectUncompressed(const void* image, size_t image_size) {
+  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
+  if (image_size < magic_size) {
+    return false;
+  }
   return std::memcmp(image,
                      reinterpret_cast<const void*>(symbols::kOffloadBundleUncompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1) == 0;
+                     magic_size) == 0;
 }
 
-static bool IsCodeObjectCompressed(const void* image) {
+static bool IsCodeObjectCompressed(const void* image, size_t image_size) {
+  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1;
+  if (image_size < magic_size) {
+    return false;
+  }
   return std::memcmp(image,
                      reinterpret_cast<const void*>(symbols::kOffloadBundleCompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1) == 0;
+                     magic_size) == 0;
 }
 
-static bool IsCodeObjectElf(const void* image) {
+static bool IsCodeObjectElf(const void* image, size_t image_size) {
+  if (image_size < sizeof(amd::Elf64_Ehdr)) {
+    return false;
+  }
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
   return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
+static size_t GetUncompressedImageSize(const void* image, size_t image_bound) {
+  if (image == nullptr) {
+    return 0;
+  }
+
+  // Pointer loads have no length. Walk only the same 4 KiB header window COMGR uses.
+  constexpr size_t kMetadataSize = 4096;
+  const size_t metadata_bound = std::min(image_bound, kMetadataSize);
+  constexpr size_t kHeaderFixedSize =
+      offsetof(symbols::ClangOffloadBundleUncompressedHeader, desc);
+  constexpr size_t kEntryFixedSize = 3 * sizeof(uint64_t);
+  if (metadata_bound < kHeaderFixedSize + kEntryFixedSize) {
+    return 0;
+  }
+
+  const auto* bytes = static_cast<const uint8_t*>(image);
+  const auto* header = static_cast<const symbols::ClangOffloadBundleUncompressedHeader*>(image);
+  constexpr uint64_t max_entries = 4096;
+  constexpr uint64_t max_bundle_id_size = 4096;
+  if (header->numOfCodeObjects == 0 || header->numOfCodeObjects > max_entries) {
+    return 0;
+  }
+
+  size_t image_size = 0;
+  const auto* entry_address = reinterpret_cast<const uint8_t*>(&header->desc[0]);
+  for (uint64_t i = 0; i < header->numOfCodeObjects; ++i) {
+    const size_t entry_offset = static_cast<size_t>(entry_address - bytes);
+    if (entry_offset > metadata_bound || metadata_bound - entry_offset < kEntryFixedSize) {
+      return 0;
+    }
+    const auto* entry = reinterpret_cast<const symbols::ClangOffloadBundleInfo*>(entry_address);
+    if (entry->bundleEntryIdSize > max_bundle_id_size ||
+        entry->bundleEntryIdSize > metadata_bound - entry_offset - kEntryFixedSize ||
+        entry->offset > std::numeric_limits<size_t>::max() ||
+        entry->size > std::numeric_limits<size_t>::max() ||
+        static_cast<size_t>(entry->offset) >
+            std::numeric_limits<size_t>::max() - static_cast<size_t>(entry->size)) {
+      return 0;
+    }
+    image_size = std::max(image_size,
+                          static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size));
+    entry_address += kEntryFixedSize + entry->bundleEntryIdSize;
+  }
+
+  const size_t descriptor_size = static_cast<size_t>(entry_address - bytes);
+  return std::max(image_size, descriptor_size);
+}
+
 static bool UncompressAndPopulateCodeObject(
-    const void* image, const std::set<std::string>& unique_isa_names,
+    const void* image, size_t image_size, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
   auto remove_file_extension = [](const std::string& input) -> std::string {
     size_t index = input.find_last_of(".");
@@ -218,9 +280,6 @@ static bool UncompressAndPopulateCodeObject(
         bundle_ids_str.emplace_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
     bundle_ids.push_back(bis.c_str());
   }
-
-  const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
-  const size_t size = obheader->totalSize;
 
   bool passed = false;
   do {
@@ -243,7 +302,7 @@ static bool UncompressAndPopulateCodeObject(
     }
 
     if (auto comgr_status =
-            amd::Comgr::set_data(input_bundle.get(), size, static_cast<const char*>(image));
+            amd::Comgr::set_data(input_bundle.get(), image_size, static_cast<const char*>(image));
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
       LogError("Error in setting image data to bundle");
       break;
@@ -342,7 +401,7 @@ static bool UncompressAndPopulateCodeObject(
 }
 
 static bool PopulateCodeObjectMap(
-    const void* image, const std::set<std::string>& unique_isa_names,
+    const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
   bool passed = false;
   do {
@@ -353,9 +412,11 @@ static bool PopulateCodeObjectMap(
       break;
     }
 
-    // There is no way to find size of offload bundle, so we pass 4096 here.
-    if (auto comgr_status =
-            amd::Comgr::set_data(data_object.get(), 4096, reinterpret_cast<const char*>(image));
+    // There is no encoded total size for an uncompressed bundle. Limit COMGR's
+    // header lookup to the readable image range.
+    const size_t header_size = std::min<size_t>(4096, image_bound);
+    if (auto comgr_status = amd::Comgr::set_data(data_object.get(), header_size,
+                                                 reinterpret_cast<const char*>(image));
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
       LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
       break;
@@ -381,8 +442,16 @@ static bool PopulateCodeObjectMap(
 
     for (const auto& item : query_list_array) {
       if (item.size > 0) {
+        if (item.offset > image_bound || item.size > image_bound - item.offset) {
+          LogPrintfError(
+              "Rejecting fat binary: code object for isa '%s' is out of bounds "
+              "(offset=%llu size=%zu image bound=%zu)",
+              item.isa, static_cast<unsigned long long>(item.offset), item.size, image_bound);
+          return false;
+        }
+
         // Map the offset pointer and size from the image
-        auto loc = reinterpret_cast<const char*>(image) + item.offset;
+        auto loc = reinterpret_cast<const char*>(image) + static_cast<size_t>(item.offset);
         code_obj_map[item.isa] = std::make_pair(loc, item.size);
       }
     }
@@ -392,7 +461,8 @@ static bool PopulateCodeObjectMap(
   return passed;
 }
 
-hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices) {
+hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
+                                                     std::vector<char>* image_storage) {
   if (fname_.empty() && image_ == nullptr) {
     LogError("Both Filename and image cannot be null");
     return hipErrorInvalidValue;
@@ -407,6 +477,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
+  // Pointer inputs (hipModuleLoadData) carry no length, so no bound is known.
+  // File loads below set the exact size.
+  size_t image_bound = amd::Elf::kUnknownSize;
   if (image_ != nullptr) {
     if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
       fname_ = std::string("");
@@ -425,28 +498,79 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       return hipErrorInvalidValue;
     }
     image_size_ = fsize;
+    image_bound = image_size_;
     image_mapped_ = true;
   }
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
 
-  bool is_compressed = IsCodeObjectCompressed(image_),
-       is_uncompressed = IsCodeObjectUncompressed(image_);
+  const bool is_compressed = IsCodeObjectCompressed(image_, image_bound);
+  const bool is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
+  const bool is_elf =
+      !is_compressed && !is_uncompressed && IsCodeObjectElf(image_, image_bound);
+  // Save the input during the initial/current-device load. Later non-current
+  // device loads reuse this copy instead of the caller-owned buffer.
+  const bool save_image_data = image_storage != nullptr;
 
-  // It better be elf if its neither compressed nor uncompressed
-  if (!is_compressed && !is_uncompressed) {
-    if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
-      for (auto* device : devices) {
-        if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
-          return hipErrorInvalidImage;
+  if (!is_compressed && !is_uncompressed && !is_elf) {
+    LogError("The code object has invalid header: compressed, uncompressed or elf");
+    return hipErrorInvalidImage;
+  }
+
+  size_t image_size = image_bound;
+  if (is_elf) {
+    image_size = amd::Elf::getElfSize(image_, image_bound);
+    if (image_size == 0) {
+      if (image_bound == amd::Elf::kUnknownSize) {
+        LogError("Invalid ELF code object: failed self-consistency validation");
+      } else {
+        LogPrintfError("Invalid ELF code object: failed size/bounds validation, image size: %zu",
+                       image_bound);
       }
-      return hipSuccess;  // We are done since it was already ELF
-    } else {
-      LogError("The code object has invalid header: compressed, uncompressed or elf");
       return hipErrorInvalidImage;
     }
+  } else if (is_compressed) {
+    constexpr size_t kCompressedHeaderSize =
+        offsetof(symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
+    if (image_bound < kCompressedHeaderSize) {
+      LogError("Compressed fat binary header is truncated");
+      return hipErrorInvalidImage;
+    }
+    const auto* header =
+        static_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image_);
+    image_size = header->totalSize;
+    if (image_size < kCompressedHeaderSize || image_size > image_bound) {
+      LogPrintfError("Rejecting compressed fat binary: totalSize=%llu is outside [%llu, %llu]",
+                     static_cast<unsigned long long>(image_size),
+                     static_cast<unsigned long long>(kCompressedHeaderSize),
+                     static_cast<unsigned long long>(image_bound));
+      return hipErrorInvalidImage;
+    }
+  } else {
+    if (save_image_data) {
+      image_size = GetUncompressedImageSize(image_, image_bound);
+      if (image_size == 0) {
+        LogError("Invalid uncompressed fat binary: failed to determine image size");
+        return hipErrorInvalidImage;
+      }
+    }
+  }
+
+  if (save_image_data) {
+    const auto* image = static_cast<const char*>(image_);
+    image_storage->assign(image, image + image_size);
+    image_ = image_storage->data();
+    image_size_ = image_size;
+    image_bound = image_size;
+  }
+
+  if (is_elf) {
+    for (auto* device : devices) {
+      if (hipSuccess != AddDevProgram(device, image_, image_size, fdesc)) {
+        return hipErrorInvalidImage;
+      }
+    }
+    return hipSuccess;
   }
 
   // Create a list of all targets, which the current device can run
@@ -465,21 +589,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
-  // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
-  if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-    for (auto device : devices) {
-      const std::string target_gfx = device->devices()[0]->isa().processorName();
-      for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
-        if (target_gfx == p.target) {
-          unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + p.source);
-        }
-      }
-    }
-  }
-
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
-    if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
+    if (!UncompressAndPopulateCodeObject(image_, image_size, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
     // For compressed code objects, we use comgr to extract and make a copy.
@@ -487,7 +599,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
-    if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
+    if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
   }
@@ -503,37 +615,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
-      // HotSwap: pick the first supported source bundle for this device's target.
-      auto hotswap_co = code_obj_map.end();
-      if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        const std::string target_gfx = device->devices()[0]->isa().processorName();
-        for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
-          if (target_gfx != p.target) {
-            continue;
-          }
-          for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {
-            if (amd::hotswap::IsaIsGfx(it->first, p.source)) {
-              hotswap_co = it;
-              break;
-            }
-          }
-          if (hotswap_co != code_obj_map.end()) {
-            break;
-          }
-        }
-      }
-
-      // HotSwap: forward the chosen source bundle first so the HSA loader transpiles/rewrites it.
-      if (hotswap_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("HotSwap: forwarding %s for transpilation to device %s",
-                      hotswap_co->first.c_str(), device_name.c_str());
-        hip_status =
-            AddDevProgram(device, hotswap_co->second.first, hotswap_co->second.second, fdesc);
-        if (hip_status != hipSuccess) {
-          break;
-        }
-        // If the size is not 0, that means we found the native isa code object
-      } else if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+      // If the size is not 0, that means we found the native isa code object
+      if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         hip_status =
             AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc);
         if (hip_status != hipSuccess) {
@@ -679,11 +762,19 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
       } else {
-        // We found neither a compatible code object nor SPIRV
-        LogPrintfError(
-            "No compatible code objects found with HIP_FORCE_SPIRV_CODEOBJECT=%d. Rebuild the application with option --offload-arch=%s",
-             HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
-        break;
+        // No compatible code object (native, generic, or SPIR-V) is present for
+        // this device. Skip it instead of aborting: other devices in the list
+        // may still have a matching code object. Aborting here makes fat-binary
+        // registration fail for *every* device whenever a single enumerated
+        // device is unsupported (e.g. an iGPU enumerated ahead of a supported
+        // dGPU), which then surfaces as hipErrorInvalidImage on the supported
+        // device even though its code object is present in the bundle.
+        LogPrintfInfo(
+            "Skipping device with no compatible code object "
+            "(HIP_FORCE_SPIRV_CODEOBJECT=%d); rebuild with --offload-arch=%s to "
+            "add support for this device",
+            HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
+        continue;
       }
     }
   } while (0);
@@ -711,60 +802,113 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     return hipErrorInvalidValue;
   }
 
-  // Build architecture priority list from devices
-  // For each device, add native ISA first, then generic fallback.
-  // Reservation in the list is pessimistically assuming there is a generic fallback for each
-  // device.
-  std::vector<std::string> arch_list;
-  arch_list.reserve(devices.size() * 2);
+  // Load one KPACK code object per unique device ISA. Devices with the
+  // same ISA can share the extracted buffer, while heterogeneous devices
+  // require separate architecture selection.
+  std::unordered_map<std::string, std::vector<hip::Device*>> devices_by_isa;
   for (auto device : devices) {
-    std::string device_name = device->devices()[0]->isa().isaName();
+    devices_by_isa[device->devices()[0]->isa().isaName()].push_back(device);
+  }
+
+  std::vector<int> registered_device_ids;
+  registered_device_ids.reserve(devices.size());
+  std::vector<void*> loaded_code_objects;
+  loaded_code_objects.reserve(devices_by_isa.size());
+
+  // Device and kpack code object cleanup method for error cases
+  auto rollback_kpack_state = [&]() {
+    for (int device_id : registered_device_ids) {
+      if (dev_programs_[device_id] != nullptr) {
+        dev_programs_[device_id]->release();
+        dev_programs_[device_id] = nullptr;
+      }
+    }
+    for (void* code_object : loaded_code_objects) {
+      code_obj_allocations_.erase(code_object);
+      kpack_free_code_object(code_object);
+    }
+  };
+
+  for (const auto& [device_name, matching_devices] : devices_by_isa) {
+    std::vector<std::string> arch_list;
+    // Architecture names
+    // 1) exact device ISA name, examples:
+    //  - amdgcn-amd-amdhsa--gfx1100
+    //  - amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-
+    // 2) generic fallback name, examples:
+    //  - amdgcn-amd-amdhsa--gfx11-generic
+    //  - can also be empty string for some arch like gfx90a
+    arch_list.reserve(2);
     arch_list.push_back(device_name);
 
-    // Add generic fallback
+    // Add generic fallback arch-name
     auto generic_name = TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       arch_list.push_back(generic_name);
     }
-  }
 
-  // Convert to C-style array for kpack API
-  std::vector<const char*> arch_ptrs;
-  arch_ptrs.reserve(arch_list.size());
-  for (const auto& arch : arch_list) {
-    arch_ptrs.push_back(arch.c_str());
-  }
+    // Convert arch-list to C-style array for kpack API
+    std::vector<const char*> arch_ptrs;
+    arch_ptrs.reserve(arch_list.size());
+    for (const auto& arch : arch_list) {
+      arch_ptrs.push_back(arch.c_str());
+    }
 
-  // Load code object from kpack archive
-  void* code_object = nullptr;
-  size_t code_object_size = 0;
+    // Load device type specific code object from kpack archive
+    void* code_object = nullptr;
+    size_t code_object_size = 0;
 
-  // binary_path is used to resolve relative paths to kpack archives.
-  // bundle_index identifies which code object to load for multi-TU binaries.
-  // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
-  kpack_error_t err =
-      kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
-                             static_cast<uint32_t>(params.bundle_index),
-                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+    // Binary_path is used to resolve relative paths to kpack archives.
+    // Bundle_index identifies which code object to load for multi-TU binaries.
+    // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
+    kpack_error_t err =
+        kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
+                               static_cast<uint32_t>(params.bundle_index), arch_ptrs.data(),
+                               arch_ptrs.size(), &code_object, &code_object_size);
 
-  if (err != KPACK_SUCCESS) {
-    LogPrintfError("kpack_load_code_object failed with error: %d", err);
-    return hipErrorInvalidImage;
-  }
+    if (err == KPACK_ERROR_ARCHIVE_NOT_FOUND || err == KPACK_ERROR_ARCH_NOT_FOUND) {
+      LogPrintfWarning(
+          "Could not load device type specific kpack object for ISA %s, err: %d, host binary: %s",
+          device_name.c_str(), err, params.binary_path.c_str());
+      continue;
+    }
+    if (err != KPACK_SUCCESS) {
+      LogPrintfError(
+          "Failed to load device type specific kpack object for ISA %s, err: %d, "
+          "host binary: %s",
+          device_name.c_str(), err, params.binary_path.c_str());
+      rollback_kpack_state();
+      return hipErrorInvalidImage;
+    }
 
-  // Add code object to all devices. The kpack buffer isn't backed by a file
-  // on disk, so no fd is passed.
-  for (auto device : devices) {
-    hipError_t hip_err =
-        AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
-    if (hip_err != hipSuccess) {
-      kpack_free_code_object(code_object);
-      return hip_err;
+    loaded_code_objects.push_back(code_object);
+    code_obj_allocations_.insert(code_object);
+
+    // Add device type specific kpack code object buffer for each similar type of device.
+    // The kpack buffer is shared by devices with the same ISA and is not
+    // backed by a file on disk, so no fd is passed.
+    for (auto device : matching_devices) {
+      registered_device_ids.push_back(device->deviceId());
+      hipError_t hip_err =
+          AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
+      if (hip_err != hipSuccess) {
+        LogPrintfError(
+            "Could not add device type specific kpack object for %s, device id: %d, err: %d",
+            device_name.c_str(), device->deviceId(), hip_err);
+        rollback_kpack_state();
+        return hip_err;
+      }
     }
   }
 
-  // Track allocation for cleanup in destructor
-  code_obj_allocations_.insert(code_object);
+  if (loaded_code_objects.empty()) {
+    // Return an error if no device-specific kpack code object was found for any device.
+    LogPrintfError(
+        "Could not find device type specific kpack code objects for any available device from "
+        "binary: %s",
+        params.binary_path.c_str());
+    return hipErrorInvalidKernelFile;
+  }
 
   return hipSuccess;
 #endif

@@ -32,7 +32,7 @@ set_target_properties(pal PROPERTIES
     POSITION_INDEPENDENT_CODE TRUE
 )
 target_compile_features(pal INTERFACE cxx_std_20)
-if (NOT PAL_CLIENT_INTERFACE_MAJOR_VERSION EQUAL 954)
+if (NOT PAL_CLIENT_INTERFACE_MAJOR_VERSION EQUAL 995)
     message(WARNING "PAL: PAL_CLIENT_INTERFACE_MAJOR_VERSION ${PAL_CLIENT_INTERFACE_MAJOR_VERSION} not supported !!!")
 endif()
 target_link_libraries(pal
@@ -51,6 +51,8 @@ target_link_libraries(pal
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/DriverUtilsService.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_settings.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/SettingsRpcService2.lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_crc32.lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddApi.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcServer.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddNet.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcShared.lib
@@ -73,7 +75,7 @@ target_link_libraries(pal
 )
 target_compile_definitions(pal
     INTERFACE
-        PAL_CLIENT_INTERFACE_MAJOR_VERSION=954
+        PAL_CLIENT_INTERFACE_MAJOR_VERSION=995
         GPUOPEN_CLIENT_INTERFACE_MAJOR_VERSION=42
         PAL_BUILD_RDF=1
         PAL_DEVELOPER_BUILD=0
@@ -86,7 +88,9 @@ target_include_directories(pal
         inc/gpuUtil
         inc/util
         shared/inc
+        shared/devdriver/shared/legacy
         shared/devdriver/shared/legacy/inc
+        shared/devdriver/shared/legacy/core/inc
         shared/devdriver/third_party/dd_crc32/inc
         shared/metrohash/src
 )

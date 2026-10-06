@@ -94,7 +94,6 @@ class TestJacobi(RocprofsysTest):
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
         env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
         if "apu" not in gpu_info.categories:
@@ -199,7 +198,7 @@ class TestJacobi(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Laplacian Kernel Count Validation",
-            perfetto_file="merged.proto",
+            perfetto_file="merged.pftrace",
             categories=["rocm_hip_stream"],
             print_output=True,
             pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
@@ -209,7 +208,7 @@ class TestJacobi(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="hipHostFree Validation",
-            perfetto_file="merged.proto",
+            perfetto_file="merged.pftrace",
             categories=["rocm_hip_api"],
             pass_regex=[r"hipHostFree\s*\|\s*[1-9]"],
         )

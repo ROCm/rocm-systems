@@ -119,17 +119,12 @@ __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int 
 #endif
 }
 
-// SMFMAC needs CDNA3+ (gfx940 and later). Clang over-reports the builtin
-// on gfx908/gfx90a so specifically guard those until upstream catches up.
-// Empty body never launched on unsupported targets (like MFMA)
-//
-// TODO: remove the `!defined(__gfx908__) && !defined(__gfx90a__)` portion
-// once ROCm/llvm-project picks up llvm/llvm-project#193999
-// Fixes the over-report, builtin check alone becomes correct.
+// SMFMAC requires CDNA3+'s gfx940-insts target feature; kernel body is empty
+// on targets without the builtin and is never launched (run_tests gates on a
+// runtime arch.major/minor check).
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
-#if __has_builtin(__builtin_amdgcn_smfmac_f32_16x16x32_f16) && \
-    !defined(__gfx908__) && !defined(__gfx90a__)
+#if __has_builtin(__builtin_amdgcn_smfmac_f32_16x16x32_f16)
     int grid_size = gridDim.x * blockDim.x;
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 

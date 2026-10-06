@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
-#include <cstdint>
 
+#include "common/delimit.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace utility
+#include <cstdint>
+#include <string>
+
+namespace rocprofsys::utility
 {
 namespace
 {
@@ -37,17 +39,16 @@ template <typename Tp, typename ContainerT, typename Up>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
 {
-    auto _get_value = [](const std::string& _inp) {
+    auto const _get_value = [](const std::string& _inp) {
         std::stringstream iss{ _inp };
         auto              var = Tp{};
         iss >> var;
         return var;
     };
 
-    for(auto& itr : _input_string)
-        itr = tolower(itr);
-    auto _result = ContainerT{};
-    for(auto _v : tim::delimit(_input_string, ",; \t\n\r"))
+    _input_string = utility::string::to_lower(_input_string);
+    auto result   = ContainerT{};
+    for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
@@ -59,20 +60,36 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             continue;
         }
 
-        auto _incr_v   = _incr;
-        auto _incr_pos = _v.find(':');
+        auto       _incr_v   = _incr;
+        auto const _incr_pos = _v.find(':');
         if(_incr_pos != std::string::npos)
         {
-            auto _incr_str = _v.substr(_incr_pos + 1);
-            if(!_incr_str.empty()) _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            auto const _incr_str = _v.substr(_incr_pos + 1);
+            if(!_incr_str.empty())
+            {
+                _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            }
             _v = _v.substr(0, _incr_pos);
         }
 
         if(_v.find('-') != std::string::npos)
         {
+            // tim::delimit collapses consecutive '-' and drops empty fields, so
+            // "5--7", "-1", and "5-" would otherwise sneak past the size check
+            // below; reject leading/trailing/consecutive dashes explicitly.
+            if(_v.front() == '-' || _v.back() == '-' ||
+               _v.find("--") != std::string::npos)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Leading, trailing, or "
+                            "consecutive '-' not permitted; required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
+
             // split the string into two parts at the '-' character and check if the
             // result is valid
-            auto _vv = tim::delimit(_v, "-");
+            auto _vv = rocprofsys::delimit(_v, "-");
             if(_vv.size() != 2)
             {
                 LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "
@@ -92,16 +109,16 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             }
             do
             {
-                emplace(_result, _vn);
+                emplace(result, _vn);
                 _vn += _incr_v;
             } while(_vn <= _vN);
         }
         else
         {
-            emplace(_result, std::stoll(_v));
+            emplace(result, std::stoll(_v));
         }
     }
-    return _result;
+    return result;
 }
 
 template std::set<std::int64_t>
@@ -115,19 +132,4 @@ parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
                                                                     const std::string&,
                                                                     long);
 
-void
-trim_str(std::string& str)
-{
-    const auto start = str.find_first_not_of(" \n\r\t\f\v");
-    if(start == std::string::npos)
-    {
-        str.clear();
-        return;
-    }
-    str.erase(0, start);
-    const auto end = str.find_last_not_of(" \n\r\t\f\v");
-    str.erase(end + 1);
-}
-
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <numeric>
 #include "hevc_parser.h"
 
 HevcVideoParser::HevcVideoParser() {
@@ -207,7 +208,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
     }
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left) * sar.numerator;
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top) * sar.denominator;
-    int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
+    int gcd = std::gcd(disp_width, disp_height); // greatest common divisor
     if (gcd) {
         video_format_params_.display_aspect_ratio.x = disp_width / gcd;
         video_format_params_.display_aspect_ratio.y = disp_height / gcd;
@@ -374,10 +375,16 @@ int HevcVideoParser::SendPicForDecode() {
     if (pps_ptr->tiles_enabled_flag) {
         pic_param_ptr->num_tile_columns_minus1 = pps_ptr->num_tile_columns_minus1;
         pic_param_ptr->num_tile_rows_minus1 = pps_ptr->num_tile_rows_minus1;
-        for (i = 0; i <= pps_ptr->num_tile_columns_minus1; i++) {
+        // RocdecHevcPicParams mirrors VAPictureParameterBufferHEVC, whose column_width_minus1[] and
+        // row_height_minus1[] hold only 19 and 21 entries. That is one fewer than the Table A.4 level
+        // limits allow, so the largest conforming tile counts cannot be passed on in full.
+        if (pps_ptr->num_tile_columns_minus1 > 18 || pps_ptr->num_tile_rows_minus1 > 20) {
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Tile count exceeds the picture parameter buffer capacity: num_tile_columns_minus1 = ") + ROCDEC_TOSTR(pps_ptr->num_tile_columns_minus1) + ", num_tile_rows_minus1 = " + ROCDEC_TOSTR(pps_ptr->num_tile_rows_minus1) + ". Only the first 19 columns and 21 rows are sent to the decoder.");
+        }
+        for (i = 0; i <= pps_ptr->num_tile_columns_minus1 && i < 19; i++) {
             pic_param_ptr->column_width_minus1[i] = pps_ptr->column_width_minus1[i];
         }
-        for (i = 0; i <= pps_ptr->num_tile_rows_minus1; i++) {
+        for (i = 0; i <= pps_ptr->num_tile_rows_minus1 && i < 21; i++) {
             pic_param_ptr->row_height_minus1[i] = pps_ptr->row_height_minus1[i];
         }
     }
@@ -1313,6 +1320,7 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     p_vps->vps_base_layer_available_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_max_layers_minus1 = Parser::ReadBits(nalu, offset, 6);
     p_vps->vps_max_sub_layers_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("vps_max_sub_layers_minus1", p_vps->vps_max_sub_layers_minus1, 0, 6);
     p_vps->vps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_reserved_0xffff_16bits = Parser::ReadBits(nalu, offset, 16);
     if (p_vps->vps_reserved_0xffff_16bits != 0xFFFF) {
@@ -1336,6 +1344,9 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
         }
     }
     p_vps->vps_max_layer_id = Parser::ReadBits(nalu, offset, 6);
+    // 7.4.3.1: vps_max_layer_id shall be less than 63 in bitstreams conforming to this version of the
+    // specification. 63 is reserved for future use and is not supported by this single layer decoder.
+    CHECK_ALLOWED_RANGE("vps_max_layer_id", p_vps->vps_max_layer_id, 0, 62);
     p_vps->vps_num_layer_sets_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
     CHECK_ALLOWED_RANGE("vps_num_layer_sets_minus1", p_vps->vps_num_layer_sets_minus1, 0, 1023);
     for (int i = 1; i <= p_vps->vps_num_layer_sets_minus1; i++) {
@@ -1385,6 +1396,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
 
     uint32_t vps_id = Parser::ReadBits(nalu, offset, 4);
     uint32_t max_sub_layer_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("sps_max_sub_layers_minus1", max_sub_layer_minus1, 0, 6);
     uint32_t sps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     HevcProfileTierLevel ptl;
     memset (&ptl, 0, sizeof(ptl));
@@ -1607,9 +1619,9 @@ ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     pps_ptr->entropy_coding_sync_enabled_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->tiles_enabled_flag) {
         pps_ptr->num_tile_columns_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, pic_width_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, std::min(pic_width_in_ctbs_y_ - 1, HEVC_MAX_TILE_COLS - 1));
         pps_ptr->num_tile_rows_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, pic_height_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, std::min(pic_height_in_ctbs_y_ - 1, HEVC_MAX_TILE_ROWS - 1));
         pps_ptr->uniform_spacing_flag = Parser::GetBit(nalu, offset);
         if (!pps_ptr->uniform_spacing_flag) {
             int temp_size = pic_width_in_ctbs_y_; // PicWidthInCtbsY
@@ -1852,6 +1864,12 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
                 }
                 p_slice_header->num_long_term_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
                 CHECK_ALLOWED_MAX("num_long_term_pics", p_slice_header->num_long_term_pics, HEVC_MAX_DPB_FRAMES - 1);
+                // 7.4.7.1: when nuh_layer_id is equal to 0, the sum of NumNegativePics[CurrRpsIdx], NumPositivePics[CurrRpsIdx],
+                // num_long_term_sps and num_long_term_pics shall be less than or equal to
+                // sps_max_dec_pic_buffering_minus1[sps_max_sub_layers_minus1] (== dpb_size - 1).
+                // This must be checked before the loop below, which uses num_long_term_sps + num_long_term_pics to index
+                // the fixed-size long-term RPS arrays of the slice header.
+                CHECK_ALLOWED_MAX("num_of_delta_pocs + num_long_term_sps + num_long_term_pics", p_slice_header->st_rps.num_of_delta_pocs + p_slice_header->num_long_term_sps + p_slice_header->num_long_term_pics, dpb_buffer_.dpb_size - 1);
 
                 int bits_for_ltrp_in_sps = 0;
                 while (sps_ptr->num_long_term_ref_pics_sps > (1 << bits_for_ltrp_in_sps)) {

@@ -20,14 +20,17 @@ struct fake_env
 
     static int setenv(const char* name, const char* value, int overwrite)
     {
-        if(!overwrite && store.count(name)) return 0;
+        if(!overwrite && store.contains(name))
+        {
+            return 0;
+        }
         store[name] = value;
         return 0;
     }
 
     static char* getenv(const char* name)
     {
-        auto it = store.find(name);
+        auto const it = store.find(name);
         return it != store.end() ? it->second.data() : nullptr;
     }
 
@@ -433,7 +436,7 @@ protected:
 
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenUnset)
 {
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "trace");
 }
@@ -441,7 +444,7 @@ TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenUnset)
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
 {
     fake_env::setenv("FOO", "sampling", 1);
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "sampling");
 }
@@ -449,7 +452,7 @@ TEST_F(FakeEnvGetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
 {
     fake_env::setenv("FOO", "bad_value", 1);
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "trace");
 }
@@ -617,6 +620,14 @@ TEST(ToEnvStringTest, ConstCharPtrPassthrough)
     EXPECT_EQ(to_env_string("world"), std::string{ "world" });
 }
 
+// ── get_default_lib_search_paths ──────────────────────────────────────────────
+
+TEST(GetDefaultLibSearchPathsTest, ReturnsNonEmpty)
+{
+    auto const paths = get_default_lib_search_paths();
+    EXPECT_FALSE(paths.empty());
+}
+
 // ── consolidate_env_entries: no-'=' entry ─────────────────────────────────────
 
 TEST_F(DuplicatedEnvironmentEntriesTest, SkipsEntryWithoutEqualsSign)
@@ -711,20 +722,23 @@ protected:
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenUnset)
 {
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 1);
 }
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsValueWhenValidChoiceSet)
 {
     fake_env::setenv("FOO", "3", 1);
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 3);
 }
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
 {
     fake_env::setenv("FOO", "99", 1);
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 1);
 }

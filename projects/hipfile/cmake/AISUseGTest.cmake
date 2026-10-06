@@ -36,15 +36,22 @@ if(AIS_GTEST_TRY_SYSTEM)
 endif()
 
 if(NOT GTest_FOUND)
+    # CMAKE_CXX_CLANG_TIDY runs on all CMake targets after it is set, including those
+    # fetched via FetchContent. clang-tidy should not run on 3rd party code at all.
+    set(_ais_saved_cxx_clang_tidy "${CMAKE_CXX_CLANG_TIDY}")
+    unset(CMAKE_CXX_CLANG_TIDY)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
       URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+      URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
       DOWNLOAD_EXTRACT_TIMESTAMP true
       SYSTEM
     )
     FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
+    set(CMAKE_CXX_CLANG_TIDY "${_ais_saved_cxx_clang_tidy}")
+    unset(_ais_saved_cxx_clang_tidy)
 endif()
 
 if(googletest_SOURCE_DIR)

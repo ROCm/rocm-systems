@@ -35,32 +35,31 @@
  ** file or not. The values have to be identical however
  */
 typedef enum _ARSMI_IO_LINK_TYPE {
-  ARSMI_IOLINK_TYPE_UNDEFINED      = 0,          //!< unknown type.
+  ARSMI_IOLINK_TYPE_UNDEFINED = 0,          //!< unknown type.
   ARSMI_IOLINK_TYPE_PCIEXPRESS,                  //!< PCI Express
   ARSMI_IOLINK_TYPE_XGMI,                        //!< XGMI
   ARSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
-  ARSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
+  ARSMI_IOLINK_TYPE_SIZE = 0xFFFFFFFF  //!< Max of IO Link types
 } ARSMI_IO_LINK_TYPE;
 
 struct ARSMI_linkInfo {
-    uint32_t src_node;
-    uint32_t dst_node;
-    uint64_t hops;
-    ARSMI_IO_LINK_TYPE type;
-    uint64_t weight;
-    uint64_t min_bandwidth;
-    uint64_t max_bandwidth;
+  uint32_t src_node;
+  uint32_t dst_node;
+  uint64_t hops;
+  ARSMI_IO_LINK_TYPE type;
+  uint64_t weight;
+  uint64_t min_bandwidth;
+  uint64_t max_bandwidth;
 };
 typedef struct ARSMI_linkInfo ARSMI_linkInfo;
 
-int ARSMI_init (void);
-int ARSMI_get_num_devices (uint32_t *num_devices);
-int ARSMI_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
-int ARSMI_topo_get_link_info(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                             ARSMI_linkInfo *info);
+int ARSMI_init(void);
+int ARSMI_get_num_devices(uint32_t* num_devices);
+int ARSMI_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
+int ARSMI_topo_get_link_info(uint32_t dv_ind_src, uint32_t dv_ind_dst, ARSMI_linkInfo* info);
 
 // Firmware version - reads MEC firmware from sysfs
-int ARSMI_get_fw_version(uint32_t dv_ind, uint64_t *fw_version);
+int ARSMI_get_fw_version(uint32_t dv_ind, uint64_t* fw_version);
 
 /*
  * Fabric support via /sys/class/drm/<card>/device/ualink/
@@ -70,44 +69,44 @@ int ARSMI_get_fw_version(uint32_t dv_ind, uint64_t *fw_version);
  */
 
 typedef enum {
-    ARSMI_FABRIC_TYPE_UALOE   = 0,
-    ARSMI_FABRIC_TYPE_UALLINK = 1,
-    ARSMI_FABRIC_TYPE_UNKNOWN = 2
+  ARSMI_FABRIC_TYPE_UALOE = 0,
+  ARSMI_FABRIC_TYPE_UALLINK = 1,
+  ARSMI_FABRIC_TYPE_UNKNOWN = 2
 } ARSMI_fabric_type_t;
 
 typedef enum {
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED = 0,
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED   = 1,
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY        = 2,
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE       = 3,
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR        = 4,
-    ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN      = 5
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED = 0,
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED = 1,
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY = 2,
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE = 3,
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR = 4,
+  ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN = 5
 } ARSMI_fabric_accelerator_vpod_state_t;
 
 typedef enum {
-    ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING       = 0,
-    ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION = 1,
-    ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN               = 2
+  ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING = 0,
+  ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION = 1,
+  ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN = 2
 } ARSMI_fabric_npa_address_mode_t;
 
 struct ARSMI_fabricInfo {
-    int                                  supported;   /* 1 if UALoE or UALLink and state is ready/active */
-    ARSMI_fabric_type_t                  fabric_type;
-    ARSMI_fabric_accelerator_vpod_state_t accel_state;
-    ARSMI_fabric_npa_address_mode_t      addr_mode;
-    uint32_t  accel_id;
-    uint8_t   ppod_id[16];   /* 128-bit UUID, binary (parsed from sysfs hex string) */
-    uint32_t  ppod_size;
-    uint32_t  bandwidth;     /* Mb/s */
-    uint32_t  latency;       /* ns */
-    uint32_t  vpod_id;
-    uint32_t  vpod_size;
+  int supported;   /* 1 if UALoE or UALLink and state is ready/active */
+  ARSMI_fabric_type_t fabric_type;
+  ARSMI_fabric_accelerator_vpod_state_t accel_state;
+  ARSMI_fabric_npa_address_mode_t addr_mode;
+  uint32_t accel_id;
+  uint8_t ppod_id[16];   /* 128-bit UUID, binary (parsed from sysfs hex string) */
+  uint32_t ppod_size;
+  uint32_t bandwidth;     /* Mb/s */
+  uint32_t latency;       /* ns */
+  uint32_t vpod_id;
+  uint32_t vpod_size;
 };
 
 /* Read fabric info for device dv_ind from /sys/class/drm/<card>/device/ualink/.
  * Returns 0 on success, ENODEV if no ualink directory exists for that device,
  * EINVAL on bad arguments. */
-int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo *info);
+int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo* info);
 
 const char* ARSMI_fabric_telem_id_to_string(uint64_t telem_id);
 

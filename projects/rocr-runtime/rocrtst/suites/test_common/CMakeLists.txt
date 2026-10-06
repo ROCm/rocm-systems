@@ -456,14 +456,13 @@ aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
 list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
 
-# Optional: enable hwloc membind nodeset call in NUMA test
-set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodeset in NUMA test")
+# Optional: enable libnuma membind call in NUMA test
+set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable libnuma membind in NUMA test")
 
 # Header file include path
 
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
-include_directories(${ROCRTST_ROOT}/thirdparty/include/)
 
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
@@ -593,6 +592,11 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
+# Trap Handler Test Kernels
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/trap_handler_test_kernels.cl")
+build_sample_for_devices("trap_handler_test")
+
 # Configure RPATH settings before creating executable target
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
@@ -693,204 +697,31 @@ if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_
   message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
 endif()
 
-# Find hwloc library
-set(HAVE_HWLOC FALSE)
-set(HWLOC_TARGET "")
-
-# First priority: Try to find hwloc via CMake package (from TheRock sysdeps)
-find_package(hwloc QUIET CONFIG)
-if(hwloc_FOUND AND TARGET hwloc::hwloc)
-  set(HWLOC_TARGET hwloc::hwloc)
-  set(HAVE_HWLOC TRUE)
-  message(STATUS "Found hwloc via CMake package (TheRock sysdeps)")
-endif()
-
-# Second priority: Try pkg-config
-if(NOT HAVE_HWLOC AND PKG_CONFIG_FOUND)
-  pkg_check_modules(HWLOC_PC hwloc)
-  if(HWLOC_PC_FOUND)
-    # Try to find the actual library file for SHARED IMPORTED target
-    find_library(HWLOC_LIBRARY_FILE
-      NAMES hwloc
-      HINTS ${HWLOC_PC_LIBRARY_DIRS}
-      NO_DEFAULT_PATH
-    )
-
-    if(HWLOC_LIBRARY_FILE)
-      # Create SHARED IMPORTED target for proper RPATH handling
-      add_library(hwloc_imported SHARED IMPORTED)
-      set_target_properties(hwloc_imported PROPERTIES
-        IMPORTED_LOCATION "${HWLOC_LIBRARY_FILE}"
-        INTERFACE_INCLUDE_DIRECTORIES "${HWLOC_PC_INCLUDE_DIRS}"
-      )
-      set(HWLOC_TARGET hwloc_imported)
-      set(HAVE_HWLOC TRUE)
-      message(STATUS "Found hwloc via pkg-config (SHARED): ${HWLOC_LIBRARY_FILE}")
-      message(STATUS "  Include dirs: ${HWLOC_PC_INCLUDE_DIRS}")
-      message(STATUS "  Library dirs: ${HWLOC_PC_LIBRARY_DIRS}")
-    endif()
-  endif()
-endif()
-
-if(NOT HAVE_HWLOC)
-  # Fallback: Search in thirdparty (may have symbol version incompatibilities with TheRock's numa)
-  find_library(HWLOC_LIBRARY
-    NAMES hwloc
-    HINTS ${ROCRTST_ROOT}/thirdparty/lib
-    PATH_SUFFIXES lib lib64
-    NO_DEFAULT_PATH
-  )
-
-  # If not found, try versioned library directly (e.g., libhwloc.so.5)
-  if(NOT HWLOC_LIBRARY)
-    find_file(HWLOC_LIBRARY
-      NAMES libhwloc.so.5 libhwloc.so.15
-      HINTS ${ROCRTST_ROOT}/thirdparty/lib
-      PATH_SUFFIXES lib lib64
-      NO_DEFAULT_PATH
-    )
-  endif()
-
-  if(HWLOC_LIBRARY)
-    add_library(hwloc_imported SHARED IMPORTED)
-    set_target_properties(hwloc_imported PROPERTIES
-      IMPORTED_LOCATION "${HWLOC_LIBRARY}"
-    )
-    set(HWLOC_TARGET hwloc_imported)
-    set(HAVE_HWLOC TRUE)
-    message(STATUS "Found hwloc library (fallback): ${HWLOC_LIBRARY}")
-    message(WARNING "Using pre-built hwloc from thirdparty/lib - may have symbol version incompatibilities with TheRock's numa")
-  else()
-    message(FATAL_ERROR "hwloc library not found. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS) or add hwloc as a TheRock dependency")
-  endif()
-endif()
-
-# Add HAVE_HWLOC compile definition
-target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
-
 # Link libraries - CMake will automatically handle RPATH for imported targets
 target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} ${YAML_CPP_TARGET} c stdc++ dl pthread rt)
 if(HAVE_NUMA)
   target_link_libraries(${ROCRTST} ${NUMA_TARGET})
 endif()
-if(HAVE_HWLOC)
-  target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
-endif()
 
 enable_testing()
 
 get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
-set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
 
-# Keep COMGR out of rocrtst link/package dependencies. These optional build
-# runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
-set(HOTSWAP_BUILD_RPATH "")
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(HOTSWAP_COMGR_WITHOUT_OPTIONS "")
-  set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
-  if(NOT HOTSWAP_SYMBOL_TOOL)
-    find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
-  endif()
-
-  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
-    foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
-      foreach(_comgr_name IN ITEMS libamd_comgr.so.3 libamd_comgr.so)
-        set(_comgr_library "${_prefix}/${_libdir}/${_comgr_name}")
-        if(HOTSWAP_SYMBOL_TOOL AND EXISTS "${_comgr_library}")
-          execute_process(
-            COMMAND "${HOTSWAP_SYMBOL_TOOL}" -D "${_comgr_library}"
-            RESULT_VARIABLE _comgr_symbol_result
-            OUTPUT_VARIABLE _comgr_symbols
-            ERROR_QUIET)
-          if(_comgr_symbol_result EQUAL 0 AND
-             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
-            list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
-            break()
-          elseif(_comgr_symbol_result EQUAL 0 AND
-                 _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
-            list(APPEND HOTSWAP_COMGR_WITHOUT_OPTIONS "${_comgr_library}")
-          endif()
-        endif()
-      endforeach()
-    endforeach()
-  endforeach()
-  list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
-  list(REMOVE_DUPLICATES HOTSWAP_COMGR_WITHOUT_OPTIONS)
-  if(NOT HOTSWAP_BUILD_RPATH AND HOTSWAP_COMGR_WITHOUT_OPTIONS)
-    message(WARNING
-      "Found COMGR without amd_comgr_hotswap_rewrite_with_options: "
-      "${HOTSWAP_COMGR_WITHOUT_OPTIONS}. hotswap_rewrite requires a "
-      "ROCm/llvm-project#3008-capable COMGR for local test RPATH setup.")
-  endif()
-endif()
-
-set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
-set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
-set(HOTSWAP_GFX1250_HSACO_HDR "${PROJECT_BINARY_DIR}/gfx1250_min_hsaco.h")
-set(HOTSWAP_GENERATE_HSACO_HDR
-    "${HOTSWAP_TEST_ROOT}/fixtures/generate_hsaco_header.cmake")
-
-add_custom_command(
-  OUTPUT "${HOTSWAP_GFX1250_HSACO}"
-  COMMAND ${CLANG}
-          -x assembler
-          -target amdgcn-amd-amdhsa
-          -mcpu=gfx1250
-          -o "${HOTSWAP_GFX1250_HSACO}"
-          "${HOTSWAP_GFX1250_ASM}"
-  DEPENDS "${HOTSWAP_GFX1250_ASM}" ${CLANG}
-  COMMENT "BUILDING ${HOTSWAP_GFX1250_HSACO}"
-  VERBATIM)
-
-add_custom_command(
-  OUTPUT "${HOTSWAP_GFX1250_HSACO_HDR}"
-  COMMAND ${CMAKE_COMMAND}
-          -DINPUT=${HOTSWAP_GFX1250_HSACO}
-          -DOUTPUT=${HOTSWAP_GFX1250_HSACO_HDR}
-          -P "${HOTSWAP_GENERATE_HSACO_HDR}"
-  DEPENDS "${HOTSWAP_GFX1250_HSACO}" "${HOTSWAP_GENERATE_HSACO_HDR}"
-  COMMENT "GENERATING ${HOTSWAP_GFX1250_HSACO_HDR}"
-  VERBATIM)
-
-add_custom_target(hotswap_gfx1250_fixture DEPENDS "${HOTSWAP_GFX1250_HSACO_HDR}")
-
-add_executable(hotswap_gfx_query
-  ${HOTSWAP_TEST_ROOT}/hotswap_gfx_query_test.cc
-  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp)
-target_include_directories(hotswap_gfx_query PRIVATE
+# GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
+# the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
+set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
+add_executable(intercept_queue_logic_test
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
+target_include_directories(intercept_queue_logic_test PRIVATE
   ${HSA_RUNTIME_ROOT}
   ${ROCRTST_ROOT}/gtest/include)
-target_link_libraries(hotswap_gfx_query ${GOOGLE_TEST_FRWK_NAME} pthread)
-add_test(NAME hotswap_gfx_query COMMAND hotswap_gfx_query)
-set_tests_properties(hotswap_gfx_query PROPERTIES
-  LABELS "quick;standard;pr;pre-commit;hotswap"
+target_link_libraries(intercept_queue_logic_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_logic_test COMMAND intercept_queue_logic_test)
+set_tests_properties(intercept_queue_logic_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
-
-add_executable(hotswap_rewrite
-  ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
-  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
-  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
-  "${HOTSWAP_GFX1250_HSACO_HDR}")
-add_dependencies(hotswap_rewrite hotswap_gfx1250_fixture)
-target_include_directories(hotswap_rewrite PRIVATE
-  ${HSA_RUNTIME_ROOT}
-  ${PROJECT_BINARY_DIR}
-  ${ROCRTST_ROOT}/gtest/include)
-target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
-target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(hotswap_rewrite PROPERTIES
-    LINK_FLAGS "-Wl,--enable-new-dtags"
-    INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
-  if(HOTSWAP_BUILD_RPATH)
-    set_property(TARGET hotswap_rewrite PROPERTY
-      BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
-  endif()
-endif()
-add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
-set_tests_properties(hotswap_rewrite PROPERTIES
-  LABELS "quick;standard;pr;pre-commit;hotswap"
-  TIMEOUT 120)
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
@@ -899,7 +730,7 @@ add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 
 # CMake automatically sets RPATH for linked libraries when CMAKE_INSTALL_RPATH_USE_LINK_PATH is TRUE
-# This works for SHARED IMPORTED targets (numa, hwloc) found via pkg-config
+# This works for SHARED IMPORTED targets (numa) found via pkg-config
 set_target_properties(${ROCRTST} PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
   INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
@@ -911,14 +742,12 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS hotswap_gfx_query hotswap_rewrite
+install(TARGETS intercept_queue_logic_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
         DESTINATION share/rocrtst)
-
-install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
 
 # ROCm Systems root (for shared/ctest and other shared resources)
 if(NOT ROCM_SYSTEMS_ROOT)
@@ -964,10 +793,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         APPEND
         "${INSTALL_TEST_FILE}"
         "\n"
-        "add_test(hotswap_gfx_query \"../hotswap_gfx_query\")\n"
-        "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
-        "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
-        "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+        "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
+        "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(

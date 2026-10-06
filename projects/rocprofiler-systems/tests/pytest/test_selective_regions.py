@@ -85,7 +85,7 @@ class TestPauseResume(RocprofsysTest):
 
         result = self.run_test(
             mode,
-            "pause_resume",
+            "pause-resume",
             env=env,
             check_target_arch=True,
         )
@@ -125,7 +125,7 @@ class TestSelectiveRegion(RocprofsysTest):
         """No ROCPROFSYS_SELECTED_REGIONS — all regions traced."""
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=selective_region_env,
             run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
@@ -163,7 +163,7 @@ class TestSelectiveRegion(RocprofsysTest):
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
             run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
@@ -195,7 +195,7 @@ class TestSelectiveRegion(RocprofsysTest):
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region2,Region3"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
             run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
@@ -233,9 +233,9 @@ class TestSelectiveRegion(RocprofsysTest):
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param("selective_region_pause_1", id="inside"),
-        pytest.param("selective_region_pause_2", id="before"),
-        pytest.param("selective_region_pause_3", id="outside"),
+        pytest.param("selective-region-pause-1", id="inside"),
+        pytest.param("selective-region-pause-2", id="before"),
+        pytest.param("selective-region-pause-3", id="outside"),
     ],
 )
 @pytest.mark.class_name("selective-region-pause")
@@ -271,15 +271,15 @@ class TestSelectiveRegionPause(RocprofsysTest):
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside region (no filter) kernels"
             pass_regex = ["CodeBlock_Z", "CodeBlock_A", "CodeBlock_C", "CodeBlock_D"]
             fail_regex = ["CodeBlock_B"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before region (no filter) kernels"
             pass_regex = ["CodeBlock_C", "CodeBlock_D"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_A", "CodeBlock_B"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside, resume outside (no filter) kernels"
             pass_regex = ["CodeBlock_A"]
             fail_regex = ["CodeBlock_C", "CodeBlock_D"]
@@ -291,7 +291,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=pass_regex,
             fail_regex=fail_regex,
         )
-        if target == "selective_region_pause_2":
+        if target == "selective-region-pause-2":
             # Region1 is pushed while paused (pause fires before the range start),
             # so the begin-marker is never written.
             self.assert_perfetto(
@@ -323,15 +323,15 @@ class TestSelectiveRegionPause(RocprofsysTest):
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside Region1 filtered kernels"
             pass_regex = ["CodeBlock_A", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_B", "CodeBlock_D"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before Region1 filtered kernels"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside Region1, resume outside filtered kernels"
             pass_regex = ["CodeBlock_A"]
             fail_regex = ["CodeBlock_C", "CodeBlock_D"]
@@ -363,15 +363,15 @@ class TestSelectiveRegionPause(RocprofsysTest):
         )
         self.assert_regex(result)
 
-        if target == "selective_region_pause_1":
+        if target == "selective-region-pause-1":
             subtest_name = "Pause inside Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        elif target == "selective_region_pause_2":
+        elif target == "selective-region-pause-2":
             subtest_name = "Pause before Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"]
             fail_regex = ["CodeBlock_Z", "CodeBlock_D"]
-        else:  # selective_region_pause_3
+        else:  # selective-region-pause-3
             subtest_name = "Pause inside Region1 ignored (no marker_api)"
             pass_regex = ["CodeBlock_A", "CodeBlock_C"]
             fail_regex = ["CodeBlock_D"]
@@ -416,7 +416,7 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
-            "selective_region",
+            "selective-region",
             env=env,
             run_args=["--push-pop"] if marker_style == "push_pop" else None,
             check_target_arch=True,
@@ -428,4 +428,65 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
             categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
+        )
+
+
+# =============================================================================
+# Test Class: Region filtering vs MPI tracing
+# =============================================================================
+
+
+@pytest.mark.mpi
+@pytest.mark.class_name("mpi-roctx-regions")
+class TestSelectiveRegionMPI(RocprofsysTest):
+    """Regression: region filtering must not switch MPI tracing off entirely.
+
+    ROCPROFSYS_SELECTED_REGIONS used to pause the gotcha that intercepts MPI_Init,
+    which is also what installs the MPI wrappers, so no MPI call was ever traced.
+
+    Code flow:
+        MPI_Bcast x8 (outside),
+        TracedRegion: MPI_Allreduce x8,
+        MPI_Bcast x8 (outside)
+    """
+
+    def test_no_filter(self, selective_region_env):
+        """No ROCPROFSYS_SELECTED_REGIONS — both phases traced."""
+        result = self.run_test(
+            "sys_run",
+            "mpi-roctx-regions",
+            env=selective_region_env,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="All MPI calls present",
+            categories=["mpi"],
+            pass_regex=["MPI_Allreduce", "MPI_Bcast"],
+        )
+
+    def test_region_filter(self, selective_region_env):
+        """ROCPROFSYS_SELECTED_REGIONS='TracedRegion'.
+
+        MPI_Allreduce present proves the MPI wrappers were installed at all;
+        MPI_Bcast absent proves they are gated to the selected region.
+        """
+        env = selective_region_env.copy()
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "TracedRegion"
+        result = self.run_test(
+            "sys_run",
+            "mpi-roctx-regions",
+            env=env,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Only in-region MPI calls traced",
+            categories=["mpi"],
+            pass_regex=["MPI_Allreduce"],
+            fail_regex=["MPI_Bcast", "MPI_Comm_rank", "MPI_Comm_size"],
         )

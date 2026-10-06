@@ -3,3 +3,6 @@ g++:
   Unit_hipMalloc_gpptest:
     <<: *level_2
     tags: [compiler]
+  Unit_gcc_half_types:
+    <<: *level_2
+    tags: [types]

@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -437,6 +443,21 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+/**
+ * Get the kernel-assigned internal queue ID from a queue handle.
+ *
+ * @param[in] QueueId Queue handle returned from hsaKmtCreateQueue
+ * @param[out] KernelInternalQueueId Pointer to receive the kernel's internal queue ID
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetKernelQueueId(
+    HSA_QUEUEID QueueId,              //IN
+    HSAuint32 *KernelInternalQueueId  //OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
@@ -769,7 +790,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );
@@ -900,6 +921,19 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetRuntimeCapabilities(
     HSAuint32	*caps_mask // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreRuntimeInfo(
+    struct kfd_runtime_info *runtime_info // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreDeviceInfo(
+    HSAuint32 gpu_id, // IN
+    struct kfd_dbg_device_info_entry *device_info // OUT
     );
 
 /**
@@ -1463,6 +1497,22 @@ hsaKmtGetAmdGPUDeviceFd(
   HsaAMDGPUDeviceHandle DeviceHandle, //IN
   int *fd //OUT
 );
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSizeCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSize(
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
 
 #ifdef __cplusplus
 }   //extern "C"

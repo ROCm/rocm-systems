@@ -15,8 +15,11 @@ using ::testing::_;
 using ::testing::Return;
 using ::testing::StrictMock;
 
-using MockBackend =
-    ::testing::StrictMock<rocprofsys::backends::rocprofiler_sdk::testing::mock_backend>;
+// NOLINTBEGIN(readability-identifier-naming)
+using MockBackendImpl = ::testing::StrictMock<
+    rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_impl>;
+using MockBackend = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
+// NOLINTEND(readability-identifier-naming)
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
@@ -24,6 +27,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 class SdkPmcDeviceTest : public ::testing::Test
 {
 protected:
+    // `m_mock_impl` is the GMock object EXPECT_CALL binds to. `mock_backend` is the
+    // stateless handle passed as device<Backend>'s Backend argument; its static
+    // methods forward to whichever impl is bound via MockBackend::bind().
+    std::shared_ptr<MockBackendImpl>   m_mock_impl;
     std::shared_ptr<MockBackend>       mock_backend;
     std::shared_ptr<rocprofsys::agent> test_agent;
     MockBackend::context_id_t          test_context{};
@@ -31,12 +38,14 @@ protected:
 
     void SetUp() override
     {
+        m_mock_impl = std::make_shared<MockBackendImpl>();
+        MockBackend::bind(m_mock_impl);
         mock_backend               = std::make_shared<MockBackend>();
         test_context.handle        = 1;
         test_profile_config.handle = 100;
 
         test_agent                    = std::make_shared<rocprofsys::agent>();
-        test_agent->type              = agent_type::GPU;
+        test_agent->type              = agent_type::gpu;
         test_agent->handle            = 42;
         test_agent->device_id         = 0;
         test_agent->device_type_index = 0;
@@ -44,16 +53,25 @@ protected:
         test_agent->product_name      = "GPU 0";
         test_agent->vendor_name       = "AMD";
     }
+
+    void TearDown() override { MockBackend::unbind(); }
 };
 
 TEST_F(SdkPmcDeviceTest, DeviceProperties)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 10,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    const device<MockBackend> dev(mock_backend, test_context, test_agent,
+                                  test_profile_config, std::move(meta));
 
     EXPECT_EQ(dev.get_index(), 0U);
     EXPECT_EQ(dev.get_name(), "GPU 0");
@@ -63,21 +81,22 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 
 TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            {});
+    const device<MockBackend> dev(mock_backend, test_context, test_agent,
+                                  test_profile_config, {});
 
     EXPECT_FALSE(dev.is_supported());
 }
 
 TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 {
-    auto agent3               = std::make_shared<rocprofsys::agent>();
+    auto const agent3         = std::make_shared<rocprofsys::agent>();
     agent3->device_type_index = 3;
     agent3->name              = "GPU 3";
     agent3->product_name      = "GPU 3";
     agent3->vendor_name       = "AMD";
 
-    device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config, {});
+    const device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config,
+                                  {});
 
     EXPECT_EQ(dev.get_index(), 3U);
     EXPECT_EQ(dev.get_name(), "GPU 3");
@@ -87,8 +106,22 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
-        counter_metadata{ 20, "SQ_INSTS_VALU", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 10,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
+        counter_metadata{ .counter_id  = 20,
+                          .name        = "SQ_INSTS_VALU",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -100,10 +133,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     records[1].id            = 20;
     records[1].counter_value = 100.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
@@ -113,7 +145,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*m_mock_impl, query_record_counter_id(_, _))
         .WillOnce(
             [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
                 out->handle = 10;
@@ -125,8 +157,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 2U);
     EXPECT_EQ(result[0].counter_id, 10U);
@@ -138,38 +170,46 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
 TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 100,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 0 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 101,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 1 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 102,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 2 }, { "SA", 0 }, { "SE", 0 } } },
-        counter_metadata{ 103,
-                          "SQC_ICACHE_HITS",
-                          "",
-                          "",
-                          "",
-                          false,
-                          false,
-                          { { "WGP", 3 }, { "SA", 0 }, { "SE", 0 } } },
+        counter_metadata{ .counter_id  = 100,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 0 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 101,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 1 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 102,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 2 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
+        counter_metadata{ .counter_id  = 103,
+                          .name        = "SQC_ICACHE_HITS",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = { { .name = "WGP", .position = 3 },
+                                           { .name = "SA", .position = 0 },
+                                           { .name = "SE", .position = 0 } } },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -182,20 +222,21 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
         records[i].counter_value = static_cast<double>(10 * (i + 1));
     }
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
             for(int i = 0; i < 4; ++i)
+            {
                 out[i] = records[i];
+            }
             *count = 4;
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*m_mock_impl, query_record_counter_id(_, _))
         .Times(4)
         .WillRepeatedly(
             [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
@@ -203,8 +244,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 4U);
     EXPECT_EQ(result[0].counter_id, 100U);
@@ -225,8 +266,14 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     constexpr std::uint64_t sdk_instance_id      = 0xDEAD0007ULL;
 
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{
-            plain_counter_handle, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = plain_counter_handle,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -236,10 +283,9 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     record.id            = sdk_instance_id;
     record.counter_value = 99.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
@@ -248,26 +294,33 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*m_mock_impl, query_record_counter_id(_, _))
         .WillOnce([](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
             out->handle = plain_counter_handle;
             return MockBackend::status_success;
         });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 1U);
     EXPECT_EQ(result[0].counter_id, plain_counter_handle);
     EXPECT_DOUBLE_EQ(result[0].value, 99.0);
 }
 
-// Verify that calling get_gpu_perf_counter_metrics repeatedly does not grow
+// Verify that calling sample_metrics repeatedly does not grow
 // heap unboundedly — the same m_result_cache vector is reused across samples.
 TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 {
     auto meta = std::vector<counter_metadata>{
-        counter_metadata{ 5, "SQ_WAVES", "", "", "", false, false, {} },
+        counter_metadata{ .counter_id  = 5,
+                          .name        = "SQ_WAVES",
+                          .description = "",
+                          .block       = "",
+                          .expression  = "",
+                          .is_constant = false,
+                          .is_derived  = false,
+                          .dimensions  = {} },
     };
 
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
@@ -277,11 +330,10 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
     record.id            = 5;
     record.counter_value = 1.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
     // Two successive sample calls; each must return correct data.
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .Times(2)
         .WillRepeatedly([&](MockBackend::context_id_t, MockBackend::user_data_t,
                             MockBackend::counter_flag_t,
@@ -291,7 +343,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*m_mock_impl, query_record_counter_id(_, _))
         .Times(2)
         .WillRepeatedly(
             [](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
@@ -299,13 +351,13 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
+    const enabled_metrics enabled{ {} };
 
-    auto result1 = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    auto result1 = dev.sample_metrics(enabled, 1000000);
     ASSERT_EQ(result1.size(), 1U);
     EXPECT_EQ(result1[0].counter_id, 5U);
 
-    auto result2 = dev.get_gpu_perf_counter_metrics(enabled, 2000000);
+    auto result2 = dev.sample_metrics(enabled, 2000000);
     ASSERT_EQ(result2.size(), 1U);
     EXPECT_EQ(result2[0].counter_id, 5U);
 }
@@ -315,14 +367,13 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce(Return(MockBackend::status_error));
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }
@@ -332,10 +383,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_))
-        .WillOnce(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,
                      MockBackend::counter_flag_t, MockBackend::counter_record_t*,
                      size_t* count) {
@@ -343,8 +393,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
             return MockBackend::status_success;
         });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }

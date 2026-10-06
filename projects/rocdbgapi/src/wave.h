@@ -42,12 +42,13 @@ namespace amd::dbgapi
 {
 
 class agent_t;
-class compute_queue_t;
+class queue_t;
 class dispatch_t;
 class event_t;
 class displaced_stepping_t;
 class process_t;
 class workgroup_t;
+class cluster_t;
 
 /* AMD Debugger API Wave.  */
 
@@ -243,8 +244,9 @@ public:
                  void *value) const;
 
   workgroup_t &workgroup () const { return m_workgroup; }
+  cluster_t &cluster () const;
   const dispatch_t &dispatch () const;
-  compute_queue_t &queue () const;
+  queue_t &queue () const;
   const agent_t &agent () const;
   process_t &process () const;
   const architecture_t &architecture () const;

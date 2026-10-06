@@ -24,17 +24,10 @@ include(ExternalProject)
 
 # Pinned mono-repo commit for rocshmem source checkout.
 # Used by both install.sh (setup_rocshmem_worktree) and cmake (auto-detect below).
-set(ROCSHMEM_MONO_HASH "0e2998b11f99e8302c72f1ac2ce9f2b8c1816587" CACHE STRING
+set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
     "Pinned rocm-systems commit hash for rocshmem source checkout")
 
 function(add_rocshmem_targets)
-
-    # Common dependency: libibverbs is required for all rocSHMEM paths
-    find_library(_IBVERBS ibverbs)
-    if(NOT _IBVERBS)
-        message(FATAL_ERROR "libibverbs not found (install rdma-core/libibverbs-dev)")
-    endif()
-    set(IBVERBS ${_IBVERBS} PARENT_SCOPE)
 
     # -----------------------------------------------------------------
     # Auto-detect ROCSHMEM_SOURCE_DIR if not provided.
@@ -98,22 +91,55 @@ function(add_rocshmem_targets)
     # -----------------------------------------------------------------
     if(ROCSHMEM_INSTALL_DIR)
         list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+        # Set rocshmem_static_ROOT; variable read on enter, so must be set BEFORE find_package()
+        if(NOT rocshmem_static_ROOT)
+          set(rocshmem_static_ROOT "${ROCSHMEM_INSTALL_DIR}")
+        endif()
         find_package(rocshmem_static)
         if(rocshmem_static_FOUND)
+            # This path returns before the -DASAN=ON propagation below, so an
+            # ASAN rccl links whatever the pre-built tree happens to contain.
+            if(BUILD_ADDRESS_SANITIZER)
+                message(WARNING
+                    "ASAN build using pre-built rocSHMEM at ${ROCSHMEM_INSTALL_DIR}. "
+                    "It is linked into librccl.so as-is; if it was not itself built "
+                    "with -DASAN=ON, rccl gets an uninstrumented rocSHMEM inside an "
+                    "instrumented library. Unset ROCSHMEM_INSTALL_DIR to build it "
+                    "from source with ASAN propagated.")
+            endif()
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
-            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   PARENT_SCOPE)
+            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
             return()
         endif()
     endif()
 
     # -----------------------------------------------------------------
-    # Path 2: Build from source (ENABLE_ROCSHMEM only)
-    # ENABLE_ROCSHMEM_GIN only needs source headers, not a built library.
+    # Path 2: Build from source when no pre-built install is available.
+    # Both ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN need the built headers
+    # (rocshmem_config.h) and device bitcode; ENABLE_ROCSHMEM additionally
+    # links librocshmem.a into librccl.so.
     # -----------------------------------------------------------------
-    if(ENABLE_ROCSHMEM)
+    if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
+        # Convert cmake list separators for shell command safety.
+        # GPU_TARGETS semicolons would be treated as bash command separators
+        # inside the bash -lc "..." string. Use commas instead — rocshmem's
+        # cmake converts commas back to semicolons.
+        string(REPLACE ";" " " _rocshmem_cmake_opts "${ROCSHMEM_CMAKE_OPTIONS}")
+        string(REPLACE ";" "," _rocshmem_gpu_targets "${GPU_TARGETS}")
+        # SDMA only needed for --rocshmem-gin (GIN SDMA plugin)
+        set(_rocshmem_sdma_opt "")
+        if(ENABLE_ROCSHMEM_GIN)
+            set(_rocshmem_sdma_opt "-DUSE_SDMA=ON")
+        endif()
+        # librocshmem.a is linked into librccl.so, so without this an ASAN
+        # build gets an uninstrumented rocSHMEM inside an instrumented library.
+        set(_rocshmem_asan_opt "")
+        if(BUILD_ADDRESS_SANITIZER)
+            set(_rocshmem_asan_opt "-DASAN=ON")
+        endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
         ExternalProject_Add(rocshmem_ext
@@ -131,15 +157,17 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/gda_bnxt -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_EXAMPLES=OFF "
-                && ${CMAKE_COMMAND} -E chdir build ${CMAKE_COMMAND}
-                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-                    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-                    -DBUILD_EXAMPLES=OFF ..
-                && ${CMAKE_COMMAND} -E chdir build ${CMAKE_MAKE_PROGRAM} -j
-            INSTALL_COMMAND
-                ${CMAKE_COMMAND} -E chdir build ${CMAKE_MAKE_PROGRAM} install
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
+            INSTALL_COMMAND ""
         )
+
+        # Rebuild when the sub-build's options change (e.g. ASAN): its build
+        # stamp ignores BUILD_COMMAND. The stamp sits beside the shared install,
+        # so the other config tree overwriting librocshmem.a invalidates it too.
+        set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
+        file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
+             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
+        ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")
 
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
         set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include"  PARENT_SCOPE)
@@ -148,6 +176,30 @@ function(add_rocshmem_targets)
         add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
     endif()
 
-    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
+    # CACHE INTERNAL (not PARENT_SCOPE): SOURCE_DIR is consumed by the
+    # top-level CMakeLists.txt install rules, outside add_subdirectory(src).
+    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
 
+endfunction()
+
+# copy files in the list-valued variable ${FILE_LIST_VAR} from ${SRC_DIR} to ${DST_DIR}
+# appends the destination file location to the list-valued variable ${OUTPUT_LIST_VAR}
+function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
+  foreach(file_name ${${FILE_LIST_VAR}})
+    set(src_file "${SRC_DIR}/${file_name}")
+    set(dst_file "${DST_DIR}/${file_name}")
+    get_filename_component(dst_file_dir "${dst_file}" DIRECTORY)
+    add_custom_command(
+      OUTPUT "${dst_file}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
+      # Qualify log.hpp include to prevent shadowing by consumer headers.
+      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
+      DEPENDS "${src_file}"
+      COMMENT "Copying ${src_file} -> ${dst_file}"
+      VERBATIM
+    )
+    list(APPEND ${OUTPUT_LIST_VAR} "${dst_file}")
+  endforeach()
+  set(${OUTPUT_LIST_VAR} ${${OUTPUT_LIST_VAR}} PARENT_SCOPE)
 endfunction()

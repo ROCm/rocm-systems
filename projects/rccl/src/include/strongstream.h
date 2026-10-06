@@ -20,7 +20,7 @@
 struct ncclCudaContext;
 
 // Get a ncclCudaContext to track the currently active CUDA context.
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out);
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int launchOrderImplicit, uint64_t commHash);
 // Drop reference.
 void ncclCudaContextDrop(struct ncclCudaContext* cxt);
 
@@ -38,29 +38,29 @@ struct ncclCudaGraph {
 
 inline struct ncclCudaGraph ncclCudaGraphNone(int graphUsageMode) {
   struct ncclCudaGraph tmp;
-  #if ROCM_VERSION >= 60100
-    tmp.origin = nullptr;
-    tmp.graph = nullptr;
-    tmp.graphId = ULLONG_MAX;
-    tmp.graphUsageMode = graphUsageMode;
-  #endif
+#if ROCM_VERSION >= 60100
+  tmp.origin = nullptr;
+  tmp.graph = nullptr;
+  tmp.graphId = ULLONG_MAX;
+  tmp.graphUsageMode = graphUsageMode;
+#endif
   return tmp;
 }
 
 inline bool ncclCudaGraphValid(struct ncclCudaGraph graph) {
-  #if ROCM_VERSION >= 60100
-    return graph.graphId != ULLONG_MAX;
-  #else
-    return false;
-  #endif
+#if ROCM_VERSION >= 60100
+  return graph.graphId != ULLONG_MAX;
+#else
+  return false;
+#endif
 }
 
 inline bool ncclCudaGraphSame(struct ncclCudaGraph a, struct ncclCudaGraph b) {
-  #if ROCM_VERSION >= 60100
-    return a.graphId == b.graphId;
-  #else
-    return true;
-  #endif
+#if ROCM_VERSION >= 60100
+  return a.graphId == b.graphId;
+#else
+  return true;
+#endif
 }
 
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, cudaStream_t stream, int graphUsageMode);
@@ -88,23 +88,20 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss);
 
 // Acquire the strong stream. Upon return `*workStream` will be usable to add work.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquire(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent,
+                                     cudaStream_t* workStream);
 
 // Get the workStream for an already acquired strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquiredWorkStream(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, struct ncclStrongStream* ss,
+                                                bool concurrent, cudaStream_t* workStream);
 
 // Release of the strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent);
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream);
 
-ncclResult_t ncclStreamWaitStream(
-  cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent
-);
+ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent);
 
 // Like cudaStreamWaitEvent except `e` must be strictly ahead of everything in `s`.
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e);
@@ -123,6 +120,10 @@ struct ncclStrongStream {
 #if ROCM_VERSION >= 60100
   // This stream ever appeared in a graph capture.
   bool everCaptured;
+  // serialEvent has been recorded at least once for the graph-origin path used when
+  // graphStreamOrdering=0. Separate from everCaptured, which is also set by captures that never
+  // record serialEvent (graphUsageMode != 2) and is shared with splitShare children.
+  bool graphOriginCaptured;
   std::mutex mutex;
   struct ncclStrongStreamCapture* captureHead;
   // The event used to establish order between graphs and streams. During acquire
@@ -135,6 +136,8 @@ struct ncclCudaContext {
   struct ncclCudaContext* next;
   int hcontext;
   int refCount;
+  bool launchOrderImplicitEverEnabled;
+  bool launchOrderImplicitEverDisabled;
   struct ncclStrongStream launchOrder;
 };
 

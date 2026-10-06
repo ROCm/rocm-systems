@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import errno
@@ -366,14 +349,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
-    def _is_command_supported(self, user_input, acceptable_values, command_name):
-        if acceptable_values == "N/A":
-            outputformat = self.helpers.get_output_format()
-            raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
-        elif str(user_input).upper() not in acceptable_values:
-            print(f"Valid inputs are {acceptable_values}")
+    def _is_command_supported(self, user_input, acceptable_values, hint=None):
+        if str(user_input).upper() not in acceptable_values:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                sys.argv[1], str(user_input).upper(), self.helpers.get_output_format()
+                sys.argv[1], str(user_input).upper(), self.helpers.get_output_format(), hint=hint
             )
         else:
             return str(user_input).upper()
@@ -398,11 +377,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
                 if lim_type not in valid_lim_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], lim_type, output_format
+                        sys.argv[1],
+                        lim_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_lim_types)}.",
                     )
 
                 # Check if the val is a valid integer value
@@ -442,7 +427,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
 
                 if not perf_levels_str:
@@ -696,6 +684,25 @@ class AMDSMIParser(argparse.ArgumentParser):
                         path.touch()
                         setattr(args, self.dest, path)
                         return
+                    # Fail fast instead of blocking on the interactive overwrite/
+                    # append prompt when stdin is not an interactive terminal
+                    # (e.g. launched by an automation framework with stdin piped
+                    # or closed). Reading from a held-open pipe can block input()
+                    # forever; automation should pass --overwrite or --append to
+                    # choose a behavior explicitly.
+                    stdin_is_tty = False
+                    try:
+                        stdin_is_tty = sys.stdin is not None and sys.stdin.isatty()
+                    except (ValueError, OSError):
+                        stdin_is_tty = False
+                    if not stdin_is_tty:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
+                            path,
+                            CheckOutputFilePath.outputformat,
+                            f"File '{path}' exists and stdin is not a TTY; "
+                            "cannot prompt to overwrite or append. Re-run with "
+                            "--overwrite or --append.",
+                        )
                     # Prompt if neither --append nor --overwrite are specified
                     try:
                         resp = (
@@ -706,7 +713,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                             .lower()
                         )
                     except Exception:
-                        sys.exit("Confirmation not given. Exiting without setting value")
+                        print(
+                            "Confirmation not given. Exiting without setting value", file=sys.stderr
+                        )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                     if resp in ("a", "append"):
                         setattr(args, self.dest, path)
                         return
@@ -715,12 +725,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                         setattr(args, self.dest, path)
                         return
                     else:
-                        # User declined to overwrite
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                            path,
-                            CheckOutputFilePath.outputformat,
-                            "User declined to overwrite or append existing file.",
+                        # Declining is not a bad path: the file was fine, the user said no.
+                        print(
+                            "User declined to overwrite or append existing file.", file=sys.stderr
                         )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                 else:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
                         path, CheckOutputFilePath.outputformat
@@ -817,9 +826,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _GPUSelectAction.outputformat,
-                            True,
-                            False,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.GPU,
                         )
 
         return _GPUSelectAction
@@ -853,7 +860,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _NICSelectAction.output_format
+                            selected_device_handles,
+                            _NICSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.NIC,
                         )
 
         return _NICSelectAction
@@ -887,7 +896,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                         )
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _SwitchSelectAction.output_format
+                            selected_device_handles,
+                            _SwitchSelectAction.output_format,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.SWITCH,
                         )
 
         return _SwitchSelectAction
@@ -926,9 +937,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CPUSelectAction.outputformat,
-                            False,
-                            True,
-                            False,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU,
                         )
 
         return _CPUSelectAction
@@ -967,9 +976,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
                             selected_device_handles,
                             _CoreSelectAction.outputformat,
-                            False,
-                            False,
-                            True,
+                            amdsmi_cli_exceptions.AmdSmiDeviceKind.CPU_CORE,
                         )
 
         return _CoreSelectAction
@@ -1270,18 +1277,26 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     ### Building parsers ###
     @staticmethod
-    def _guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G")):
-        """Override *parser*.error() so that combining any GTT flag with
+    def _guard_gtt_gpu_conflict(
+        parser, gtt_flags=("--gtt", "-G"), reason="--gtt is a system-wide setting, not per-GPU"
+    ):
+        """Override *parser*.error() so that combining any of *gtt_flags* with
         --gpu / -g produces a clear mutual-exclusion message instead of
-        the confusing "expected at least one argument" from --gpu."""
+        the confusing "expected at least one argument" from --gpu. Only
+        argparse's missing-value diagnostic is replaced."""
         _original_error = parser.error
 
         def _intercept(message):
-            if set(gtt_flags).intersection(sys.argv) and {"--gpu", "-g"}.intersection(sys.argv):
+            error_prefix = message.split(":", 1)[0]
+            if (
+                set(gtt_flags).intersection(sys.argv)
+                and {"--gpu", "-g"}.intersection(sys.argv)
+                and error_prefix in {"argument -g/--gpu", "argument --gpu/-g"}
+                and "expected at least one argument" in message
+            ):
                 flag_str = "/".join(gtt_flags)
                 _original_error(
-                    f"argument {flag_str}: not allowed with argument --gpu/-g "
-                    "(--gtt is a system-wide setting, not per-GPU)"
+                    f"argument {flag_str}: not allowed with argument --gpu/-g ({reason})"
                 )
             _original_error(message)
 
@@ -1463,7 +1478,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
-                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID"
+                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
 
         # Create list subparser
         list_parser = subparsers.add_parser(
@@ -1780,6 +1795,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Switch temperature, clock, and usage to partition-scoped\n"
             "    (XCP/AID/MID) data sources; combine with those flags to scope it;"
             "\n    Only available for MI300 or newer ASICs"
+        )
+        show_unsupported_help = (
+            "Print every field, including the ones the GPU's gpu_metrics\n"
+            "    table version cannot carry and which are omitted by default;\n"
+            "    affects human-readable output only, since --json and --csv\n"
+            "    always print every field"
         )
 
         # Help text for Arguments only on Hypervisors
@@ -2180,7 +2201,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
         self._add_device_arguments(metric_parser, required=False)
-        self._add_command_modifiers(metric_parser)
+        command_modifier_group = self._add_command_modifiers(metric_parser)
+        command_modifier_group.add_argument(
+            "--show-unsupported", action="store_true", required=False, help=show_unsupported_help
+        )
 
     def _add_process_parser(self, subparsers: argparse._SubParsersAction, func):
         if self.helpers.is_hypervisor():
@@ -2409,6 +2433,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 accelerator_set_choices_str = ", ".join(accelerator_set_choices)
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                set_compute_partition_hint = f"\nValid inputs are: {accelerator_set_choices_str}.\nUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
@@ -2422,7 +2447,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self.helpers.get_power_caps()
             )
             set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o 1300 ppt0`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
-            set_clk_limit_help = "Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk | fclk) (min | max) value"
+            set_clk_limit_help = "Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk | fclk) (min | max) value\n\tFor mclk and fclk ONLY, a max value is rounded down to the nearest selectable DPM level; sclk is honored exactly."
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
@@ -2523,7 +2548,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     action="store",
                     choices=accelerator_set_choices,
                     type=lambda value: self._is_command_supported(
-                        value, accelerator_set_choices, "--compute-partition"
+                        value, accelerator_set_choices, hint=set_compute_partition_hint
                     ),
                     required=False,
                     help=set_compute_partition_help,
@@ -2652,6 +2677,19 @@ class AMDSMIParser(argparse.ArgumentParser):
                     help=set_gtt_help,
                     metavar="GB",
                 )
+
+            # Node power limit is enabled on guest (1VF), maintain order
+            max_node_power_limit = self.helpers.get_max_node_power_limit()
+            set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
+            set_value_exclusive_group.add_argument(
+                "-n",
+                "--node-power-limit",
+                action="store",
+                type=lambda value: self._positive_int(value, "--node-power-limit"),
+                required=False,
+                help=set_node_power_limit_help,
+                metavar="WATTS",
+            )
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
@@ -2861,6 +2899,15 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
+        # Improve the --gpu error message if combined with --node-power-limit;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-power-limit", "-n"),
+            reason="--node-power-limit is a node-wide setting, not per-GPU",
+        )
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)
@@ -3239,6 +3286,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
+        tray_help = "Displays compute tray type and accelerator count"
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3263,6 +3311,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=base_board_temps_help,
         )
         node_parser.add_argument("-G", "--gtt", action="store_true", required=False, help=gtt_help)
+        node_parser.add_argument(
+            "-T", "--tray", action="store_true", required=False, help=tray_help
+        )
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

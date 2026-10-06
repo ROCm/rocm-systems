@@ -160,7 +160,13 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Functional) {
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
+  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 0));
   HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, kNode, &kNodeParams1));
+  HIP_CHECK(hipMemset(C_d, 0, Nbytes));
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+
+  HIP_CHECK(hipGraphNodeSetEnabled(graphExec, kNode, 1));
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
 

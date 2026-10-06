@@ -33,6 +33,8 @@
  * It is the top-level interface for these resources.
  */
 
+#include <hip/hip_runtime_api.h>
+
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -387,6 +389,125 @@ class Backend {
   void symm_allgather(void *inout, size_t bytes_per_pe);
 
   /**
+   * @brief Collective agreement across all PEs on a per-PE value.
+   *
+   * Symmetric registration is collective and exchanges data via
+   * symm_allgather. If a PE returned early on a local error it would drop out
+   * of those collectives and either deadlock the remaining PEs or leave a
+   * region published on some PEs but not others. To keep all PEs on the same
+   * path, each fallible step contributes a per-PE @p local_value, all-gathers
+   * the values here, and proceeds only if predicate @p ok holds for every PE's
+   * contribution. Every PE inspects the same gathered vector, so agreement is
+   * unanimous and all PEs continue or unwind together.
+   *
+   * @tparam T       Trivially-copyable per-PE value type.
+   * @param[in] local_value This PE's contribution.
+   * @param[in] ok          Predicate applied to each PE's gathered value.
+   * @return true only if @p ok holds for every PE's value.
+   */
+  template <typename T, typename Predicate>
+  bool all_pes_agree(T local_value, Predicate ok) {
+    std::vector<T> values(num_pes, T{});
+    values[my_pe] = local_value;
+    symm_allgather(values.data(), sizeof(T));
+    for (int i = 0; i < num_pes; i++) {
+      if (!ok(values[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * @brief Collective agreement that every PE's fallible step succeeded.
+   *
+   * @param[in] local_success Non-zero if this PE's step succeeded.
+   * @return true only if every PE reported success.
+   */
+  bool all_pes_succeeded(int local_success) {
+    return all_pes_agree(local_success, [](int v) { return v != 0; });
+  }
+
+  /**
+   * @brief Collective check that every PE registered the same length.
+   *
+   * @param[in] length This PE's registered length in bytes.
+   * @return true if all PEs registered @p length.
+   */
+  bool symm_lengths_match(size_t length) {
+    return all_pes_agree(length, [length](size_t v) { return v == length; });
+  }
+
+  /**
+   * @brief IPC-specific per-registration state, shared by backends that expose
+   * registered buffers over IPC (the IPC backend for all peers, the GDA
+   * backend for its node-local peers).
+   *
+   * The common base/length bookkeeping lives in Backend::symm_buffer_regions;
+   * this holds the IPC handle/mapping state needed to tear a registration
+   * down. Peer arrays are indexed by the backend's peer index (global PE for
+   * the IPC backend, node-local shm index for GDA), matching how the owning
+   * backend calls ipcPeerPtr().
+   */
+  struct IpcSymmRecord {
+    int slot{-1};                       // index into ipcImpl.symm_table
+    int num_peers{0};                   // size of the peer arrays
+    int self_index{-1};                 // this PE's own peer index
+    char** dev_peer_bases{nullptr};     // device array[num_peers] (published)
+    std::vector<char*> peer_bases{};    // host copy[num_peers] (for CloseIpcHandle)
+    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
+  };
+
+  /**
+   * @brief Host-side map of IPC symmetric registration state, keyed by the
+   * symmetric address returned to the caller.
+   */
+  std::map<uintptr_t, IpcSymmRecord> ipc_symm_records_{};
+
+  /**
+   * @brief Allocate the device-visible IPC symmetric-registration table
+   * (ipcImpl.symm_table), sized to ROCSHMEM_MAX_SYMM_REGIONS. Shared by the
+   * IPC and GDA backends.
+   */
+  void alloc_ipc_symm_table();
+
+  /**
+   * @brief Free ipcImpl.symm_table (regions array and header).
+   */
+  void free_ipc_symm_table();
+
+  /**
+   * @brief Register a symmetric buffer over IPC and publish it into
+   * ipcImpl.symm_table (collective).
+   *
+   * Exports this PE's IPC handle for @p export_addr, all-gathers handles across
+   * all PEs, opens the handles of the peers listed in @p peer_global, and
+   * publishes the resulting peer-base array (indexed by @p peer_global's order)
+   * so ipcPeerPtr() can translate symmetric addresses to peer mappings. The
+   * calling PE's own slot (@p self_index) is filled with @p symm_addr.
+   *
+   * @param[in] symm_addr   Symmetric address (this PE's local base / self peer)
+   * @param[in] export_addr Buffer whose IPC handle is exported (== symm_addr,
+   *                        except the IPC backend which exports the original
+   *                        buffer behind a distinct alias)
+   * @param[in] length      Length in bytes
+   * @param[in] peer_global Peer index -> global PE whose handle to open
+   * @param[in] self_index  This PE's index within @p peer_global
+   * @return ROCSHMEM_SUCCESS or ROCSHMEM_ERROR (agreed across all PEs)
+   */
+  int register_ipc_symm_region(void* symm_addr, void* export_addr,
+                               size_t length,
+                               const std::vector<int>& peer_global,
+                               int self_index);
+
+  /**
+   * @brief Tear down an IPC symmetric registration published by
+   * register_ipc_symm_region(): close peer mappings, release the exported
+   * handle, compact ipcImpl.symm_table, and drop the record.
+   */
+  int unregister_ipc_symm_region(void* symm_addr);
+
+  /**
    * @brief Required to support static inheritance for device calls.
    *
    * The Context DISPATCH implementation requires this member.
@@ -414,6 +535,26 @@ class Backend {
    *        handled separately.  Default is a no-op.
    */
   virtual void accumulate_default_host_ctx_stats() {}
+
+  /**
+   * @brief Create the rocSHMEM-managed symmetric address for a registration.
+   *
+   * Maps the user's buffer to a rocSHMEM-owned virtual address (an "alias")
+   * via the heap allocator, so the returned symmetric address is
+   * distinct from and owned independently of the user's pointer. Both the IPC
+   * and GDA backends use this alias as the symmetric address.
+   *
+   * @param[in]  addr   User's buffer to register.
+   * @param[in]  length Length in bytes.
+   * @param[out] alias  Filled with the symmetric address to return to caller.
+   */
+  hipError_t create_symm_alias(void *addr, size_t length, void **alias);
+
+  /**
+   * @brief Release a symmetric address previously produced by
+   *        create_symm_alias() (unmaps the alias mapping).
+   */
+  void destroy_symm_alias(void *alias, size_t length);
 
   /**
    * @brief Dumps derived class statistics. Default is a no-op.

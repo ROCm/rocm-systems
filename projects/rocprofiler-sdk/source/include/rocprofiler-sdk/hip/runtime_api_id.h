@@ -629,5 +629,23 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetDefaultMemPool,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetLuid,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipInitDevice,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleEnumerateFunctions,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceFlushGPUDirectRDMAWrites,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttributeForDevice,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;
