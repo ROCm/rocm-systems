@@ -1688,7 +1688,7 @@ instructions.</p>
 coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
-and generic FLAT stores that require both STORECNT and DSCNT waits. This partial
+and address-dependent FLAT counter participation. This partial
 coverage does not establish complete counter, scheduling, or writeback support;
 issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
 and GFX11.</p>
@@ -1830,12 +1830,35 @@ following lifecycle:</p>
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.</li>
 </ol>
-<p>Generic <code>FLAT_*</code> instructions have two independent completion obligations:
-the vector-memory counter and the LDS counter. A wait on only one domain does
-not complete the race-detector event; both domains must be satisfied. The
-resolved route still determines whether the event accesses global memory or
-LDS. This currently assumes that all active lanes select the same memory space;
-mixed LDS/global lanes are tracked separately in #11456.</p>
+<p>Generic <code>FLAT_*</code> instructions select counter domains from their resolved memory
+requests. Global and scratch requests use the vector-memory counter; LDS
+requests use the LDS counter. An instruction with requests in both domains uses
+both counters. The runtime applies this conditional-participation model across
+AMD GPU targets, for loads, stores and atomics. Validation on every physical GPU
+architecture is not established.</p>
+<p>For uniform requests, the race detector uses only the selected memory domain.
+For example, on gfx950 with global addresses in every requesting lane, this use
+of <code>v8</code> has a sufficient wait:</p>
+<div class="highlight"><pre><span></span><code><span class="nf">flat_load_dword</span><span class="w"> </span><span class="no">v8</span><span class="p">,</span><span class="w"> </span><span class="no">v</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">]</span>
+<span class="nf">s_waitcnt</span><span class="w"> </span><span class="no">vmcnt</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="nf">flat_store_dword</span><span class="w"> </span><span class="no">v</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="no">v8</span>
+</code></pre></div>
+<p>LDS-only loads instead require <code>lgkmcnt(0)</code>. Newer targets use their corresponding
+split counters. Routing preserves decoded completion ordering and independent
+obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
+a nonzero wait cannot prove a result ready.</p>
+<p>Functional counter acquisition and both runtime checkers use the selected memory
+domains. FLAT capacity constraints are applied after addresses are resolved.
+Before reading the address operands, neither domain is guaranteed to need a
+counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
+prove an older LDS result complete.</p>
+<p>A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
+observations still attach both obligations to the whole race-plugin event, so a
+consumer restricted to an already-completed lane group can still get a false
+report. <code>TODO(newling)</code> regression cases track this remaining #12237 gap. The
+core checker's <a href="../memory-wait-counter-coverage/#flat-register-readiness">FLAT register-readiness policy</a>
+tracks the groups separately. Mixed LDS/global functional execution remains
+limited by first-request-lane routing, tracked separately in #11456.</p>
 <p>An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit <code>lgkmcnt(15)</code> and six-bit <code>vmcnt(63)</code> therefore retire no events;
 <code>lgkmcnt(14)</code> and <code>vmcnt(62)</code> are the largest values that can impose an
