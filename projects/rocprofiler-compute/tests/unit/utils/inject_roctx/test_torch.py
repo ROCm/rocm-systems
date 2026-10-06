@@ -3,6 +3,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from utils.inject_roctx._backends.torch import format_wrap_args
 
 
@@ -134,3 +136,47 @@ def test_deep_tensor_method_wraps_disabled_by_env(monkeypatch):
 
     monkeypatch.setenv("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", "0")
     assert _selected_tensor_method_wraps() == TENSOR_METHOD_WRAPS
+
+
+def test_function_apply_wrappers_idempotent(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    push_counter = {"count": 0}
+
+    def _count_push(*_args, **_kwargs):
+        push_counter["count"] += 1
+
+    monkeypatch.setattr(torch_backend, "_push_scope", _count_push)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+
+    class Foo(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x):
+            return x + 1
+
+        @staticmethod
+        def backward(ctx, grad_out):
+            return grad_out
+
+    class Bar(Foo):
+        pass
+
+    assert torch_backend.install_function_apply_wrappers() is True
+    assert getattr(
+        getattr(Foo.__dict__.get("apply"), "__func__", None),
+        "_roctx_wrapped",
+        False,
+    )
+    assert "apply" not in Bar.__dict__
+
+    x = torch.tensor(1.0, requires_grad=True)
+    y = Bar.apply(x)
+    y.backward()
+    assert push_counter["count"] == 1
