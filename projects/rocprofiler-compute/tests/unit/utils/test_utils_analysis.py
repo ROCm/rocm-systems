@@ -2928,6 +2928,23 @@ def test_nest_marker_intervals_three_deep_with_file_line():
     assert addmm.line_number is None
 
 
+def test_nest_marker_intervals_nests_when_child_row_precedes_parent():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("aten::addmm", 20, 70),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+        ])
+    )
+    assert forest["1"][0].name == "nn.Module.Linear.forward"
+    assert [child.name for child in forest["1"][0].children] == ["aten::addmm"]
+
+
 def test_nest_marker_intervals_disjoint_linear_siblings():
     forest = nest_marker_intervals(
         pd.DataFrame([
