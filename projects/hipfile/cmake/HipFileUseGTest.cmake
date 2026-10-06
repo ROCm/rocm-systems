@@ -6,7 +6,7 @@
 # run exactly once.
 include_guard(GLOBAL)
 
-include(AISSanitizers)
+include(HipFileSanitizers)
 include(FetchContent)
 
 # GoogleTest's ThreadLocal<T> implementation uses POSIX thread-key APIs
@@ -18,10 +18,10 @@ find_package(Threads REQUIRED)
 
 # Decide whether to check for a system GoogleTest install first. When building
 # with the sanitizers, we HAVE to build GoogleTest from source.
-if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
-    set(AIS_GTEST_TRY_SYSTEM FALSE)
+if(HIPFILE_USE_SANITIZERS OR HIPFILE_USE_THREAD_SANITIZER)
+    set(HIPFILE_GTEST_TRY_SYSTEM FALSE)
 else()
-    set(AIS_GTEST_TRY_SYSTEM TRUE)
+    set(HIPFILE_GTEST_TRY_SYSTEM TRUE)
 endif()
 
 set(INSTALL_GTEST OFF CACHE BOOL "Don't install GoogleTest")
@@ -31,14 +31,14 @@ set(GTEST_HAS_ABSL OFF CACHE BOOL "Don't use Abseil for GoogleTest")
 # FetchContent_Declare, since FIND_PACKAGE_ARGS was introduced in CMake
 # version 3.24, which is unavailable on some operating systems:
 # https://cmake.org/cmake/help/latest/module/FetchContent.html
-if(AIS_GTEST_TRY_SYSTEM)
+if(HIPFILE_GTEST_TRY_SYSTEM)
     find_package(GTest QUIET)
 endif()
 
 if(NOT GTest_FOUND)
     # CMAKE_CXX_CLANG_TIDY runs on all CMake targets after it is set, including those
     # fetched via FetchContent. clang-tidy should not run on 3rd party code at all.
-    set(_ais_saved_cxx_clang_tidy "${CMAKE_CXX_CLANG_TIDY}")
+    set(_hipfile_saved_cxx_clang_tidy "${CMAKE_CXX_CLANG_TIDY}")
     unset(CMAKE_CXX_CLANG_TIDY)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
@@ -50,8 +50,8 @@ if(NOT GTest_FOUND)
     )
     FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
-    set(CMAKE_CXX_CLANG_TIDY "${_ais_saved_cxx_clang_tidy}")
-    unset(_ais_saved_cxx_clang_tidy)
+    set(CMAKE_CXX_CLANG_TIDY "${_hipfile_saved_cxx_clang_tidy}")
+    unset(_hipfile_saved_cxx_clang_tidy)
 endif()
 
 if(googletest_SOURCE_DIR)
@@ -60,9 +60,9 @@ else()
     message(STATUS "Using system GoogleTest")
 endif()
 
-if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
-    ais_add_sanitizers(GTest::gtest)
-    ais_add_sanitizers(GTest::gmock)
+if(HIPFILE_USE_SANITIZERS OR HIPFILE_USE_THREAD_SANITIZER)
+    hipfile_add_sanitizers(GTest::gtest)
+    hipfile_add_sanitizers(GTest::gmock)
 endif()
 
 # Propagate pthread linkage to anything that links a GTest target, so the
@@ -106,17 +106,17 @@ include(GoogleTest)
 
 # Absolute path to the LeakSanitizer suppression file. Only applied when
 # building with the (non-TSAN) sanitizers.
-set(AIS_LSAN_SUPPRESSIONS_FILE "${HIPFILE_ROOT_PATH}/cmake/lsan-suppressions.supp")
+set(HIPFILE_LSAN_SUPPRESSIONS_FILE "${HIPFILE_ROOT_PATH}/cmake/lsan-suppressions.supp")
 
-function(ais_gtest_discover_tests target)
+function(hipfile_gtest_discover_tests target)
     set(forwarded_args ${ARGV})
 
     # When the address sanitizer is on, force every discovered test to load the
     # LSan suppression file via LSAN_OPTIONS. We splice an ENVIRONMENT entry into
     # the PROPERTIES list that gtest_discover_tests applies to each test case, so
     # the suppression travels with the test regardless of how ctest is invoked.
-    if(AIS_USE_SANITIZERS)
-        set(lsan_env "LSAN_OPTIONS=suppressions=${AIS_LSAN_SUPPRESSIONS_FILE}")
+    if(HIPFILE_USE_SANITIZERS)
+        set(lsan_env "LSAN_OPTIONS=suppressions=${HIPFILE_LSAN_SUPPRESSIONS_FILE}")
         list(FIND forwarded_args "PROPERTIES" props_idx)
         if(props_idx EQUAL -1)
             list(APPEND forwarded_args PROPERTIES ENVIRONMENT "${lsan_env}")
@@ -130,7 +130,7 @@ function(ais_gtest_discover_tests target)
 
     cmake_language(CALL gtest_discover_tests ${forwarded_args})
 
-    if(AIS_USE_CODE_COVERAGE)
+    if(HIPFILE_USE_CODE_COVERAGE)
         set(options)
         set(oneValueArgs TEST_LIST)
         set(multiValueArgs)
@@ -146,12 +146,12 @@ function(ais_gtest_discover_tests target)
         set_property(
             DIRECTORY APPEND PROPERTY
             TEST_INCLUDE_FILES
-            "${HIPFILE_ROOT_PATH}/cmake/AISSetCoverageFile.cmake"
+            "${HIPFILE_ROOT_PATH}/cmake/HipFileSetCoverageFile.cmake"
             "${coverage_include_file}"
         )
 
         file(WRITE "${coverage_include_file}"
-            "ais_set_coverage_file(\"${arg_TEST_LIST}\" \"${CMAKE_CURRENT_BINARY_DIR}\")"
+            "hipfile_set_coverage_file(\"${arg_TEST_LIST}\" \"${CMAKE_CURRENT_BINARY_DIR}\")"
         )
     endif()
 endfunction()
