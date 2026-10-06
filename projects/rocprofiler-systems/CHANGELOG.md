@@ -12,7 +12,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
   `ROCPROFSYS_HIPFILE_METRICS`. See
   [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
-- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary 
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary
   sleeps for the given duration after attach instead of waiting for `ENTER` on stdin.
 
 ### Resolved issues

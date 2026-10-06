@@ -25,8 +25,8 @@ namespace
 {
 struct attach_options
 {
-    int                      pid            = -1;
-    int                      detach_after   = -1;  // seconds; -1 = wait for stdin ENTER
+    int                      pid          = -1;
+    int                      detach_after = -1;  // seconds; -1 = wait for stdin ENTER
     std::string              output_path;
     std::vector<std::string> profile_format;
 };
