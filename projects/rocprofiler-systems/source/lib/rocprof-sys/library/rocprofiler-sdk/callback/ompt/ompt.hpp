@@ -377,8 +377,8 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
                                                                     backtrace_data);
             break;
         default:
-            LOG_WARNING("tool_tracing_callback: unhandled PHASE_NONE "
-                        "for OMPT callback record.");
+            LOG_WARNING("unhandled PHASE_NONE operation {} for OMPT callback record",
+                        record.operation);
     }
 }
 
