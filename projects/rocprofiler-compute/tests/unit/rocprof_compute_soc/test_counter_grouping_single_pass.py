@@ -155,6 +155,52 @@ def test_slot_limit_fill_uses_existing_then_opens_new():
     assert slot <= placed
 
 
+def test_slot_limit_fill_never_reuses_a_surviving_bucket_name():
+    from rocprof_compute_soc.counter_grouping_single_pass import (
+        fill_slot_limit_into_existing_passes,
+    )
+
+    cfg = {"SQ": 1}
+    b0 = rebuild_counter_file("0", cfg, {"SQ_A"})
+    b2 = rebuild_counter_file("2", cfg, {"SQ_B"})
+    assert b0 is not None and b2 is not None
+
+    files, file_count, _stats = fill_slot_limit_into_existing_passes(
+        [b0, b2],
+        [frozenset({"SQ_C"})],
+        cfg,
+        file_count_start=2,
+    )
+
+    assert [bucket.name for bucket in files] == ["0", "2", "3"]
+    assert file_count == 4
+
+
+def test_slot_limit_fill_keeps_tcc_series_channels_together():
+    from rocprof_compute_soc.counter_grouping_single_pass import (
+        fill_slot_limit_into_existing_passes,
+    )
+
+    cfg = {"TCC": 1, "SQ": 1}
+    full = rebuild_counter_file("0", cfg, {"TCC_OTHER[0]", "SQ_A"})
+    assert full is not None
+    series = frozenset({"TCC_EA0_RDREQ[0]", "TCC_EA0_RDREQ[1]"})
+
+    files, _file_count, _stats = fill_slot_limit_into_existing_passes(
+        [full],
+        [series],
+        cfg,
+    )
+
+    homes = [
+        bucket
+        for bucket in files
+        if series & set(flat_counters_in_perfmon_file(bucket))
+    ]
+    assert len(homes) == 1
+    assert series <= set(flat_counters_in_perfmon_file(homes[0]))
+
+
 def test_slot_limit_fill_zero_extra_when_already_covered():
     from rocprof_compute_soc.counter_grouping_single_pass import (
         fill_slot_limit_into_existing_passes,
@@ -305,3 +351,24 @@ def test_strip_orphan_noop_without_level_home():
         "TCC_EA0_RDREQ",
         "TCC_EA0_WRREQ",
     }
+
+
+def test_strip_orphan_preserves_required_union_coverage():
+    cfg = {"TCC": 4, "SQ": 8}
+    home = rebuild_counter_file(
+        "0",
+        cfg,
+        {"TCC_EA0_RDREQ[0]", "TCC_EA0_RDREQ_LEVEL[0]"},
+    )
+    required = frozenset({"TCC_EA0_RDREQ[0]", "SQ_A"})
+    orphan = rebuild_counter_file("1", cfg, set(required))
+    assert home is not None and orphan is not None
+
+    files = _strip_orphan_tcc_ea_req_duplicates(
+        [home, orphan],
+        cfg,
+        [required],
+    )
+
+    assert _any_bucket_has_full_group(files, required)
+    assert "TCC_EA0_RDREQ" in _bucket_tcc_channel_bases(files[1])

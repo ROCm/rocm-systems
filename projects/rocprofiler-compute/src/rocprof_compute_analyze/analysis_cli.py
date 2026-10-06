@@ -239,6 +239,10 @@ class cli_analysis(OmniAnalyze_Base):
                 )
                 continue
 
+            iteration_multiplexing = self._profiling_config.get(
+                "iteration_multiplexing"
+            )
+
             if active_operator_lists or active_operator_filters:
                 process_ml_api_trace_output(workload, path_info[0])
 
@@ -247,10 +251,10 @@ class cli_analysis(OmniAnalyze_Base):
                     path_info[0],
                     args.verbose,
                 )
-                if self._profiling_config.get("iteration_multiplexing") is not None:
+                if iteration_multiplexing is not None:
                     workload.raw_pmc = self.iteration_multiplex_impute_counters(
                         workload.raw_pmc,
-                        policy=self._profiling_config["iteration_multiplexing"],
+                        policy=iteration_multiplexing,
                         workload_dir=Path(path_info[0]),
                     )
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
@@ -296,16 +300,15 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc, workload.pmc_pass_layout = file_io.load_df_pmc(
                     path_info[0],
                     args.verbose,
+                    preserve_pass_provenance=iteration_multiplexing is None,
                 )
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
+            if iteration_multiplexing is not None:
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
                     workload.raw_pmc,
-                    policy=self._profiling_config["iteration_multiplexing"],
+                    policy=iteration_multiplexing,
                     workload_dir=Path(path_info[0]),
                 )
-                # IM pass assignment is not wired yet; skip same-pass bind.
-                workload.pmc_pass_layout = None
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,

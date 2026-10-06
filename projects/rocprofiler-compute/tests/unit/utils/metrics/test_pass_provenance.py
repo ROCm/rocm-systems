@@ -18,6 +18,7 @@ from utils.metrics.pass_provenance import (
     extract_row_refs,
     natural_pass_sort_key,
     select_pass,
+    select_pass_with_normalization_fallback,
 )
 from utils.utils_analysis import process_rocpd_csv
 
@@ -89,6 +90,27 @@ def test_load_df_pmc_no_duplicates_matches_unique_columns(tmp_path) -> None:
     assert not any("@pass:" in column for column in df.columns)
 
 
+def test_load_df_pmc_legacy_shape_for_iteration_multiplexing(tmp_path) -> None:
+    _write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "GRBM_GUI_ACTIVE,100\n",
+    )
+    _write_gzip_csv(
+        tmp_path / "results_pmc_perf_1.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "GRBM_GUI_ACTIVE,200\n",
+    )
+
+    df, layout = load_df_pmc(
+        str(tmp_path),
+        verbose=0,
+        preserve_pass_provenance=False,
+    )
+
+    assert layout == PassLayout.empty()
+    assert df["GRBM_GUI_ACTIVE"].iloc[0] == 200
+    assert not any("@pass:" in column for column in df.columns)
+
+
 def test_select_pass_and_bind_expression() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
@@ -141,6 +163,83 @@ def test_select_pass_returns_none_when_counters_span_passes() -> None:
         duplicated=frozenset(),
     )
     assert select_pass(frozenset({"A", "B"}), layout) is None
+
+
+def test_select_pass_relaxes_only_runtime_normalization_counter() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"SQ_WAVES"}),
+        },
+        duplicated=frozenset(),
+    )
+
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "SQ_WAVES"}),
+        layout,
+        "MI300",
+    )
+
+    assert selected == "pmc_perf_0"
+    assert relaxed
+
+
+def test_normalization_fallback_reports_failure_when_formula_still_spans_passes():
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY", "SQ_WAVES"}),
+            "pmc_perf_1": frozenset({"TD_BUSY"}),
+        },
+        duplicated=frozenset(),
+    )
+
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "TD_BUSY", "SQ_WAVES"}),
+        layout,
+        "MI300",
+    )
+
+    assert selected is None
+    assert not relaxed
+
+
+def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
+    monkeypatch,
+) -> None:
+    long_df = pd.DataFrame({
+        "GPU_ID": [0, 0],
+        "Dispatch_ID": [0, 0],
+        "Grid_Size": [256, 256],
+        "Workgroup_Size": [64, 64],
+        "LDS_Per_Workgroup": [0, 0],
+        "Scratch_Per_Workitem": [0, 0],
+        "Arch_VGPR": [8, 8],
+        "Accum_VGPR": [0, 0],
+        "SGPR": [16, 16],
+        "Kernel_Name": ["k", "k"],
+        "Start_Timestamp": [10, 10],
+        "End_Timestamp": [20, 20],
+        "Kernel_ID": [0, 0],
+        "Counter_Name": ["SQ_WAVES", "TA_BUSY"],
+        "Counter_Value": [4, 50],
+        "Pass_Key": ["pmc_perf_0", "pmc_perf_1"],
+    })
+    layout = build_pass_layout(long_df)
+
+    def fail_provenance_merge(*_args, **_kwargs):
+        raise AssertionError
+
+    monkeypatch.setattr(
+        "utils.utils_analysis._merge_counters_with_pass_provenance",
+        fail_provenance_merge,
+    )
+
+    result = process_rocpd_csv(long_df, pass_layout=layout)
+
+    assert result["SQ_WAVES"].iloc[0] == 4
+    assert result["TA_BUSY"].iloc[0] == 50
 
 
 def test_bind_expression_dataframe_groups_by_metric_id() -> None:
