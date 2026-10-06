@@ -2348,10 +2348,12 @@ TEST_F(RmaMultiSegmentPostMPITest, IPutSignalFillsSendQueueWithoutTest)
 // Opt-in (RCCL_MSEG_SQ_STRESS=1): twice the send queue's worth of putSignals
 // without test(). Overflow is fatal for the context, as upstream: posts fail
 // without a request and every accepted request ends, in success or an error.
+// The flooded context's failure must not reach the comm's other context.
 TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
 {
     if (SyncSkip(MPIHelpers::getEnvParam<int>("RCCL_MSEG_SQ_STRESS", 0) == 0))
         GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to flood the RMA send queue";
+    numContexts_ = 2;
     if (!SetUpFixture(/*minProcesses=*/2)) return;
     const std::string skip = PrepareWindows();
     if (HasFailure()) return;
@@ -2388,7 +2390,10 @@ TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
               reqs.size(), rejected, failed);
 
     EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
-    Barrier();
+    if (HasFailure()) return;
+
+    RunAndVerify({MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], /*ctx=*/1, false)}, {0},
+                 {IntoDst(chains)}, /*signals=*/0);
 }
 
 // Every rank puts its slot into every peer and gets every peer's slot, driving

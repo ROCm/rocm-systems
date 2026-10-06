@@ -1175,7 +1175,7 @@
         },
         {
           "name": "NetIB_RMA_MultiSeg_SendQueueOversubscribe",
-          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test(): overflow is fatal for the context, so rejected posts must return no request and every accepted request must end in success or an error rather than hang",
+          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test() on context 0: overflow is fatal for that context, so rejected posts must return no request, every accepted request must end in success or an error rather than hang, and context 1 must still deliver a multi-segment put",
           "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
           "env_variables": {
             "RCCL_MSEG_SQ_STRESS": "1"
