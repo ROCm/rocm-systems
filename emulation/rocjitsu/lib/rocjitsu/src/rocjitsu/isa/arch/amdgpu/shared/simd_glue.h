@@ -733,6 +733,52 @@ inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
   };
 }
 
+/// @brief The MODE.FP_DENORM field that governs format Fmt.
+template <typename Fmt> inline uint32_t fp_denorm_mode(const Wavefront &wf) {
+  return std::is_same_v<Fmt, fp_format::F32> ? wf.fp_denorm_mode_f32()
+                                             : wf.fp_denorm_mode_f16_f64();
+}
+
+/// @brief Resolve a conversion to a floating format from MODE and the instruction fields.
+/// @details Each format reads its own MODE fields: the source's input-denormal
+/// control and the destination's rounding, output-denormal and FP16_OVFL
+/// controls. The result is ready for scalar lanes and SIMD batches alike.
+/// @param abs VOP3 ABS field, or zero.
+/// @param neg VOP3 NEG field, or zero.
+/// @param omod VOP3 OMOD field, or zero.
+/// @param clamp VOP3 CLAMP field, or zero.
+template <typename From, typename To>
+inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, uint32_t abs = 0,
+                                                         uint32_t neg = 0, uint32_t omod = 0,
+                                                         uint32_t clamp = 0) {
+  conversion::ToFloat<From, To> stages;
+  stages.abs = abs;
+  stages.neg = neg;
+  if constexpr (!conversion::is_integer_v<From>)
+    stages.input = input_denormal::Policy::make(fp_denorm_mode<From>(wf));
+  stages.output = output_modifier_policy<To>(wf, omod, clamp);
+  // OMOD treats a result that is tiny after rounding as zero, as disabled
+  // output denormals do; output_modifier then makes it +0.
+  const bool flush_tiny = output_denormal::Policy::make(fp_denorm_mode<To>(wf)).flush_outputs ||
+                          stages.output.omod != 0;
+  stages.rounding = {stages.output.round_mode, flush_tiny,
+                     std::is_same_v<To, fp_format::F16> && wf.fp16_ovfl()};
+  return stages;
+}
+
+/// @brief Resolve a VOP1 conversion to F16, which scales by SDWA OMOD before rounding.
+/// @details SDWA scales an F16 result in its producer, before narrowing; the
+/// destination write then applies OMOD's zero rules and CLAMP (sdwa::write_lane).
+/// Without SDWA there is no OMOD.
+template <typename From, typename Inst>
+inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const Inst &inst,
+                                                                        const Wavefront &wf) {
+  auto stages = conversion_to_float<From, fp_format::F16>(wf);
+  constexpr int32_t kScale[] = {0, 1, 2, -1};
+  stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
+  return stages;
+}
+
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
 /// @details Resolve MODE once, before the SIMD lane loop. The operation itself
 /// only needs to implement input flushing and produce destination-format bits.

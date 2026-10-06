@@ -37,6 +37,7 @@ from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     F64_TO_INTEGER_DTYPES,
+    TO_FLOAT_CONVERSION_DTYPES,
     is_float_relation,
 )
 
@@ -48,6 +49,40 @@ FLOAT_COMPARE_CALL = 'float_compare_'
 
 # Semantic call prefix for IEEE 754-2019 min/max forms, e.g. float_minmax_min_num.
 FLOAT_MINMAX_CALL = 'float_minmax_'
+
+# Semantic call prefix for conversions lowered through shared/conversion.h,
+# followed by the conversion data type, e.g. conversion_f32_i32.
+CONVERSION_CALL = 'conversion_'
+
+_SEMA_FORMATS = {
+    'f16': SemaType.F16,
+    'f32': SemaType.F32,
+    'f64': SemaType.F64,
+    'i16': SemaType('I', 16),
+    'u16': SemaType('U', 16),
+    'i32': SemaType.I32,
+    'u32': SemaType.U32,
+}
+
+
+def _conversion(dtype: str) -> SemaBlock:
+    """Write a conversion's destination bits from its typed source.
+
+    The typed source and destination let enrichment attach VOP3 ABS/NEG and
+    OMOD/CLAMP; lowering passes those fields to the shared conversion.
+    """
+    result_name, source_name = dtype.split('_')
+    source_ty = _SEMA_FORMATS[source_name]
+    result_ty = _SEMA_FORMATS[result_name]
+    name = f'{CONVERSION_CALL}{dtype}'
+    call = SemaNode(
+        SemaNodeKind.CALL,
+        ty=result_ty,
+        call_name=name,
+        children=(_id(name), _cast(_src(0, source_ty), source_ty)),
+    )
+    return _assign(_cast(_dst(0, result_ty), result_ty), call)
+
 
 # Three-source min/max forms recognized directly by their operation name.
 _IEEE_MINMAX3 = (
@@ -1131,6 +1166,9 @@ class _VectorUnary(_ScalarDeriver):
             )
             body = _assign(_cast(_dst(0, ty), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'cvt' and dtype in TO_FLOAT_CONVERSION_DTYPES:
+            return SemaBlock(sem.name, ExecModel.VECTOR, _conversion(dtype))
 
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'

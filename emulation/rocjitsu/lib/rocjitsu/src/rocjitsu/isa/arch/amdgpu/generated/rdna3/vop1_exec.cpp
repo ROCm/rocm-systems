@@ -1467,15 +1467,12 @@ void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   uint64_t exec = wf.exec();
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
-        *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       static_cast<float>(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                       wf.fp16_ovfl()));
+        *this, wf, vdst, lane, conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
   }
 }
 
@@ -1496,15 +1493,12 @@ RJ_NOINLINE void VCvtF16U16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   uint64_t exec = wf.exec();
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
-        *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       static_cast<float>(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                       wf.fp16_ovfl()));
+        *this, wf, vdst, lane, conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1515,16 +1509,12 @@ void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   uint64_t exec = wf.exec();
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
-        *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            *this, wf,
-            static_cast<float>(
-                static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF)),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
   }
 }
 
@@ -1545,16 +1535,12 @@ RJ_NOINLINE void VCvtF16I16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   uint64_t exec = wf.exec();
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
-        *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            *this, wf,
-            static_cast<float>(
-                static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF)),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
   }
   dpp_write_mask_scope_.restore();
 }

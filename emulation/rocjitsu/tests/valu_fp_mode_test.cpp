@@ -2716,6 +2716,63 @@ std::vector<ArithmeticCase> saturating_pack_half_cases() {
   return cases;
 }
 
+// Integer-to-float conversions round in the destination format's MODE.FP_ROUND
+// field, saturate F16 overflow under FP16_OVFL, and apply OMOD, then CLAMP, to
+// the rounded result. Results are gfx1201 captures. MODE 0xf9 rounds F32
+// toward +inf and F16/F64 toward -inf, 0xf6 the reverse; 0xf3 and 0xfc split
+// round-toward-zero the same way, so reading the wrong field fails.
+std::vector<ArithmeticCase> integer_to_float_cases() {
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
+                       uint32_t result, uint32_t mode, bool half) {
+    std::vector<std::pair<uint32_t, uint32_t>> sources{{0, input}};
+    if (half)
+      sources.emplace_back(6, 0xa5a5a5a5u);
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     {{6, result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto vop1 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
+  };
+  const auto vop3 = [](uint16_t op, rdna4::Vop3BuilderFields fields = {}) {
+    fields.vdst = 6;
+    fields.src0 = 256;
+    return rdna4::build_vop3(op, fields);
+  };
+  const auto f32_i32 = vop1(rdna4::kVCvtF32I32Vop1);
+  const auto f32_u32 = vop1(rdna4::kVCvtF32U32Vop1);
+  const auto f16_u16 = vop1(rdna4::kVCvtF16U16Vop1);
+  add("F32I32TowardPositive", f32_i32, 0x80000001u, 0xceffffffu, 0xf9u, false);
+  add("F32I32TowardNegative", f32_i32, 0x80000001u, 0xcf000000u, 0xf6u, false);
+  add("F32I32LargestTowardNegative", f32_i32, 0x7fffffffu, 0x4effffffu, 0xf6u, false);
+  add("F32U32TowardZero", f32_u32, 0xffffffffu, 0x4f7fffffu, 0xf3u, false);
+  add("F32U32NearestEven", f32_u32, 0xffffffffu, 0x4f800000u, 0xfcu, false);
+  // OMOD scales the result already rounded toward zero.
+  add("F32U32TowardZeroMul2", vop3(rdna4::kVCvtF32U32Vop3, {.omod = 1}), 0xffffffffu, 0x4fffffffu,
+      0xffu, false);
+  add("F16U16OverflowTowardPositive", f16_u16, 0xfcafffffu, kHigh | 0x7c00u, 0xf6u, true);
+  add("F16U16OverflowTowardNegative", f16_u16, 0xfcafffffu, kHigh | 0x7bffu, 0xf9u, true);
+  add("F16U16TowardNegative", f16_u16, 0xb70d7fffu, kHigh | 0x77ffu, 0xf9u, true);
+  add("F16U16Fp16Ovfl", f16_u16, 0xfd18fff0u, kHigh | 0x7bffu, 0x8000f0u, true);
+  add("F16U16NoFp16Ovfl", f16_u16, 0xfd18fff0u, kHigh | 0x7c00u, 0xf0u, true);
+  add("F16I16Clamp", vop3(rdna4::kVCvtF16I16Vop3, {.clamp = 1}), 0xd18f7fffu, kHigh | 0x3c00u,
+      0xf0u, true);
+  add("F16I16ClampNegative", vop3(rdna4::kVCvtF16I16Vop3, {.clamp = 1}), 0xc40affffu, kHigh, 0xf0u,
+      true);
+  add("F16I16Mul2Overflow", vop3(rdna4::kVCvtF16I16Vop3, {.omod = 1}), 0xed858001u, kHigh | 0xfc00u,
+      0xf0u, true);
+  // OP_SEL selects the source's high half and writes the destination's high half.
+  add("F16I16HighHalves", vop3(rdna4::kVCvtF16I16Vop3, {.opsel = 9}), 0xb38b8000u, 0xf4c7a5a5u,
+      0xffu, true);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2986,6 +3043,12 @@ INSTANTIATE_TEST_SUITE_P(FloatToIntegerNanAndFlush, ValuConversionTest,
 
 INSTANTIATE_TEST_SUITE_P(SaturatingPackHalf, ValuConversionTest,
                          testing::ValuesIn(saturating_pack_half_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(IntegerToFloat, ValuConversionTest,
+                         testing::ValuesIn(integer_to_float_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

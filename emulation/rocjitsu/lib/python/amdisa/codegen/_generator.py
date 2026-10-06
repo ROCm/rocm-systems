@@ -6378,6 +6378,8 @@ class CodeGenerator:
                 # Integer sources take no ABS/NEG, but the float result takes
                 # CLAMP and OMOD like any other VOP3 float result.
                 is_integer_to_float = cls == 'vector_unary' and dtype in (
+                    'f16_i16',
+                    'f16_u16',
                     'f32_i32',
                     'f32_u32',
                     'f32_ubyte0',
@@ -13991,6 +13993,11 @@ class CodeGenerator:
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
+            )
+            prefixed_body = _re.sub(
+                r'(amdgpu::sdwa_conversion_to_f16<[\w:]+>)\(\*this, wf\)',
+                r'\1(inst, wf)',
+                prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body

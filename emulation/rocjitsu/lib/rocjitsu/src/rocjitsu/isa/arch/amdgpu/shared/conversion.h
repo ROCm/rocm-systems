@@ -25,9 +25,13 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rounding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 namespace rocjitsu::amdgpu::conversion {
 
@@ -131,5 +135,83 @@ template <typename Int, IntegerRounding Rounding, NanResult Nan> struct F32ToInt
 using FloorI32 = F32ToInteger<int32_t, IntegerRounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
 /// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
 using NearestI32 = F32ToInteger<int32_t, IntegerRounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
+
+/// @brief An integer source format: the low Width bits of a 32-bit register.
+template <typename Int> struct Integer {
+  using Lane = uint32_t;
+  static constexpr unsigned kWidth = 8 * sizeof(Int);
+  static constexpr bool kSigned = std::is_signed_v<Int>;
+};
+
+using I16 = Integer<int16_t>;
+using U16 = Integer<uint16_t>;
+using I32 = Integer<int32_t>;
+using U32 = Integer<uint32_t>;
+
+template <typename Fmt> inline constexpr bool is_integer_v = false;
+template <typename Int> inline constexpr bool is_integer_v<Integer<Int>> = true;
+
+/// @brief Convert to a floating format, from an integer or another floating format.
+/// @details Holds every stage's settings, resolved before any lane is evaluated:
+///
+///   ABS/NEG (floating sources) -> input flush -> one rounding -> OMOD -> CLAMP
+///
+/// Usable directly as a scalar or SIMD lane operation on raw register bits. Lanes
+/// use the wider of the two formats' lane types and hold the narrower encoding in
+/// their low bits; SIMD callers convert lane widths, scalar lanes convert here.
+template <typename From, typename To> struct ToFloat {
+  /// The lane type that holds both encodings.
+  using Lane = std::conditional_t<(sizeof(typename From::Lane) > sizeof(typename To::Lane)),
+                                  typename From::Lane, typename To::Lane>;
+
+  /// VOP3 ABS and NEG fields; bit 0 applies to the source.
+  uint32_t abs = 0;
+  uint32_t neg = 0;
+  input_denormal::Policy input;
+  rounding::Policy rounding;
+  output_modifier::Policy output;
+
+  template <typename V> constexpr auto operator()(V bits) const {
+    if constexpr (std::is_arithmetic_v<V>) {
+      return static_cast<typename To::Lane>(evaluate(static_cast<Lane>(bits)));
+    } else {
+      return evaluate(bits);
+    }
+  }
+
+private:
+  // The destination layout in the shared lane type.
+  using Destination = fp_format::Format<Lane, To::kExponentBits, To::kMantissaBits>;
+
+  template <typename V> constexpr V evaluate(V bits) const {
+    static_assert(fp_format::is_lane_v<Destination, V>);
+    return output_modifier::apply<Destination>(convert(bits), output);
+  }
+
+  template <typename V> constexpr V convert(V bits) const {
+    using detail::choose;
+    if constexpr (is_integer_v<From>) {
+      constexpr Lane kMask = Lane(~Lane{0}) >> (8 * sizeof(Lane) - From::kWidth);
+      constexpr Lane kTop = Lane{1} << (From::kWidth - 1);
+      const V value = bits & V(kMask);
+      if constexpr (From::kSigned) {
+        // A negative value's magnitude is its two's complement within the width.
+        const auto negative = (value & V(kTop)) != V(Lane{0});
+        const V magnitude = choose(negative, (V(Lane{0}) - value) & V(kMask), value);
+        return rounding::from_integer<Destination>(magnitude, negative, rounding);
+      } else {
+        return rounding::from_integer<Destination>(value, value != value, rounding);
+      }
+    } else {
+      using Source = fp_format::Format<Lane, From::kExponentBits, From::kMantissaBits>;
+      bits = source_modifier::apply<Source>(bits & V(Source::kBits), 0, abs, neg);
+      bits = input_denormal::flush_input<Source>(bits, input);
+      if constexpr (From::kMantissaBits > To::kMantissaBits)
+        return rounding::narrow<Source, Destination>(bits, rounding);
+      else
+        return rounding::widen<Source, Destination>(bits);
+    }
+  }
+};
 
 } // namespace rocjitsu::amdgpu::conversion

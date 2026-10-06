@@ -8999,14 +8999,15 @@ TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
   struct Architecture {
     rj_code_arch_t arch;
     uint16_t cvt_f16_i16;
+    uint16_t cvt_f16_u16;
   };
   constexpr std::array architectures{
-      Architecture{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVCvtF16I16Vop1, cdna4::kVCvtF16U16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVCvtF16I16Vop1, cdna3::kVCvtF16U16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVCvtF16I16Vop1, cdna2::kVCvtF16U16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVCvtF16I16Vop1, cdna1::kVCvtF16U16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVCvtF16I16Vop1, rdna2::kVCvtF16U16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVCvtF16I16Vop1, rdna1::kVCvtF16U16Vop1},
   };
   struct Case {
     uint16_t opcode;
@@ -9019,6 +9020,8 @@ TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
     const std::array cases{
         Case{cdna4::kVCvtF32I32Vop1, 2u, amdgpu::sdwa::DWORD, 0x40800000u},
         Case{architecture.cvt_f16_i16, 2u, amdgpu::sdwa::WORD_0, 0x4400u},
+        // Divide before rounding: 65535 / 2 rounds to 32768, not infinity / 2.
+        Case{architecture.cvt_f16_u16, 0xffffu, amdgpu::sdwa::WORD_0, 0x7800u, 3},
         Case{cdna4::kVCvtF16F32Vop1, 0x40000000u, amdgpu::sdwa::DWORD, 0x4400u},
         Case{cdna4::kVCvtF32F16Vop1, 0x4000u, amdgpu::sdwa::WORD_0, 0x40800000u},
         Case{cdna4::kVCvtF32Ubyte0Vop1, 2u, amdgpu::sdwa::DWORD, 0x40800000u},

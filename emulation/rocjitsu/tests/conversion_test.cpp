@@ -77,4 +77,66 @@ TEST(ConversionTest, SimdLanesMatchScalarLanes) {
   }
 }
 
+template <typename From, typename To>
+conversion::ToFloat<From, To> to_float(uint32_t mode, uint32_t omod = 0, bool clamp = false) {
+  conversion::ToFloat<From, To> stages;
+  stages.rounding = {mode, false, false};
+  stages.output = {omod, clamp, true, mode, false};
+  return stages;
+}
+
+TEST(ConversionTest, IntegerSourcesUseTheirLowBits) {
+  const auto i16 = to_float<conversion::I16, rocjitsu::amdgpu::fp_format::F16>(0);
+  const auto u16 = to_float<conversion::U16, rocjitsu::amdgpu::fp_format::F16>(0);
+  EXPECT_EQ(i16(0x12348000u), 0xf800u); // -32768
+  EXPECT_EQ(i16(0xffffffffu), 0xbc00u); // -1
+  EXPECT_EQ(u16(0xffff0001u), 0x3c00u); // 1
+  EXPECT_EQ(u16(0x0000fff0u), 0x7c00u); // rounds up to infinity
+  const auto i32 = to_float<conversion::I32, rocjitsu::amdgpu::fp_format::F32>(3);
+  EXPECT_EQ(i32(0x80000000u), 0xcf000000u);
+  EXPECT_EQ(i32(0x80000001u), 0xceffffffu);
+}
+
+TEST(ConversionTest, OutputModifiersFollowRounding) {
+  // Round toward zero first, then scale: 0xffffffff -> 0x4f7fffff -> 0x4fffffff.
+  const auto u32 = to_float<conversion::U32, rocjitsu::amdgpu::fp_format::F32>(3, 1);
+  EXPECT_EQ(u32(0xffffffffu), 0x4fffffffu);
+  const auto clamped = to_float<conversion::I16, rocjitsu::amdgpu::fp_format::F16>(0, 0, true);
+  EXPECT_EQ(clamped(0x7fffu), 0x3c00u);
+  EXPECT_EQ(clamped(0xffffu), 0u);
+}
+
+TEST(ConversionTest, FloatSourcesTakeModifiersBeforeFlushing) {
+  conversion::ToFloat<rocjitsu::amdgpu::fp_format::F32, rocjitsu::amdgpu::fp_format::F64> wide;
+  wide.neg = 1;
+  EXPECT_EQ(wide(0x00000001u), uint64_t{0xb6a0000000000000});
+  wide.input = kFlush;
+  EXPECT_EQ(wide(0x00000001u), uint64_t{0x8000000000000000});
+  // Scalar lanes of a narrowing conversion return the destination lane type.
+  conversion::ToFloat<rocjitsu::amdgpu::fp_format::F64, rocjitsu::amdgpu::fp_format::F32> narrow;
+  narrow.abs = 1;
+  const uint32_t one = narrow(uint64_t{0xbff0000000000000});
+  EXPECT_EQ(one, 0x3f800000u);
+}
+
+TEST(ConversionTest, ToFloatSimdLanesMatchScalarLanes) {
+  using V = util::native<uint32_t>;
+  std::mt19937 random(6);
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    auto i16 = to_float<conversion::I16, rocjitsu::amdgpu::fp_format::F16>(mode, mode);
+    auto f16 = to_float<rocjitsu::amdgpu::fp_format::F32, rocjitsu::amdgpu::fp_format::F16>(mode);
+    f16.rounding.flush_tiny = mode % 2 == 0;
+    f16.neg = mode & 1u;
+    for (int i = 0; i < 2000; ++i) {
+      const V input([&](auto) { return static_cast<uint32_t>(random()); });
+      const V half = i16(input);
+      const V narrowed = f16(input);
+      for (std::size_t lane = 0; lane < V::size(); ++lane) {
+        ASSERT_EQ(half[lane], i16(uint32_t(input[lane])));
+        ASSERT_EQ(narrowed[lane], f16(uint32_t(input[lane])));
+      }
+    }
+  }
+}
+
 } // namespace

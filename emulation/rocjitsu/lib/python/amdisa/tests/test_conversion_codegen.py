@@ -1,0 +1,101 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Tests for conversions lowered through shared/conversion.h."""
+
+import pytest
+
+from amdisa.codegen.execute import conversion
+from amdisa.codegen.execute.sema_lower import lower_sema_block
+from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
+from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_enrich import enrich_block
+from amdisa.semantics import derive_semantics
+
+_INTEGER_TO_FLOAT = [
+    ('V_CVT_F32_I32', 'amdgpu::conversion::I32, amdgpu::fp_format::F32'),
+    ('V_CVT_F32_U32', 'amdgpu::conversion::U32, amdgpu::fp_format::F32'),
+    ('V_CVT_F16_I16', 'amdgpu::conversion::I16, amdgpu::fp_format::F16'),
+    ('V_CVT_F16_U16', 'amdgpu::conversion::U16, amdgpu::fp_format::F16'),
+]
+
+
+def _lower(name, enc, fields=frozenset()):
+    block = derive_sema_block(derive_semantics(name, enc))
+    if fields:
+        block = enrich_block(block, enc_field_names=frozenset(fields))
+    return lower_sema_block(block)
+
+
+@pytest.mark.parametrize(('name', 'formats'), _INTEGER_TO_FLOAT)
+def test_integer_to_float_vop3_passes_output_modifiers_to_one_stage_object(
+    name, formats
+):
+    cpp = _lower(name, 'ENC_VOP3', {'clamp', 'omod'})
+    stages = (
+        f'const auto conversion = amdgpu::conversion_to_float<{formats}>'
+        '(wf, 0u, 0u, inst_.omod, inst_.clamp);'
+    )
+    assert stages in cpp
+    # Bits go straight to the destination: no host float, rounding or rescaling.
+    assert 'conversion(' in cpp.split(stages, 1)[1]
+    for host in (
+        'static_cast<float>',
+        'f32_to_f16',
+        'apply_omod',
+        'clamp_floating_result',
+    ):
+        assert host not in cpp
+
+
+@pytest.mark.parametrize(('name', 'formats'), _INTEGER_TO_FLOAT)
+def test_integer_to_float_vop1_scales_f16_results_by_sdwa_omod(name, formats):
+    cpp = _lower(name, 'ENC_VOP1')
+    if 'F16' in name:
+        source = formats.split(',')[0]
+        expected = f'amdgpu::sdwa_conversion_to_f16<{source}>(*this, wf);'
+    else:
+        expected = f'amdgpu::conversion_to_float<{formats}>(wf);'
+    assert f'const auto conversion = {expected}' in cpp
+
+
+@pytest.mark.parametrize(
+    ('dtype', 'formats'),
+    [
+        ('f32_i32', 'amdgpu::conversion::I32, amdgpu::fp_format::F32'),
+        ('f32_u32', 'amdgpu::conversion::U32, amdgpu::fp_format::F32'),
+    ],
+)
+def test_f32_integer_conversion_simd_keeps_output_modifiers(dtype, formats):
+    vop1 = simd_probe_line(f'v_cvt_{dtype}_vop1')
+    vop3 = simd_probe_line(f'v_cvt_{dtype}_vop3')
+    assert vop1 == (
+        f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, '
+        f'amdgpu::conversion_to_float<{formats}>(wf));'
+    )
+    assert vop3 == (
+        f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, '
+        f'amdgpu::conversion_to_float<{formats}>(wf, 0u, 0u, inst.inst_.omod, inst.inst_.clamp));'
+    )
+
+
+@pytest.mark.parametrize('dtype', ['f16_i16', 'f16_u16'])
+def test_f16_integer_conversion_simd_writes_true16_halves(dtype):
+    stages = conversion.stages_expr(
+        dtype, ('0u', '0u', 'inst.inst_.omod', 'inst.inst_.clamp')
+    )
+    vop3 = simd_probe_line(f'v_cvt_{dtype}_vop3', true16_vop3=True)
+    assert vop3 == (
+        f'  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, {stages})) return;'
+    )
+    e32 = local_coverage_probe(
+        f'v_cvt_{dtype}_vop1', e32=True, e32_half_dst=True, e32_half_inputs=1
+    )
+    vop1_stages = conversion.stages_expr(dtype)
+    assert e32 == (
+        f'  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, {vop1_stages})) return;'
+    )
+    # Without true16 halves the result is written zero-extended.
+    assert simd_probe_line(f'v_cvt_{dtype}_vop1').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,'
+    )

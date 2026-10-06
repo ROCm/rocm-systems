@@ -14,10 +14,15 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare, float_minmax, vop3_modifiers
+from amdisa.codegen.execute import (
+    conversion,
+    float_compare,
+    float_minmax,
+    vop3_modifiers,
+)
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
-from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
+from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -1140,9 +1145,17 @@ def _lower_dst_write(
     # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
     # conversion to host float and back. These forms only exist on targets
     # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
+    # Conversions also write bits; their stage object applies SDWA F16 OMOD.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_bits = _is_float_minmax(selection_node)
-    if writes_bits:
+    writes_bits = _is_float_minmax(selection_node) or _is_conversion(selection_node)
+    if _is_conversion(selection_node):
+        rhs = _lower_conversion(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif writes_bits:
         _, rhs = _float_minmax_selection(
             selection_node,
             ctx,
@@ -2339,6 +2352,46 @@ def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
     if dtype == 'f16':
         return f'util::f16_to_f32(static_cast<uint16_t>({selected}))'
     return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({selected})'
+
+
+def _is_conversion(node: SemaNode) -> bool:
+    return node.kind == SemaNodeKind.CALL and (node.call_name or '').startswith(
+        CONVERSION_CALL
+    )
+
+
+def _lower_conversion(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None,
+) -> str:
+    """Lower a conversion to destination bits through shared/conversion.h.
+
+    The stage object, resolved before the lane loop, applies the source's
+    ABS/NEG and the destination's OMOD/CLAMP. Without VOP3 modifiers, an F16
+    result takes the SDWA OMOD; see conversion.declaration.
+    """
+    dtype = (node.call_name or '').removeprefix(CONVERSION_CALL)
+    source = node.children[1]
+    abs_field = neg_field = '0u'
+    if source.kind == SemaNodeKind.CALL and source.call_name == 'apply_src_mod':
+        if source.children[4].lit_value == '1':
+            abs_field = 'inst_.abs'
+        if source.children[3].lit_value == '1':
+            neg_field = 'inst_.neg'
+        source = source.children[1]
+    while source.kind == SemaNodeKind.CAST:
+        source = source.children[0]
+    if source.kind != SemaNodeKind.INSTOPERAND:
+        raise ValueError(f'unexpected {node.call_name} source: {source}')
+    fields = None
+    if output_fields is not None or (abs_field, neg_field) != ('0u', '0u'):
+        fields = (abs_field, neg_field, *(output_fields or ('0u', '0u')))
+    declaration = conversion.declaration(dtype, fields)
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    # Register reads already have the unsigned type the stage object takes.
+    return f'{conversion.STAGES}({_lower_expr(source, ctx)})'
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:

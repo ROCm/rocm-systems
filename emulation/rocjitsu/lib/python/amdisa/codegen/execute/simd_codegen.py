@@ -28,7 +28,7 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import conversion, float_compare, float_minmax
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -569,17 +569,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[](auto a) {'
         ' return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 24) & 0xFFu); }',
     ),
-    # --- int<->float casts (single-rounded, bit-identical) ---
-    'v_cvt_f32_i32_vop1': (
-        'int32_t',
-        'float32_t',
-        '[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a); }',
-    ),
-    'v_cvt_f32_u32_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a); }',
-    ),
+    # Integer-to-float conversions round in MODE; see conversion.simd_probe.
     # --- float rounding (bit-identical to std::* on host) ---
     'v_floor_f32_vop1': (
         'float32_t',
@@ -771,20 +761,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         'uint32_t',
         '[](auto a) { return util::f32_to_f16_simd(a); }',
-    ),
-    'v_cvt_f16_i16_vop1': (
-        'int32_t',
-        'uint32_t',
-        '[](auto a) {'
-        ' auto i = (a << 16) >> 16;'  # sign-extend low 16 bits
-        ' return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i)); }',
-    ),
-    'v_cvt_f16_u16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) {'
-        ' auto u = a & 0xFFFFu;'
-        ' return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u)); }',
     ),
     'v_cvt_i16_f16_vop1': (
         'uint32_t',
@@ -2683,6 +2659,9 @@ def _simd_probe_line(
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:
         return minmax_probe
+    conversion_probe = conversion.simd_probe(template_name, true16_vop3=true16_vop3)
+    if conversion_probe is not None:
+        return conversion_probe
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -3138,8 +3117,6 @@ def _simd_probe_line(
                 # Modified F32 inputs use the scalar conversion body.
                 return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
             if base in (
-                'v_cvt_f32_i32',
-                'v_cvt_f32_u32',
                 'v_cvt_f32_ubyte0',
                 'v_cvt_f32_ubyte1',
                 'v_cvt_f32_ubyte2',
@@ -3377,6 +3354,13 @@ def _local_coverage_probe(
             False,
             e32_half_inputs if e32 else 0,
             '[](auto a) { return std::bit_cast<util::native<uint32_t>>(util::bf16_to_f32_simd(a)); }',
+        )
+    if (e32 or true16_vop3) and conversion.needs_half_glue(template_name):
+        return conversion.simd_probe(
+            template_name,
+            true16_vop3=true16_vop3,
+            e32=e32,
+            e32_half_inputs=e32_half_inputs,
         )
     if template_name in ('v_cvt_f32_fp8_vop3', 'v_cvt_f32_bf8_vop3'):
         convert = (
