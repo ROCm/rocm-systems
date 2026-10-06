@@ -233,7 +233,7 @@ def compute_medians_for_workload(
     from utils.metrics.expression import build_metric_value_string
     from utils.utils_common import canonical_config_arch
 
-    sys_info = parser.reconcile_sysinfo_l2_channels(pd.read_csv(wl_dir / "sysinfo.csv"))
+    sys_info = pd.read_csv(wl_dir / "sysinfo.csv")
     arch = str(sys_info.iloc[0]["gpu_arch"])
     config_arch = canonical_config_arch(arch) or arch
     config_dir = (
