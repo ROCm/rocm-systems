@@ -1764,6 +1764,33 @@ TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
   }
 }
 
+TEST(CacheMaintenanceTest, FullInvalidationVisitsSparseAndBoundarySets) {
+  Cache<6, 32, 2> cache;
+  constexpr std::array<uint32_t, 5> sets{0, 7, 8, 24, 31};
+  std::array<CacheTag *, sets.size()> retained{};
+  for (uint32_t round = 0; round != 3; ++round) {
+    for (size_t index = 0; index != sets.size(); ++index) {
+      const uint64_t address = uint64_t{sets[index]} * 64;
+      auto *tag = cache.allocate(address, round);
+      tag->dirty = true;
+      tag->coherence_epoch = 17;
+      tag->coherence = CoherenceState::MODIFIED;
+      retained[index] = tag;
+      if (index % 2 == 0)
+        cache.invalidate(address, round);
+    }
+    cache.invalidate_all();
+    for (size_t index = 0; index != sets.size(); ++index) {
+      EXPECT_FALSE(cache.lookup(uint64_t{sets[index]} * 64, nullptr, round));
+      EXPECT_FALSE(retained[index]->valid);
+      EXPECT_FALSE(retained[index]->dirty);
+      EXPECT_EQ(retained[index]->coherence_epoch, 0u);
+      EXPECT_EQ(retained[index]->coherence, CoherenceState::INVALID);
+    }
+    cache.invalidate_all();
+  }
+}
+
 TEST(CacheMaintenanceTest, DirtyWalkPreservesOrderAcrossReplacementAndInvalidation) {
   TestCache cache;
   constexpr uint64_t kLineSize = TestCache::LINE_SIZE;

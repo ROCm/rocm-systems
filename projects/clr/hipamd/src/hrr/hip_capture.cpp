@@ -124,6 +124,14 @@ static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
                   sz);
 }
 
+// Wait for an async D2H copy before its host buffer is snapshotted. Once the
+// writer has closed, for instance after capture stopped for lack of space, the
+// snapshot would be dropped, so the copy is left asynchronous as the app asked.
+static hipError_t sync_for_d2h_snapshot(hipStream_t stream) {
+  if (!hrr_cap::writer::is_open()) return hipSuccess;
+  return g_real_table.hipStreamSynchronize_fn(stream);
+}
+
 // Parse the extra[] sentinel format for packed kernarg buffers.
 static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_size) {
   if (!extra) return false;
@@ -653,7 +661,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
       hrr_trace_h2d("hipMemcpyAsync", dst, sizeBytes);
     } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r == hipSuccess)
         h = hrr_cap::writer::write_blob(dst, sizeBytes);
       else
@@ -737,7 +745,7 @@ hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
     hrr_cap::Hash128 h{0, 0};
     if (dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r == hipSuccess)
         h = hrr_cap::writer::write_blob(dst, sizeBytes);
       else
@@ -1596,7 +1604,7 @@ static void capture_memcpy3d_impl(
     // its rect, and reading it can reach past the caller's buffer. The null
     // stream is synchronised too, as in the driver 3D path below.
     if (is_async) {
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r != hipSuccess) {
         LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 3D blob skipped",
                          sync_r);
@@ -1786,7 +1794,7 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
       // is valid and waits on the blocking streams, which is what the app itself
       // would have to do before reading dstHost.
       if (is_async) {
-        hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+        hipError_t sync_r = sync_for_d2h_snapshot(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H drv blob skipped",
                            sync_r);
@@ -1891,7 +1899,7 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
   // stream is asynchronous too, and a failed sync leaves no blob to take.
   bool dst_ready = true;
   if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost) {
-    hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+    hipError_t sync_r = sync_for_d2h_snapshot(stream);
     if (sync_r != hipSuccess) {
       LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H param 2D blob skipped",
                        sync_r);
@@ -1939,7 +1947,7 @@ static void capture_memcpy2d_impl(
     size_t n = memcpy2d_host_byte_count(dpitch, width, height);
     if (n > 0) {
       if (is_async) {
-        hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+        hipError_t sync_r = sync_for_d2h_snapshot(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 2D blob skipped",
                            sync_r);
@@ -2574,7 +2582,12 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // A refused open leaves capture off, so take the shims out of the dispatch
+    // table too rather than leave every call going through them for nothing.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) {
+      hip_capture_uninstall();
+      return;
+    }
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

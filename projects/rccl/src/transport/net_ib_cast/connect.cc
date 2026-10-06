@@ -124,6 +124,8 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
+  IbCastGidInfoSnapshot(base, ibDev);
+
   if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
     WARN("NET/IB: %s: requested CQ size %ld exceeds device %s max_cqe %d, clamping",
          __func__, cqSize, ibDev->devName, ibDev->maxCqe);
@@ -392,6 +394,17 @@ ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, str
 
   return ncclSuccess;
 }
+
+ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo) {
+  if (context == NULL || portAttr == NULL || gidInfo == NULL) return ncclInternalError;
+  gidInfo->link_layer = portAttr->link_layer;
+  NCCLCHECK(IbCastGetGidIndex(context, portNum, portAttr, &gidInfo->localGidIndex));
+  if (gidInfo->localGidIndex < 0) return ncclInternalError;
+  NCCLCHECK(wrap_ibv_query_gid(context, portNum, gidInfo->localGidIndex, &gidInfo->localGid));
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp) {
   struct ncclIbQpInitAttr* initAttr = &qp->initAttr;
   struct ibv_qp_attr qpAttr;
@@ -1355,6 +1368,7 @@ ib_recv_dev_list:
   comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
 
   INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d", isP2p, handle->isRMA,
        comm->useCtsOffload, comm->base.recvMatchingScheme);
@@ -1407,6 +1421,7 @@ ib_recv_dev_list:
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
   meta.isRMA = handle->isRMA;
+  meta.optRecvCompletion = comm->base.optRecvCompletion;
   meta.sharedGroupIdx = -1;
   meta.commId = 0;
   // TODO - QP sharing
@@ -1424,7 +1439,7 @@ ib_recv_dev_list:
     NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId, depthMult), ret, fail);
     comm->telChId = channelId;
     comm->telChStats = NULL;
-  
+
     // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
     // the untracked value the hooks expect.
     if (rcclTelemetryOn()) {
@@ -1483,13 +1498,7 @@ ib_recv_dev_list:
     devInfo->rkey = commDev->ctsFifoMr->rkey;
 
     // Pack local GID info
-    devInfo->link_layer = commDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &commDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, commDev->base.gidInfo.localGidIndex,
-                                     &commDev->base.gidInfo.localGid),
-                  ret, fail);
+    devInfo->link_layer = commDev->base.gidInfo.link_layer;
     devInfo->gid.global.subnet_prefix = commDev->base.gidInfo.localGid.global.subnet_prefix;
     devInfo->gid.global.interface_id = commDev->base.gidInfo.localGid.global.interface_id;
 
@@ -1567,6 +1576,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
+  comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1986,6 +1996,10 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
 
   struct IbCastSharedQp* recvExistingSlot = IbCastFindSharedQp(&recvProbeKey);
 
+  // QP sharing disables CTS offload.
+  rComm->useCtsOffload = false;
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
+
   if (recvExistingSlot != NULL) {
     // SECONDARY receiver: reuse existing QPs
     INFO(NCCL_NET, "NET/IB: %s: QP sharing SECONDARY receiver commId=%u group=%d",
@@ -1994,7 +2008,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     rComm->base.qpSharing.isPrimary = false;
     int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
     rComm->base.qpSharing.groupNqps = primaryNqps;
-    rComm->useCtsOffload = false;
 
     IbCastSharedQpKey recvKey;
     memset(&recvKey, 0, sizeof(recvKey));
@@ -2087,7 +2100,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d",
          __func__, rComm->base.qpSharing.netIbCommId, recvGroupIdx);
     rComm->base.qpSharing.isPrimary = true;
-    rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
     *outRole = QP_SHARING_PRIMARY;
   }
 
@@ -2273,6 +2285,7 @@ ib_recv:
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
        remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
        rComm->base.recvMatchingScheme);
@@ -2348,12 +2361,6 @@ ib_recv:
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
     ibDev = IbCastDevs + ibDevN;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &rCommDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, rCommDev->base.gidInfo.localGidIndex,
-                                     &rCommDev->base.gidInfo.localGid),
-                  ret, fail);
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
     if (link_layer != ibDev->portAttr.link_layer) {
       int ibDev0 = rComm->devs[0].base.ibDevN;
@@ -2552,7 +2559,7 @@ ib_recv:
 
     // Fill Handle
     meta.devs[i].lid = ibDev->portAttr.lid;
-    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
+    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer;
     meta.devs[i].ib_port = ibDev->portNum;
     meta.devs[i].gid.global.subnet_prefix = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
     meta.devs[i].gid.global.interface_id = rCommDev->base.gidInfo.localGid.global.interface_id;
@@ -2565,6 +2572,8 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
+  meta.optRecvCompletion = rComm->base.optRecvCompletion;
+  rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;

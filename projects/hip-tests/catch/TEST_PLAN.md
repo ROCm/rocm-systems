@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 616 | 616 | 0 |
-| **total** | **616** | **616** | **0** |
+| `contract` | 618 | 618 | 0 |
+| **total** | **618** | **618** | **0** |
 
 ## Tier: `contract`
 
@@ -704,12 +704,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (3 cases)
+### `kernel_object_attributes` (5 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues` | hipKernelGetAttribute | reports a positive max-threads-per-block and non-negative static resource usage for a loaded kernel |
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
 
 ### `library` (14 cases)

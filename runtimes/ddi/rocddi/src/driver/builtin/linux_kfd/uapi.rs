@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! The KFD UAPI records used by memory, queues, and native loss reporting.
 //!
 //! These layouts follow the vendored `ROCm` Systems KFD UAPI in
@@ -44,7 +46,6 @@ pub(super) const SVM: u64 = request(3, 0x20, 24);
 pub(super) const IPC_IMPORT_HANDLE: u64 = request(3, 0x80, 48);
 pub(super) const IPC_EXPORT_HANDLE: u64 = request(3, 0x81, 32);
 pub(super) const SPM: u64 = request(3, 0x84, 32);
-pub(super) const PC_SAMPLE: u64 = request(3, 0x85, 32);
 
 pub(super) const SVM_OP_SET_ATTR: u32 = 0;
 pub(super) const SVM_OP_GET_ATTR: u32 = 1;
@@ -61,16 +62,6 @@ pub(super) const SVM_ATTR_GRANULARITY: u32 = 7;
 pub(super) const SPM_OP_ACQUIRE: u32 = 0;
 pub(super) const SPM_OP_RELEASE: u32 = 1;
 pub(super) const SPM_OP_SET_DESTINATION: u32 = 2;
-pub(super) const PC_SAMPLE_OP_QUERY_CAPABILITIES: u32 = 0;
-pub(super) const PC_SAMPLE_OP_CREATE: u32 = 1;
-pub(super) const PC_SAMPLE_OP_DESTROY: u32 = 2;
-pub(super) const PC_SAMPLE_OP_START: u32 = 3;
-pub(super) const PC_SAMPLE_OP_STOP: u32 = 4;
-pub(super) const PC_SAMPLE_METHOD_HOSTTRAP: u32 = 1;
-pub(super) const PC_SAMPLE_METHOD_STOCHASTIC: u32 = 2;
-pub(super) const PC_SAMPLE_TYPE_TIME_US: u32 = 0;
-pub(super) const PC_SAMPLE_TYPE_CLOCK_CYCLES: u32 = 1;
-pub(super) const PC_SAMPLE_TYPE_INSTRUCTIONS: u32 = 2;
 
 const IOCTL_SIZE_MAX: usize = (1 << 14) - 1;
 
@@ -337,29 +328,6 @@ pub(super) struct Spm {
     pub has_data_loss: u32,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) struct PcSampleInfo {
-    pub interval: u64,
-    pub interval_min: u64,
-    pub interval_max: u64,
-    pub flags: u64,
-    pub method: u32,
-    pub sample_type: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct PcSample {
-    pub sample_info: u64,
-    pub sample_info_count: u32,
-    pub operation: u32,
-    pub gpu_id: u32,
-    pub trace_id: u32,
-    pub flags: u32,
-    pub version: u32,
-}
-
 impl Default for ExportDmaBuf {
     fn default() -> Self {
         Self {
@@ -483,18 +451,6 @@ const _: () = {
     assert!(offset_of!(Spm, gpu_id) == 20);
     assert!(offset_of!(Spm, bytes_copied) == 24);
     assert!(offset_of!(Spm, has_data_loss) == 28);
-    assert!(size_of::<PcSampleInfo>() == 40);
-    assert!(offset_of!(PcSampleInfo, interval_min) == 8);
-    assert!(offset_of!(PcSampleInfo, flags) == 24);
-    assert!(offset_of!(PcSampleInfo, method) == 32);
-    assert!(offset_of!(PcSampleInfo, sample_type) == 36);
-    assert!(size_of::<PcSample>() == 32);
-    assert!(offset_of!(PcSample, sample_info_count) == 8);
-    assert!(offset_of!(PcSample, operation) == 12);
-    assert!(offset_of!(PcSample, gpu_id) == 16);
-    assert!(offset_of!(PcSample, trace_id) == 20);
-    assert!(offset_of!(PcSample, flags) == 24);
-    assert!(offset_of!(PcSample, version) == 28);
     assert!(size_of::<CreateEvent>() == 32);
     assert!(offset_of!(CreateEvent, event_id) == 24);
     assert!(size_of::<DestroyEvent>() == 8);
