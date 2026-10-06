@@ -104,3 +104,27 @@ def test_list_torch_only_confines_tree_and_kernels(
     assert "PyTorch Operator Call Tree:" in out
     assert "Triton Operator Call Tree" not in out
     assert "triton.JITFunction" not in out
+
+
+@pytest.mark.ml_api_trace
+def test_list_triton_only_confines_tree_and_kernels(
+    ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-triton-operators",
+        "--path",
+        ml_api_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Triton Operator Call Tree:" in out
+    assert "PyTorch Operator Call Tree" not in out
+    relu_idx = out.find("aten::relu")
+    triton_idx = out.find("triton.JITFunction")
+    assert relu_idx >= 0
+    assert triton_idx > relu_idx
+    assert "(id " not in out[relu_idx:triton_idx]
+    assert "(id " in out[triton_idx:]
