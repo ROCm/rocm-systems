@@ -573,7 +573,7 @@ class OmniSoC_Base:
 
         **Default:** single-pass-packable — every metric whose PMC set fits one
         ``CounterFile`` gets a full-bucket collection (counters may be duplicated
-        across passes), then ``SLOT_LIMIT`` PMCs are filled into existing buckets.
+        across passes), then SPU PMCs are filled into existing buckets.
 
         **Legacy heuristic** (priority coalesce → first-fit):
         set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1``.
