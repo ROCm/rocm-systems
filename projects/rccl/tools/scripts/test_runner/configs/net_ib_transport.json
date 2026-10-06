@@ -1154,7 +1154,7 @@
         },
         {
           "name": "NetIB_RMA_MultiSeg_PostPath",
-          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops and per-context batches",
+          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
           "test_filter": "RmaMultiSegmentPostMPITest.*"
         },
         {
