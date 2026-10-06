@@ -2829,11 +2829,11 @@ struct_amdsmi_dimm_power_t._pack_ = 1 # source:False
 struct_amdsmi_dimm_power_t._layout_ = 'ms'
 struct_amdsmi_dimm_power_t._fields_ = [
     ('power', ctypes.c_uint16, 15),
-    ('PADDING_0', ctypes.c_uint8, 1),
+    ('PADDING_0', ctypes.c_uint16, 1),
     ('update_rate', ctypes.c_uint16, 9),
-    ('PADDING_1', ctypes.c_uint8, 7),
+    ('PADDING_1', ctypes.c_uint16, 7),
     ('dimm_addr', ctypes.c_uint16, 8),
-    ('PADDING_2', ctypes.c_uint8, 8),
+    ('PADDING_2', ctypes.c_uint16, 8),
 ]
 
 amdsmi_dimm_power_t = struct_amdsmi_dimm_power_t
@@ -2844,11 +2844,12 @@ struct_amdsmi_dimm_thermal_t._pack_ = 1 # source:False
 struct_amdsmi_dimm_thermal_t._layout_ = 'ms'
 struct_amdsmi_dimm_thermal_t._fields_ = [
     ('sensor', ctypes.c_uint16, 11),
-    ('PADDING_0', ctypes.c_uint8, 5),
+    ('PADDING_0', ctypes.c_uint16, 5),
     ('update_rate', ctypes.c_uint16, 9),
-    ('PADDING_1', ctypes.c_uint8, 7),
+    ('PADDING_1', ctypes.c_uint16, 7),
     ('dimm_addr', ctypes.c_uint16, 8),
-    ('PADDING_2', ctypes.c_uint32, 24),
+    ('PADDING_2', ctypes.c_uint16, 8),
+    ('PADDING_2_1', ctypes.c_uint16, 16),
     ('temp', ctypes.c_float),
 ]
 

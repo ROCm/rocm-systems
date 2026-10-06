@@ -117,6 +117,49 @@ def insert_layout_ms(full_path_file_name):
     shutil.move(abs_path, full_path_file_name)
 
 
+def unify_bitfield_padding(full_path_file_name):
+    # clang2py types each PADDING bit-field by its own width (c_uint8 for up to
+    # 8 bits) instead of by the storage unit it completes. Python 3.14+ lays out
+    # _layout_ = 'ms' structs with MSVC rules, where a bit-field of a different
+    # type starts a new unit, so such structs grow and later fields move. Give
+    # each padding bit-field the type of the unit it completes.
+    bitfield = re.compile(r"^(\s*)\('(\w+)', ctypes\.(c_u?int(8|16|32|64)), (\d+)\),\s*$")
+    fh, abs_path = tempfile.mkstemp()
+    with os.fdopen(fh, "w", encoding="UTF-8") as new_file:
+        with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
+            unit_type, unit_width, used = None, 0, 0
+            for line in old_file:
+                m = bitfield.match(line)
+                if not m:
+                    unit_type, unit_width, used = None, 0, 0
+                    new_file.write(line)
+                    continue
+                indent, name, ctype, width, bits = m.group(1, 2, 3, 4, 5)
+                width, bits = int(width), int(bits)
+                if name.startswith("PADDING_") and unit_type and ctype != unit_type:
+                    part = 0
+                    while bits:
+                        if used == unit_width:
+                            used = 0
+                        chunk = min(bits, unit_width - used)
+                        suffix = f"_{part}" if part else ""
+                        new_file.write(
+                            f"{indent}('{name}{suffix}', ctypes.{unit_type}, {chunk}),\n"
+                        )
+                        used += chunk
+                        bits -= chunk
+                        part += 1
+                    continue
+                if ctype != unit_type or used + bits > width:
+                    unit_type, unit_width, used = ctype, width, 0
+                used += bits
+                new_file.write(line)
+
+    shutil.copymode(full_path_file_name, abs_path)
+    os.remove(full_path_file_name)
+    shutil.move(abs_path, full_path_file_name)
+
+
 def find_replacement(search_str1, search_str2, line):
     pos1 = line.find(search_str1)
     if pos1 < 0:
@@ -495,6 +538,7 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
 
         write_file(output_file, output_file_array)
 
+    unify_bitfield_padding(output_file)
     insert_layout_ms(output_file)
 
 
