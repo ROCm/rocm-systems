@@ -28,6 +28,6 @@ The following environment variables affect the rocDecode runtime.
      - | Comma-separated list of GPU indices. Parsed when ``ROCR_VISIBLE_DEVICES`` isn't set.
    * - ``LIBVA_DRIVERS_PATH``
      - | Optional. Path to the directory containing the VA-API driver.
-       | You don't normally need to set this. The libva that ships with ROCm finds the driver under ``ROCM_PATH``: in ``%ROCM_PATH%\lib\rocm_sysdeps\bin`` on Windows and ``$ROCM_PATH/lib/rocm_sysdeps/lib`` on Linux. A distribution-provided libva uses the driver directory that was configured when it was built.
-       | Set it only to load a driver from outside the ROCm installation. It replaces libva's default search directory rather than adding to it, so an incorrect value makes VA-API initialization fail.
+       | Only required if the driver you want to use is neither the one that ships with ROCm nor the distribution-provided one. ROCm's libva finds its driver under ``ROCM_PATH`` on its own: ``%ROCM_PATH%\lib\rocm_sysdeps\bin`` on Windows, ``$ROCM_PATH/lib/rocm_sysdeps/lib`` on Linux.
+       | This replaces libva's default search directory rather than adding to it, so an incorrect value makes VA-API initialization fail.
 
