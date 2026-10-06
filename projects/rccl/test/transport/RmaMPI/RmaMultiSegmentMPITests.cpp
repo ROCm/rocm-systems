@@ -1905,6 +1905,12 @@ protected:
         return false;
     }
 
+    // Classic gives a no-WR op its predecessor's id; IB-CAST completes it on its own.
+    bool DoneBehindZeroSizeOp(void* req)
+    {
+        return rma_ == &ncclRmaIbProxy ? DoneOnFirstTest(req) : PollUntilDone(req);
+    }
+
     // Like PollUntilDone, but returns test()'s error, or ncclInProgress on timeout.
     ncclResult_t PollStatus(void* req, int timeoutMs)
     {
@@ -2128,7 +2134,7 @@ TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOpsCompleteWithQueuedPredecessor)
         void* zeroPut = post(OpKind::Put, srcMh_, dstMh_, none);
         void* zeroGet = post(OpKind::Get, dstMh_, srcMh_, none);
         ok = PollUntilDone(zeroPut) && ok;
-        ok = DoneOnFirstTest(first) && ok;
+        ok = DoneBehindZeroSizeOp(first) && ok;
         ok = DoneOnFirstTest(zeroGet) && ok;
 
         void* signalOnly = post(OpKind::PutSignal, srcMh_, dstMh_, none);
@@ -2277,7 +2283,7 @@ TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
         EXPECT_EQ(accepted, 0) << "invalid ops were accepted";
         void* zero = post(MakeOp(OpKind::Put, srcMh_, dstMh_, Chain{}, 0, aggregate));
         ok = PollUntilDone(zero) && ok;
-        ok = DoneOnFirstTest(first) && ok;
+        ok = DoneBehindZeroSizeOp(first) && ok;
 
         std::vector<void*> reqs;
         for (int i = 0; i < kBurst; i++)
@@ -2391,6 +2397,9 @@ TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
     }
     TEST_INFO("send-queue flood: %zu accepted, %d rejected, %d ended in an error",
               reqs.size(), rejected, failed);
+    // IB-CAST waits for send-queue credits instead of overflowing the QP.
+    if (rma_ == &IbCastRmaIbProxy)
+        EXPECT_EQ(rejected + failed, 0) << "IB-CAST rejected or failed posts instead of waiting for credits";
 
     EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
     if (HasFailure()) return;

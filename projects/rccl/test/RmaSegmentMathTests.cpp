@@ -467,11 +467,12 @@ TEST(RmaSegmentMathTest, LayoutsMatchRequiresEqualBoundaries)
 TEST(RmaSegmentMathTest, SegIndexOfUsesHalfOpenOffsets)
 {
     const size_t off[] = {0, 4096, 8192};
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 0), 0);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 4095), 0);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 4096), 1);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 8192), 1);
-    EXPECT_EQ(ncclRmaSegIndexOf(0, off, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 4095), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 4096), 1);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 8192), 1);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 0, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(nullptr, 2, 0), 0);
 }
 
 TEST(RmaSegmentMathTest, OffsetRangeOkRejectsPastEnd)
