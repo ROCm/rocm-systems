@@ -122,6 +122,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
+* The analyze-mode `--gui` and `--tui` options are deprecated and will be removed in a future release. Use the default CLI analysis instead.
+
 ### Known issues
 
 * On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.

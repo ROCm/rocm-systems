@@ -72,7 +72,9 @@ enum InstFlags : uint64_t {
   /// @brief This execution skipped a conditional memory-counter register result.
   MEMORY_WAIT_RESULT_SUPPRESSED = (1ULL << 18),
   /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
-  XCNT_DRAIN = (1ULL << 19)
+  XCNT_DRAIN = (1ULL << 19),
+  /// @brief This ISA suppresses issue of this instruction while MODE.VSKIP is set.
+  VSKIP_AFFECTED = (1ULL << 20)
 };
 
 class BasicBlock;
@@ -304,6 +306,8 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+  /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
+  bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
   /// @brief Record whether a conditional producer wrote its result this time.

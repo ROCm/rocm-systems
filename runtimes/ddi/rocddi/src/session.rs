@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Session lifetime and root coordination for the rocddi interface.
 //!
 //! A session owns the selected platform driver and coordinates passive
@@ -6,116 +8,14 @@
 //! respective modules rather than sharing this lifecycle namespace.
 
 use crate::device::Device;
-use crate::driver::{self, HostDriver, ProviderDriver, VirtualMemoryDriver};
+use crate::driver::{self, GpuPresentationDriver, HostDriver, ProviderDriver, VirtualMemoryDriver};
 use crate::host_storage::{Allocator, Shared};
-use crate::memory::{HostAllocation, VirtualAddress, VirtualAddressInfo};
-use crate::topology::Endpoint;
+use crate::memory::{
+    DeviceIntervals, HostAllocation, HostIntervals, ProviderHostAllocation, ProviderVirtualAddress,
+    VirtualAddress,
+};
+use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};
-
-/// Linux descriptor calls shared by native-handle ABI adapters.
-#[cfg(target_os = "linux")]
-pub mod linux {
-    use std::io;
-
-    /// Reads the current length of a borrowed descriptor without closing it.
-    ///
-    /// # Errors
-    /// Returns the native descriptor or metadata error.
-    pub fn descriptor_length(descriptor: i32) -> io::Result<u64> {
-        crate::driver::descriptor_length(descriptor)
-    }
-
-    /// Reads exactly `bytes.len()` bytes from a borrowed descriptor at `offset`.
-    ///
-    /// # Errors
-    /// Returns a native read error or `UnexpectedEof` for a short file.
-    pub fn read_descriptor_exact(descriptor: i32, bytes: &mut [u8], offset: i64) -> io::Result<()> {
-        crate::driver::read_descriptor_exact(descriptor, bytes, offset)
-    }
-
-    /// Closes one descriptor whose ownership was transferred by the caller.
-    ///
-    /// # Errors
-    /// Returns the native close error. Linux may still consume the descriptor.
-    pub fn close_descriptor(descriptor: i32) -> io::Result<()> {
-        crate::driver::close_descriptor(descriptor)
-    }
-
-    /// Reads one chunk at `offset` without changing the descriptor position.
-    ///
-    /// # Safety
-    /// `address..address + size` must be a live writable host range for the
-    /// duration of the call, and `descriptor` must remain open.
-    ///
-    /// # Errors
-    /// Returns an invalid argument or native read error.
-    #[allow(unsafe_code)]
-    pub unsafe fn read_descriptor(
-        descriptor: i32,
-        address: usize,
-        size: usize,
-        offset: i64,
-    ) -> io::Result<usize> {
-        // SAFETY: The caller upholds the range and descriptor contract.
-        unsafe { crate::driver::read_descriptor(descriptor, address, size, offset) }
-    }
-
-    /// Writes one chunk at `offset` without changing the descriptor position.
-    ///
-    /// # Safety
-    /// `address..address + size` must be a live readable host range for the
-    /// duration of the call, and `descriptor` must remain open.
-    ///
-    /// # Errors
-    /// Returns an invalid argument or native write error.
-    #[allow(unsafe_code)]
-    pub unsafe fn write_descriptor(
-        descriptor: i32,
-        address: usize,
-        size: usize,
-        offset: i64,
-    ) -> io::Result<usize> {
-        // SAFETY: The caller upholds the range and descriptor contract.
-        unsafe { crate::driver::write_descriptor(descriptor, address, size, offset) }
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::unwrap_used)]
-    mod tests {
-        use super::*;
-        use std::io::Write;
-        use std::os::fd::AsRawFd;
-
-        #[test]
-        fn exact_read_preserves_the_borrowed_descriptor() {
-            let path = std::env::temp_dir().join(format!(
-                "rocddi-descriptor-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let mut file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .unwrap();
-            std::fs::remove_file(path).unwrap();
-            file.write_all(b"ABCD").unwrap();
-            let descriptor = file.as_raw_fd();
-            assert_eq!(descriptor_length(descriptor).unwrap(), 4);
-            let mut bytes = [0; 2];
-            read_descriptor_exact(descriptor, &mut bytes, 1).unwrap();
-            assert_eq!(&bytes, b"BC");
-            assert_eq!(
-                read_descriptor_exact(descriptor, &mut bytes, 3)
-                    .unwrap_err()
-                    .kind(),
-                io::ErrorKind::UnexpectedEof
-            );
-            assert_eq!(file.metadata().unwrap().len(), 4);
-        }
-    }
-}
 
 /// Upper bound on the lifetime of native state acquired by this session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,17 +31,23 @@ pub enum SessionLifetime {
     Session,
 }
 
-/// Owns native connections and reusable device bindings for one core session.
+/// Coordinates native connections and reusable bindings for one core session.
 /// Construction allocates only the controller record. Both lifetime policies
 /// permit passive queries and host storage; only an explicit activation
 /// acquires endpoint state. Dropping a [`Device`] leaves any backend-retained
-/// binding available for recreation within this session.
-pub struct Session {
-    driver: Shared<driver::PlatformDriver>,
+/// binding available for recreation under the selected lifetime policy.
+pub(crate) struct ProviderSession<D: ProviderDriver> {
+    driver: Shared<D>,
     lifetime: SessionLifetime,
 }
 
-impl Clone for Session {
+pub(crate) struct Activated<D: ProviderDriver> {
+    pub(crate) driver: Shared<D>,
+    pub(crate) state: D::DeviceState,
+    pub(crate) endpoint: Endpoint,
+}
+
+impl<D: ProviderDriver> Clone for ProviderSession<D> {
     fn clone(&self) -> Self {
         Self {
             driver: self.driver.clone(),
@@ -150,10 +56,113 @@ impl Clone for Session {
     }
 }
 
+impl<D: ProviderDriver> ProviderSession<D> {
+    pub(crate) fn new(
+        driver: D,
+        lifetime: SessionLifetime,
+        allocator: Allocator,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            driver: Shared::new(driver, allocator)?,
+            lifetime,
+        })
+    }
+
+    pub(crate) fn destroy(&mut self) -> Result<(), Error> {
+        let driver = Shared::get_mut(&mut self.driver).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "activated devices still borrow this session",
+        })?;
+        driver.shutdown()
+    }
+
+    pub(crate) fn enumerate(
+        &self,
+        visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.driver.enumerate(visitor)
+    }
+
+    pub(crate) fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
+        self.driver.open_endpoint(id)
+    }
+
+    pub(crate) fn activate(&self, endpoint: &Endpoint) -> Result<Activated<D>, Error> {
+        if endpoint.provider_instance != self.driver.provider_instance() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "endpoint belongs to another provider instance",
+            });
+        }
+        let state = self.driver.activate(endpoint, self.lifetime)?;
+        Ok(Activated {
+            driver: self.driver.clone(),
+            state,
+            endpoint: endpoint.clone(),
+        })
+    }
+
+    pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
+        endpoint.provider_instance == self.driver.provider_instance()
+            && self
+                .driver
+                .supports_host_registration(endpoint, self.lifetime)
+    }
+}
+
+impl<D: GpuPresentationDriver> ProviderSession<D> {
+    fn gpu_presentation(&self, endpoint: &Endpoint) -> Result<GpuPresentation, Error> {
+        if endpoint.provider_instance != self.driver.provider_instance() || endpoint.gpu().is_none()
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "GPU presentation requires a GPU in this session",
+            });
+        }
+        Ok(self.driver.gpu_presentation(endpoint))
+    }
+}
+
+impl<D: ProviderDriver + HostDriver> ProviderSession<D> {
+    pub(crate) fn allocate_host(
+        &self,
+        size: u64,
+        alignment: u64,
+    ) -> Result<ProviderHostAllocation<D>, Error> {
+        Ok(ProviderHostAllocation::new(
+            self.driver.allocate_host(size, alignment)?,
+        ))
+    }
+}
+
+/// Public session using the native provider selected for this target.
+/// The provider-independent discovery and activation lifecycle is shared with
+/// non-GPU provider contract tests.
+pub struct Session {
+    inner: ProviderSession<driver::PlatformDriver>,
+}
+
+impl Clone for Session {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl Session {
+    /// Returns optional display metadata from this session's native provider.
+    /// The stable target and PCI identity remain in [`Endpoint`].
+    ///
+    /// # Errors
+    /// Rejects an endpoint owned by another session or a non-GPU endpoint.
+    pub fn gpu_presentation(&self, endpoint: &Endpoint) -> Result<GpuPresentation, Error> {
+        self.inner.gpu_presentation(endpoint)
+    }
+
     /// Borrows the private native controller for domain-specific crate layers.
     pub(crate) fn driver(&self) -> &Shared<driver::PlatformDriver> {
-        &self.driver
+        &self.inner.driver
     }
 
     /// Creates an inert controller with the system allocator for metadata.
@@ -175,12 +184,15 @@ impl Session {
     /// record. Failure acquires no native endpoint or address-space state.
     pub fn with_allocator(lifetime: SessionLifetime, allocator: Allocator) -> Result<Self, Error> {
         Ok(Self {
-            driver: Shared::new(driver::PlatformDriver::new(allocator), allocator)?,
-            lifetime,
+            inner: ProviderSession::new(
+                driver::PlatformDriver::with_lifetime(allocator, lifetime),
+                lifetime,
+                allocator,
+            )?,
         })
     }
 
-    /// Releases native connection owners in dependency order without waiting
+    /// Discharges this session's native dependencies without waiting
     /// for device work. The adapter must have discharged its public borrowing
     /// obligations first. [`SessionLifetime::Process`] may leave native state
     /// alive; callback-backed native dependencies must be released before
@@ -194,11 +206,7 @@ impl Session {
     /// close errors retain their cause; consumed native handles are never
     /// replayed.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        let driver = Shared::get_mut(&mut self.driver).ok_or(Error::Operation {
-            kind: ErrorKind::Busy,
-            detail: "activated devices still borrow this session",
-        })?;
-        driver.shutdown()
+        self.inner.destroy()
     }
 
     /// Allocates host-only storage under either native lifetime policy.
@@ -214,9 +222,9 @@ impl Session {
     /// exhaustion and native allocation failure leave no published owner; native
     /// errors retain their original cause.
     pub fn allocate_host(&self, size: u64, alignment: u64) -> Result<HostAllocation, Error> {
-        let inner = self.driver.allocate_host(size, alignment)?;
-        let info = inner.cached_info();
-        Ok(HostAllocation { inner, info })
+        Ok(HostAllocation {
+            inner: self.inner.allocate_host(size, alignment)?,
+        })
     }
 
     /// Visits one generation-consistent set of passive endpoint records. The
@@ -234,7 +242,7 @@ impl Session {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        self.driver.enumerate(visitor)
+        self.inner.enumerate(visitor)
     }
 
     /// Reads the exact native endpoint selected by `id` and verifies its
@@ -246,7 +254,7 @@ impl Session {
     /// malformed metadata, or the native error from the selected endpoint. A
     /// controller whose teardown has begun rejects the query.
     pub fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
-        self.driver.open_endpoint(id)
+        self.inner.open_endpoint(id)
     }
 
     /// Reserves one process virtual-address range common to every supplied
@@ -265,7 +273,7 @@ impl Session {
     ) -> Result<VirtualAddress, Error> {
         let mut bounds: Option<(u64, u64)> = None;
         for device in devices {
-            if !Shared::ptr_eq(&self.driver, &device.driver) {
+            if !Shared::ptr_eq(&self.inner.driver, &device.driver) {
                 return Err(Error::Operation {
                     kind: ErrorKind::InvalidArgument,
                     detail: "virtual-address devices must belong to one session",
@@ -286,19 +294,26 @@ impl Session {
                 detail: "activated devices have no common virtual-address aperture",
             });
         }
-        let owner = Shared::try_new_uninit(self.driver.allocator())?;
+        let owner = Shared::try_new_uninit(self.inner.driver.allocator())?;
+        let intervals = Shared::new(
+            HostIntervals::new(self.inner.driver.allocator()),
+            self.inner.driver.allocator(),
+        )?;
+        let device_intervals = Shared::new(
+            DeviceIntervals::new(self.inner.driver.allocator()),
+            self.inner.driver.allocator(),
+        )?;
         let inner = self
+            .inner
             .driver
             .reserve_virtual_address(bounds, size, alignment, address)?;
-        let info = VirtualAddressInfo {
-            address: inner.address(),
-            size: inner.size(),
-            mapping_granularity: inner.mapping_granularity(),
-        };
         Ok(VirtualAddress {
-            driver: self.driver.clone(),
-            inner: owner.write(inner),
-            info,
+            inner: ProviderVirtualAddress::new(
+                self.inner.driver.clone(),
+                owner.write(inner),
+                intervals,
+                device_intervals,
+            ),
         })
     }
 
@@ -313,24 +328,18 @@ impl Session {
     /// incompatible existing ownership, allocation failure, or native I/O.
     /// Partial native setup remains owned for safe cleanup or a later retry.
     pub fn activate(&self, endpoint: &Endpoint) -> Result<Device, Error> {
-        if endpoint.provider_instance != self.driver.provider_instance() {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "endpoint belongs to another provider instance",
-            });
-        }
-        let state = self.driver.activate(endpoint, self.lifetime)?;
+        let activated = self.inner.activate(endpoint)?;
         Ok(Device {
-            driver: self.driver.clone(),
-            state,
-            endpoint: endpoint.clone(),
+            driver: activated.driver,
+            state: activated.state,
+            endpoint: activated.endpoint,
         })
     }
 
     /// Lifetime policy used when qualifying device services.
     #[must_use]
     pub fn state_lifetime(&self) -> SessionLifetime {
-        self.lifetime
+        self.inner.lifetime
     }
 
     /// Returns whether this backend can register caller-owned host pages for
@@ -339,10 +348,7 @@ impl Session {
     /// if its caller pages cannot be bound by the native driver.
     #[must_use]
     pub fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
-        endpoint.provider_instance == self.driver.provider_instance()
-            && self
-                .driver
-                .supports_host_registration(endpoint, self.lifetime)
+        self.inner.supports_host_registration(endpoint)
     }
 }
 
@@ -357,20 +363,28 @@ mod tests {
         // A process VA reservation needs no GPU endpoint, so this exercises the
         // public owner and its native cleanup on CPU-only test hosts.
         let inner = session
+            .inner
             .driver
             .reserve_virtual_address((0x1_0000, isize::MAX as u64), 4096, 4096, 0)
             .unwrap();
-        let info = VirtualAddressInfo {
-            address: inner.address(),
-            size: inner.size(),
-            mapping_granularity: inner.mapping_granularity(),
-        };
+        let info = driver::VirtualAddressOwnerInfo::cached_info(&*inner);
         let mut address = VirtualAddress {
-            driver: session.driver.clone(),
-            inner: Shared::new(inner, session.driver.allocator()).unwrap(),
-            info,
+            inner: ProviderVirtualAddress::new(
+                session.inner.driver.clone(),
+                Shared::new(inner, session.inner.driver.allocator()).unwrap(),
+                Shared::new(
+                    HostIntervals::new(session.inner.driver.allocator()),
+                    session.inner.driver.allocator(),
+                )
+                .unwrap(),
+                Shared::new(
+                    DeviceIntervals::new(session.inner.driver.allocator()),
+                    session.inner.driver.allocator(),
+                )
+                .unwrap(),
+            ),
         };
-        let mapping_lease = address.inner.clone();
+        let mapping_lease = address.inner.inner.clone();
         assert_eq!(address.free().unwrap_err().kind(), ErrorKind::Busy);
         assert_eq!(address.info(), info);
         drop(mapping_lease);

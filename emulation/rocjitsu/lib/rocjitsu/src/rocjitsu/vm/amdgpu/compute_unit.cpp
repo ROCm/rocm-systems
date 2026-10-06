@@ -1533,6 +1533,12 @@ template <bool EnableAsync>
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
+  // Skipped vector instructions never issue: no register/plugin effects, wait
+  // counter changes, or async matrix submission. Scalar instructions still run.
+  if ((active->mode_raw() & Wavefront::VSKIP_BIT) && inst->is_vskip_affected()) {
+    active->pc += inst_size;
+    return;
+  }
   auto *wait_state = config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off
                          ? nullptr
                          : active->memory_wait_scoreboard();
